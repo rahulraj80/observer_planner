@@ -139,6 +139,15 @@ func newRoutingExplainCmd() *cobra.Command {
 			fmt.Fprintf(out, "  policy      %s @ %s\n", d.PolicyName, d.PolicyHash)
 			fmt.Fprintf(out, "  cache math  est. savings $%.4f net of cache forfeit $%.4f (%s)\n",
 				d.EstSavingsUSD, d.CacheForfeitUSD, d.EstimateVersion)
+			if d.BenefitText != "" {
+				fmt.Fprintf(out, "  benefit     %s\n", d.BenefitText)
+				if d.EntitlementKind != "" {
+					fmt.Fprintf(out, "  basis       entitlement=%s pricing=%s\n", d.EntitlementKind, d.EffectiveBasis)
+				}
+				if d.RealizedDeltaUSD != nil {
+					fmt.Fprintf(out, "  realized    delta $%.4f (vs expected)\n", *d.RealizedDeltaUSD)
+				}
+			}
 			if d.APITurnID != nil {
 				fmt.Fprintf(out, "  api turn    %d\n", *d.APITurnID)
 			} else {

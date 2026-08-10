@@ -85,6 +85,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/routing", label: "Routing", icon: Shuffle },
       { to: "/suggestions", label: "Suggestions", icon: Lightbulb },
+      { to: "/briefing", label: "Daily briefing", icon: BellRing },
       { to: "/report", label: "Cost report", icon: Receipt },
     ],
   },

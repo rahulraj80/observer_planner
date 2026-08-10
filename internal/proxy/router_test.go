@@ -25,6 +25,7 @@ type servedRecord struct {
 	token  int64
 	turnID int64
 	model  string
+	usage  RouterUsage
 }
 
 func (f *fakeRouter) Decide(shape RouterShape, sess RouterSession) RouterVerdict {
@@ -38,10 +39,10 @@ func (f *fakeRouter) Decide(shape RouterShape, sess RouterSession) RouterVerdict
 	return f.verdict
 }
 
-func (f *fakeRouter) RecordServed(token, turnID int64, model string) {
+func (f *fakeRouter) RecordServed(token, turnID int64, model string, usage RouterUsage) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.served = append(f.served, servedRecord{token, turnID, model})
+	f.served = append(f.served, servedRecord{token, turnID, model, usage})
 }
 
 func (f *fakeRouter) snapshot() ([]RouterShape, []RouterSession, []servedRecord) {
@@ -157,6 +158,12 @@ func TestRouter_AdviseModeTouchesNothing(t *testing.T) {
 	if served[0].token != 7 || served[0].turnID == 0 || served[0].model != "claude-haiku-4-5" {
 		// model from the RESPONSE body — the model that actually served.
 		t.Errorf("RecordServed = %+v", served[0])
+	}
+	// The landed usage bundle must mirror the response's usage block
+	// (10 input / 5 output) — the seam that prices the realized benefit.
+	if served[0].usage.Input != 10 || served[0].usage.Output != 5 ||
+		served[0].usage.CacheRead != 0 || served[0].usage.CacheCreation != 0 {
+		t.Errorf("RecordServed usage = %+v, want {10 input, 5 output, no cache}", served[0].usage)
 	}
 	if turns := sink.all(); len(turns) != 1 {
 		t.Fatalf("turns = %d", len(turns))

@@ -82,6 +82,10 @@ func (a *Adapter) WithSessionHookChecker(check SessionHookChecker) *Adapter {
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolClineCLI }
 
+// SQLiteBacked implements adapter.SQLiteBacked — sessions.db is queried by
+// watermark and hooks.jsonl is tailed by byte cursor, neither is read whole.
+func (*Adapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter.
 func (a *Adapter) WatchPaths() []string { return a.roots }
 

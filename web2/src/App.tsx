@@ -23,6 +23,7 @@ import { SessionsPage } from "@/pages/Sessions";
 import { LivePage } from "@/pages/Live";
 import { MoversPage } from "@/pages/Movers";
 import { ReportPage } from "@/pages/Report";
+import { BriefingPage } from "@/pages/Briefing";
 import { SuggestionsPage } from "@/pages/Suggestions";
 import { ProjectsPage } from "@/pages/Projects";
 import { ProjectDetailPage } from "@/pages/ProjectDetail";
@@ -58,6 +59,7 @@ export default function App() {
         <Route path="/routing" element={<OptimizePage />} />
         <Route path="/suggestions" element={<SuggestionsPage />} />
         <Route path="/report" element={<ReportPage />} />
+        <Route path="/briefing" element={<BriefingPage />} />
         <Route path="/movers" element={<MoversPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/live" element={<LivePage />} />

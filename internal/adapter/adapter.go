@@ -6,6 +6,22 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
+// SQLiteBacked is an optional capability implemented by adapters that
+// parse an on-disk SQLite store via incremental read-only queries
+// (opencode, goose, devin, crush, kilo-cli, hermes). Their
+// ParseSessionFile never reads the whole file into memory — it opens the
+// DB read-only, computes a watermark from the newest row, and only queries
+// rows newer than the saved cursor. The watcher's max-file-bytes cap is a
+// whole-file-read DoS guard (it bounds a hostile multi-GB JSONL driving an
+// adapter into unbounded allocation); SQLite store adapters don't allocate
+// the file at all, so a legitimately large or WAL-fragmented store DB must
+// not be skipped for crossing it.
+type SQLiteBacked interface {
+	// SQLiteBacked reports that ParseSessionFile treats path as a SQLite
+	// store queried incrementally rather than a file slurped whole.
+	SQLiteBacked() bool
+}
+
 // Adapter turns one AI coding tool's session data into normalized ToolEvents
 // and TokenEvents. Implementations live in internal/adapter/<name>.
 //

@@ -813,6 +813,101 @@ export interface ReportResult {
   by_project: KeyCost[];
   top_sessions: ReportSession[];
 }
+// Daily Briefing (Phase C). The /api/org/briefing payload is the pure
+// internal/briefing Briefing document (types.go) — one source of truth.
+export interface BriefingAtGlance {
+  sessions: number;
+  turns: number;
+  spend_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cache_hit_rate: number;
+  error_turns: number;
+  active_hours: number;
+  fast_share: number;
+}
+export interface BriefingActivity {
+  tool: string;
+  sessions: number;
+  turns: number;
+  spend_usd: number;
+}
+export interface BriefingSessionRef {
+  id: string;
+  tool?: string;
+  turns: number;
+  cost_usd: number;
+}
+export interface BriefingRepriceTurn {
+  original_model: string;
+  selected_model: string;
+  estimated_cost_usd: number;
+  reason?: string;
+}
+export interface BriefingEvidence {
+  numbers?: Record<string, number>;
+  items?: { label: string; value: number; unit?: string }[];
+  math?: string;
+}
+export interface BriefingJustification {
+  claim: string;
+  source: string;
+  group_by?: string;
+  since: string;
+  until: string;
+  tool?: string;
+  project?: string;
+  price_basis: string;
+  estimate_version?: string;
+  evidence: BriefingEvidence;
+  confidence: number;
+  flip_conditions?: string;
+  reprice?: BriefingRepriceTurn[];
+}
+export interface BriefingOpportunity {
+  dedup_key: string;
+  detector: string;
+  category: string;
+  scope: string;
+  severity: string;
+  title: string;
+  nudge: string;
+  savings_usd?: number;
+  savings_min?: number;
+  confidence: number;
+  justification: BriefingJustification;
+}
+export interface OrgBriefing {
+  date: string;
+  generated_at: string;
+  basis: string;
+  window: { since: string; until: string };
+  at_glance: BriefingAtGlance;
+  activity: BriefingActivity[];
+  top_sessions: BriefingSessionRef[];
+  opportunities: BriefingOpportunity[];
+  narrative: string;
+  questions: string[];
+}
+// The pushed hash-only aggregate digest (admin-only). One bucket per
+// (day, tool, project_hash) + the node's user_email.
+export interface BriefingAggregate {
+  day: string;
+  tool: string;
+  project_hash?: string;
+  user_email?: string;
+  sessions: number;
+  turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+}
+export interface BriefingAggregatesResult {
+  date: string;
+  aggregates: BriefingAggregate[];
+}
 // Org advisor (§6d). Mirrors rollup.SuggestionsResult.
 export interface Suggestion {
   id: string;
@@ -1108,6 +1203,15 @@ export const api = {
   // Monthly cost statement (calendar month YYYY-MM; default current).
   report: (month?: string) =>
     request<ReportResult>(`/api/org/report${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  // Daily Briefing (Phase C): the composed, role-scoped org briefing for one
+  // UTC day (default = most recent completed). Content-free by construction.
+  briefing: (date?: string) =>
+    request<OrgBriefing>(`/api/org/briefing${date ? `?date=${encodeURIComponent(date)}` : ""}`),
+  // Pushed hash-only briefing aggregate digest — ADMIN-only.
+  briefingAggregates: (date?: string) =>
+    request<BriefingAggregatesResult>(
+      `/api/org/briefing/aggregates${date ? `?date=${encodeURIComponent(date)}` : ""}`,
+    ),
   // Org-wide cost/hygiene advisories.
   suggestions: (days?: number) => request<SuggestionsResult>(withDays("/api/org/suggestions", days)),
   projects: (days?: number) => request<ProjectsResult>(withDays("/api/org/projects", days)),

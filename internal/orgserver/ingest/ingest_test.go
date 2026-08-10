@@ -624,3 +624,73 @@ func TestPush_NoAdmissionSlicesNoOp(t *testing.T) {
 		}
 	}
 }
+
+// TestPush_VirtuousCycleUpsert pins the Stage 3 exec-memo ingest: pushed
+// virtuous_cycle rows land with the authenticated pusher pinned, and a
+// re-push of the same (org_id, user_email, week_start) overwrites (windowed
+// recompute at the node settles a week's numbers over time).
+func TestPush_VirtuousCycleUpsert(t *testing.T) {
+	d := newServerDB(t)
+	ctx := context.Background()
+
+	env := fullEnvelope()
+	env.VirtuousCycle = []orgcontract.VirtuousCycleRow{{
+		WeekStart: "2026-05-18", Applies: 3, ProjectedUSD: 15.00, RealizedUSD: 8.50, RealizedTurns: 5,
+		OrgID: "org-1", UserEmail: "dev@acme.example",
+	}}
+	if _, err := Push(ctx, d, env, "user-1", "2026-05-26T11:00:00Z"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	var applies int64
+	var realized float64
+	var pinnedBy string
+	if err := d.QueryRowContext(ctx,
+		`SELECT applies, realized_usd, pushed_by_user_id FROM virtuous_cycle WHERE week_start='2026-05-18'`).
+		Scan(&applies, &realized, &pinnedBy); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if applies != 3 || realized != 8.50 || pinnedBy != "user-1" {
+		t.Errorf("row = %d applies/$%.2f pushed_by=%q, want 3/$8.50/user-1", applies, realized, pinnedBy)
+	}
+
+	// Re-push the same week with settled numbers → upsert overwrites, no dupe.
+	env.VirtuousCycle[0].Applies = 4
+	env.VirtuousCycle[0].RealizedUSD = 9.25
+	env.VirtuousCycle[0].RealizedTurns = 6
+	if _, err := Push(ctx, d, env, "user-1", "2026-05-26T12:00:00Z"); err != nil {
+		t.Fatalf("Push (re-push): %v", err)
+	}
+	var n int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM virtuous_cycle`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("rows after re-push = %d, want 1 (upsert by natural key)", n)
+	}
+	if err := d.QueryRowContext(ctx,
+		`SELECT applies, realized_usd, realized_turns FROM virtuous_cycle WHERE week_start='2026-05-18'`).
+		Scan(&applies, &realized, &pinnedBy); err != nil {
+		t.Fatal(err)
+	}
+	if applies != 4 || realized != 9.25 {
+		t.Errorf("row after re-push = %d applies/$%.2f, want 4/$9.25", applies, realized)
+	}
+}
+
+// TestPush_NoVirtuousCycleNoOp confirms an envelope WITHOUT the virtuous_cycle
+// slice ingests cleanly (additive compat: pre-feature agents omit the key).
+func TestPush_NoVirtuousCycleNoOp(t *testing.T) {
+	d := newServerDB(t)
+	ctx := context.Background()
+	if _, err := Push(ctx, d, fullEnvelope(), "user-1", "2026-05-26T11:00:00Z"); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	var n int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM virtuous_cycle`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("virtuous_cycle = %d rows, want 0 (no slice in envelope)", n)
+	}
+}

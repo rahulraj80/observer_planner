@@ -45,6 +45,10 @@ func NewWithOptions(s *scrub.Scrubber, roots []string) *Adapter {
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolGoose }
 
+// SQLiteBacked implements adapter.SQLiteBacked — the store is queried
+// incrementally by watermark, never read whole.
+func (*Adapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter. The roots are a snapshot taken at
 // construction: the goose `sessions` directory per cross-mount-resolved
 // home. goose's store is a single central sessions.db, so one root per

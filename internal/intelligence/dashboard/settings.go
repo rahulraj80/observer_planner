@@ -56,6 +56,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"hooks", "proxy", "dashboard", "compression", "intelligence",
 			"advisor", "cachetrack", "observability", "secrets", "profiles", "mcp",
 			"org", "otel", "guard", "routing", "process", "browser", "terminal",
+			"llm",
 		},
 	})
 }
@@ -825,6 +826,20 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 			next.Rules = rules
 		}
 		cfg.Routing = next
+	case "llm":
+		// The [llm] block — optional LLM analysis connections for the
+		// daily briefing. The Connections map is keyed by connection id;
+		// each connection holds NAME refs (api_key_env /
+		// api_key_keychain) — never the key literal. The literal key is
+		// stored to the OS keychain by the dedicated
+		// /api/config/llm/key/<id> endpoint, which then sets the
+		// api_key_keychain ref here. validateLLM (via config.Validate at
+		// the section save) rejects a paste-through literal.
+		var sec config.LLMConfig
+		if err := json.Unmarshal(body, &sec); err != nil {
+			return fmt.Errorf("decode llm: %w", err)
+		}
+		cfg.LLM = sec
 	case "pricing":
 		return errors.New("pricing has its own endpoint /api/config/pricing")
 	default:

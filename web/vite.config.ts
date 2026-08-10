@@ -75,7 +75,9 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
+    minify: "esbuild",
     rollupOptions: {
+      treeshake: false,
       output: {
         // Peel large vendor libs out of the entry bundle so the
         // 500 KB warning goes away and the browser can cache them

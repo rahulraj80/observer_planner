@@ -751,6 +751,22 @@ var forbiddenCacheTables = []string{
 	// allow-list neither is in. Same posture as remote_audit / limit_snapshots.
 	"remote_sessions",
 	"remote_session_state",
+	// Daily-Briefing snapshot (migration 078, docs/design/standup-briefing.md
+	// §2.5) is NODE-LOCAL: the last-composed briefing JSON embeds file paths,
+	// command summaries, per-model cost detail, and advisor suggestions for a
+	// local day — a condensed picture of the operator's own work. It is a
+	// presentation artifact, never a capture surface, and must not cross the
+	// org-push wire. No paired orgserver migration, by design.
+	"briefing_snapshots",
+	// LLM-connection analysis accounting (migration 079, standup-briefing.md
+	// §3.6) is NODE-LOCAL: rows are content-free (ids, counts, cost, latency)
+	// but reveal per-connection analysis activity that is separate from tool
+	// traffic. The Phase C org briefing ships a separate opt-in hash-only
+	// AGGREGATE — composed by store.SelectBriefingAggregates in
+	// store/briefingorg.go (never by orgpush.go, which stays table-name-free
+	// under this sentinel) from the api_turns + token_usage capture surface —
+	// never these rows. No paired orgserver migration, by design.
+	"analysis_calls",
 }
 
 // TestRemoteAuditTablePinnedOutOfPush pins the remote-access audit log

@@ -36,6 +36,7 @@ import (
 // watcher-attached indexer keeps full control of its batch path.
 type Store struct {
 	db          *sql.DB
+	dbPath      string
 	indexer     *indexing.Indexer
 	stamper     *identity.Stamper
 	cacheEngine *cachetrack.Engine
@@ -54,7 +55,20 @@ type Store struct {
 func (s *Store) SetObsOrgProviders(p ObsOrgProviders) { s.obsOrg = p }
 
 // New wraps an already-opened *sql.DB (use internal/db.Open).
-func New(db *sql.DB) *Store { return &Store{db: db} }
+// If dbPath is provided, it's stored for file-adjacent operations
+// (e.g., reading the briefing-CTA ledger for virtuous-cycle org push).
+func New(db *sql.DB, dbPath ...string) *Store {
+	st := &Store{db: db}
+	if len(dbPath) > 0 {
+		st.dbPath = dbPath[0]
+	}
+	return st
+}
+
+// SetDBPath sets the database file path for file-adjacent operations
+// (e.g., reading the briefing-CTA ledger for virtuous-cycle org push).
+// Called by `observer start` after creating the Store.
+func (s *Store) SetDBPath(path string) { s.dbPath = path }
 
 // SetCacheEngine wires the same per-process cachetrack.Engine
 // instance the proxy uses through to the watcher-side Ingest

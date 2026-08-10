@@ -50,6 +50,11 @@ func NewWithOptions(s *scrub.Scrubber, roots []string) *Adapter {
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolOpenCode }
 
+// SQLiteBacked implements adapter.SQLiteBacked. ParseSessionFile opens the
+// store read-only and queries only rows newer than the watermark cursor,
+// so the watcher's whole-file size cap must not skip a large opencode.db.
+func (*Adapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter.
 func (a *Adapter) WatchPaths() []string { return a.roots }
 

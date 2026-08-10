@@ -136,6 +136,25 @@ type PushEnvelope struct {
 	// excerpts (input/expected/output/rationale) are gated by shipsRawContent().
 	// Same additive-compat posture as the other optional slices.
 	ObsEvalItems []ObsEvalItemRow `json:"obs_eval_items,omitempty"`
+
+	// BriefingAggregates is the OPTIONAL Daily-Briefing AGGREGATE (content-free
+	// counts + sums by (day, tool, project_hash), docs/design/standup-briefing.md
+	// §4 Phase C). Present only when the node operator opted in via
+	// [org_client.share] briefing_aggregates — never server-forced, same
+	// additive-compat posture as the other optional slices (pre-feature
+	// servers ignore the key, future servers tolerate its absence). Composed
+	// in orgpush.go from the briefing table seam — the sentinel stays green.
+	BriefingAggregates []BriefingAggregateRow `json:"briefing_aggregates,omitempty"`
+
+	// VirtuousCycle is the OPTIONAL Virtuous-Cycle trend (cumulative CTA
+	// applies with projected vs realized savings, weekly buckets — Stage 3
+	// of docs/design/standup-briefing.md). Present only when the node operator
+	// opted in via [org_client.share] virtuous_cycle — never server-forced,
+	// same additive-compat posture as the other optional slices (pre-feature
+	// servers ignore the key, future servers tolerate its absence). Composed
+	// in orgpush.go from the CTA ledger + router_decisions — the sentinel
+	// stays green.
+	VirtuousCycle []VirtuousCycleRow `json:"virtuous_cycle,omitempty"`
 }
 
 // PushResponse is the 200 body of POST /api/agent/push.
@@ -742,6 +761,62 @@ type ObsEvalItemRow struct {
 	// Rationale is the scorer's verdict prose (obs_eval_scores.rationale), which
 	// may quote the item — gated with the excerpts.
 	Rationale string `json:"rationale,omitempty"`
+}
+
+// BriefingAggregateRow is the Daily-Briefing AGGREGATE wire row (Phase C of
+// docs/design/standup-briefing.md §4): per (day, tool, project_hash) counts
+// + sums, composed from the node-local briefing table seam (never from
+// briefing_snapshots/analysis_calls — the privacy sentinel stays green). Every
+// key is content-free: project_hash is the sha256 of the project root (the
+// same posture sessions/api_turns already ship) and tool is the adapter name.
+// No prompt, turn, or snapshot content crosses the wire — an org admin can
+// never force more (the node-side [org_client.share] briefing_aggregates
+// opt-in is the only gate).
+type BriefingAggregateRow struct {
+	// OrgID / UserEmail are the agent-stamped attribution.
+	OrgID     string `json:"org_id,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
+	// Day is the UTC date (YYYY-MM-DD) the aggregate bucket covers.
+	Day string `json:"day"`
+	// Tool is the adapter name the bucket covers (claudecode/codex/…).
+	Tool string `json:"tool"`
+	// ProjectHash is the content-free key of the project root. Empty when the
+	// sessions carried no project.
+	ProjectHash string `json:"project_hash,omitempty"`
+
+	// Counts / sums — mirror the node-side briefing Facts (standup-briefing.md
+	// §2): session/turn counts, and token/cost sums.
+	Sessions     int64 `json:"sessions"`
+	Turns        int64 `json:"turns"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	// CostUSD is the total model spend of the bucket.
+	CostUSD float64 `json:"cost_usd"`
+}
+
+// VirtuousCycleRow is the Virtuous-Cycle trend wire row (Stage 3 of
+// docs/design/standup-briefing.md): per-week cumulative CTA applies with
+// projected vs realized savings, composed from the node-local CTA ledger
+// + router_decisions realized_delta_usd. Content-free; the only gate is
+// the node-side [org_client.share] virtuous_cycle opt-in. No CTA ledger
+// content or raw router_decisions rows cross the wire — an org admin can
+// never force more (the node-side [org_client.share] virtuous_cycle
+// opt-in is the only gate).
+type VirtuousCycleRow struct {
+	// OrgID / UserEmail are the agent-stamped attribution.
+	OrgID     string `json:"org_id,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
+	// WeekStart is the Monday of the week (YYYY-MM-DD) the aggregate bucket covers.
+	WeekStart string `json:"week_start"`
+	// Applies is the number of CTA applies recorded in this week.
+	Applies int64 `json:"applies"`
+	// ProjectedUSD is the sum of monthly projected savings from applies this week.
+	ProjectedUSD float64 `json:"projected_usd"`
+	// RealizedUSD is the cumulative realized savings measured from the earliest
+	// apply to now (broad filter, not per-week attributed).
+	RealizedUSD float64 `json:"realized_usd"`
+	// RealizedTurns is the number of graded turns contributing to RealizedUSD.
+	RealizedTurns int64 `json:"realized_turns"`
 }
 
 // ObsEvalItemBatch is the per-item eval push payload (scores + cursor) returned

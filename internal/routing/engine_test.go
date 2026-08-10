@@ -2,6 +2,7 @@ package routing
 
 import (
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,22 @@ func TestDecide_DownshiftHappyPath(t *testing.T) {
 	}
 	if d.EstimateVersion != EstimateVersion || d.PolicyName != "value" || d.PolicyHash == "" {
 		t.Errorf("attribution fields = %+v", d)
+	}
+	if d.Benefit == nil {
+		t.Fatalf("expected a benefit record on a priced downshift, got nil")
+	}
+	if want := 0.60; !floatNear(d.Benefit.NetUSD, want, 0.01) {
+		t.Errorf("benefit.NetUSD = %v, want ≈%v", d.Benefit.NetUSD, want)
+	}
+	if d.Benefit.QualitySignal != QualityUnknown || d.Benefit.EvidenceConfidence != 0 {
+		t.Errorf("benefit signal = %s/%.2f, want unknown/uncalibrated",
+			d.Benefit.QualitySignal, d.Benefit.EvidenceConfidence)
+	}
+	if !strings.Contains(d.BenefitText, "route read_only→claude-haiku-4-5") {
+		t.Errorf("BenefitText = %q, want route read_only→claude-haiku-4-5", d.BenefitText)
+	}
+	if d.Entitlement != "" || d.EffectiveBasis != "list" {
+		t.Errorf("entitlement/basis = %q/%q, want empty/list", d.Entitlement, d.EffectiveBasis)
 	}
 }
 
@@ -218,14 +235,17 @@ func TestDecide_CacheHold(t *testing.T) {
 	}
 }
 
-// TestDecide_NoDollarClaimWithoutUsage pins estimate honesty: without
-// observed usage the switch still happens (the rule is sound) but no
-// dollar figures are invented — and no cache-hold either, since a hold
-// is itself a dollar claim.
+// TestDecide_NoDollarClaimWithoutUsage pins estimate honesty on the
+// live path: with no observed usage AND no prompt-token estimate the
+// switch still happens (the rule is sound) but no dollar figures are
+// invented — and no cache-hold either, since a hold is itself a dollar
+// claim. The prompt-estimate case (PromptTokens > 0) is pinned by
+// TestDecide_LivePromptEstimate.
 func TestDecide_NoDollarClaimWithoutUsage(t *testing.T) {
 	t.Parallel()
 	in := readOnlyInput()
 	in.ObservedUsage = nil
+	in.Shape.PromptTokens = 0 // no prompt estimate either — nothing to price
 	in.Session.PriorCacheReadTokens = 1_000_000
 	d := Decide(valuePolicy(t), testSnapshot(), in)
 	if !d.Changed || d.SelectedModel != "claude-haiku-4-5" {
@@ -233,6 +253,50 @@ func TestDecide_NoDollarClaimWithoutUsage(t *testing.T) {
 	}
 	if d.EstSavingsUSD != 0 || d.CacheForfeitUSD != 0 {
 		t.Errorf("invented dollars: savings %v forfeit %v", d.EstSavingsUSD, d.CacheForfeitUSD)
+	}
+}
+
+// TestDecide_LivePromptEstimate pins the live estimate path (§R13):
+// with no observed usage but a prompt-token estimate, the prompt-side
+// dollars materialize — labeled usage_basis "live_prompt" on the
+// benefit record — and a warm prefix never cache-holds the switch. A
+// coarse live estimate understates gross (output/cache dollars are
+// absent until the response lands), so a hold off its partial math
+// would block switches the realized loop would vindicate; live never
+// held before estimates existed and must not start holding now.
+func TestDecide_LivePromptEstimate(t *testing.T) {
+	t.Parallel()
+	in := readOnlyInput()
+	in.ObservedUsage = nil
+	in.Shape.PromptTokens = 100_000
+	// Forfeit dwarfs the prompt-side gross on purpose: a hold would be
+	// tempting if the estimate were trusted, and must not fire.
+	in.Session.PriorCacheReadTokens = 1_000_000
+	d := Decide(valuePolicy(t), testSnapshot(), in)
+	if !d.Changed || d.SelectedModel != "claude-haiku-4-5" {
+		t.Fatalf("decision = %+v, want downshift (no cache-hold on a live estimate)", d)
+	}
+	for _, rc := range d.ReasonCodes {
+		if rc == ReasonCacheHold {
+			t.Fatalf("cache-held on a live prompt-only estimate: %v", d.ReasonCodes)
+		}
+	}
+	// prompt-side gross = (100k×5 − 100k×1)/1e6 = 0.40; forfeit =
+	// 1M × $1.25/M = 1.25 at haiku's cache-write rate.
+	if d.CacheForfeitUSD < 1.24 || d.CacheForfeitUSD > 1.26 {
+		t.Errorf("forfeit = %v, want ≈1.25", d.CacheForfeitUSD)
+	}
+	if want := 0.40 - 1.25; !floatNear(d.EstSavingsUSD, want, 0.01) {
+		t.Errorf("net = %v, want ≈%v (prompt-side gross − full forfeit)", d.EstSavingsUSD, want)
+	}
+	if d.Benefit == nil {
+		t.Fatal("expected a live benefit record")
+	}
+	if d.Benefit.UsageBasis != UsageBasisLivePrompt {
+		t.Errorf("usage_basis = %q, want %q", d.Benefit.UsageBasis, UsageBasisLivePrompt)
+	}
+	if !floatNear(d.Benefit.NetUSD, 0.40-1.25, 0.01) {
+		t.Errorf("benefit.NetUSD = %v, want ≈-0.85", d.Benefit.NetUSD)
 	}
 }
 
@@ -650,5 +714,70 @@ func TestApplyPin_OpusFivePromotionEconomics(t *testing.T) {
 					d.EstSavingsUSD, -d.CacheForfeitUSD)
 			}
 		})
+	}
+}
+
+// TestDecide_BenefitCarriesEvidenceSignal pins the evidence_quality
+// wiring (§5.4): a snapshot whose Evidence grades the (read_only,
+// haiku-class) downshift as hold/0.95 puts that signal + confidence on
+// the committed switch's benefit record — the compounding-confidence
+// path the uncalibrated tests below never see.
+func TestDecide_BenefitCarriesEvidenceSignal(t *testing.T) {
+	t.Parallel()
+	snap := testSnapshot()
+	snap.Evidence = map[EvidenceKey]QualityEvidence{
+		{Kind: TurnReadOnly, Tier: TierHaikuClass}: {Signal: QualityHold, Confidence: 0.95},
+	}
+	d := Decide(valuePolicy(t), snap, readOnlyInput())
+	if !d.Changed || d.SelectedModel != "claude-haiku-4-5" {
+		t.Fatalf("decision = %+v, want change to claude-haiku-4-5", d)
+	}
+	if d.Benefit == nil {
+		t.Fatal("expected a benefit record on a priced downshift")
+	}
+	if d.Benefit.QualitySignal != QualityHold || d.Benefit.EvidenceConfidence != 0.95 {
+		t.Errorf("benefit signal = %s/%.2f, want hold/0.95",
+			d.Benefit.QualitySignal, d.Benefit.EvidenceConfidence)
+	}
+	if !strings.Contains(d.BenefitText, "95% CI no quality delta") {
+		t.Errorf("BenefitText = %q, want 95%% CI clause", d.BenefitText)
+	}
+}
+
+// TestDecide_BenefitEvidenceIsKindScoped pins that the evidence map is
+// keyed by turn-kind: a signal for a DIFFERENT kind must not leak onto
+// the decision's benefit record.
+func TestDecide_BenefitEvidenceIsKindScoped(t *testing.T) {
+	t.Parallel()
+	snap := testSnapshot()
+	snap.Evidence = map[EvidenceKey]QualityEvidence{
+		{Kind: TurnEdit, Tier: TierHaikuClass}: {Signal: QualityBetter, Confidence: 0.9},
+	}
+	d := Decide(valuePolicy(t), snap, readOnlyInput())
+	if d.Benefit == nil {
+		t.Fatal("expected a benefit record")
+	}
+	if d.Benefit.QualitySignal != QualityUnknown || d.Benefit.EvidenceConfidence != 0 {
+		t.Errorf("benefit signal = %s/%.2f, want unknown/0 for a foreign kind",
+			d.Benefit.QualitySignal, d.Benefit.EvidenceConfidence)
+	}
+}
+
+// TestDecide_BenefitEvidenceGatesOnConfidence pins that a zero-confidence
+// evidence entry (below the sample floor — the derivation's
+// uncalibrated signal) does not override the unknown posture.
+func TestDecide_BenefitEvidenceGatesOnConfidence(t *testing.T) {
+	t.Parallel()
+	snap := testSnapshot()
+	snap.Evidence = map[EvidenceKey]QualityEvidence{
+		{Kind: TurnReadOnly, Tier: TierHaikuClass}: {Signal: QualityWorse, Confidence: 0},
+	}
+	d := Decide(valuePolicy(t), snap, readOnlyInput())
+	if d.Benefit == nil {
+		t.Fatal("expected a benefit record")
+	}
+	if d.Benefit.QualitySignal != QualityUnknown || d.Benefit.EvidenceConfidence != 0 {
+		t.Errorf("benefit signal = %s/%.2f, want unknown/0 for zero-confidence evidence",
+			d.Benefit.QualitySignal, d.Benefit.EvidenceConfidence)
 	}
 }

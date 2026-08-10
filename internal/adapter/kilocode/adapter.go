@@ -61,6 +61,10 @@ func NewCLIWithOptions(s *scrub.Scrubber, roots []string) *CLIAdapter {
 // Name implements adapter.Adapter.
 func (*CLIAdapter) Name() string { return models.ToolKiloCodeCLI }
 
+// SQLiteBacked implements adapter.SQLiteBacked — kilo.db is queried
+// incrementally by watermark, never read whole.
+func (*CLIAdapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter.
 func (a *CLIAdapter) WatchPaths() []string { return a.roots }
 

@@ -402,9 +402,13 @@ func wireRouting(ctx context.Context, cfg config.Config, s *store.Store, opts *p
 		opts.KeyPools = cfg.Routing.KeyPool
 		logger.Info("routing: key pools wired", "providers", len(cfg.Routing.KeyPool))
 	}
-	refresher := store.NewRoutingRefresher(s, policy, resolver, routingPriceFn(cost.NewEngine(cfg.Intelligence)))
+	// One price seam for the whole Channel-B surface — the refresher's
+	// snapshot and the liveRouter's realized-benefit write share the
+	// same adapter, so estimated and realized math never drift.
+	price := routingPriceFn(cost.NewEngine(cfg.Intelligence))
+	refresher := store.NewRoutingRefresher(s, policy, resolver, price)
 	go refresher.Run(ctx)
-	lr := newLiveRouter(policy, cfg.Routing.Mode, refresher, s, logger)
+	lr := newLiveRouter(policy, cfg.Routing.Mode, refresher, s, logger, price)
 	opts.ModelRouter = lr
 	// §R7.2/§R18.3 calibration job: refreshes model_calibration
 	// through the existing one-owner seam and (auto_demote) grades

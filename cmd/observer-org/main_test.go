@@ -64,9 +64,11 @@ func TestMigrateAndDumpConfig(t *testing.T) {
 	// 017_obs_enduser_spend (per-end-user cross-instance spend rollup),
 	// 018_m365_copilot_analytics_daily (native-console instance #4 / World 1 —
 	// the Microsoft 365 Copilot org connector; server-only, no agent pair),
-	// 019_obs_admission (T6 admission org-wire tier), and 020_obs_eval_items
-	// (T7 per-item eval tier).
-	if !strings.Contains(out, "schema version = 21") {
+	// 019_obs_admission (T6 admission org-wire tier), 020_obs_eval_items
+	// (T7 per-item eval tier), 021_obs_alerts_delivery (retention-backed
+	// delivery + digest state), and 022_briefing_aggregates (the hash-only
+	// Daily-Briefing aggregate push, Phase C of docs/design/standup-briefing.md).
+	if !strings.Contains(out, "schema version = 22") {
 		t.Errorf("migrate output = %q", out)
 	}
 

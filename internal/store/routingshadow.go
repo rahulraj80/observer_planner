@@ -33,6 +33,14 @@ type AdviseShadowReport struct {
 	// HoldsByReason counts the no-change advise decisions by their
 	// first reason code — why the shadow router stayed put.
 	HoldsByReason map[string]int `json:"holds_by_reason"`
+	// StickinessHolds counts no-change decisions held by the session
+	// coherence floor (stickiness_hold). These represent switches that
+	// WOULD have been made but were held.
+	StickinessHolds int `json:"stickiness_holds"`
+	// StickinessHoldSavingsUSD is the ESTIMATED savings of the held
+	// switches: average reroute savings × stickiness holds. This is a
+	// heuristic since held decisions don't carry individual savings.
+	StickinessHoldSavingsUSD float64 `json:"stickiness_hold_savings_usd"`
 	// ReadyToPromote: the report's mechanical read of the §R22 gate —
 	// enough decisions, real savings, zero quality flags. The operator
 	// decides; this is the evidence, not the decision.
@@ -42,6 +50,13 @@ type AdviseShadowReport struct {
 	// explain "N of M decisions" without hardcoding the threshold.
 	MinDecisions int    `json:"min_decisions"`
 	Note         string `json:"note"`
+	// PolicyName is the policy the shadow ran under — the dominant
+	// policy_name across the advise decisions (ties broken
+	// alphabetically, so the report is deterministic). The promotion
+	// CTA's apply lever writes exactly this value to [routing].policy.
+	// Empty when no advise row carries a name (defensive: the insert
+	// seam always stamps one).
+	PolicyName string `json:"policy_name,omitempty"`
 }
 
 // AdviseShadowNote is the structural caveat on every shadow report.
@@ -62,6 +77,7 @@ func BuildAdviseShadowReport(rows []RouterDecisionDetail, evidence map[routing.E
 		HoldsByReason: map[string]int{},
 		MinDecisions:  shadowMinDecisions,
 		Note:          AdviseShadowNote,
+		PolicyName:    dominantPolicyName(rows),
 	}
 	for _, d := range rows {
 		if d.Mode != "advise" || d.Applied {
@@ -70,7 +86,11 @@ func BuildAdviseShadowReport(rows []RouterDecisionDetail, evidence map[routing.E
 		rep.AdviseDecisions++
 		if d.SelectedModel == d.OriginalModel {
 			if len(d.ReasonCodes) > 0 {
-				rep.HoldsByReason[d.ReasonCodes[0]]++
+				reason := d.ReasonCodes[0]
+				rep.HoldsByReason[reason]++
+				if reason == "stickiness_hold" {
+					rep.StickinessHolds++
+				}
 			}
 			continue
 		}
@@ -90,9 +110,36 @@ func BuildAdviseShadowReport(rows []RouterDecisionDetail, evidence map[routing.E
 			rep.QualityByKind[d.TurnKind]++
 		}
 	}
+	// Heuristic: average reroute savings × stickiness holds.
+	// Held decisions don't carry individual savings; this is an estimate.
+	if rep.StickinessHolds > 0 && rep.WouldReroute > 0 {
+		avgRerouteSave := rep.WouldSaveUSD / float64(rep.WouldReroute)
+		rep.StickinessHoldSavingsUSD = avgRerouteSave * float64(rep.StickinessHolds)
+	}
 	rep.ReadyToPromote = rep.AdviseDecisions >= shadowMinDecisions &&
 		rep.WouldReroute > 0 && rep.WouldSaveUSD > 0 && rep.QualityFlags == 0
 	return rep
+}
+
+// dominantPolicyName picks the policy the advise shadow ran under: the
+// most frequent policy_name among the advise decisions, ties broken
+// alphabetically so the report is deterministic. Holds and reroutes
+// count alike — both were decided under the same candidate policy.
+func dominantPolicyName(rows []RouterDecisionDetail) string {
+	counts := map[string]int{}
+	for _, d := range rows {
+		if d.Mode != "advise" || d.Applied || d.PolicyName == "" {
+			continue
+		}
+		counts[d.PolicyName]++
+	}
+	best, bestN := "", 0
+	for name, n := range counts {
+		if n > bestN || (n == bestN && (best == "" || name < best)) {
+			best, bestN = name, n
+		}
+	}
+	return best
 }
 
 // AdviseShadowSignal composes the §R22 gate read for the advisor's

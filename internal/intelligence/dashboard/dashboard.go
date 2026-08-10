@@ -27,6 +27,9 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/intelligence/discover"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/learn"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/suggest"
+	"github.com/marmutapp/superbased-observer/internal/llmconn"
+	"github.com/marmutapp/superbased-observer/internal/llmkeyring"
+	"github.com/marmutapp/superbased-observer/internal/llmrun"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/processbridge/setup"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
@@ -97,6 +100,20 @@ type Options struct {
 	// Used by /api/setup/codex to compute the desired
 	// ~/.codex/config.toml base_url. Zero falls back to 8820.
 	ProxyPort int
+	// LLMRunner executes OPTIONAL LLM analysis calls (daily-briefing Phase B,
+	// docs/design/standup-briefing.md §3): the narrative upgrade and grounded
+	// Q&A. nil → both surfaces degrade: GET /api/briefing ignores
+	// ?narrative=llm and POST /api/briefing/ask returns 404 no_connection.
+	// The Runner itself is never load-bearing (template fallback).
+	LLMRunner *llmrun.Runner
+	// LLMConns are the enabled [llm.connections] (already converted + filtered).
+	LLMConns []llmconn.Connection
+	// LLMKeyStore persists LLM analysis API keys to the OS keychain
+	// (0600-file fallback) for the /api/config/llm/key/<id> endpoint.
+	// nil → an Open with the config dir is used (the same store the
+	// runner resolves api_key_keychain refs from). Injected in tests to
+	// force a deterministic temp-dir store.
+	LLMKeyStore *llmkeyring.Store
 	// StashDir is the proxy-side SROD (Stash & Retrieve on Demand) stash
 	// directory (cfg.Compression.Conversation.Stash.Dir). When set, the
 	// /api/compression/retrieval surface reads short content snippets of
@@ -607,6 +624,45 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	reg("/api/routing/policy", V, s.handleRoutingPolicy)
 	reg("/api/routing/policy/lint", V, s.handleRoutingPolicyLint)
 	reg("/api/verbosity/aggregate", V, s.handleVerbosityAggregate)
+	// Daily briefing (docs/design/standup-briefing.md, Phase A + Phase B).
+	// Data-only read surfaces — VIEW, remotely viewable exactly like
+	// /api/sessions: the full composed briefing, the flat opportunity cards,
+	// the per-card drill-down justification (served from the snapshot so page
+	// and drill-down never drift), and the session drill-down delegating to
+	// the one /api/session/ implementation. GET only; nothing mutates config
+	// or any AI-tool file. Phase B adds the OPTIONAL LLM surfaces: the
+	// narrative upgrade is an explicit ?narrative=llm GET param (never fired
+	// implicitly — a configured connection is still opt-in per request) and
+	// the grounded Q&A POST (egress-capable compute — read-only data,
+	// auto-escalated to Execute remotely, §9.3, like /api/routing/simulate).
+	reg("/api/briefing", V, s.handleBriefing)
+	reg("/api/briefing/opportunities", V, s.handleBriefingOpportunities)
+	reg("/api/briefing/justify", V, s.handleBriefingJustify)
+	reg("/api/briefing/session/", V, s.handleBriefingSession)
+	reg("/api/briefing/ask", V, s.handleBriefingAsk)
+	reg("/api/briefing/ask-past", V, s.handleBriefingAskPast)
+	reg("/api/briefing/coaching", V, s.handleBriefingCoaching)
+	// Stage 1 LLM follow-ups: triage (LLM prioritization + grouping of the
+	// opportunity card set — read-only compute, VIEW like /api/routing/
+	// simulate) and diagnose (per-pattern failure diagnosis). Both degrade to
+	// deterministic answers without egress.
+	reg("/api/briefing/triage", V, s.handleBriefingTriage)
+	reg("/api/briefing/diagnose", V, s.handleBriefingDiagnose)
+	// Stage 2 Pull rail: the "Actions recommended" rail over the active
+	// opportunity cards, each linking to the config surface + expected
+	// impact (and, for levered cards, the CTA apply). Pure read — VIEW.
+	reg("/api/briefing/actions", V, s.handleBriefingActions)
+	// Stage 2 Apply CTA: plan is a pure simulate-first preview (compute
+	// over current evidence — VIEW); apply/revert WRITE config.toml →
+	// Local like /api/config/section/; ledger is the read-only undo
+	// history.
+	reg("/api/briefing/cta/plan", V, s.handleBriefingCTAPlan)
+	reg("/api/briefing/cta/apply", L, s.handleBriefingCTAApply)
+	reg("/api/briefing/cta/revert", L, s.handleBriefingCTARevert)
+	reg("/api/briefing/cta/ledger", V, s.handleBriefingCTALedger)
+	reg("/api/briefing/cta/suspend", L, s.handleBriefingCTASuspend)
+	reg("/api/briefing/cta/resume", L, s.handleBriefingCTAResume)
+	reg("/api/briefing/suspensions", V, s.handleBriefingSuspensions)
 	reg("/api/sessions", V, s.handleSessions)
 	reg("/api/sessions/calendar", V, s.handleSessionsCalendar)
 	// /api/session/ keeps a View base — its many GET sub-route reads must work
@@ -766,6 +822,21 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	reg("/api/analysis/cost-by-hour", V, s.handleAnalysisCostByHour)
 	reg("/api/analysis/cost-by-dow-hour", V, s.handleAnalysisCostByDowHour)
 	reg("/api/analysis/cache-savings-trend", V, s.handleAnalysisCacheSavingsTrend)
+	// Self-hosted standard reports (docs/design/api-intelligence.md §5.3.1):
+	// latency percentiles, error rate, and cache-money-saved, all per
+	// model/provider/tool and feeding the briefing numbers section. VIEW tier
+	// — aggregate, content-free latency/error/savings metadata.
+	reg("/api/reports/latency", V, s.handleReportLatency)
+	reg("/api/reports/errors", V, s.handleReportErrors)
+	reg("/api/reports/cache", V, s.handleReportCache)
+	// Evidence / Model Fit (docs/design/api-intelligence.md §5.3 + §5.5).
+	// VIEW tier — remotely viewable metadata about model/provider/kind performance.
+	reg("/api/evidence/summary", V, s.handleEvidenceSummary)
+	reg("/api/evidence/matrix", V, s.handleEvidenceMatrix)
+	reg("/api/evidence/timeseries", V, s.handleEvidenceTimeseries)
+	// License usage (docs/design/api-intelligence.md §5.2 + §5.5).
+	// VIEW tier — remotely viewable license utilization data.
+	reg("/api/license/usage", V, s.handleLicenseUsage)
 	// /api/config GET is a config READ (owner-trusted; §2A). Every config WRITE
 	// is whole-route Local: pricing PUT, the generic section PUT, reload, profile
 	// create, backup restore POST, profile mutate/delete. (Whole-route Local
@@ -779,6 +850,13 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	reg("/api/config/reload", L, s.handleConfigReload)
 	reg("/api/config/profiles", L, s.handleConfigProfiles)
 	reg("/api/config/profiles/", L, s.handleConfigProfile)
+	// LLM analysis connections (§3): the key-save/delete seam writes the
+	// OS keychain + config.toml; the test probe egresses to a
+	// user-configured endpoint. Both are owner-local (CapabilityLocal) —
+	// a remote principal must never write the keychain or trigger a
+	// probe to an arbitrary host.
+	reg("/api/config/llm/key/", L, s.handleConfigLLMKey)
+	reg("/api/config/llm/test/", L, s.handleConfigLLMTest)
 	reg("/api/tools/status", V, s.handleToolsStatus)
 	reg("/api/tools/launch", L, s.handleToolsLaunch)
 	reg("/api/setup/hooks", L, s.handleSetupHooks)

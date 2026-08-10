@@ -61,6 +61,10 @@ func NewLegacyWithOptions(s *scrub.Scrubber, watchRoots []string) *LegacyAdapter
 // Name implements adapter.Adapter.
 func (*LegacyAdapter) Name() string { return models.ToolKiloCode }
 
+// SQLiteBacked implements adapter.SQLiteBacked — the delegate reads the
+// cline sessions.db incrementally, never whole.
+func (*LegacyAdapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter.
 func (a *LegacyAdapter) WatchPaths() []string { return a.watchRoots }
 

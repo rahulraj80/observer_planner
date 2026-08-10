@@ -81,6 +81,10 @@ func NewWithOptions(s *scrub.Scrubber, roots ...string) *Adapter {
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolHermes }
 
+// SQLiteBacked implements adapter.SQLiteBacked — state.db is queried
+// incrementally by watermark, never read whole.
+func (*Adapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter.
 func (a *Adapter) WatchPaths() []string { return a.roots }
 

@@ -130,3 +130,54 @@ func TestPreviewNoSendNoMarker(t *testing.T) {
 		t.Errorf("preview must not write a marker, got %d rows", n)
 	}
 }
+
+// TestAssembleBriefing_VirtuousCycle pins the Stage 3 exec-memo assembly:
+// pushed virtuous_cycle rows are rolled up into the BriefingData totals so
+// the email's "Virtuous cycle" section is populated.
+func TestAssembleBriefing_VirtuousCycle(t *testing.T) {
+	d := newDigestDB(t)
+	ctx := context.Background()
+
+	// Seed two weeks' worth of pushed virtuous_cycle rows.
+	for _, vc := range []struct {
+		week      string
+		applies   int64
+		projected float64
+		realized  float64
+		turns     int64
+	}{
+		{"2026-06-15", 2, 10.00, 0, 0},
+		{"2026-06-22", 3, 15.00, 12.50, 6},
+	} {
+		if _, err := d.ExecContext(ctx,
+			`INSERT INTO virtuous_cycle
+			   (org_id, user_email, week_start, applies, projected_usd, realized_usd, realized_turns, updated_at, pushed_by_user_id)
+			 VALUES ('org1', 'node@x', ?, ?, ?, ?, ?, '2026-07-01T00:00:00Z', 'node')`,
+			vc.week, vc.applies, vc.projected, vc.realized, vc.turns); err != nil {
+			t.Fatalf("seed virtuous_cycle: %v", err)
+		}
+	}
+
+	var rec []email.Message
+	s := newTestScheduler(t, d, &rec)
+	period, _ := notifydigest.DuePeriod(notifydigest.Weekly, 8, fixedNow)
+	data, err := s.assembleBriefing(ctx, period)
+	if err != nil {
+		t.Fatalf("assembleBriefing: %v", err)
+	}
+	if data.VirtuousCycleTotalApplies != 5 {
+		t.Errorf("applies = %d, want 5", data.VirtuousCycleTotalApplies)
+	}
+	if data.VirtuousCycleTotalProjectedUSD != 25.00 {
+		t.Errorf("projected = %.2f, want 25.00", data.VirtuousCycleTotalProjectedUSD)
+	}
+	if data.VirtuousCycleTotalRealizedUSD != 12.50 || data.VirtuousCycleTotalRealizedTurns != 6 {
+		t.Errorf("realized = %.2f/%d, want 12.50/6", data.VirtuousCycleTotalRealizedUSD, data.VirtuousCycleTotalRealizedTurns)
+	}
+
+	// The composed email carries the section.
+	msg := notifydigest.ComposeBriefing(data)
+	if !strings.Contains(msg.Text, "Virtuous cycle") || !strings.Contains(msg.Text, "CTA applies: 5") {
+		t.Errorf("composed briefing missing virtuous-cycle section\n---\n%s", msg.Text)
+	}
+}

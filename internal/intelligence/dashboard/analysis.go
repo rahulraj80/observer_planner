@@ -1,8 +1,10 @@
 package dashboard
 
 import (
+	"database/sql"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
@@ -102,7 +104,10 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 		       at.cache_creation_tokens, at.cache_creation_1h_tokens,
 		       0 AS reasoning_tokens,
 		       at.web_search_requests, at.timestamp,
-		       at.cost_usd
+		       at.cost_usd,
+		       at.time_to_first_token_ms AS ttft, at.total_response_ms AS total,
+		       CASE WHEN at.error_class != '' THEN 1 ELSE 0 END AS is_error,
+		       1 AS is_proxy
 		FROM api_turns at` + atJoins + `
 		WHERE at.timestamp >= ?` + atWhere + `
 		UNION ALL
@@ -110,7 +115,8 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 		       tu.cache_creation_tokens, tu.cache_creation_1h_tokens,
 		       tu.reasoning_tokens,
 		       tu.web_search_requests, tu.timestamp,
-		       tu.estimated_cost_usd
+		       tu.estimated_cost_usd,
+		       NULL, NULL, 0, 0
 		FROM token_usage tu` + tuJoins + `
 		WHERE tu.timestamp >= ?` + tuWhere + `
 		  AND (tu.source_event_id IS NULL OR tu.source_event_id = ''
@@ -123,7 +129,8 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 	       COALESCE(reasoning_tokens, 0),
 	       COALESCE(web_search_requests, 0),
 	       timestamp,
-	       COALESCE(cost_usd, 0)
+	       COALESCE(cost_usd, 0),
+	       ttft, total, is_error, is_proxy
 	FROM combined`
 
 	args := []any{tsArg, tsArg}
@@ -146,24 +153,29 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 		periodHC100k, periodHC200k                            int64
 		periodCostHC100k, periodCostHC200k                    float64
 		periodCacheSavings                                    float64
+		periodAPITurns, periodAPIErrors                       int64
 		perTurnCosts                                          []float64
+		periodTTFT, periodTotal                               []int64
 		modelCost                                             = map[string]float64{}
 		activeHours                                           = map[string]struct{}{}
 	)
 
 	for rows.Next() {
 		var (
-			model    string
-			bundle   cost.TokenBundle
-			tsStr    string
-			recorded float64
+			model            string
+			bundle           cost.TokenBundle
+			tsStr            string
+			recorded         float64
+			ttft, total      sql.NullInt64
+			isError, isProxy int
 		)
 		if err := rows.Scan(&model,
 			&bundle.Input, &bundle.Output,
 			&bundle.CacheRead, &bundle.CacheCreation, &bundle.CacheCreation1h,
 			&bundle.Reasoning,
 			&bundle.WebSearchRequests,
-			&tsStr, &recorded); err != nil {
+			&tsStr, &recorded,
+			&ttft, &total, &isError, &isProxy); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -206,6 +218,18 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 			periodCacheWrite += bundle.CacheCreation
 			if recorded > 0 {
 				periodRecordedCost += recorded
+			}
+			if isProxy == 1 {
+				periodAPITurns++
+				if isError == 1 {
+					periodAPIErrors++
+				}
+			}
+			if ttft.Valid && ttft.Int64 > 0 {
+				periodTTFT = append(periodTTFT, ttft.Int64)
+			}
+			if total.Valid && total.Int64 > 0 {
+				periodTotal = append(periodTotal, total.Int64)
 			}
 			if modelHasLC && rowCost > rowStdCost {
 				periodLCEligibleTurns++
@@ -329,6 +353,29 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 		perTurnP95 = perTurnCosts[p95Idx]
 	}
 
+	// Latency percentiles over positive proxy-captured timings. Same
+	// nearest-rank convention as the org rollup (apiTurnPercentile): offset
+	// = floor(f×(n−1)+0.5), then the sorted value at that index.
+	latency := map[string]int64{}
+	if n := len(periodTTFT); n > 0 {
+		sort.Slice(periodTTFT, func(i, j int) bool { return periodTTFT[i] < periodTTFT[j] })
+		latency["ttft_p50_ms"] = periodTTFT[percentileIndex(periodTTFT, 0.5)]
+		latency["ttft_p75_ms"] = periodTTFT[percentileIndex(periodTTFT, 0.75)]
+		latency["ttft_p95_ms"] = periodTTFT[percentileIndex(periodTTFT, 0.95)]
+		latency["sample_turns"] = int64(n)
+	}
+	if n := len(periodTotal); n > 0 {
+		sort.Slice(periodTotal, func(i, j int) bool { return periodTotal[i] < periodTotal[j] })
+		latency["total_p50_ms"] = periodTotal[percentileIndex(periodTotal, 0.5)]
+		latency["total_p75_ms"] = periodTotal[percentileIndex(periodTotal, 0.75)]
+		latency["total_p95_ms"] = periodTotal[percentileIndex(periodTotal, 0.95)]
+		latency["total_sample_turns"] = int64(n)
+	}
+	var periodErrorRate float64
+	if periodAPITurns > 0 {
+		periodErrorRate = float64(periodAPIErrors) / float64(periodAPITurns)
+	}
+
 	// Burn rate $/active-hour. An "active hour" is any (date, hour) bucket
 	// with at least one turn in the period. This is the user's hourly
 	// AI bill while engaged — not a steady-state per-clock-hour rate.
@@ -435,7 +482,29 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 			"blended_rate_per_million": blendedRate,
 			"source_note":              "stale-read tokens × blended input rate",
 		},
+		"latency": latency,
+		"errors": map[string]any{
+			"api_turns":   periodAPITurns,
+			"error_turns": periodAPIErrors,
+			"error_rate":  periodErrorRate,
+			"source_note": "api_turns rows with a non-empty error_class; proxy-captured turns only",
+		},
 	})
+}
+
+// percentileIndex returns the 0-based index of the nearest-rank percentile f
+// (0..1) in a sorted slice, mirroring the org rollup's apiTurnPercentile:
+// offset = int(f×(n−1)+0.5), clamped into range.
+func percentileIndex(vals []int64, f float64) int {
+	n := len(vals)
+	off := int(f*float64(n-1) + 0.5)
+	if off < 0 {
+		off = 0
+	}
+	if off > n-1 {
+		off = n - 1
+	}
+	return off
 }
 
 // handleAnalysisTrend serves /api/analysis/trend?dim=model|project|tool
@@ -1658,4 +1727,347 @@ func stripLongContext(p cost.Pricing) cost.Pricing {
 	p.LongContextCacheCreation = 0
 	p.LongContextCacheCreation1h = 0
 	return p
+}
+
+// windowResponse wraps the common (days, since, until) envelope shared by the
+// windowed evidence endpoints. A zero `until` (days-only request) means no
+// upper bound, so the field is omitted rather than serialized as year-zero.
+func windowResponse(days int, since, until time.Time, key string, payload any) map[string]any {
+	m := map[string]any{
+		"days":  days,
+		"since": since.Format(time.RFC3339),
+		key:     payload,
+	}
+	if !until.IsZero() {
+		m["until"] = until.Format(time.RFC3339)
+	}
+	return m
+}
+
+// untilFilter returns the SQL tail (plus args) that constrains a windowed
+// query's upper bound. A zero `until` (days-only request) means no upper bound,
+// so nothing is appended — binding a zero time would match nothing.
+func untilFilter(until time.Time) (string, []any) {
+	if until.IsZero() {
+		return "", nil
+	}
+	return " AND observed_at < ?", []any{until.Format(time.RFC3339)}
+}
+
+// handleEvidenceSummary serves /api/evidence/summary — aggregated evidence
+// summary across all kinds/models/providers for the window. Used by the
+// Model Fit page's header stats.
+func (s *Server) handleEvidenceSummary(w http.ResponseWriter, r *http.Request) {
+	days := intArg(r, "days", 30, 1, 36500)
+	tool := r.URL.Query().Get("tool")
+	project := r.URL.Query().Get("project")
+	since, until := windowRange(r, 30, 1, 36500)
+
+	// A zero `until` (days-only request) means no upper bound — binding a
+	// zero time would match nothing, so it is omitted.
+	where := []string{"timestamp >= ?"}
+	args := []any{since.Format(time.RFC3339Nano)}
+	if !until.IsZero() {
+		where = append(where, "timestamp < ?")
+		args = append(args, until.Format(time.RFC3339Nano))
+	}
+	if tool != "" {
+		where = append(where, "tool = ?")
+		args = append(args, tool)
+	}
+	if project != "" {
+		where = append(where, "project_id = (SELECT id FROM projects WHERE root_path = ?)")
+		args = append(args, project)
+	}
+
+	rows, err := s.db().QueryContext(r.Context(), `
+		SELECT
+			COALESCE(turn_kind, 'unknown') AS kind,
+			model,
+			COALESCE(provider, '') AS provider,
+			COUNT(*) AS n,
+			SUM(COALESCE(input_tokens, 0)) AS input_tokens,
+			SUM(COALESCE(output_tokens, 0)) AS output_tokens,
+			SUM(COALESCE(cache_read_tokens, 0)) AS cache_read_tokens,
+			SUM(COALESCE(cache_creation_tokens, 0)) AS cache_creation_tokens,
+			SUM(COALESCE(cost_usd, 0)) AS cost_usd,
+			SUM(CASE WHEN error_class != '' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS error_rate
+		FROM api_turns
+		WHERE `+strings.Join(where, " AND ")+`
+		GROUP BY kind, model, provider
+		ORDER BY cost_usd DESC
+	`, args...)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		Kind                string  `json:"kind"`
+		Model               string  `json:"model"`
+		Provider            string  `json:"provider"`
+		Turns               int64   `json:"turns"`
+		InputTokens         int64   `json:"input_tokens"`
+		OutputTokens        int64   `json:"output_tokens"`
+		CacheReadTokens     int64   `json:"cache_read_tokens"`
+		CacheCreationTokens int64   `json:"cache_creation_tokens"`
+		CostUSD             float64 `json:"cost_usd"`
+		ErrorRate           float64 `json:"error_rate"`
+	}
+	var out []item
+	for rows.Next() {
+		var i item
+		if err := rows.Scan(&i.Kind, &i.Model, &i.Provider, &i.Turns,
+			&i.InputTokens, &i.OutputTokens, &i.CacheReadTokens, &i.CacheCreationTokens,
+			&i.CostUSD, &i.ErrorRate); err != nil {
+			writeErr(w, err)
+			return
+		}
+		out = append(out, i)
+	}
+	writeJSON(w, windowResponse(days, since, until, "items", out))
+}
+
+// handleEvidenceMatrix serves /api/evidence/matrix — a kind×model×provider
+// matrix for the Model Fit page. Each cell contains aggregated stats.
+func (s *Server) handleEvidenceMatrix(w http.ResponseWriter, r *http.Request) {
+	days := intArg(r, "days", 30, 1, 36500)
+	kind := r.URL.Query().Get("kind")
+	model := r.URL.Query().Get("model")
+	provider := r.URL.Query().Get("provider")
+	tool := r.URL.Query().Get("tool")
+	project := r.URL.Query().Get("project")
+	since, until := windowRange(r, 30, 1, 36500)
+
+	// A zero `until` (days-only request) means no upper bound — binding a
+	// zero time would match nothing, so it is omitted.
+	where := []string{"timestamp >= ?"}
+	args := []any{since.Format(time.RFC3339Nano)}
+	if !until.IsZero() {
+		where = append(where, "timestamp < ?")
+		args = append(args, until.Format(time.RFC3339Nano))
+	}
+	if kind != "" {
+		where = append(where, "COALESCE(turn_kind, 'unknown') = ?")
+		args = append(args, kind)
+	}
+	if model != "" {
+		where = append(where, "model = ?")
+		args = append(args, model)
+	}
+	if provider != "" {
+		where = append(where, "COALESCE(provider, '') = ?")
+		args = append(args, provider)
+	}
+	if tool != "" {
+		where = append(where, "tool = ?")
+		args = append(args, tool)
+	}
+	if project != "" {
+		where = append(where, "project_id = (SELECT id FROM projects WHERE root_path = ?)")
+		args = append(args, project)
+	}
+
+	q := `SELECT
+		COALESCE(turn_kind, 'unknown') AS kind,
+		model,
+		COALESCE(provider, '') AS provider,
+		COUNT(*) AS n,
+		SUM(COALESCE(input_tokens, 0)) AS input_tokens,
+		SUM(COALESCE(output_tokens, 0)) AS output_tokens,
+		SUM(COALESCE(cache_read_tokens, 0)) AS cache_read_tokens,
+		SUM(COALESCE(cache_creation_tokens, 0)) AS cache_creation_tokens,
+		SUM(COALESCE(cost_usd, 0)) AS cost_usd,
+		SUM(CASE WHEN error_class != '' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS error_rate,
+		COALESCE(AVG(CASE WHEN time_to_first_token_ms > 0 THEN time_to_first_token_ms END), 0) AS avg_ttft_ms,
+		COALESCE(AVG(CASE WHEN total_response_ms > 0 THEN total_response_ms END), 0) AS avg_total_ms
+	FROM api_turns
+	WHERE ` + strings.Join(where, " AND ") + `
+	GROUP BY kind, model, provider
+	ORDER BY cost_usd DESC`
+
+	rows, err := s.db().QueryContext(r.Context(), q, args...)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer rows.Close()
+
+	type cell struct {
+		Kind                string  `json:"kind"`
+		Model               string  `json:"model"`
+		Provider            string  `json:"provider"`
+		Turns               int64   `json:"turns"`
+		InputTokens         int64   `json:"input_tokens"`
+		OutputTokens        int64   `json:"output_tokens"`
+		CacheReadTokens     int64   `json:"cache_read_tokens"`
+		CacheCreationTokens int64   `json:"cache_creation_tokens"`
+		CostUSD             float64 `json:"cost_usd"`
+		ErrorRate           float64 `json:"error_rate"`
+		AvgTTFTMs           float64 `json:"avg_ttft_ms"`
+		AvgTotalMs          float64 `json:"avg_total_ms"`
+	}
+	var out []cell
+	for rows.Next() {
+		var c cell
+		if err := rows.Scan(&c.Kind, &c.Model, &c.Provider, &c.Turns,
+			&c.InputTokens, &c.OutputTokens, &c.CacheReadTokens, &c.CacheCreationTokens,
+			&c.CostUSD, &c.ErrorRate, &c.AvgTTFTMs, &c.AvgTotalMs); err != nil {
+			writeErr(w, err)
+			return
+		}
+		out = append(out, c)
+	}
+	writeJSON(w, windowResponse(days, since, until, "cells", out))
+}
+
+// handleEvidenceTimeseries serves /api/evidence/timeseries — time-series
+// evidence for a specific kind/model/provider over the window.
+func (s *Server) handleEvidenceTimeseries(w http.ResponseWriter, r *http.Request) {
+	days := intArg(r, "days", 30, 1, 36500)
+	kind := r.URL.Query().Get("kind")
+	model := r.URL.Query().Get("model")
+	provider := r.URL.Query().Get("provider")
+	bucket := r.URL.Query().Get("bucket")
+	if bucket != "hour" && bucket != "day" {
+		bucket = "day"
+	}
+	since, until := windowRange(r, 30, 1, 36500)
+
+	// A zero `until` (days-only request) means no upper bound — binding a
+	// zero time would match nothing, so it is omitted.
+	where := []string{"timestamp >= ?"}
+	args := []any{since.Format(time.RFC3339Nano)}
+	if !until.IsZero() {
+		where = append(where, "timestamp < ?")
+		args = append(args, until.Format(time.RFC3339Nano))
+	}
+	if kind != "" {
+		where = append(where, "COALESCE(turn_kind, 'unknown') = ?")
+		args = append(args, kind)
+	}
+	if model != "" {
+		where = append(where, "model = ?")
+		args = append(args, model)
+	}
+	if provider != "" {
+		where = append(where, "COALESCE(provider, '') = ?")
+		args = append(args, provider)
+	}
+
+	bucketExpr := "DATE(timestamp)"
+	if bucket == "hour" {
+		bucketExpr = "STRFTIME('%Y-%m-%d %H:00:00', timestamp)"
+	}
+
+	q := `SELECT
+		` + bucketExpr + ` AS bucket,
+		COUNT(*) AS n,
+		SUM(COALESCE(input_tokens, 0)) AS input_tokens,
+		SUM(COALESCE(output_tokens, 0)) AS output_tokens,
+		SUM(COALESCE(cache_read_tokens, 0)) AS cache_read_tokens,
+		SUM(COALESCE(cache_creation_tokens, 0)) AS cache_creation_tokens,
+		SUM(COALESCE(cost_usd, 0)) AS cost_usd,
+		SUM(CASE WHEN error_class != '' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS error_rate,
+		COALESCE(AVG(CASE WHEN time_to_first_token_ms > 0 THEN time_to_first_token_ms END), 0) AS avg_ttft_ms,
+		COALESCE(AVG(CASE WHEN total_response_ms > 0 THEN total_response_ms END), 0) AS avg_total_ms
+	FROM api_turns
+	WHERE ` + strings.Join(where, " AND ") + `
+	GROUP BY bucket
+	ORDER BY bucket`
+
+	rows, err := s.db().QueryContext(r.Context(), q, args...)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer rows.Close()
+
+	type point struct {
+		Bucket              string  `json:"bucket"`
+		Turns               int64   `json:"turns"`
+		InputTokens         int64   `json:"input_tokens"`
+		OutputTokens        int64   `json:"output_tokens"`
+		CacheReadTokens     int64   `json:"cache_read_tokens"`
+		CacheCreationTokens int64   `json:"cache_creation_tokens"`
+		CostUSD             float64 `json:"cost_usd"`
+		ErrorRate           float64 `json:"error_rate"`
+		AvgTTFTMs           float64 `json:"avg_ttft_ms"`
+		AvgTotalMs          float64 `json:"avg_total_ms"`
+	}
+	var out []point
+	for rows.Next() {
+		var p point
+		if err := rows.Scan(&p.Bucket, &p.Turns, &p.InputTokens, &p.OutputTokens,
+			&p.CacheReadTokens, &p.CacheCreationTokens, &p.CostUSD, &p.ErrorRate,
+			&p.AvgTTFTMs, &p.AvgTotalMs); err != nil {
+			writeErr(w, err)
+			return
+		}
+		out = append(out, p)
+	}
+	resp := windowResponse(days, since, until, "points", out)
+	resp["bucket"] = bucket
+	writeJSON(w, resp)
+}
+
+// handleLicenseUsage serves /api/license/usage — hourly license usage
+// telemetry from the license_usage table (migration 075).
+func (s *Server) handleLicenseUsage(w http.ResponseWriter, r *http.Request) {
+	days := intArg(r, "days", 30, 1, 36500)
+	since, until := windowRange(r, 30, 1, 36500)
+
+	upperSQL, upperArgs := untilFilter(until)
+	args := append([]any{since.Format(time.RFC3339)}, upperArgs...)
+	rows, err := s.db().QueryContext(r.Context(), `
+		SELECT
+			license_id,
+			observed_at,
+			entitlement_kind,
+			provider,
+			models_used_json,
+			turns,
+			input_tokens,
+			output_tokens,
+			cache_read_tokens,
+			cache_creation_tokens,
+			cost_usd_list,
+			quota_monthly_tokens
+		FROM license_usage
+		WHERE observed_at >= ?`+upperSQL+`
+		ORDER BY observed_at DESC
+	`, args...)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		LicenseID           string  `json:"license_id"`
+		ObservedAt          string  `json:"observed_at"`
+		EntitlementKind     string  `json:"entitlement_kind"`
+		Provider            string  `json:"provider"`
+		ModelsUsedJSON      string  `json:"models_used_json"`
+		Turns               int64   `json:"turns"`
+		InputTokens         int64   `json:"input_tokens"`
+		OutputTokens        int64   `json:"output_tokens"`
+		CacheReadTokens     int64   `json:"cache_read_tokens"`
+		CacheCreationTokens int64   `json:"cache_creation_tokens"`
+		CostUSDList         float64 `json:"cost_usd_list"`
+		QuotaMonthlyTokens  *int64  `json:"quota_monthly_tokens"`
+	}
+	out := []item{}
+	for rows.Next() {
+		var i item
+		if err := rows.Scan(&i.LicenseID, &i.ObservedAt, &i.EntitlementKind, &i.Provider,
+			&i.ModelsUsedJSON, &i.Turns, &i.InputTokens, &i.OutputTokens,
+			&i.CacheReadTokens, &i.CacheCreationTokens, &i.CostUSDList, &i.QuotaMonthlyTokens); err != nil {
+			writeErr(w, err)
+			return
+		}
+		out = append(out, i)
+	}
+	writeJSON(w, windowResponse(days, since, until, "items", out))
 }

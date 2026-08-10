@@ -41,6 +41,12 @@ func TestWireEncodingGolden(t *testing.T) {
 			Exp: 1797206400, Iat: 1789430400, Jti: "jti-7f3a",
 		},
 		"push_response": PushResponse{AcceptedRows: 118, DedupedRows: 7, NextCursor: 90210},
+		"briefing_aggregate": BriefingAggregateRow{
+			OrgID: "org-acme", UserEmail: "dev@acme.example",
+			Day: "2026-07-30", Tool: "claude-code", ProjectHash: "sha256:proj-root-aaa",
+			Sessions: 12, Turns: 384,
+			InputTokens: 480000, OutputTokens: 96000, CostUSD: 0.42,
+		},
 		"policy_bundle": PolicyBundle{
 			Version:     3,
 			BundleTOML:  "[[override]]\nrule = \"R-110\"\ndecision = \"deny\"\n",
@@ -104,6 +110,17 @@ func TestWireEncodingGolden(t *testing.T) {
 				TargetHash: "sha256:tgt-fff",
 				ChainPrev:  "", ChainHash: "sha256:chain-001",
 				OrgID: "org-acme", UserEmail: "dev@acme.example",
+			}},
+			BriefingAggregates: []BriefingAggregateRow{{
+				OrgID: "org-acme", UserEmail: "dev@acme.example",
+				Day: "2026-07-30", Tool: "claude-code", ProjectHash: "sha256:proj-root-aaa",
+				Sessions: 12, Turns: 384,
+				InputTokens: 480000, OutputTokens: 96000, CostUSD: 0.42,
+			}},
+			VirtuousCycle: []VirtuousCycleRow{{
+				OrgID: "org-acme", UserEmail: "dev@acme.example",
+				WeekStart: "2026-07-20", Applies: 5,
+				ProjectedUSD: 24.00, RealizedUSD: 15.50, RealizedTurns: 9,
 			}},
 		},
 	}

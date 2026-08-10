@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
@@ -20,19 +21,27 @@ import (
 // memory; once the cap is hit we stop accumulating (but keep forwarding).
 // Turns from truncated captures will have zero tokens and are dropped
 // by the caller, same as any other unparseable capture.
-func (p *Proxy) teeStream(ctx context.Context, w http.ResponseWriter, body io.Reader) []byte {
+//
+// The returned time is the wall-clock stamp of the FIRST chunk that arrived
+// from the upstream (time.Time zero when no chunk ever arrived) — the
+// server-time-to-first-token observation that feeds the TTFT latency reports.
+// Using the Proxy clock keeps it deterministic under test.
+func (p *Proxy) teeStream(ctx context.Context, w http.ResponseWriter, body io.Reader) (captured []byte, firstChunkAt time.Time) {
 	const maxStreamBufferBytes = 4 * 1024 * 1024
 	flusher, _ := w.(http.Flusher)
 	var buf bytes.Buffer
 	chunk := make([]byte, 4*1024)
 	for {
 		if err := ctx.Err(); err != nil {
-			return buf.Bytes()
+			return buf.Bytes(), firstChunkAt
 		}
 		n, err := body.Read(chunk)
 		if n > 0 {
+			if firstChunkAt.IsZero() {
+				firstChunkAt = p.now()
+			}
 			if _, werr := w.Write(chunk[:n]); werr != nil {
-				return buf.Bytes()
+				return buf.Bytes(), firstChunkAt
 			}
 			if flusher != nil {
 				flusher.Flush()
@@ -48,7 +57,7 @@ func (p *Proxy) teeStream(ctx context.Context, w http.ResponseWriter, body io.Re
 			}
 		}
 		if err != nil {
-			return buf.Bytes()
+			return buf.Bytes(), firstChunkAt
 		}
 	}
 }

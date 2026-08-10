@@ -2,6 +2,85 @@
 
 All notable changes to SuperBased Observer are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Daily Briefing (Phase A of `docs/design/standup-briefing.md`).** A
+  data-only stand-up page at `/briefing` that tells yesterday's story in one
+  screen: at-a-glance KPIs (spend, sessions, turns, cache hit-rate, errors,
+  active hours), per-tool activity, top sessions, a narrative, and expandable
+  opportunity cards — routing-shadow savings, trivial-model overprovisioning,
+  low cache hit-rate, long-context surcharge — each carrying a
+  served-from-snapshot justification so the page and its drill-down can never
+  drift.
+  - Pure, deterministic composer `internal/briefing` (types / compose /
+    justify): zero network, no prompt text, no file paths; everything is
+    injected (`Facts` + pricing function) and identical inputs always produce
+    the identical Briefing.
+  - Endpoints `/api/briefing`, `/api/briefing/opportunities`,
+    `/api/briefing/justify?id=<dedup_key>`, `/api/briefing/session/<id>` —
+    all `V`-class (remote-readable). Default window is the most-recent
+    **completed** local day; `?date=YYYY-MM-DD` overrides.
+  - `briefing_snapshots` table (migration `078`) — the last-composed briefing
+    per local day for reproducibility + audit, node-local (never selected by
+    the org-push seam).
+  - Daily email: `observer digest --kind briefing` — content-free composer
+    reusing the exact facts scan + pricing the dashboard serves, with
+    `digest_state` send-once markers so a day is never emailed twice.
+- **`observer demoseed [-d days] [-u users]`** — deterministic synthetic
+  dataset generator for demos and Briefing verification: seven days × up to
+  30 users across the top harnesses (proxy + watcher channels), top-30
+  priceable models, and deliberately-tuned cache / long-context /
+  trivial-model / routing-shadow / failure patterns so the opportunity
+  detectors fire correctly. Re-running purges only its own rows
+  (`demo-seed` / `seed-%` / `/work/*`), so real data is never touched.
+- **LLM Analysis Connections (Phase B of `docs/design/standup-briefing.md`).**
+  Optional, opt-in LLM connections that analysis surfaces can point at —
+  never load-bearing: zero configured connections reproduces exactly the
+  data-only behavior.
+  - `internal/llmconn` — one shared client for the anthropic / openai_compat /
+    local_openai_compat dialects: 60s timeout, judge-style retry, egress
+    guardrails for remote hosts, `X-SBO-Analysis` attribution, task-based
+    selection (`[llm.connections.<id>]` in config; env-ref secrets only,
+    `allow_remote=true` required for non-loopback hosts). Connections accept
+    arbitrary extra headers (`observer llm add --header "Name: Value"` /
+    `[llm.connections.<id>].headers`) that fill only fields not already set — still
+    never leaves the machine.
+  - `analysis_calls` table (migration `079`) — content-free accounting of
+    every analysis call (tokens, cost, latency, status), kept separate from
+    tool traffic (`api_turns`) and excluded from org push.
+  - `observer llm list|setup|status|add|remove` — manage connections with
+    loopback auto-discovery of Ollama (`:11434`) and vLLM/llama.cpp
+    (`:8000`); never touches remote hosts.
+  - Briefing upgrade: `GET /api/briefing?narrative=llm` replaces the
+    deterministic narrative when a connection is wired (failure keeps the
+    template), and `POST /api/briefing/ask` answers evidence-items-only
+    questions over the briefing facts (404 without a connection).
+  - Migrated hand-rolled LLM callers onto the shared client, behavior-
+    preserving: the eval/admission **judge** client and
+    `internal/intelligence/summary` (Anthropic Messages).
+- **Org manager briefing (Phase C of `docs/design/standup-briefing.md`).** The
+  org dashboard's `/briefing` page composes the org's day from every enrolled
+  node into the SAME pure `internal/briefing` document the node dashboard
+  serves — KPIs, per-tool activity, top sessions, opportunity cards with
+  embedded drill-down math, and the deterministic narrative. Role-scoped
+  (admins see the whole org; leads see their teams).
+  - `GET /api/org/briefing?date=YYYY-MM-DD` — composed briefing (default =
+    most recent completed UTC day) and `GET /api/org/briefing/aggregates` —
+    the pushed hash-only digest (admin-only). Content-free by construction:
+    the rollup loader reads only counts / tokens / costs / model / tool /
+    project-hash columns, and recorded (never re-priced) costs are used.
+  - `briefing_aggregates` table (org-server migration `022`) — per
+    `(org, user, day, tool, project_hash)` UPSERTed counts + sums from the
+    push; the node composes the same buckets only when its operator sets
+    `[org_client.share] briefing_aggregates = true` (own consent toggle;
+    hash-only, no raw content, no git branch).
+  - Daily manager email: `observer-org digest --kind briefing` — a second
+    scheduler beside the org digest that sends the composed briefing for the
+    last completed UTC day.
+  - `web2` Daily Briefing page (`/briefing`) + sidebar entry.
+
 ## [1.27.0] — 2026-07-29
 
 ### Added

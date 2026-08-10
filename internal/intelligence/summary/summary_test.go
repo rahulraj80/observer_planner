@@ -41,14 +41,23 @@ func seedDB(t *testing.T) (*Summarizer, *httptest.Server) {
 		t.Fatal(err)
 	}
 
+	// claudeReply mirrors the Anthropic Messages success shape the fake upstream
+	// serves (the production client no longer defines it — it lives in llmconn).
+	type claudeReply struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			http.NotFound(w, r)
 			return
 		}
-		resp := claudeResponse{Content: []struct {
+		resp := claudeReply{Content: []struct {
+			Type string `json:"type"`
 			Text string `json:"text"`
-		}{{Text: "The session read a.go and wrote b.go. No failures."}}}
+		}{{Type: "text", Text: "The session read a.go and wrote b.go. No failures."}}}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}))

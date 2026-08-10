@@ -49,6 +49,23 @@ type RouterSession struct {
 	Entitlement string
 }
 
+// RouterUsage is the landed turn's realized token bundle, handed to
+// RecordServed so the router implementation can price the REALIZED
+// benefit (router_decisions.realized_delta_usd) — the Phase D
+// virtuous-cycle "did it actually help" number. Deliberately mirrors
+// CostTokens field-for-field: plain proxy-local fields, no routing
+// types across this boundary (§24.2).
+type RouterUsage struct {
+	Input           int64
+	Output          int64
+	CacheRead       int64
+	CacheCreation   int64
+	CacheCreation1h int64
+	// Fast marks the turn as served on the provider's premium
+	// low-latency tier (priced at the model's fast multiplier).
+	Fast bool
+}
+
 // RouterVerdict is the router's plain answer.
 type RouterVerdict struct {
 	// Apply commits the rewrite (enforce mode, legal, changed). When
@@ -76,10 +93,12 @@ type ModelRouter interface {
 	// RecordServed links a decision to its api_turns row once the turn
 	// lands (called off the hot path, on the detached insert
 	// goroutine). servedModel is the model that actually served the
-	// request. Turns that never land (dropped zero-usage streams) are
-	// the implementation janitor's problem — RecordServed is then
-	// simply never called for that token.
-	RecordServed(token int64, apiTurnID int64, servedModel string)
+	// request; usage is the landed turn's realized token bundle, so the
+	// implementation can price the realized benefit on the row. Turns
+	// that never land (dropped zero-usage streams) are the
+	// implementation janitor's problem — RecordServed is then simply
+	// never called for that token.
+	RecordServed(token int64, apiTurnID int64, servedModel string, usage RouterUsage)
 }
 
 // safeDecide invokes the router with a panic guard: a routing failure
@@ -96,7 +115,7 @@ func (p *Proxy) safeDecide(shape RouterShape, sess RouterSession) (v RouterVerdi
 
 // recordServedSafe reports the landed turn to the router with the same
 // panic guard — persistence side effects never propagate.
-func (p *Proxy) recordServedSafe(token, apiTurnID int64, servedModel string) {
+func (p *Proxy) recordServedSafe(token, apiTurnID int64, servedModel string, usage RouterUsage) {
 	if p.router == nil || token == 0 {
 		return
 	}
@@ -105,7 +124,7 @@ func (p *Proxy) recordServedSafe(token, apiTurnID int64, servedModel string) {
 			p.logger.Warn("proxy: model router RecordServed panicked", "panic", rec)
 		}
 	}()
-	p.router.RecordServed(token, apiTurnID, servedModel)
+	p.router.RecordServed(token, apiTurnID, servedModel, usage)
 }
 
 // applyRoutedBody installs the routed plain-JSON body as the forward

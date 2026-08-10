@@ -321,23 +321,14 @@ func newStartCmd() *cobra.Command {
 					// cancel the root context so the daemon runs its NORMAL
 					// graceful shutdown (component drain + surfaces.close PTY reap
 					// + dbCleanup); main() re-execs after every defer completes.
-					// Refuses up front if the config wouldn't come back
-					// (never shut down into a brick) or on an OS without execve.
-					RestartFunc: func() error {
-						if !reexecSupported() {
-							return fmt.Errorf("restart from the dashboard is not supported on this OS — relaunch the daemon manually")
-						}
-						if perr := preflightRestart(configPath); perr != nil {
-							return perr
-						}
-						restartRequested.Store(true)
-						go func() {
-							// Let the HTTP response flush before shutdown begins.
-							time.Sleep(300 * time.Millisecond)
-							cancel()
-						}()
-						return nil
-					},
+					// Refuses up front if the config wouldn't come back (never
+					// shut down into a brick).
+					// Only set on OSes that can re-exec. Where execve is
+					// unavailable (native Windows) the hook stays nil so the
+					// /api/admin/restart handler reports 501 ("relaunch the
+					// daemon manually") instead of a 500 from a hook that can
+					// only ever fail.
+					RestartFunc: restartHook(cancel, configPath),
 					// Remote-access substrate (plan §4). Nil unless [remote] is
 					// enabled AND a pairing secret is provisioned, so a
 					// non-loopback dashboard bind stays fail-closed. Built once
@@ -346,6 +337,10 @@ func newStartCmd() *cobra.Command {
 					Remote:      remoteCtrl,
 					RemoteAudit: remoteAuditSink(database),
 				}
+				// Phase B: OPTIONAL LLM analysis connections (daily-briefing
+				// narrative + Q&A). nil runner / empty conns when unconfigured —
+				// the briefing surfaces then match Phase A exactly.
+				opts.LLMRunner, opts.LLMConns = llmAnalysis(cfg, database, cost.NewEngine(cfg.Intelligence))
 				// Assign the concrete client only when present so Options.OrgClient
 				// stays a nil interface (not a non-nil interface holding a nil
 				// pointer) on a solo-local install — the enrolment handlers key

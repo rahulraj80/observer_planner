@@ -17,15 +17,17 @@ import (
 // stubFlagAdapter records whether ParseSessionFile was called and can be told
 // to panic, so the size-cap and panic-recovery guards can be exercised.
 type stubFlagAdapter struct {
-	name        string
-	root        string
-	called      bool
-	shouldPanic bool
+	name         string
+	root         string
+	called       bool
+	shouldPanic  bool
+	sqliteBacked bool
 }
 
 func (s *stubFlagAdapter) Name() string                { return s.name }
 func (s *stubFlagAdapter) WatchPaths() []string        { return []string{s.root} }
 func (s *stubFlagAdapter) IsSessionFile(p string) bool { return strings.HasSuffix(p, ".stub") }
+func (s *stubFlagAdapter) SQLiteBacked() bool          { return s.sqliteBacked }
 
 func (s *stubFlagAdapter) ParseSessionFile(_ context.Context, _ string, _ int64) (adapter.ParseResult, error) {
 	s.called = true
@@ -80,6 +82,23 @@ func TestProcessFileParsesWhenUnderCap(t *testing.T) {
 	}
 	if !stub.called {
 		t.Error("adapter was not called on an under-cap file")
+	}
+}
+
+func TestProcessFileExemptsSQLiteBackedAdapter(t *testing.T) {
+	root := t.TempDir()
+	stub := &stubFlagAdapter{name: "stub", root: root, sqliteBacked: true}
+	w, _ := quietWatcher(t, Options{MaxFileBytes: 8})
+
+	path := filepath.Join(root, "big.stub")
+	if err := os.WriteFile(path, []byte("this file is well over eight bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.processFile(context.Background(), stub, path, false); err != nil {
+		t.Fatalf("processFile: %v", err)
+	}
+	if !stub.called {
+		t.Error("SQLiteBacked adapter was not called on an oversize file; the cap must not apply to it")
 	}
 }
 

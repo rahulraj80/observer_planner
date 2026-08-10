@@ -715,6 +715,11 @@ func (s *Store) LatestGuardPolicyStates(ctx context.Context) ([]GuardPolicyState
 // disjoint sessions (documented approximation; backs the injected
 // guard.BudgetLookup).
 func (s *Store) GuardBudgetSpend(ctx context.Context, sessionID string, dayStart, weekStart, monthStart time.Time) (spend GuardBudgetWindows, err error) {
+	// until caps every window at "now": spend-so-far must never include
+	// future-dated rows (a demo/replayed/skewed clock otherwise inflates
+	// every window and, with a large corpus, forces the aggregations to
+	// scan the whole table on every guard evaluation).
+	until := time.Now().UTC()
 	if sessionID != "" {
 		err = s.db.QueryRowContext(ctx, `
 			SELECT MAX(
@@ -725,13 +730,13 @@ func (s *Store) GuardBudgetSpend(ctx context.Context, sessionID string, dayStart
 			return spend, fmt.Errorf("store.GuardBudgetSpend: session: %w", err)
 		}
 	}
-	if spend.DailyUSD, err = s.windowSpendSince(ctx, dayStart); err != nil {
+	if spend.DailyUSD, err = s.windowSpendSince(ctx, dayStart, until); err != nil {
 		return spend, fmt.Errorf("store.GuardBudgetSpend: daily: %w", err)
 	}
-	if spend.WeeklyUSD, err = s.windowSpendSince(ctx, weekStart); err != nil {
+	if spend.WeeklyUSD, err = s.windowSpendSince(ctx, weekStart, until); err != nil {
 		return spend, fmt.Errorf("store.GuardBudgetSpend: weekly: %w", err)
 	}
-	if spend.MonthlyUSD, err = s.windowSpendSince(ctx, monthStart); err != nil {
+	if spend.MonthlyUSD, err = s.windowSpendSince(ctx, monthStart, until); err != nil {
 		return spend, fmt.Errorf("store.GuardBudgetSpend: monthly: %w", err)
 	}
 	return spend, nil
@@ -750,26 +755,29 @@ type GuardBudgetWindows struct {
 	MonthlyUSD float64
 }
 
-// windowSpendSince returns the node-wide spend since `since`, de-duped
+// windowSpendSince returns the node-wide spend in [since, until], de-duped
 // per session at the larger of the proxy (api_turns.cost_usd) and
 // watcher (token_usage.estimated_cost_usd) sums. A zero `since`
 // (window disabled) still runs — the caller gates on the configured
-// threshold, and the query is bounded by the 30s guard cache.
+// threshold, and the query is bounded by the 30s guard cache. The
+// `until` cap keeps future-dated rows (demo seeds, replayed transcripts,
+// skewed clocks) out of a backwards-looking window.
 // api_turns.session_id is nullable (unattributed proxy turns) —
 // COALESCE to ” so those rows still group, join and count.
-func (s *Store) windowSpendSince(ctx context.Context, since time.Time) (float64, error) {
+func (s *Store) windowSpendSince(ctx context.Context, since, until time.Time) (float64, error) {
 	ts := timestamp(since)
+	untilTS := timestamp(until)
 	var total float64
 	err := s.db.QueryRowContext(ctx, `
 		WITH p AS (SELECT COALESCE(session_id,'') sid, SUM(COALESCE(cost_usd,0)) c
-		             FROM api_turns WHERE timestamp >= ? GROUP BY COALESCE(session_id,'')),
+		             FROM api_turns WHERE timestamp >= ? AND timestamp <= ? GROUP BY COALESCE(session_id,'')),
 		     u AS (SELECT session_id sid, SUM(COALESCE(estimated_cost_usd,0)) c
-		             FROM token_usage WHERE timestamp >= ? GROUP BY session_id)
+		             FROM token_usage WHERE timestamp >= ? AND timestamp <= ? GROUP BY session_id)
 		SELECT COALESCE(SUM(MAX(COALESCE(p.c,0), COALESCE(u.c,0))),0)
 		FROM (SELECT sid FROM p UNION SELECT sid FROM u) s
 		LEFT JOIN p ON p.sid = s.sid
 		LEFT JOIN u ON u.sid = s.sid`,
-		ts, ts).Scan(&total)
+		ts, untilTS, ts, untilTS).Scan(&total)
 	if err != nil {
 		return 0, err
 	}

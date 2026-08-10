@@ -5,15 +5,23 @@ package routing
 // the dollar formulas below change.
 //
 // p1-v1 semantics:
-//   - gross savings  = price(original, observed usage) − price(candidate,
-//     observed usage): the same realized bundle re-priced at candidate
-//     rates. Replay-exact; live paths without ObservedUsage report 0.
+//   - gross savings  = price(original, bundle) − price(candidate,
+//     bundle). The bundle is the turn's realized usage on replay paths
+//     (DecisionInput.ObservedUsage) — replay-exact — and the coarse
+//     prompt-side {Input: Shape.PromptTokens} estimate on the live hot
+//     path, where the response (and its output/cache tokens) has not
+//     landed yet. The live estimate mirrors costMinimizeBasis, which
+//     ranks on the same fallback; its rows are labeled usage_basis
+//     "live_prompt" in the benefit record.
 //   - cache forfeit  = price(candidate, {CacheCreation: prior turn's
 //     cache_read}): re-creating the session's warm prefix at the
 //     candidate's cache-write rate.
 //   - EstSavingsUSD  = gross − forfeit (net). A switch is held with
-//     ReasonCacheHold when the net is negative (§R13: stickiness from
-//     math, not a timer).
+//     ReasonCacheHold when the net is negative AND the pricing was
+//     replay-exact (§R13: stickiness from math, not a timer). A coarse
+//     live estimate never holds — it understates gross (output/cache
+//     dollars are absent), so a hold off its partial math would block
+//     switches the realized loop would vindicate.
 //   - cost_minimize ranking omits the §R13 expected-cache-savings
 //     credit (conservative: switches look more expensive, never
 //     cheaper, than reality) — see costMinimizeBasis.
@@ -39,6 +47,8 @@ func Decide(p Policy, snap *Snapshot, in DecisionInput) Decision {
 		PolicyHash:      p.Hash(),
 		EstimateVersion: EstimateVersion,
 		TurnKind:        TurnUnknown,
+		Entitlement:     in.Entitlement,
+		EffectiveBasis:  "list",
 	}
 	if snap == nil || snap.Tiers == nil || snap.Stale || in.Shape.Model == "" {
 		d.ReasonCodes = []ReasonCode{ReasonFailOpen}
@@ -200,13 +210,14 @@ func applyProviderFilter(r Rule, snap *Snapshot, in DecisionInput, d Decision, r
 		if c.Model == in.Shape.Model || !privacyRuleAllows(synth, c.ModelCandidate) {
 			continue
 		}
-		gross, forfeit, priced := switchEconomics(snap.Price, in, c.Model)
+		gross, forfeit, priced, _ := switchEconomics(snap.Price, in, c.Model)
 		d.SelectedModel = c.Model
 		d.Changed = true
 		d.ReasonCodes = []ReasonCode{ReasonPrivacyHold, r.Reason}
 		d.CacheForfeitUSD = forfeit
 		if priced {
 			d.EstSavingsUSD = gross - forfeit
+			attachBenefit(&d, snap, in, c.Model)
 		}
 		return d
 	}
@@ -237,13 +248,14 @@ func applyPin(r Rule, snap *Snapshot, in DecisionInput, tier Tier, d Decision, r
 		d.ReasonCodes = dedupReasons(st.DenyReasons)
 		return d
 	}
-	gross, forfeit, priced := switchEconomics(snap.Price, in, candidate)
+	gross, forfeit, priced, _ := switchEconomics(snap.Price, in, candidate)
 	d.SelectedModel = candidate
 	d.Changed = true
 	d.ReasonCodes = []ReasonCode{r.Reason}
 	d.CacheForfeitUSD = forfeit
 	if priced {
 		d.EstSavingsUSD = gross - forfeit
+		attachBenefit(&d, snap, in, candidate)
 	}
 	return d
 }
@@ -298,13 +310,14 @@ func applyPipelineDefaults(snap *Snapshot, in DecisionInput, tier Tier, p Policy
 			if c.Model == in.Shape.Model {
 				continue
 			}
-			gross, forfeit, priced := switchEconomics(snap.Price, in, c.Model)
+			gross, forfeit, priced, _ := switchEconomics(snap.Price, in, c.Model)
 			d.SelectedModel = c.Model
 			d.Changed = true
 			d.ReasonCodes = dedupReasons(st.DenyReasons)
 			d.CacheForfeitUSD = forfeit
 			if priced {
 				d.EstSavingsUSD = gross - forfeit
+				attachBenefit(&d, snap, in, c.Model)
 			}
 			return d
 		}
@@ -347,9 +360,9 @@ func applySwitchReasons(reasons []ReasonCode, snap *Snapshot, in DecisionInput, 
 		return d
 	}
 
-	gross, forfeit, priced := switchEconomics(snap.Price, in, candidate)
+	gross, forfeit, priced, exact := switchEconomics(snap.Price, in, candidate)
 	d.CacheForfeitUSD = forfeit
-	if p.RespectCache && priced && gross-forfeit < 0 {
+	if p.RespectCache && priced && exact && gross-forfeit < 0 {
 		// The warm cache is worth more than the switch saves: stay
 		// (§R13 — the inverse of every market router). This is the
 		// §R6.5 borderline case — the policy wanted to save money but
@@ -357,7 +370,11 @@ func applySwitchReasons(reasons []ReasonCode, snap *Snapshot, in DecisionInput, 
 		// zero-cache-loss alternative: an effort downshift suggestion
 		// (the default suggestion for borderline cases; the proxy's
 		// replace-only contract makes it a no-op for requests with no
-		// effort fields).
+		// effort fields). The gate requires replay-exact pricing: a
+		// coarse live estimate understates gross (no output/cache
+		// dollars), so a hold off its partial math would block switches
+		// the realized loop would vindicate — live never held before
+		// estimates existed, and it must not start holding now.
 		d.ReasonCodes = []ReasonCode{ReasonCacheHold, ReasonEffortDownshift}
 		d.SetEffort = EffortLow
 		d.EstSavingsUSD = gross - forfeit
@@ -369,23 +386,93 @@ func applySwitchReasons(reasons []ReasonCode, snap *Snapshot, in DecisionInput, 
 	d.ReasonCodes = reasons
 	if priced {
 		d.EstSavingsUSD = gross - forfeit
+		attachBenefit(&d, snap, in, candidate)
 	}
 	return d
 }
 
-// switchEconomics prices a proposed switch under the p1-v1 estimate:
-// gross saving from re-pricing the observed bundle, forfeit from
-// re-creating the warm prefix. priced=false when the input carries no
-// observed usage or either model is unpriceable — the engine then makes
-// no dollar claim (and no cache-hold, which is a dollar claim too).
-func switchEconomics(price PriceFn, in DecisionInput, candidate string) (gross, forfeit float64, priced bool) {
-	if price == nil || in.ObservedUsage == nil {
-		return 0, 0, false
+// attachBenefit records the structured expected-benefit record (§5.4)
+// for a committed switch. Called only where the switch was actually
+// priced and applied; the held-switch paths (ReasonCacheHold) carry no
+// benefit record — the hold's negative net is already in
+// EstSavingsUSD. The quality signal and its confidence come from the
+// snapshot's calibration evidence (evidence_quality): the (turn-kind,
+// target tier) key grades the switch against the kind's top-tier
+// baseline, compounding toward 95% as evidence accumulates; an
+// uncalibrated key keeps the unknown/0 posture — no claim. The
+// breakdown's dollar math always agrees with switchEconomics because
+// both run the p1-v1 formula.
+func attachBenefit(d *Decision, snap *Snapshot, in DecisionInput, candidate string) {
+	ttft := int64(0)
+	signal := QualityUnknown
+	confidence := 0.0
+	if snap != nil {
+		if lo, ok := snap.LatencyP75Ms[d.OriginalModel]; ok {
+			if hi, ok := snap.LatencyP75Ms[candidate]; ok {
+				ttft = hi - lo
+			}
+		}
+		if snap.Tiers != nil && snap.Evidence != nil {
+			if tier, _ := snap.Tiers.Lookup(candidate); tier != TierUnclassified {
+				if ev, ok := snap.Evidence[EvidenceKey{Kind: d.TurnKind, Tier: tier}]; ok && ev.Confidence > 0 {
+					signal, confidence = ev.Signal, ev.Confidence
+				}
+			}
+		}
 	}
-	origUSD, ok1 := price(in.Shape.Model, *in.ObservedUsage)
-	candUSD, ok2 := price(candidate, *in.ObservedUsage)
+	bundle, basis, ok := pricingBundle(in)
+	if !ok {
+		return
+	}
+	bb, priced := ComputeBenefit(snap.Price, d.OriginalModel, candidate,
+		&bundle, in.Session.PriorCacheReadTokens, ttft,
+		signal, confidence)
+	if !priced {
+		return
+	}
+	bb.UsageBasis = basis
+	b := bb
+	d.Benefit = &b
+	d.BenefitText = BenefitText(d.TurnKind, d.OriginalModel, candidate, b)
+}
+
+// pricingBundle resolves the token bundle the p1-v1 estimate prices —
+// the same fallback logic costMinimizeBasis ranks on (bases.go). The
+// turn's realized bundle when present (replay / simulate: exact
+// counterfactual dollar math), else the coarse prompt-side estimate
+// {Input: Shape.PromptTokens} on the live hot path, where the response
+// has not landed. basis names which ("realized" vs "live_prompt") so
+// the benefit record is self-describing; ok=false when nothing is
+// priceable (no observed bundle AND no prompt estimate).
+func pricingBundle(in DecisionInput) (bundle PromptUsage, basis string, ok bool) {
+	if in.ObservedUsage != nil {
+		return *in.ObservedUsage, UsageBasisRealized, true
+	}
+	if in.Shape.PromptTokens <= 0 {
+		return PromptUsage{}, "", false
+	}
+	return PromptUsage{Input: in.Shape.PromptTokens}, UsageBasisLivePrompt, true
+}
+
+// switchEconomics prices a proposed switch under the p1-v1 estimate:
+// gross saving from re-pricing the pricing bundle, forfeit from
+// re-creating the warm prefix. priced=false when the price seam is nil,
+// the input carries nothing to price, or either model is unpriceable —
+// the engine then makes no dollar claim. exact reports whether the
+// pricing was replay-exact (realized bundle) rather than the coarse
+// live prompt-side estimate — the cache-hold gate requires exact math.
+func switchEconomics(price PriceFn, in DecisionInput, candidate string) (gross, forfeit float64, priced, exact bool) {
+	if price == nil {
+		return 0, 0, false, false
+	}
+	bundle, basis, ok := pricingBundle(in)
+	if !ok {
+		return 0, 0, false, false
+	}
+	origUSD, ok1 := price(in.Shape.Model, bundle)
+	candUSD, ok2 := price(candidate, bundle)
 	if !ok1 || !ok2 {
-		return 0, 0, false
+		return 0, 0, false, false
 	}
 	gross = origUSD - candUSD
 	if in.Session.PriorCacheReadTokens > 0 {
@@ -394,7 +481,7 @@ func switchEconomics(price PriceFn, in DecisionInput, candidate string) (gross, 
 			forfeit = f
 		}
 	}
-	return gross, forfeit, true
+	return gross, forfeit, true, basis == UsageBasisRealized
 }
 
 // budgetBurnMax returns the highest burn fraction among the snapshot's

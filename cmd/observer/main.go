@@ -167,6 +167,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newUnenrollCmd())
 	root.AddCommand(newOrgCmd())
 	root.AddCommand(newObserverAliasCmd())
+	root.AddCommand(newDemoSeedCmd())
+	root.AddCommand(newLLMCmd())
 	return root
 }
 
@@ -206,6 +208,7 @@ func observerSubcommands() []*cobra.Command {
 		newCacheHealthCmd(),
 		newCacheStatusCmd(),
 		newRoutingCmd(),
+		newKindsCmd(),
 		newModelValueCmd(),
 		newPredictCmd(),
 		newHandoffCmd(),

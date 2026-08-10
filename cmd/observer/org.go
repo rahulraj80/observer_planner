@@ -74,6 +74,7 @@ func buildOrgBundle(ctx context.Context, configPath string) (orgBundle, error) {
 	}
 	logger := newLogger("warn")
 	st := store.New(database)
+	st.SetDBPath(cfg.Observer.DBPath)
 	// Wire the org-tier observability provider seam (obs-org-tier plan §2):
 	// obs owns the obs_* reads; this binds them as plain func fields so the
 	// push path can compose the opt-in tiers without internal/store importing

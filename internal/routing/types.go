@@ -355,8 +355,11 @@ type DecisionInput struct {
 	Session SessionState
 	// ObservedUsage carries the turn's realized token bundle on replay
 	// paths (simulate), enabling exact counterfactual dollar math. Nil
-	// on the live hot path — the engine then skips dollar estimates
-	// rather than inventing them.
+	// on the live hot path — the engine then prices the coarse
+	// prompt-side estimate {Input: Shape.PromptTokens} instead (the
+	// same fallback costMinimizeBasis ranks on), labels the benefit
+	// record usage_basis "live_prompt", and never cache-holds off its
+	// partial math (§R13: the hold requires replay-exact dollars).
 	ObservedUsage *PromptUsage
 	// Project is the boundary-resolved project name; rule when.project
 	// and privacy rules match against it. Empty = unknown.
@@ -455,6 +458,14 @@ type Snapshot struct {
 	// inputs (§R8.1). A session absent from the map has no recent
 	// activity — the classifier degrades to unknown (no routing).
 	Sessions map[string]SessionActivity
+	// Evidence carries the calibration-derived quality signal per
+	// (turn-kind, target tier) — the §5.4 evidence_quality substrate the
+	// benefit record's quality signal + confidence read. Built store-side
+	// on the slow tick from the model_calibration global cells; a key
+	// absent from the map is uncalibrated (QualityUnknown, confidence 0).
+	// A tier's signal grades it against the highest-tier pool for the
+	// same turn-kind (§R7.2).
+	Evidence map[EvidenceKey]QualityEvidence
 }
 
 // SessionActivity is the per-session classifier input the refresher
@@ -576,4 +587,20 @@ type Decision struct {
 	// for this turn — consumed by the proxy's retry layer on
 	// 429/5xx/timeout. Empty = no chain configured.
 	FallbackModels []string
+	// Benefit is the structured expected-benefit record for this
+	// decision (§5.4). Set only when the switch was priced (observed
+	// usage + priceable models); nil otherwise — the decision then
+	// makes no dollar claim. Persisted as benefit_json.
+	Benefit *BenefitBreakdown
+	// BenefitText is the human sentence rendered from Benefit
+	// (dashboards, explain, savings CLI). Empty when Benefit is nil.
+	BenefitText string
+	// Entitlement is the boundary-resolved entitlement class that
+	// governed this decision (§R11.3) — recorded so benefit rows stay
+	// attributable to api_key vs subscription economics.
+	Entitlement string
+	// EffectiveBasis names the pricing basis that produced the benefit
+	// estimate: "list" today, "effective" when effective-cost wiring
+	// lands (§5.2). Empty when no pricing ran.
+	EffectiveBasis string
 }

@@ -1,4 +1,5 @@
 export type NavIcon =
+  | "briefing"
   | "overview"
   | "live"
   | "search"
@@ -17,7 +18,11 @@ export type NavIcon =
   | "patterns"
   | "privacy"
   | "remote"
-  | "settings";
+  | "settings"
+  | "modelfit"
+  | "apiexplorer"
+  | "licenses"
+  | "guide";
 
 export type NavItem = {
   id: string;
@@ -52,7 +57,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "cost", label: "Cost", path: "/cost", icon: "cost" },
       { id: "analysis", label: "Analysis", path: "/analysis", icon: "analysis" },
+      { id: "briefing", label: "Briefing", path: "/briefing", icon: "briefing" },
+      { id: "guide", label: "Guide", path: "/guide", icon: "guide" },
       { id: "tools", label: "Tools", path: "/tools", icon: "tools" },
+      { id: "modelfit", label: "Model Fit", path: "/modelfit", icon: "modelfit" },
+      { id: "apiexplorer", label: "API Explorer", path: "/apiexplorer", icon: "apiexplorer" },
     ],
   },
   {
@@ -75,6 +84,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "privacy", label: "Privacy", path: "/privacy", icon: "privacy" },
       { id: "terminals", label: "Terminals", path: "/terminals", icon: "tools" },
       { id: "remote", label: "Remote", path: "/remote", icon: "remote" },
+      { id: "licenses", label: "Licenses", path: "/licenses", icon: "licenses" },
       { id: "settings", label: "Settings", path: "/settings", icon: "settings" },
     ],
   },

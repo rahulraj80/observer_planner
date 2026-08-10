@@ -292,7 +292,7 @@ observer tail            # live-stream captured actions
 
 `observer start` opens the dashboard automatically on interactive
 launches (suppress with `--no-open`; default URL
-<http://localhost:8081>). Twenty-one tabs in four nav groups (Monitor /
+<http://localhost:8081>). Twenty-two tabs in four nav groups (Monitor /
 Analyze / Optimize / Configure), each designed around one question —
 the tour below covers the core surfaces; Live (recent sessions with a
 real-time action feed), Search (full-text over captured tool outputs),
@@ -304,7 +304,22 @@ self-explanatory once you're in, and the Suggestions tab's advisor
 nudges and the Patterns tab's derived habits are covered in their own
 docs. Evaluating without data? Start **demo mode** from the empty
 Overview — synthetic dataset in a temp DB, real `observer.db`
-untouched, one click to clear.
+untouched, one click to clear — or seed a full week of realistic
+multi-user history into your live DB with `observer demoseed`.
+
+### Briefing — yesterday, one page
+
+The stand-up tab (first in Monitor). It composes the most recent
+**completed** local day (yesterday unless you pick another date) into
+one screen: at-a-glance KPIs, per-tool activity, top sessions, and
+"efficiency gains left on the table" opportunity cards — routing-shadow
+savings, trivial-model overprovisioning, low cache hit-rate, long-context
+surcharge. Every card expands to its justification: the exact query, the
+math, and the confidence behind the number, served from the persisted
+snapshot so the page and its drill-down can never drift. Data-only and
+local — no network call, no prompt text, no file paths; the same
+composition also ships as the daily email (`observer digest
+--kind briefing`).
 
 ### Overview — what's been happening?
 
@@ -1008,6 +1023,7 @@ lint-gated policy editor, budget guardrails, evidence downloads) — see the
 | `observer summarize` | Generate AI session summaries (uses Anthropic Haiku). |
 | `observer score` | Session quality scoring (error rate, redundancy, onboarding cost, retry cost). |
 | `observer status` | Row counts + recent activity. |
+| `observer demoseed [-d days] [-u users]` | Deterministic synthetic week of multi-user activity for demos + Briefing (default 7 days × 30 users, max 30; prints a JSON summary; re-running purges only its own rows). |
 | `observer tail` | Live-stream captured actions. |
 | `observer advise` | Prescriptive cost/quality suggestions (the Suggestions tab, in the CLI). |
 | `observer cache-health` | Prompt-cache engine health: grading gate, read:write consistency, cause concentration. |

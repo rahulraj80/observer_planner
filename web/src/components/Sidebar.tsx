@@ -7,6 +7,7 @@ import { fmtBytes, fmtCompact } from "@/lib/format";
 import {
   BarChartIcon,
   BoltIcon,
+  BriefingIcon,
   CoinsIcon,
   CompassIcon,
   DatabaseIcon,
@@ -21,12 +22,18 @@ import {
   ShieldIcon,
   SparklesIcon,
   WrenchIcon,
+  APIExplorerIcon,
+  LicensesIcon,
+  ModelFitIcon,
+  GuideIcon,
 } from "@/components/icons";
 import { Tooltip } from "@/components/primitives";
 import type { StatusSnapshot, SetupClaude, WatcherHealth } from "@/lib/types";
 
 function NavIconSvg({ icon }: { icon: NavIcon }) {
   switch (icon) {
+    case "briefing":
+      return <BriefingIcon size={13} />;
     case "overview":
       return <EyeIcon size={13} />;
     case "live":
@@ -65,6 +72,14 @@ function NavIconSvg({ icon }: { icon: NavIcon }) {
       return <CompassIcon size={13} />;
     case "settings":
       return <GearIcon size={13} />;
+    case "modelfit":
+      return <ModelFitIcon size={13} />;
+    case "apiexplorer":
+      return <APIExplorerIcon size={13} />;
+    case "licenses":
+      return <LicensesIcon size={13} />;
+    case "guide":
+      return <GuideIcon size={13} />;
   }
 }
 

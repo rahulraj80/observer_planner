@@ -7,6 +7,18 @@
     "iat": 1789430400,
     "jti": "jti-7f3a"
   },
+  "briefing_aggregate": {
+    "org_id": "org-acme",
+    "user_email": "dev@acme.example",
+    "day": "2026-07-30",
+    "tool": "claude-code",
+    "project_hash": "sha256:proj-root-aaa",
+    "sessions": 12,
+    "turns": 384,
+    "input_tokens": 480000,
+    "output_tokens": 96000,
+    "cost_usd": 0.42
+  },
   "enroll_request": {
     "one_time_token": "tok_id123.ot_abc123",
     "agent_public_key": "MCowBQYDK2VwAyEA..."
@@ -138,6 +150,31 @@
         "chain_hash": "sha256:chain-001",
         "org_id": "org-acme",
         "user_email": "dev@acme.example"
+      }
+    ],
+    "briefing_aggregates": [
+      {
+        "org_id": "org-acme",
+        "user_email": "dev@acme.example",
+        "day": "2026-07-30",
+        "tool": "claude-code",
+        "project_hash": "sha256:proj-root-aaa",
+        "sessions": 12,
+        "turns": 384,
+        "input_tokens": 480000,
+        "output_tokens": 96000,
+        "cost_usd": 0.42
+      }
+    ],
+    "virtuous_cycle": [
+      {
+        "org_id": "org-acme",
+        "user_email": "dev@acme.example",
+        "week_start": "2026-07-20",
+        "applies": 5,
+        "projected_usd": 24,
+        "realized_usd": 15.5,
+        "realized_turns": 9
       }
     ]
   },

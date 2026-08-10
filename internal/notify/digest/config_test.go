@@ -13,9 +13,10 @@ func TestConfigValidate(t *testing.T) {
 	}{
 		{"disabled ignores junk", Config{Enabled: false, Frequency: "yearly", SendHour: 99}, false},
 		{"enabled empty freq ok", Config{Enabled: true}, false},
+		{"enabled daily ok", Config{Enabled: true, Frequency: "daily", SendHour: 8}, false},
 		{"enabled weekly ok", Config{Enabled: true, Frequency: "weekly", SendHour: 8}, false},
 		{"enabled monthly ok", Config{Enabled: true, Frequency: "monthly", SendHour: 0}, false},
-		{"bad freq", Config{Enabled: true, Frequency: "daily"}, true},
+		{"bad freq", Config{Enabled: true, Frequency: "fortnightly"}, true},
 		{"bad hour high", Config{Enabled: true, SendHour: 24}, true},
 		{"bad hour low", Config{Enabled: true, SendHour: -1}, true},
 	}
@@ -32,6 +33,9 @@ func TestConfigValidate(t *testing.T) {
 func TestFrequencyAndSendHourDefaults(t *testing.T) {
 	if got := (Config{}).FrequencyOrDefault(); got != Weekly {
 		t.Errorf("default frequency = %q, want weekly", got)
+	}
+	if got := (Config{Frequency: "DAILY"}).FrequencyOrDefault(); got != Daily {
+		t.Errorf("frequency = %q, want daily", got)
 	}
 	if got := (Config{Frequency: "MONTHLY"}).FrequencyOrDefault(); got != Monthly {
 		t.Errorf("frequency = %q, want monthly", got)
@@ -66,6 +70,31 @@ func TestDuePeriodWeeklySendHourGate(t *testing.T) {
 	now := time.Date(2026, 7, 8, 6, 0, 0, 0, time.UTC) // 06:00 < send_hour 8
 	if _, ready := DuePeriod(Weekly, 8, now); ready {
 		t.Fatalf("expected NOT ready at 06:00 with send_hour=8")
+	}
+}
+
+func TestDuePeriodDaily(t *testing.T) {
+	// Pin the machine zone so the local-day boundary is deterministic
+	// (decision 2026-08-01: local-machine-timezone day boundary).
+	prev := time.Local
+	time.Local = time.FixedZone("digest-test", 2*60*60) // UTC+2
+	defer func() { time.Local = prev }()
+
+	// 2026-08-01 22:00 UTC = 2026-08-02 00:00 +02:00 — the completed local day
+	// is 2026-08-01 (local midnight → local midnight).
+	now := time.Date(2026, 8, 1, 22, 0, 0, 0, time.UTC)
+	p, ready := DuePeriod(Daily, 8, now)
+	if !ready {
+		t.Fatalf("expected ready at 22:00 with send_hour=8")
+	}
+	zone := time.FixedZone("digest-test", 2*60*60)
+	wantStart := time.Date(2026, 8, 1, 0, 0, 0, 0, zone)
+	wantEnd := wantStart.AddDate(0, 0, 1)
+	if !p.Start.Equal(wantStart) || !p.End.Equal(wantEnd) {
+		t.Fatalf("window = [%s,%s), want [%s,%s)", p.Start, p.End, wantStart, wantEnd)
+	}
+	if p.Key != "2026-08-01" {
+		t.Errorf("key = %q, want 2026-08-01", p.Key)
 	}
 }
 

@@ -51,6 +51,9 @@ func newDashboardCmd() *cobra.Command {
 			// (no-op + fail-closed unless BOTH the [remote] substrate and the PTY
 			// launcher exist). Same assembly as `observer start`.
 			wireRemoteExecuteTier(cfg, launchMgr, remoteCtrl)
+			// Phase B: OPTIONAL LLM analysis connections (daily-briefing
+			// narrative + Q&A); nil/empty when unconfigured.
+			llmRunner, llmConns := llmAnalysis(cfg, database, cost.NewEngine(cfg.Intelligence))
 			server, err := dashboard.New(dashboard.Options{
 				DB:                    database,
 				DBPath:                cfg.Observer.DBPath,
@@ -95,6 +98,8 @@ func newDashboardCmd() *cobra.Command {
 				// non-loopback bind stays fail-closed until Phase 2 exposure.
 				Remote:      remoteCtrl,
 				RemoteAudit: remoteAuditSink(database),
+				LLMRunner:   llmRunner,
+				LLMConns:    llmConns,
 			})
 			if err != nil {
 				return err

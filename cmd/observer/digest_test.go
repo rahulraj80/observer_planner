@@ -140,3 +140,103 @@ func TestNodeDigestSendDryRunCLI(t *testing.T) {
 		t.Errorf("dry-run must not send")
 	}
 }
+
+// briefingFixedNow is 2026-08-01 22:00 UTC. With time.Local pinned to UTC+2
+// the completed local day is 2026-08-01 (2026-07-31 22:00Z → 2026-08-01 22:00Z).
+var briefingFixedNow = time.Date(2026, 8, 1, 22, 0, 0, 0, time.UTC)
+
+func seedBriefingDB(t *testing.T) string {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "briefing.db")
+	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	stmts := []string{
+		`INSERT INTO projects (id, root_path, created_at) VALUES (1,'/r','2026-01-01T00:00:00Z')`,
+		`INSERT INTO sessions (id, project_id, tool, started_at) VALUES ('bs1',1,'claude-code','2026-08-01T09:00:00Z')`,
+		// inside the completed local day (2026-07-31 22:00Z → 2026-08-01 22:00Z)
+		`INSERT INTO token_usage (session_id, timestamp, tool, model, input_tokens, output_tokens, estimated_cost_usd, source, reliability, source_file, source_event_id)
+		 VALUES ('bs1','2026-08-01T10:00:00Z','claude-code','claude-opus',100,50,5.0,'jsonl','approximate','f','be1')`,
+	}
+	for _, s := range stmts {
+		if _, err := database.ExecContext(ctx, s); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	return dbPath
+}
+
+func testBriefingRunner(t *testing.T, database *sql.DB, rec *[]email.Message) *briefingDigestRunner {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Digest = notifydigest.Config{Enabled: true, SendHour: 8}
+	r := newBriefingDigestRunner(cfg, database, nil, newLogger("error"))
+	r.now = func() time.Time { return briefingFixedNow }
+	r.send = func(_ context.Context, m email.Message) { *rec = append(*rec, m) }
+	return r
+}
+
+func TestBriefingTickSendsOncePerDay(t *testing.T) {
+	// Pin the machine zone so the local-day window matches the seed timestamps.
+	prevLocal := time.Local
+	time.Local = time.FixedZone("briefing-test", 2*60*60)
+	defer func() { time.Local = prevLocal }()
+
+	database := openDigestDB(t, seedBriefingDB(t))
+	var rec []email.Message
+	r := testBriefingRunner(t, database, &rec)
+	ctx := context.Background()
+	r.tick(ctx)
+	r.tick(ctx)
+	if len(rec) != 1 {
+		t.Fatalf("sends = %d, want 1", len(rec))
+	}
+	if !strings.Contains(rec[0].Subject, "Daily briefing") {
+		t.Errorf("subject = %q, want daily briefing", rec[0].Subject)
+	}
+	if !strings.Contains(rec[0].Text, "$5.00") {
+		t.Errorf("briefing email missing observed spend\n---\n%s", rec[0].Text)
+	}
+	var got string
+	if err := database.QueryRowContext(ctx, `SELECT last_period FROM digest_state WHERE kind='briefing'`).Scan(&got); err != nil {
+		t.Fatalf("marker: %v", err)
+	}
+	if got != "2026-08-01" {
+		t.Errorf("marker = %q, want 2026-08-01", got)
+	}
+}
+
+func TestBriefingDigestSendDryRunCLI(t *testing.T) {
+	prevClock := digestClock
+	digestClock = func() time.Time { return briefingFixedNow }
+	defer func() { digestClock = prevClock }()
+	prevLocal := time.Local
+	time.Local = time.FixedZone("briefing-test", 2*60*60)
+	defer func() { time.Local = prevLocal }()
+
+	dbPath := seedBriefingDB(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("[observer]\ndb_path = \""+dbPath+"\"\n\n[digest]\nenabled = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newDigestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"send", "--kind", "briefing", "--config", cfgPath, "--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"Subject:", "Daily briefing", "Observed spend", "Sessions:"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dry-run output missing %q\n---\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "briefing digest sent") {
+		t.Errorf("dry-run must not send")
+	}
+}

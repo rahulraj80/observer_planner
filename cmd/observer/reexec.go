@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 )
@@ -42,4 +44,29 @@ func preflightRestart(configPath string) error {
 		return fmt.Errorf("restart refused — the current config is invalid (fix it first): %w", verr)
 	}
 	return nil
+}
+
+// restartHook builds the dashboard RestartFunc: preflight the config, mark
+// restartRequested, then cancel the root context after the HTTP response has
+// had time to flush. It returns nil on platforms without execve (native
+// Windows) — the /api/admin/restart handler reports 501 ("relaunch the daemon
+// manually") for a nil hook, which is the honest answer for a process mode
+// that cannot self-restart, instead of a 500 from a hook that could only ever
+// fail.
+func restartHook(cancel context.CancelFunc, configPath string) func() error {
+	if !reexecSupported() {
+		return nil
+	}
+	return func() error {
+		if perr := preflightRestart(configPath); perr != nil {
+			return perr
+		}
+		restartRequested.Store(true)
+		go func() {
+			// Let the HTTP response flush before shutdown begins.
+			time.Sleep(300 * time.Millisecond)
+			cancel()
+		}()
+		return nil
+	}
 }

@@ -127,6 +127,14 @@ export function SparklesIcon({ size = 14, className }: IconProps) {
   );
 }
 
+export function BriefingIcon({ size = 14, className }: IconProps) {
+  return svg(
+    "M2.5 3.5h11v9h-11v-9ZM4.5 5.5h7M4.5 7.5h7M4.5 9.5h4.5",
+    size,
+    className,
+  );
+}
+
 export function GearIcon({ size = 14, className }: IconProps) {
   return (
     <svg
@@ -703,4 +711,61 @@ function toolGlyphPath(tool: string) {
         <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
       );
   }
+}
+
+// Model Fit — matrix/grid icon
+export function ModelFitIcon({ size = 14, className }: IconProps) {
+  return svg(
+    "M3 3h10v10H3V3zm11 0h1v10h-1V3zm0 11h1v10h-1v-10zm-11 0h1v10H3v-10z",
+    size,
+    className,
+  );
+}
+
+// Guide — open book / route icon
+export function GuideIcon({ size = 14, className }: IconProps) {
+  return svg(
+    "M2.5 3h4.5a2.5 2.5 0 0 1 2.5 2.5v7a2.5 2.5 0 0 0-2.5-2.5H2.5v-7ZM13.5 3H9a2.5 2.5 0 0 0-2.5 2.5v7a2.5 2.5 0 0 1 2.5-2.5h4.5v-7Z",
+    size,
+    className,
+  );
+}
+
+// API Explorer — search + API layers
+export function APIExplorerIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      className={className}
+      aria-hidden
+    >
+      <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <rect x="2" y="2" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="2" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="2" y="9" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="9" width="5" height="5" rx="0.5" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+// Licenses — credit card / license key icon
+export function LicensesIcon({ size = 14, className }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      className={className}
+      aria-hidden
+    >
+      <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5 6h6M5 9h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="12" cy="5" r="1.5" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
 }

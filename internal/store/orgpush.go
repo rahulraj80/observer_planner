@@ -38,8 +38,9 @@ const (
 // recent window; T2/T3 cap the per-push row count (windowed-recompute v1 — the
 // server upserts by composite key, so a re-pushed window is idempotent).
 const (
-	obsOrgWindowDays = 7
-	obsOrgRowCap     = 5000
+	obsOrgWindowDays           = 7
+	virtuousCycleAggWindowDays = 90
+	obsOrgRowCap               = 5000
 )
 
 // ObsOrgProviders is the obs→org bridge: the host binds these funcs at the obs
@@ -137,7 +138,22 @@ type PushBatch struct {
 	// T2/T3 structure rows + T6 events); windowed-recompute + server-upsert
 	// idempotent, so it does not affect the per-table cursors.
 	ObsEvalItems []orgcontract.ObsEvalItemRow // T7 per-item eval scores
-	EstBytes     int64
+	// BriefingAggregates is the OPTIONAL Daily-Briefing AGGREGATE (Phase C of
+	// docs/design/standup-briefing.md §4), attached only under
+	// ShareOptions.BriefingAggregates and composed by SelectBriefingAggregates
+	// (this file names no briefing table — the privacy sentinel stays green).
+	// Content-free counts + sums by (day, tool, project_hash). Windowed-
+	// recompute + server-upsert idempotent: not counted by RowCount, consulted
+	// by hasAggregates so an aggregate-only batch still pushes.
+	BriefingAggregates []orgcontract.BriefingAggregateRow
+	// VirtuousCycle is the OPTIONAL Virtuous-Cycle trend rollup (Stage 3 of
+	// docs/design/standup-briefing.md), attached only under
+	// ShareOptions.VirtuousCycle and composed by SelectVirtuousCycle
+	// (this file names no ledger/router_decisions — the privacy sentinel stays green).
+	// Content-free cumulative applies + projected + realized (broad filter);
+	// weekly trend in ByWeek. Not counted by RowCount, consulted by hasAggregates.
+	VirtuousCycle []orgcontract.VirtuousCycleRow
+	EstBytes      int64
 }
 
 // RowCount is the total number of rows across all row-bearing tables in the
@@ -152,15 +168,17 @@ func (b PushBatch) RowCount() int {
 
 // hasAggregates reports whether the batch carries any windowed-recompute
 // aggregate rollups that RowCount deliberately omits (they recompute
-// idempotently and don't gate cursor progress): the routing summaries and the
-// obs T1/T4 aggregates. A node opted into an aggregate-only tier (e.g.
-// obs_summary with no trace rows) has zero RowCount but must still push, so the
-// aggregates are consulted here rather than being silently dropped by the
-// PushOnce empty-batch early return.
+// idempotently and don't gate cursor progress): the routing summaries, the
+// briefing/virtuous-cycle rollups, and the obs T1/T4 aggregates. A node
+// opted into an aggregate-only tier (e.g. obs_summary with no trace rows)
+// has zero RowCount but must still push, so the aggregates are consulted
+// here rather than being silently dropped by the PushOnce empty-batch early
+// return.
 func (b PushBatch) hasAggregates() bool {
 	return len(b.RoutingSummaries) > 0 || len(b.ObsSummaries) > 0 ||
 		len(b.ObsEvalRuns) > 0 || len(b.ObsEndUserSpend) > 0 ||
-		len(b.ObsAdmissionPolicies) > 0
+		len(b.ObsAdmissionPolicies) > 0 || len(b.BriefingAggregates) > 0 ||
+		len(b.VirtuousCycle) > 0
 }
 
 // Empty reports whether the batch carries nothing to push — no rows AND no
@@ -417,6 +435,19 @@ type ShareOptions struct {
 	// file never names the underlying node-local tables). Its own
 	// consent toggle (model-routing spec §R26.4), default false.
 	RoutingSummary bool
+	// BriefingAggregates opts the Daily-Briefing AGGREGATE rollup onto the
+	// wire (content-free counts + sums by (day, tool, project_hash) — Phase C
+	// of docs/design/standup-briefing.md §4). See store.SelectBriefingAggregates,
+	// which owns the aggregation; this file names no briefing table, so the
+	// privacy sentinel stays green (like RoutingSummary). Its own consent
+	// toggle, default false, node-side only — the org admin cannot force it.
+	BriefingAggregates bool
+	// VirtuousCycle opts the Virtuous-Cycle trend rollup onto the wire
+	// (cumulative CTA applies with projected vs realized savings, weekly
+	// trend). See store.SelectVirtuousCycle, which owns the aggregation.
+	// Content-free; its own consent toggle, default false, node-side only
+	// — the org admin cannot force it.
+	VirtuousCycle bool
 	// ObsSummary / ObsTraces / ObsContent / ObsEvalSummary are the
 	// org-tier observability opt-ins (obs-org-tier plan §1, the T1–T4
 	// ladder). Each default false, each independent, none server-forced.
@@ -903,6 +934,43 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			est += jsonSize(sums[i])
 		}
 		batch.RoutingSummaries = sums
+	}
+
+	// Daily-Briefing AGGREGATE rollup (Phase C of docs/design/standup-briefing.md
+	// §4) — attached only under the node-side opt-in. Computed by
+	// store.SelectBriefingAggregates (which owns the node-local read in
+	// store/briefingorg.go; this file deliberately never names the source
+	// tables — the privacy sentinel forbids it). Content-free counts + sums by
+	// (day, tool, project_hash); windowed-recompute + server-upsert idempotent.
+	if share.BriefingAggregates {
+		rows, err := s.SelectBriefingAggregates(ctx, briefingAggWindowDays)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: briefing aggregates: %w", err)
+		}
+		for i := range rows {
+			rows[i].OrgID, rows[i].UserEmail = orgID, userEmail
+			est += jsonSize(rows[i])
+		}
+		batch.BriefingAggregates = rows
+	}
+
+	// Virtuous-Cycle trend rollup (Stage 3) — attached only under the
+	// node-side opt-in. Computed by store.SelectVirtuousCycle (which reads
+	// the briefing-CTA ledger + router_decisions; this file deliberately
+	// never names the source tables/files — the privacy sentinel forbids it).
+	// Content-free cumulative applies + projected + realized (broad filter);
+	// weekly trend in ByWeek. Its own consent toggle, default false,
+	// node-side only — the org admin cannot force it.
+	if share.VirtuousCycle {
+		rows, err := s.SelectVirtuousCycle(ctx, virtuousCycleAggWindowDays)
+		if err != nil {
+			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: virtuous cycle: %w", err)
+		}
+		for i := range rows {
+			rows[i].OrgID, rows[i].UserEmail = orgID, userEmail
+			est += jsonSize(rows[i])
+		}
+		batch.VirtuousCycle = rows
 	}
 
 	// Org-tier observability rollups (obs-org-tier plan §2). Each tier is

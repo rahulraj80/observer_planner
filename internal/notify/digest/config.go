@@ -10,6 +10,8 @@ import (
 type Frequency string
 
 const (
+	// Daily reports the most-recently-completed local-machine day.
+	Daily Frequency = "daily"
 	// Weekly reports the most-recently-completed 7-day window.
 	Weekly Frequency = "weekly"
 	// Monthly reports the most-recently-completed calendar month.
@@ -46,9 +48,9 @@ func (c Config) Validate() error {
 		return nil
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Frequency)) {
-	case "", string(Weekly), string(Monthly):
+	case "", string(Daily), string(Weekly), string(Monthly):
 	default:
-		return fmt.Errorf("digest: frequency %q not in {weekly, monthly}", c.Frequency)
+		return fmt.Errorf("digest: frequency %q not in {daily, weekly, monthly}", c.Frequency)
 	}
 	if c.SendHour < 0 || c.SendHour > 23 {
 		return fmt.Errorf("digest: send_hour %d out of range 0..23", c.SendHour)
@@ -59,6 +61,8 @@ func (c Config) Validate() error {
 // FrequencyOrDefault returns the effective cadence, defaulting to weekly.
 func (c Config) FrequencyOrDefault() Frequency {
 	switch strings.ToLower(strings.TrimSpace(c.Frequency)) {
+	case string(Daily):
+		return Daily
 	case string(Monthly):
 		return Monthly
 	default:
@@ -102,6 +106,16 @@ func DuePeriod(freq Frequency, sendHour int, now time.Time) (Period, bool) {
 	now = now.UTC()
 	var p Period
 	switch freq {
+	case Daily:
+		// One COMPLETED local-machine day (decision 2026-08-01): yesterday's
+		// local midnight → today's local midnight, keyed by the local date so
+		// the same stored day reads back identically across the local zone.
+		localNow := now.In(time.Local)
+		today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)
+		p.Start = today.AddDate(0, 0, -1)
+		p.End = today
+		p.Key = p.Start.Format("2006-01-02")
+		p.Label = p.Start.Format("Mon, Jan 2, 2006")
 	case Monthly:
 		curMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 		p.Start = curMonthStart.AddDate(0, -1, 0)

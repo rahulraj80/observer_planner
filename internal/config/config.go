@@ -82,6 +82,18 @@ type Config struct {
 	// Experiments is the [[experiments]] list — productized profile
 	// A/B runs (usability arc P6.4). See experiments.go.
 	Experiments []ExperimentConfig `toml:"experiments"`
+	// LLM configures the optional LLM analysis connections
+	// (docs/design/standup-briefing.md §3.2) — one endpoint you can point
+	// briefing narrative / Q&A / summaries at. LOCAL-ONLY. OPT-IN and never
+	// load-bearing: the zero value (no [llm] section) reproduces exactly the
+	// data-only briefing, and a configured remote connection still needs
+	// allow_remote=true before it can be selected. Secrets are env-ref or
+	// OS-keychain refs only — never written to config. See llm.go.
+	LLM LLMConfig `toml:"llm"`
+	// Licenses configures the license/plan inventory (docs/design/
+	// api-intelligence.md §5.2). LOCAL-ONLY, never distributed. OPT-IN:
+	// default empty → list-price everywhere. See licenses.go.
+	Licenses LicenseConfig `toml:"licenses"`
 }
 
 // Device-session lifetime defaults for the [remote] block, in MINUTES. They are
@@ -1703,6 +1715,18 @@ type OrgClientShareConfig struct {
 	// the org admin cannot force it (model-routing spec §R26.4 +
 	// the share-mode posture).
 	RoutingSummary bool `toml:"routing_summary"`
+	// BriefingAggregates opts the Daily-Briefing AGGREGATE (content-free
+	// counts + sums by (day, tool, project_hash) — docs/design/
+	// standup-briefing.md §4 Phase C) onto the push. Its own consent toggle,
+	// default false, node-side only — the org admin cannot force it (same
+	// posture as routing_summary; never snapshot or analysis content).
+	BriefingAggregates bool `toml:"briefing_aggregates"`
+	// VirtuousCycle opts the Virtuous-Cycle trend (cumulative CTA applies
+	// with projected vs realized savings) onto the push. Its own consent
+	// toggle, default false, node-side only — the org admin cannot force it.
+	// Carries cumulative applies, projected/realized USD, and weekly trend
+	// buckets; never raw CTA ledger content.
+	VirtuousCycle bool `toml:"virtuous_cycle"`
 	// --- Plane A: general observability of an admin/org-hosted LLM app ---
 	// Org-tier observability opt-ins now live under the nested
 	// [org_client.share.obs] sub-table (Obs below) so the config namespace
@@ -3479,6 +3503,8 @@ func migrateLegacyOrgShareObs(cfg *Config, metas []toml.MetaData) []string {
 }
 
 // Validate checks semantic constraints on cfg.
+//
+//nolint:gocyclo // validation function with many independent checks; splitting would not improve readability
 func Validate(cfg Config) error {
 	if cfg.Observer.DBPath == "" {
 		return errors.New("config: observer.db_path is required")
@@ -3516,18 +3542,8 @@ func Validate(cfg Config) error {
 			return fmt.Errorf("config: cachewarm.keepwarm.mode %q not in {off, advise, enforce}", cfg.CacheWarm.Keepwarm.Mode)
 		}
 	}
-	switch cfg.Browser.GranularityCeiling {
-	case "", "usage_only", "redacted", "full":
-	default:
-		return fmt.Errorf("config: browser.granularity_ceiling %q not in {usage_only, redacted, full}", cfg.Browser.GranularityCeiling)
-	}
-	if cfg.Browser.IngestTimeoutMS > maxBrowserIngestTimeoutMS {
-		// The end-to-end browser ingest (db.Open + store.Ingest, bounded by
-		// BrowserConfig.IngestTimeout()) must finish before the native host's
-		// 40s reply cap tears down the WSL bridge and kills the child
-		// mid-write. Reject a value that would break that guarantee rather
-		// than silently clamp, so the operator learns their setting is unsafe.
-		return fmt.Errorf("config: browser.ingest_timeout_ms %d exceeds the maximum %d (it must stay below the native-messaging host's 40000ms reply cap so a slow ingest is never killed mid-write)", cfg.Browser.IngestTimeoutMS, maxBrowserIngestTimeoutMS)
+	if err := validateBrowser(cfg.Browser); err != nil {
+		return err
 	}
 	if err := validateGuard(cfg.Guard); err != nil {
 		return err
@@ -3556,6 +3572,12 @@ func Validate(cfg Config) error {
 		return err
 	}
 	if err := validateTerminal(cfg.Terminal); err != nil {
+		return err
+	}
+	if err := validateLLM(cfg.LLM); err != nil {
+		return err
+	}
+	if err := validateLicense(cfg.Licenses); err != nil {
 		return err
 	}
 	return nil
@@ -3592,6 +3614,27 @@ func validateTerminal(c TerminalConfig) error {
 		if d < 0 {
 			return fmt.Errorf("config: terminal.idle_timeout %q must not be negative (use \"0\" to disable idle reaping)", c.IdleTimeout)
 		}
+	}
+	return nil
+}
+
+// validateBrowser validates the [browser] block: granularity ceiling and
+// ingest timeout must be within bounds. The ingest timeout bound is
+// intentionally strict — it must stay below the native-messaging host's 40s
+// reply cap so a slow ingest is never killed mid-write.
+func validateBrowser(c BrowserConfig) error {
+	switch c.GranularityCeiling {
+	case "", "usage_only", "redacted", "full":
+	default:
+		return fmt.Errorf("config: browser.granularity_ceiling %q not in {usage_only, redacted, full}", c.GranularityCeiling)
+	}
+	if c.IngestTimeoutMS > maxBrowserIngestTimeoutMS {
+		// The end-to-end browser ingest (db.Open + store.Ingest, bounded by
+		// BrowserConfig.IngestTimeout()) must finish before the native host's
+		// 40s reply cap tears down the WSL bridge and kills the child
+		// mid-write. Reject a value that would break that guarantee rather
+		// than silently clamp, so the operator learns their setting is unsafe.
+		return fmt.Errorf("config: browser.ingest_timeout_ms %d exceeds the maximum %d (it must stay below the native-messaging host's 40000ms reply cap so a slow ingest is never killed mid-write)", c.IngestTimeoutMS, maxBrowserIngestTimeoutMS)
 	}
 	return nil
 }

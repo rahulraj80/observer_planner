@@ -48,6 +48,10 @@ func NewWithOptions(s *scrub.Scrubber, roots []string) *Adapter {
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolDevin }
 
+// SQLiteBacked implements adapter.SQLiteBacked — the store is queried
+// incrementally by watermark, never read whole.
+func (*Adapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter. The roots are a snapshot taken at
 // construction: the Devin CLI store directory per cross-mount-resolved
 // home. Devin's store is a single central sessions.db, so one root per

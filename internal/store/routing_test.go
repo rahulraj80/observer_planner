@@ -56,6 +56,10 @@ func TestInsertRouterDecisions_RoundTrip(t *testing.T) {
 			CacheForfeitUSD: 0.05,
 			EstimateVersion: "v0",
 			Applied:         false,
+			BenefitJSON:     `{"prompt_cost_before":0.75,"prompt_cost_after":0.15,"cache_forfeit":0.05,"net_usd":0.55,"expected_ttft_delta_ms":-40,"quality_signal":"hold","evidence_confidence":0.95}`,
+			BenefitText:     "route read_only→claude-haiku-4-5: $0.55/prompt, forfeits $0.05 warm prefix, 95% CI no quality delta",
+			EntitlementKind: "api_key",
+			EffectiveBasis:  "list",
 		},
 		{
 			// Channel-A decision: no api_turn to hang on (§R26 item 1).
@@ -124,6 +128,38 @@ func TestInsertRouterDecisions_RoundTrip(t *testing.T) {
 	}
 	if !stats.LastTS.Equal(ts.Add(time.Minute)) {
 		t.Errorf("stats.LastTS = %v, want %v", stats.LastTS, ts.Add(time.Minute))
+	}
+
+	// Benefit columns survive a select-back through the owner seam.
+	detail, ok, err := st.SelectRouterDecisionByID(ctx, 1)
+	if err != nil {
+		t.Fatalf("SelectRouterDecisionByID: %v", err)
+	}
+	if !ok {
+		t.Fatal("SelectRouterDecisionByID: row 1 missing")
+	}
+	if detail.BenefitText == "" || detail.BenefitJSON == "" ||
+		detail.EntitlementKind != "api_key" || detail.EffectiveBasis != "list" ||
+		detail.RealizedDeltaUSD != nil {
+		t.Errorf("benefit fields = text:%q json:%q ent:%q basis:%q delta:%v, want populated (json+text, api_key, list, nil delta)",
+			detail.BenefitText, detail.BenefitJSON, detail.EntitlementKind, detail.EffectiveBasis, detail.RealizedDeltaUSD)
+	}
+	// The unpriced channel-A row carries empty benefit columns.
+	details, err := st.SelectRouterDecisions(ctx, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 100)
+	if err != nil {
+		t.Fatalf("SelectRouterDecisions: %v", err)
+	}
+	if len(details) != 2 {
+		t.Fatalf("got %d rows, want 2", len(details))
+	}
+	var unpriced RouterDecisionDetail
+	for _, r := range details {
+		if r.Channel == "A" {
+			unpriced = r
+		}
+	}
+	if unpriced.BenefitJSON != "" || unpriced.BenefitText != "" || unpriced.EntitlementKind != "" {
+		t.Errorf("unpriced row benefit = %+v, want all empty", unpriced)
 	}
 }
 
@@ -205,5 +241,71 @@ func TestRoutingTables_EmptyBatchNoOp(t *testing.T) {
 	}
 	if err := st.UpsertModelCalibrations(ctx, nil); err != nil {
 		t.Errorf("UpsertModelCalibrations(nil) = %v, want nil", err)
+	}
+}
+
+// TestSelectRealizedRoutingDelta pins the Stage 3 realized-vs-estimated
+// aggregate: only APPLIED decisions with a realized grade (non-null
+// realized_delta_usd) inside the window count, and the optional mode /
+// policy filters attribute savings to the CTA lever that was applied.
+func TestSelectRealizedRoutingDelta(t *testing.T) {
+	t.Parallel()
+	st, ctx := openRoutingTestStore(t)
+
+	delta := func(v float64) *float64 { return &v }
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	rows := []RouterDecisionRow{
+		{SessionID: "s", Timestamp: base, Mode: "enforce", PolicyName: "value", Applied: true, RealizedDeltaUSD: delta(0.07)},
+		{SessionID: "s", Timestamp: base.Add(5 * time.Minute), Mode: "enforce", PolicyName: "value", Applied: true, RealizedDeltaUSD: delta(0.03)},
+		// Different mode — excluded when filtering mode=enforce.
+		{SessionID: "s", Timestamp: base.Add(10 * time.Minute), Mode: "advise", PolicyName: "value", Applied: true, RealizedDeltaUSD: delta(0.02)},
+		// Different policy — excluded when filtering policy=value.
+		{SessionID: "s", Timestamp: base.Add(15 * time.Minute), Mode: "enforce", PolicyName: "other", Applied: true, RealizedDeltaUSD: delta(0.09)},
+		// Unapplied — never counted (decisions in advise do not realize).
+		{SessionID: "s", Timestamp: base.Add(20 * time.Minute), Mode: "enforce", PolicyName: "value", Applied: false, RealizedDeltaUSD: delta(0.50)},
+		// Graded-unaware row (NULL realized_delta_usd) — contributes zero dollars and no turn.
+		{SessionID: "s", Timestamp: base.Add(25 * time.Minute), Mode: "enforce", PolicyName: "value", Applied: true},
+		// Outside the window bounds — excluded.
+		{SessionID: "s", Timestamp: base.Add(-time.Hour), Mode: "enforce", PolicyName: "value", Applied: true, RealizedDeltaUSD: delta(0.10)},
+		{SessionID: "s", Timestamp: base.Add(2 * time.Hour), Mode: "enforce", PolicyName: "value", Applied: true, RealizedDeltaUSD: delta(0.10)},
+	}
+	if err := st.InsertRouterDecisions(ctx, rows); err != nil {
+		t.Fatalf("InsertRouterDecisions: %v", err)
+	}
+
+	q := RealizedRoutingQuery{Since: base, Until: base.Add(30 * time.Minute), Mode: "enforce"}
+	got, err := st.SelectRealizedRoutingDelta(ctx, q)
+	if err != nil {
+		t.Fatalf("SelectRealizedRoutingDelta: %v", err)
+	}
+	// mode=enforce matches the two "value" rows (0.07+0.03) plus the
+	// "other"-policy row (0.09) — the mode filter alone does not exclude it.
+	if got.DeltaUSD != 0.19 || got.GradedTurns != 3 {
+		t.Errorf("mode=enforce aggregate = ($%.2f, %d turns), want ($0.19, 3)", got.DeltaUSD, got.GradedTurns)
+	}
+
+	q.Policy = "value"
+	got, err = st.SelectRealizedRoutingDelta(ctx, q)
+	if err != nil {
+		t.Fatalf("SelectRealizedRoutingDelta: %v", err)
+	}
+	if got.DeltaUSD != 0.10 || got.GradedTurns != 2 {
+		t.Errorf("mode+policy aggregate = ($%.2f, %d turns), want ($0.10, 2)", got.DeltaUSD, got.GradedTurns)
+	}
+
+	got, err = st.SelectRealizedRoutingDelta(ctx, RealizedRoutingQuery{Since: base, Until: base.Add(30 * time.Minute)})
+	if err != nil {
+		t.Fatalf("SelectRealizedRoutingDelta (no filter): %v", err)
+	}
+	if got.DeltaUSD != 0.21 || got.GradedTurns != 4 {
+		t.Errorf("unfiltered aggregate = ($%.2f, %d turns), want ($0.21, 4)", got.DeltaUSD, got.GradedTurns)
+	}
+
+	empty, err := st.SelectRealizedRoutingDelta(ctx, RealizedRoutingQuery{Since: base.Add(time.Hour), Until: base.Add(2 * time.Hour)})
+	if err != nil {
+		t.Fatalf("SelectRealizedRoutingDelta (empty): %v", err)
+	}
+	if empty.DeltaUSD != 0 || empty.GradedTurns != 0 {
+		t.Errorf("empty aggregate = ($%.2f, %d), want (0, 0)", empty.DeltaUSD, empty.GradedTurns)
 	}
 }

@@ -398,11 +398,20 @@ func (w *Watcher) processFile(ctx context.Context, a adapter.Adapter, path strin
 	// DoS guard: skip a file larger than the configured cap before parsing.
 	// A malformed or hostile multi-GB session file in a watch root would
 	// otherwise drive the adapter's whole-file read into unbounded allocation.
+	// SQLite-backed adapters (adapter.SQLiteBacked) are exempt: they open the
+	// store read-only and query incrementally by watermark, never allocating
+	// the file, so a large or WAL-fragmented store DB must not be dropped.
 	if w.maxFileBytes > 0 {
-		if fi, err := os.Stat(path); err == nil && fi.Size() > w.maxFileBytes {
-			w.logger.Warn("watcher.processFile: skipping oversize file",
-				"path", path, "size", fi.Size(), "max", w.maxFileBytes)
-			return nil
+		var sqliteBacked bool
+		if sb, ok := a.(adapter.SQLiteBacked); ok {
+			sqliteBacked = sb.SQLiteBacked()
+		}
+		if !sqliteBacked {
+			if fi, err := os.Stat(path); err == nil && fi.Size() > w.maxFileBytes {
+				w.logger.Warn("watcher.processFile: skipping oversize file",
+					"path", path, "size", fi.Size(), "max", w.maxFileBytes)
+				return nil
+			}
 		}
 	}
 

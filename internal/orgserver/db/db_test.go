@@ -26,12 +26,12 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Version: %v", err)
 	}
-	if v != 21 {
-		t.Fatalf("version = %d, want 21", v)
+	if v != 23 {
+		t.Fatalf("version = %d, want 23", v)
 	}
 
 	want := []string{
-		"actions", "api_turns", "audit_log", "budgets", "cc_analytics_daily",
+		"actions", "api_turns", "audit_log", "briefing_aggregates", "budgets", "cc_analytics_daily",
 		"codex_analytics_daily", "copilot_analytics_daily", "digest_state", "enrolment_tokens",
 		"guard_events", "issued_bearers", "m365_copilot_analytics_daily",
 		"m365_copilot_content", "obs_admission_events", "obs_admission_policy_versions",
@@ -41,6 +41,7 @@ func TestOpenAppliesMigrations(t *testing.T) {
 		"org_project_team", "org_routing_policies", "org_team_members",
 		"org_teams", "otel_content", "revoked_bearers", "routing_policy_audit",
 		"routing_policy_keys", "routing_summaries", "sessions", "token_usage",
+		"virtuous_cycle",
 	}
 	rows, err := d.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_meta' ORDER BY name`)
 	if err != nil {
@@ -138,7 +139,7 @@ func TestReopenIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 21 {
-		t.Errorf("version after reopen = %d, want 21", v)
+	if v != 23 {
+		t.Errorf("version after reopen = %d, want 23", v)
 	}
 }

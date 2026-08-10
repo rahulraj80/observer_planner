@@ -290,6 +290,8 @@ func (c *Client) PushOnce(ctx context.Context) (PushResult, error) {
 			TargetActionAllowlist: c.cfg.Share.TargetActionAllowlist,
 			AdminManaged:          c.cfg.Share.AdminManaged,
 			RoutingSummary:        c.cfg.Share.RoutingSummary,
+			BriefingAggregates:    c.cfg.Share.BriefingAggregates,
+			VirtuousCycle:         c.cfg.Share.VirtuousCycle,
 			ObsSummary:            c.cfg.Share.Obs.Summary,
 			ObsTraces:             c.cfg.Share.Obs.Traces,
 			ObsContent:            c.cfg.Share.Obs.Content,
@@ -344,6 +346,16 @@ func (c *Client) PushOnce(ctx context.Context) (PushResult, error) {
 		// content excerpts are gated by shipsRawContent() in composeObsTiers;
 		// the score metadata + content_hash always ship.
 		ObsEvalItems: batch.ObsEvalItems,
+		// Daily-Briefing AGGREGATE — composed only under the node-side
+		// [org_client.share] briefing_aggregates opt-in (Phase C of
+		// docs/design/standup-briefing.md §4); nil/empty otherwise.
+		// Content-free counts + sums by (day, tool, project_hash).
+		BriefingAggregates: batch.BriefingAggregates,
+		// Virtuous-Cycle trend — composed only under the node-side
+		// [org_client.share] virtuous_cycle opt-in (Stage 3 of
+		// docs/design/standup-briefing.md); nil/empty otherwise.
+		// Content-free cumulative applies + projected + realized.
+		VirtuousCycle: batch.VirtuousCycle,
 	}
 	raw, err := json.Marshal(env)
 	if err != nil {

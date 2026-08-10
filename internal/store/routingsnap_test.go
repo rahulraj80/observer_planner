@@ -450,3 +450,72 @@ func TestBuildAdviseShadowReport(t *testing.T) {
 		t.Errorf("nil-evidence caution: %+v", repNil)
 	}
 }
+
+// TestRoutingRefresher_CalibrationEvidence pins the evidence_quality
+// snapshot wiring (§5.4): the global (project_id 0) model_calibration
+// cells pool up to (turn-kind, tier) on the slow tick, each lower tier
+// grades against the kind's highest-tier baseline pool, and ungraded
+// kinds stay absent from the map (no claim).
+func TestRoutingRefresher_CalibrationEvidence(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestStore(t)
+	now := time.Now().UTC()
+	err := s.UpsertModelCalibrations(context.Background(), []ModelCalibrationRow{
+		// read_only: opus clean (0/200), haiku regressed (40/200 = 20%).
+		{
+			Model: "claude-opus-4-8", TurnKind: "read_only", ProjectID: 0, WindowDays: 30,
+			N: 200, ErrorGraded: 200, ErrorCount: 0,
+		},
+		{
+			Model: "claude-haiku-4-5", TurnKind: "read_only", ProjectID: 0, WindowDays: 30,
+			N: 200, ErrorGraded: 200, ErrorCount: 40,
+		},
+		// A per-project cell must NOT leak into the node-level signal.
+		{
+			Model: "claude-haiku-4-5", TurnKind: "read_only", ProjectID: 7, WindowDays: 30,
+			N: 999, ErrorGraded: 999, ErrorCount: 999,
+		},
+		// edit: only one tier pooled — nothing to grade against.
+		{
+			Model: "claude-opus-4-8", TurnKind: "edit", ProjectID: 0, WindowDays: 30,
+			N: 100, ErrorGraded: 100, ErrorCount: 0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("upsert calibrations: %v", err)
+	}
+	r := testRefresher(t, s, routing.Policy{}, now)
+	if err := r.RefreshNow(context.Background()); err != nil {
+		t.Fatalf("RefreshNow: %v", err)
+	}
+	ev, ok := r.Current().Evidence[routing.EvidenceKey{Kind: routing.TurnReadOnly, Tier: routing.TierHaikuClass}]
+	if !ok {
+		t.Fatalf("no evidence for read_only/haiku-class: %+v", r.Current().Evidence)
+	}
+	if ev.Signal != routing.QualityWorse {
+		t.Errorf("signal = %q, want worse", ev.Signal)
+	}
+	// delta 0.20, CI ≈ 1.96·√(0.2·0.8/200) ≈ 0.055 → confidence ≈ 0.94.
+	if ev.Confidence < 0.90 || ev.Confidence > 0.96 {
+		t.Errorf("confidence = %.4f, want ≈0.94", ev.Confidence)
+	}
+	// Single-tier kinds and per-project cells produce nothing.
+	if len(r.Current().Evidence) != 1 {
+		t.Errorf("evidence map = %+v, want exactly one graded key", r.Current().Evidence)
+	}
+}
+
+// TestRoutingRefresher_CalibrationEvidenceAbsent pins the empty-table
+// posture: no calibration cells → nil evidence map (the engine reports
+// quality unknown, never an invented claim).
+func TestRoutingRefresher_CalibrationEvidenceAbsent(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestStore(t)
+	r := testRefresher(t, s, routing.Policy{}, time.Now().UTC())
+	if err := r.RefreshNow(context.Background()); err != nil {
+		t.Fatalf("RefreshNow: %v", err)
+	}
+	if ev := r.Current().Evidence; ev != nil && len(ev) != 0 {
+		t.Errorf("evidence = %+v, want empty", ev)
+	}
+}

@@ -35,6 +35,12 @@ const HelpDrawer = lazy(() =>
 const OverviewPage = lazy(() =>
   import("@/pages/Overview").then((m) => ({ default: m.OverviewPage })),
 );
+const BriefingPage = lazy(() =>
+  import("@/pages/Briefing").then((m) => ({ default: m.BriefingPage })),
+);
+const GuidePage = lazy(() =>
+  import("@/pages/Guide").then((m) => ({ default: m.GuidePage })),
+);
 const CostPage = lazy(() =>
   import("@/pages/Cost").then((m) => ({ default: m.CostPage })),
 );
@@ -98,6 +104,15 @@ const PrivacyPage = lazy(() =>
 const ReportPage = lazy(() =>
   import("@/pages/Report").then((m) => ({ default: m.ReportPage })),
 );
+const ModelFitPage = lazy(() =>
+  import("@/pages/ModelFit").then((m) => ({ default: m.ModelFitPage })),
+);
+const APIExplorerPage = lazy(() =>
+  import("@/pages/APIExplorer").then((m) => ({ default: m.APIExplorerPage })),
+);
+const LicensesPage = lazy(() =>
+  import("@/pages/Licenses").then((m) => ({ default: m.LicensesPage })),
+);
 
 // RouteErrorBoundary keys the boundary on the pathname so navigating
 // to another tab after a crash gives that tab a clean mount.
@@ -135,6 +150,8 @@ function AnimatedRoutes() {
       >
         <Routes location={location}>
           <Route index element={<OverviewPage />} />
+          <Route path="briefing" element={<BriefingPage />} />
+          <Route path="guide" element={<GuidePage />} />
           <Route path="live" element={<LivePage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="cost" element={<CostPage />} />
@@ -156,6 +173,9 @@ function AnimatedRoutes() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="remote" element={<RemotePage />} />
           <Route path="terminals" element={<TerminalsPage />} />
+          <Route path="modelfit" element={<ModelFitPage />} />
+          <Route path="apiexplorer" element={<APIExplorerPage />} />
+          <Route path="licenses" element={<LicensesPage />} />
           {/* D-6: an unknown route gets an honest page instead of a
               silent redirect that reads as a navigation bug. */}
           <Route path="*" element={<NotFoundPage />} />

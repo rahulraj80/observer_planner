@@ -7,6 +7,7 @@ import { BUILTIN_PROFILE_NAMES, SECTION_SPECS } from "./settings/sectionSpecs";
 import { StructuredConfigSection } from "./settings/StructuredConfigSection";
 import { AntigravityHelperCard } from "./settings/AntigravityHelperCard";
 import { ETWCapturerCard } from "./settings/ETWCapturerCard";
+import { LLMConnectionsCard } from "./settings/LLMConnectionsCard";
 import { ConnectedToolsSection } from "./settings/ConnectedToolsSection";
 import { EnrolmentSection } from "./settings/EnrolmentSection";
 import { HealthSection } from "./settings/HealthSection";
@@ -85,7 +86,8 @@ type SectionId =
   | "process"
   | "antigravity"
   | "browser"
-  | "terminal";
+  | "terminal"
+  | "llm";
 
 type SectionDef = {
   id: SectionId;
@@ -522,6 +524,21 @@ const SECTIONS: SectionDef[] = [
         "Turning the attach socket on/off, changing whether attach sessions route through the proxy by default, or toggling whether `observer claude`/`observer codex` attach by default (opt out per-launch with --no-attach).",
       behavior:
         "Serving the socket is start-time (restart required to bind/unbind). Route-through-proxy and attach-by-default are read per-launch by the CLI, so they take effect on the next launch with no restart.",
+    },
+  },
+  {
+    id: "llm",
+    label: "LLM analysis",
+    group: "config",
+    status: "restart",
+    icon: <SparklesIcon size={13} />,
+    about: {
+      summary:
+        "Optional LLM analysis connections for the daily briefing — the narrative upgrade and grounded Q&A. Each connection is one endpoint (anthropic / OpenAI-compatible / local); keys are saved to the OS keychain, so config.toml holds only the label.",
+      whenModified:
+        "Pointing analysis at a new endpoint (Ollama, OpenRouter, a provider), editing a base_url or default model, or saving an API key from the browser.",
+      behavior:
+        "Restart required — the briefing runner binds connections at daemon start. Save writes config.toml + .bak. Keys go to the OS keychain (0600 file fallback), never into config.toml; the Test button probes reachability + model list.",
     },
   },
 ];
@@ -1877,6 +1894,13 @@ function SectionView({
   onReload: () => void;
 }) {
   const spec = SECTION_SPECS[section];
+  if (section === "llm") {
+    // The [llm] block is a map of connections, not a flat config
+    // object — the structured spec renderer doesn't fit. The card owns
+    // the whole surface: add/edit/remove connections, keychain key
+    // save, and the live health probe.
+    return <LLMConnectionsCard config={config} onReload={onReload} />;
+  }
   if (spec) {
     return (
       <StructuredConfigSection

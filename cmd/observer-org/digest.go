@@ -27,15 +27,21 @@ func newDigestCmd(configPath *string) *cobra.Command {
 
 func newDigestSendCmd(configPath *string) *cobra.Command {
 	var dryRun bool
+	var kind string
 	cmd := &cobra.Command{
 		Use:   "send",
-		Short: "Compose the org spend digest for the most-recent completed period and email it",
-		Long: "Compose the org spend digest for the most-recently-COMPLETED period\n" +
-			"([digest].frequency, default weekly) and email it to [digest].to (or\n" +
-			"[email].to). With --dry-run the composed email is printed to stdout and\n" +
-			"nothing is sent. A real send requires [email].enabled; --dry-run does not.\n" +
-			"On-demand sends bypass the send_hour gate; a real send updates the\n" +
-			"send-once marker so the same period's scheduled send is suppressed.",
+		Short: "Compose the scheduled digest for the most-recent completed period and email it",
+		Long: "Compose the scheduled digest for the most-recently-COMPLETED period and\n" +
+			"email it to [digest].to (or [email].to). With --kind org (default):\n" +
+			"the org spend digest ([digest].frequency, default weekly) — spend by\n" +
+			"developer/model/project with the prior-period delta. With --kind\n" +
+			"briefing: the daily manager briefing for the most-recently-completed\n" +
+			"day (sessions, turns, spend, tokens, cache hit rate, opportunities;\n" +
+			"docs/design/standup-briefing.md §4 Phase C). With --dry-run the\n" +
+			"composed email is printed to stdout and nothing is sent. A real send\n" +
+			"requires [email].enabled; --dry-run does not. On-demand sends bypass\n" +
+			"the send_hour gate; a real send updates the send-once marker so the\n" +
+			"same period's scheduled send is suppressed.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfig(*configPath)
 			if err != nil {
@@ -66,7 +72,15 @@ func newDigestSendCmd(configPath *string) *cobra.Command {
 				notifier = n
 			}
 
-			sched := orgdigest.NewScheduler(db, org, cfg.Digest, notifier, version, cfg.Email.To, logger)
+			var sched *orgdigest.Scheduler
+			switch kind {
+			case "briefing":
+				sched = orgdigest.NewBriefingScheduler(db, org, cfg.Digest, notifier, version, cfg.Email.To, logger)
+			case "", "org":
+				sched = orgdigest.NewScheduler(db, org, cfg.Digest, notifier, version, cfg.Email.To, logger)
+			default:
+				return fmt.Errorf("digest send: unknown kind %q (want org or briefing)", kind)
+			}
 			if dryRun {
 				msg, perr := sched.Preview(ctx)
 				if perr != nil {
@@ -84,6 +98,7 @@ func newDigestSendCmd(configPath *string) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the composed email to stdout instead of sending")
+	cmd.Flags().StringVar(&kind, "kind", "org", "digest variant: org (spend digest) or briefing (daily manager briefing)")
 	return cmd
 }
 

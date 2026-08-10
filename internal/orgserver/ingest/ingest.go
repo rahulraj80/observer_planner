@@ -219,6 +219,59 @@ func Push(ctx context.Context, db *sql.DB, env orgcontract.PushEnvelope, userID,
 		}
 	}
 
+	// Daily-Briefing AGGREGATE rollup (docs/design/standup-briefing.md §4,
+	// Phase C) — optional both directions (pre-feature agents omit it). The
+	// rows UPSERT by the (org_id, user_email, day, tool, project_hash) natural
+	// key so a node's windowed-recompute of a completed day (which settles as
+	// more turns land) overwrites cleanly. Content-free by construction; not
+	// counted as accepted/deduped, exactly like routing_summaries.
+	for _, ba := range env.BriefingAggregates {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO briefing_aggregates
+			   (org_id, user_email, day, tool, project_hash,
+			    sessions, turns, input_tokens, output_tokens, cost_usd,
+			    updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?)
+			 ON CONFLICT(org_id, user_email, day, tool, project_hash) DO UPDATE SET
+			   sessions = excluded.sessions,
+			   turns = excluded.turns,
+			   input_tokens = excluded.input_tokens,
+			   output_tokens = excluded.output_tokens,
+			   cost_usd = excluded.cost_usd,
+			   updated_at = excluded.updated_at`,
+			ba.OrgID, ba.UserEmail, ba.Day, ba.Tool, ba.ProjectHash,
+			ba.Sessions, ba.Turns, ba.InputTokens, ba.OutputTokens, ba.CostUSD,
+			pushedAt); err != nil {
+			return Result{}, fmt.Errorf("ingest.Push: briefing_aggregate %s/%s/%s: %w", ba.Day, ba.Tool, ba.ProjectHash, err)
+		}
+	}
+
+	// Virtuous-Cycle trend rollup (Stage 3 of docs/design/standup-briefing.md)
+	// — optional both directions (pre-feature agents omit it). The
+	// rows UPSERT by the (org_id, user_email, week_start) natural
+	// key so a node's windowed-recompute of a completed week overwrites cleanly.
+	// Content-free by construction; not counted as accepted/deduped, exactly like
+	// routing_summaries and briefing_aggregates.
+	for _, vc := range env.VirtuousCycle {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO virtuous_cycle
+			   (org_id, user_email, week_start,
+			    applies, projected_usd, realized_usd, realized_turns,
+			    updated_at, pushed_by_user_id)
+			 VALUES (?,?,?,?,?,?,?,?,?)
+			 ON CONFLICT(org_id, user_email, week_start) DO UPDATE SET
+			   applies = excluded.applies,
+			   projected_usd = excluded.projected_usd,
+			   realized_usd = excluded.realized_usd,
+			   realized_turns = excluded.realized_turns,
+			   updated_at = excluded.updated_at`,
+			vc.OrgID, vc.UserEmail, vc.WeekStart,
+			vc.Applies, vc.ProjectedUSD, vc.RealizedUSD, vc.RealizedTurns,
+			pushedAt, userID); err != nil {
+			return Result{}, fmt.Errorf("ingest.Push: virtuous_cycle %s: %w", vc.WeekStart, err)
+		}
+	}
+
 	// Guard-layer verdict rows (guard spec §14.3, G14). The
 	// content-bearing columns (reason, target_excerpt, taint_origin)
 	// are empty unless the node opted into full-content sharing — the
@@ -606,5 +659,10 @@ func forcePusherEmail(env *orgcontract.PushEnvelope, email string) {
 	// half the natural key that keeps each node's runs distinct).
 	for i := range env.ObsEvalItems {
 		env.ObsEvalItems[i].UserEmail = email
+	}
+	// Daily-Briefing AGGREGATE — re-pin the pusher (user_email is half the
+	// natural key of the upsert; it cannot be forged).
+	for i := range env.BriefingAggregates {
+		env.BriefingAggregates[i].UserEmail = email
 	}
 }

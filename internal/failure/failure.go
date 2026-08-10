@@ -28,7 +28,7 @@ const MaxCommandSummaryLen = 200
 // so that "ls -la" and "ls  -la" collide. Normalization: trim surrounding
 // whitespace and collapse internal whitespace runs to a single space.
 func CommandHash(command string) string {
-	normalized := normalize(command)
+	normalized := Normalize(command)
 	if normalized == "" {
 		return ""
 	}
@@ -83,7 +83,10 @@ func Categorize(message string) string {
 	return CategoryUnknown
 }
 
-func normalize(s string) string {
+// Normalize trims surrounding whitespace and collapses internal whitespace
+// runs to a single space, so semantically identical messages ("ls  -la" vs
+// "ls -la") compare equal.
+func Normalize(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""

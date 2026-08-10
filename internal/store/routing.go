@@ -43,6 +43,21 @@ type RouterDecisionRow struct {
 	EstimateVersion string
 	Applied         bool
 	OutcomeBackref  *int64
+	// BenefitJSON is the serialized routing.BenefitBreakdown (§5.4) —
+	// empty when the decision was unpriced. Stored verbatim; the store
+	// seam never interprets it.
+	BenefitJSON string
+	// BenefitText is the human sentence rendered from the breakdown.
+	BenefitText string
+	// EntitlementKind is the request's entitlement class (api_key |
+	// subscription | "").
+	EntitlementKind string
+	// EffectiveBasis names the pricing basis that produced the estimate
+	// ("list" today; "effective" once effective-cost wiring lands).
+	EffectiveBasis string
+	// RealizedDeltaUSD writes back realized-vs-expected benefit on the
+	// outcome loop (§R18.3); nil until a grader grades the row.
+	RealizedDeltaUSD *float64
 }
 
 // ModelCalibrationRow is one row of model_calibration — the observed
@@ -79,8 +94,10 @@ INSERT INTO router_decisions (
     api_turn_id, session_id, ts, mode, channel,
     original_model, selected_model, turn_kind, policy_name, policy_hash,
     reason_codes, est_savings_usd, cache_forfeit_usd, estimate_version,
-    applied, outcome_backref
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    applied, outcome_backref,
+    benefit_json, benefit_text, entitlement_kind, effective_basis,
+    realized_delta_usd
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // InsertRouterDecisions appends decision rows in one transaction.
 // Decisions are append-only (§R9.1) — there is no upsert path.
@@ -109,6 +126,8 @@ func (s *Store) InsertRouterDecisions(ctx context.Context, rows []RouterDecision
 			r.OriginalModel, r.SelectedModel, r.TurnKind, r.PolicyName, r.PolicyHash,
 			string(codes), r.EstSavingsUSD, r.CacheForfeitUSD, r.EstimateVersion,
 			boolToInt(r.Applied), r.OutcomeBackref,
+			nullableString(r.BenefitJSON), r.BenefitText, nullableString(r.EntitlementKind),
+			nullableString(r.EffectiveBasis), r.RealizedDeltaUSD,
 		); err != nil {
 			return fmt.Errorf("store.InsertRouterDecisions: insert: %w", err)
 		}
@@ -203,25 +222,30 @@ func (s *Store) CountModelCalibrations(ctx context.Context) (int64, error) {
 // transparency surfaces (§R17): savings, explain, advise feed,
 // dashboard. ProjectRoot/Tool join in from the session.
 type RouterDecisionDetail struct {
-	ID              int64
-	APITurnID       *int64
-	SessionID       string
-	Timestamp       time.Time
-	Mode            string
-	Channel         string
-	OriginalModel   string
-	SelectedModel   string
-	TurnKind        string
-	PolicyName      string
-	PolicyHash      string
-	ReasonCodes     []string
-	EstSavingsUSD   float64
-	CacheForfeitUSD float64
-	EstimateVersion string
-	Applied         bool
-	OutcomeBackref  *int64
-	ProjectRoot     string
-	Tool            string
+	ID               int64
+	APITurnID        *int64
+	SessionID        string
+	Timestamp        time.Time
+	Mode             string
+	Channel          string
+	OriginalModel    string
+	SelectedModel    string
+	TurnKind         string
+	PolicyName       string
+	PolicyHash       string
+	ReasonCodes      []string
+	EstSavingsUSD    float64
+	CacheForfeitUSD  float64
+	EstimateVersion  string
+	Applied          bool
+	OutcomeBackref   *int64
+	BenefitJSON      string
+	BenefitText      string
+	EntitlementKind  string
+	EffectiveBasis   string
+	RealizedDeltaUSD *float64
+	ProjectRoot      string
+	Tool             string
 }
 
 const selectRouterDecisionSQL = `
@@ -230,6 +254,9 @@ SELECT rd.id, rd.api_turn_id, rd.session_id, rd.ts, rd.mode, rd.channel,
        rd.policy_name, rd.policy_hash, rd.reason_codes,
        rd.est_savings_usd, rd.cache_forfeit_usd, rd.estimate_version,
        rd.applied, rd.outcome_backref,
+       COALESCE(rd.benefit_json, ''), COALESCE(rd.benefit_text, ''),
+       COALESCE(rd.entitlement_kind, ''), COALESCE(rd.effective_basis, ''),
+       rd.realized_delta_usd,
        COALESCE(p.root_path, ''), COALESCE(se.tool, '')
 FROM router_decisions rd
 LEFT JOIN sessions se ON se.id = rd.session_id
@@ -293,7 +320,9 @@ func scanRouterDecision(r rowScanner) (RouterDecisionDetail, error) {
 		&d.OriginalModel, &d.SelectedModel, &d.TurnKind,
 		&d.PolicyName, &d.PolicyHash, &codes,
 		&d.EstSavingsUSD, &d.CacheForfeitUSD, &d.EstimateVersion,
-		&appl, &d.OutcomeBackref, &d.ProjectRoot, &d.Tool); err != nil {
+		&appl, &d.OutcomeBackref,
+		&d.BenefitJSON, &d.BenefitText, &d.EntitlementKind,
+		&d.EffectiveBasis, &d.RealizedDeltaUSD, &d.ProjectRoot, &d.Tool); err != nil {
 		return RouterDecisionDetail{}, err
 	}
 	d.Timestamp = parseStamp(ts)
@@ -304,6 +333,51 @@ func scanRouterDecision(r rowScanner) (RouterDecisionDetail, error) {
 			// a failed read.
 			d.ReasonCodes = nil
 		}
+	}
+	return d, nil
+}
+
+// RealizedRoutingDelta is the realized outcome aggregate for APPLIED
+// routing decisions: how many carried a realized grade (non-null
+// realized_delta_usd) and the summed realized delta.
+type RealizedRoutingDelta struct {
+	GradedTurns int
+	DeltaUSD    float64
+}
+
+// RealizedRoutingQuery narrows the realized-delta aggregate to a window
+// and optionally to one mode and/or policy. Mode/Policy are the Stage 3
+// attribution levers: a CTA apply of [routing].mode → enforce measures
+// decisions served in enforce mode only, so pre-restart (old-config)
+// turns never inflate the realized figure.
+type RealizedRoutingQuery struct {
+	Since  time.Time
+	Until  time.Time
+	Mode   string
+	Policy string
+}
+
+// SelectRealizedRoutingDelta sums realized_delta_usd over APPLIED
+// decisions in [Since, Until), optionally restricted to one mode or
+// policy — the Stage 3 realized-vs-estimated measurement behind a CTA
+// apply. Unapplied and un-graded decisions contribute nothing.
+func (s *Store) SelectRealizedRoutingDelta(ctx context.Context, q RealizedRoutingQuery) (RealizedRoutingDelta, error) {
+	query := `
+SELECT COUNT(realized_delta_usd), COALESCE(SUM(realized_delta_usd), 0)
+  FROM router_decisions
+ WHERE applied = 1 AND ts >= ? AND ts < ?`
+	args := []any{timestamp(q.Since), timestamp(q.Until)}
+	if q.Mode != "" {
+		query += ` AND mode = ?`
+		args = append(args, q.Mode)
+	}
+	if q.Policy != "" {
+		query += ` AND policy_name = ?`
+		args = append(args, q.Policy)
+	}
+	var d RealizedRoutingDelta
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&d.GradedTurns, &d.DeltaUSD); err != nil {
+		return RealizedRoutingDelta{}, fmt.Errorf("store.SelectRealizedRoutingDelta: %w", err)
 	}
 	return d, nil
 }

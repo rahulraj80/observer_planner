@@ -1430,7 +1430,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isStream {
-		captured := p.teeStream(r.Context(), w, resp.Body)
+		captured, firstChunkAt := p.teeStream(r.Context(), w, resp.Body)
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			// Upstream returned an error status. The captured body might
 			// be either a plain JSON error (when the upstream returned
@@ -1448,7 +1448,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 			captureNetwork(resp.StatusCode, captured, true, 0, turn.RequestID, "", nil, resp.Header)
 			return
 		}
-		turn := p.buildStreamTurn(provider, reqShape, captured, resp.Header, start, sessionID)
+		turn := p.buildStreamTurn(provider, reqShape, captured, resp.Header, start, firstChunkAt, sessionID)
 		turn.RequestID = orRequestID(turn.RequestID, proxyRequestID)
 		var apiTurnID int64
 		switch {
@@ -1505,7 +1505,11 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	if !isStream && looksLikeSSE(respBody) {
 		// Non-2xx error already handled above; skip to the success path.
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			turn := p.buildStreamTurn(provider, reqShape, respBody, resp.Header, start, sessionID)
+			// Buffered (io.ReadAll) capture — no per-chunk TTFT signal, so
+			// pass a zero firstChunkAt and let buildStreamTurn leave
+			// TimeToFirstTokenMS unset rather than fake a TTFT from a
+			// fully-buffered response.
+			turn := p.buildStreamTurn(provider, reqShape, respBody, resp.Header, start, time.Time{}, sessionID)
 			turn.RequestID = orRequestID(turn.RequestID, proxyRequestID)
 			var apiTurnID int64
 			switch {
@@ -1629,7 +1633,7 @@ func (p *Proxy) insertTurnDetached(turn models.APITurn, routerToken int64, label
 		p.logger.Warn(label, "err", err)
 		return 0
 	}
-	p.recordServedSafe(routerToken, id, turn.Model)
+	p.recordServedSafe(routerToken, id, turn.Model, routerUsage(turn))
 	return id
 }
 
@@ -1663,7 +1667,7 @@ func (p *Proxy) insertTurnAndCacheDetached(turn models.APITurn, reqShape request
 		p.logger.Warn(label, "err", err)
 		return 0
 	}
-	p.recordServedSafe(routerToken, apiTurnID, turn.Model)
+	p.recordServedSafe(routerToken, apiTurnID, turn.Model, routerUsage(turn))
 	if p.cacheEngine == nil {
 		return apiTurnID
 	}
@@ -1792,6 +1796,21 @@ func (p *Proxy) applyCost(t *models.APITurn) {
 		Fast:            t.Fast,
 	}); ok {
 		t.CostUSD = usd
+	}
+}
+
+// routerUsage adapts the landed turn's token bundle for the Channel-B
+// realized-benefit seam. Mirrors CostTokens field-for-field — the two
+// types share a producer (the parsed response usage) and a consumer
+// (the cost engine), so the bundle must never drift apart.
+func routerUsage(t models.APITurn) RouterUsage {
+	return RouterUsage{
+		Input:           t.InputTokens,
+		Output:          t.OutputTokens,
+		CacheRead:       t.CacheReadTokens,
+		CacheCreation:   t.CacheCreationTokens,
+		CacheCreation1h: t.CacheCreation1hTokens,
+		Fast:            t.Fast,
 	}
 }
 
@@ -2126,12 +2145,17 @@ func (p *Proxy) buildTurn(
 // buildStreamTurn constructs an APITurn from a captured SSE exchange. The
 // request shape carries message/tool counts; the captured body carries the
 // accurate token counts and stop_reason from the stream's terminal events.
+// firstChunkAt is the wall-clock stamp of the first SSE chunk that arrived
+// (zero when the stream was captured by buffering rather than teeing, e.g.
+// the sniffed-SSE fallback) — it becomes TimeToFirstTokenMS so TTFT is only
+// ever asserted from true streaming observations.
 func (p *Proxy) buildStreamTurn(
 	provider string,
 	req requestShape,
 	captured []byte,
 	respHeader http.Header,
 	start time.Time,
+	firstChunkAt time.Time,
 	sessionID string,
 ) models.APITurn {
 	result := parseSSEStream(captured, provider)
@@ -2142,6 +2166,10 @@ func (p *Proxy) buildStreamTurn(
 	requestID := result.RequestID
 	if requestID == "" {
 		requestID = respHeader.Get("X-Request-Id")
+	}
+	ttft := int64(0)
+	if !firstChunkAt.IsZero() {
+		ttft = firstChunkAt.Sub(start).Milliseconds()
 	}
 	return models.APITurn{
 		SessionID:             sessionID,
@@ -2157,6 +2185,7 @@ func (p *Proxy) buildStreamTurn(
 		MessageCount:          req.MessageCount,
 		ToolUseCount:          req.ToolUseCount,
 		SystemPromptHash:      req.SystemPromptHash,
+		TimeToFirstTokenMS:    ttft,
 		TotalResponseMS:       p.now().Sub(start).Milliseconds(),
 		StopReason:            result.StopReason,
 		// See buildTurn() above. Anthropic speed:"fast" rides the request

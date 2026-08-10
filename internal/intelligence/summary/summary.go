@@ -1,18 +1,16 @@
 package summary
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/llmconn"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
 )
 
@@ -196,60 +194,34 @@ func (s *Summarizer) buildDigest(ctx context.Context, sessionID, tool, startedAt
 	return b.String(), rows.Err()
 }
 
-type claudeRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	Messages  []claudeMessage `json:"messages"`
-}
-
-type claudeMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type claudeResponse struct {
-	Content []struct {
-		Text string `json:"text"`
-	} `json:"content"`
-}
-
+// callClaude runs one Anthropic Messages turn via the SHARED internal/llmconn
+// client (standup-briefing plan §3 / §15 Q6 — migrate judgeclient, then
+// intelligence/summary). The migration is behavior-preserving: the same
+// ANTHROPIC_API_KEY default, same BaseURL/Model/MaxTokens knobs, and the same
+// no-egress-scrub posture (the digest is scrubbed only at storage, spec §8).
+// The shared client additionally brings judge-style retry on a transient
+// failure, the 60s timeout, and the X-SBO-Analysis attribution header.
 func (s *Summarizer) callClaude(ctx context.Context, apiKey, digest string) (string, error) {
 	prompt := "Summarize this AI coding session in 2-4 sentences. Focus on what was accomplished, which files were touched, and whether there were failures. Be concise.\n\n" + digest
-	reqBody := claudeRequest{
-		Model:     s.opts.Model,
-		MaxTokens: s.opts.MaxTokens,
-		Messages:  []claudeMessage{{Role: "user", Content: prompt}},
+	client := llmconn.NewClient(llmconn.Connection{
+		ID:           "summary",
+		Name:         "session summarizer",
+		Kind:         llmconn.KindAnthropic,
+		BaseURL:      s.opts.BaseURL,
+		DefaultModel: s.opts.Model,
+	}, apiKey)
+	client = client.WithTuning(s.opts.MaxTokens, 0)
+	if s.opts.HTTPClient != nil {
+		client = client.WithHTTPClient(s.opts.HTTPClient)
 	}
-	body, err := json.Marshal(reqBody)
+	res, err := client.Complete(ctx, s.opts.Model, prompt)
 	if err != nil {
-		return "", fmt.Errorf("summary: marshal request: %w", err)
+		return "", fmt.Errorf("summary: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.opts.BaseURL+"/v1/messages", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("summary: build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", apiKey)
-	req.Header.Set("Anthropic-Version", "2023-06-01")
-
-	resp, err := s.opts.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("summary: API call: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("summary: API %d: %s", resp.StatusCode, respBody)
-	}
-	var cr claudeResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&cr); err != nil {
-		return "", fmt.Errorf("summary: parse response: %w", err)
-	}
-	if len(cr.Content) == 0 {
+	if res.Text == "" {
 		return "", errors.New("summary: empty response content")
 	}
-	return cr.Content[0].Text, nil
+	return res.Text, nil
 }
 
 func truncateStr(s string, max int) string {

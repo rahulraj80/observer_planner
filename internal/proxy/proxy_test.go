@@ -341,6 +341,9 @@ func TestProxy_AnthropicStreaming(t *testing.T) {
 	if tr.StopReason != "end_turn" {
 		t.Errorf("stop_reason: %q", tr.StopReason)
 	}
+	if tr.TimeToFirstTokenMS < 0 || tr.TimeToFirstTokenMS > tr.TotalResponseMS {
+		t.Errorf("ttft=%d total=%d: ttft must lie in [0, total] on a real teed stream", tr.TimeToFirstTokenMS, tr.TotalResponseMS)
+	}
 }
 
 // TestProxy_PopulatesCostUSDOnInsert verifies that when a CostComputer
@@ -3351,7 +3354,7 @@ func TestBuildTurn_FastFromSpeed(t *testing.T) {
 				t.Errorf("buildTurn(speed=%q).Fast = %v, want %v", tc.speed, turn.Fast, tc.wantFast)
 			}
 			// Streaming path parity — same Speed shape, same Fast result.
-			turnStream := p.buildStreamTurn(models.ProviderAnthropic, req, []byte{}, http.Header{}, time.Unix(0, 0), "")
+			turnStream := p.buildStreamTurn(models.ProviderAnthropic, req, []byte{}, http.Header{}, time.Unix(0, 0), time.Time{}, "")
 			if turnStream.Fast != tc.wantFast {
 				t.Errorf("buildStreamTurn(speed=%q).Fast = %v, want %v", tc.speed, turnStream.Fast, tc.wantFast)
 			}
@@ -3422,7 +3425,7 @@ func TestBuildTurn_FastFromServiceTier(t *testing.T) {
 			}
 			inner += `"usage":{"input_tokens":10,"output_tokens":5}}}`
 			sse := []byte("event: response.completed\ndata: " + inner + "\n\n")
-			turnStream := p.buildStreamTurn(models.ProviderOpenAI, req, sse, http.Header{}, time.Unix(0, 0), "")
+			turnStream := p.buildStreamTurn(models.ProviderOpenAI, req, sse, http.Header{}, time.Unix(0, 0), time.Time{}, "")
 			if turnStream.Fast != tc.wantFast {
 				t.Errorf("buildStreamTurn(req=%q,resp=%q).Fast = %v, want %v", tc.reqTier, tc.respTier, turnStream.Fast, tc.wantFast)
 			}

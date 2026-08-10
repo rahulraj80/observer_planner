@@ -4,12 +4,15 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/proxy"
 	"github.com/marmutapp/superbased-observer/internal/routing"
@@ -62,12 +65,15 @@ func liveRouterFixture(t *testing.T, mode string) (*liveRouter, *store.Store, in
 	if routing.LintHasErrors(issues) {
 		t.Fatalf("value template lints dirty: %+v", issues)
 	}
-	refresher := store.NewRoutingRefresher(s, policy, routing.NewTierResolver(), nil)
+	// One price seam for the refresher's snapshot AND the liveRouter's
+	// realized-benefit write, mirroring the production wiring.
+	price := routingPriceFn(cost.NewEngine(config.Default().Intelligence))
+	refresher := store.NewRoutingRefresher(s, policy, routing.NewTierResolver(), price)
 	if err := refresher.RefreshNow(ctx); err != nil {
 		t.Fatalf("RefreshNow: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return newLiveRouter(policy, mode, refresher, s, logger), s, turnID
+	return newLiveRouter(policy, mode, refresher, s, logger, price), s, turnID
 }
 
 func liveShape() proxy.RouterShape {
@@ -93,7 +99,7 @@ func TestLiveRouter_AdviseLogsWithoutActing(t *testing.T) {
 	if v.SelectedModel != "claude-haiku-4-5" {
 		t.Fatalf("verdict = %+v, want the read-only downshift selection", v)
 	}
-	lr.RecordServed(v.Token, turnID, "claude-opus-4-8")
+	lr.RecordServed(v.Token, turnID, "claude-opus-4-8", proxy.RouterUsage{})
 
 	stats, err := s.SelectRouterDecisionStats(context.Background())
 	if err != nil || stats.Count != 1 {
@@ -130,7 +136,7 @@ func TestLiveRouter_JanitorFlushesOrphans(t *testing.T) {
 	// The turn never lands; a later RecordServed for a DIFFERENT token
 	// sweeps the expired orphan.
 	lr.now = func() time.Time { return base.Add(2 * pendingJanitorAge) }
-	lr.RecordServed(999_999, 0, "")
+	lr.RecordServed(999_999, 0, "", proxy.RouterUsage{})
 	stats, err := s.SelectRouterDecisionStats(context.Background())
 	if err != nil || stats.Count != 1 {
 		t.Fatalf("decision rows = %+v err=%v, want the orphan flushed", stats, err)
@@ -191,7 +197,7 @@ func TestLiveRouter_EscalationAfterFailedDownshift(t *testing.T) {
 		t.Fatalf("second verdict = %+v, want escalation hold", v2)
 	}
 	// The decision row carries reason=escalation — flush and check.
-	lr.RecordServed(v2.Token, 0, "")
+	lr.RecordServed(v2.Token, 0, "", proxy.RouterUsage{})
 	stats, err := s.SelectRouterDecisionStats(ctx)
 	if err != nil || stats.Count < 1 {
 		t.Fatalf("decision rows = %+v err=%v", stats, err)
@@ -273,4 +279,146 @@ func TestRunRoutingCalibration_EndToEnd(t *testing.T) {
 	if err != nil || n == 0 {
 		t.Fatalf("calibration cells = %d err=%v, want > 0", n, err)
 	}
+}
+
+// lastRouterDecision reads back the newest decision row.
+func lastRouterDecision(t *testing.T, s *store.Store) store.RouterDecisionDetail {
+	t.Helper()
+	rows, err := s.SelectRouterDecisions(context.Background(), time.Now().Add(-time.Hour), 5)
+	if err != nil {
+		t.Fatalf("SelectRouterDecisions: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no decision rows")
+	}
+	return rows[0]
+}
+
+// scriptedPrice returns a deterministic two-model price seam for
+// realized-benefit math: opus 15/75, haiku 1/5 per 1M tokens.
+func scriptedPrice() routing.PriceFn {
+	return func(model string, u routing.PromptUsage) (float64, bool) {
+		switch model {
+		case "claude-opus-4-8":
+			return float64(u.Input)*15/1e6 + float64(u.Output)*75/1e6, true
+		case "claude-haiku-4-5":
+			return float64(u.Input)*1/1e6 + float64(u.Output)*5/1e6, true
+		}
+		return 0, false
+	}
+}
+
+// TestLiveRouter_RealizedBenefitComputed pins Phase D Stage 0: for an
+// applied downshift with a landed usage bundle, RecordServed writes
+// router_decisions.realized_delta_usd = price(original, usage) −
+// price(served, usage) — the actual dollars the route changed, on the
+// same pricing basis that estimated it. The decision row ALSO carries
+// the live prompt-side estimate (p1-v1 priced on
+// PromptTokensEstimate, labeled usage_basis "live_prompt") — so the
+// realized-vs-estimated comparison has both sides on one row.
+func TestLiveRouter_RealizedBenefitComputed(t *testing.T) {
+	lr, s, turnID := liveRouterFixture(t, "enforce")
+	lr.price = scriptedPrice()
+
+	v := lr.Decide(liveShape(), liveSess())
+	if !v.Apply || v.SelectedModel != "claude-haiku-4-5" {
+		t.Fatalf("verdict = %+v, want applied downshift", v)
+	}
+	// The landed turn consumed 10k input / 1k output on the served model.
+	lr.RecordServed(v.Token, turnID, "claude-haiku-4-5",
+		proxy.RouterUsage{Input: 10_000, Output: 1_000})
+
+	row := lastRouterDecision(t, s)
+	if row.RealizedDeltaUSD == nil {
+		t.Fatalf("realized_delta_usd = nil, want the priced delta")
+	}
+	// opus: 0.15 + 0.075 = 0.225; haiku: 0.01 + 0.005 = 0.015 → 0.21.
+	if want := 0.21; math.Abs(*row.RealizedDeltaUSD-want) > 1e-9 {
+		t.Errorf("realized_delta_usd = %v, want %v", *row.RealizedDeltaUSD, want)
+	}
+	if row.APITurnID == nil || *row.APITurnID != turnID {
+		t.Errorf("decision not linked to the landed turn: %+v", row.APITurnID)
+	}
+	// The estimate side materialized on the live path: prompt-side
+	// dollars priced on the 4k prompt estimate, labeled live_prompt,
+	// sitting next to the realized delta on the same row.
+	if row.EstSavingsUSD <= 0 {
+		t.Errorf("est_savings_usd = %v, want the live prompt-side estimate > 0", row.EstSavingsUSD)
+	}
+	if row.EstimateVersion != routing.EstimateVersion {
+		t.Errorf("estimate_version = %q, want %q", row.EstimateVersion, routing.EstimateVersion)
+	}
+	if !strings.Contains(row.BenefitJSON, `"usage_basis":"live_prompt"`) {
+		t.Errorf("benefit_json = %q, want usage_basis live_prompt", row.BenefitJSON)
+	}
+	if row.BenefitText == "" {
+		t.Error("benefit_text empty on a live-priced decision")
+	}
+}
+
+// TestLiveRouter_RealizedBenefitNil pins the no-claim cases: no model
+// change (advise rows, dated echoes of the original), zero-usage
+// turns, and unpriceable served models all leave realized_delta_usd
+// nil rather than inventing a dollar figure.
+func TestLiveRouter_RealizedBenefitNil(t *testing.T) {
+	t.Run("advise_served_original", func(t *testing.T) {
+		lr, s, turnID := liveRouterFixture(t, "advise")
+		lr.price = scriptedPrice()
+		v := lr.Decide(liveShape(), liveSess())
+		if v.Apply {
+			t.Fatal("advise mode applied")
+		}
+		lr.RecordServed(v.Token, turnID, "claude-opus-4-8",
+			proxy.RouterUsage{Input: 10_000, Output: 1_000})
+		if row := lastRouterDecision(t, s); row.RealizedDeltaUSD != nil {
+			t.Errorf("realized_delta_usd = %v, want nil (served the original)", *row.RealizedDeltaUSD)
+		}
+	})
+	t.Run("dated_echo_of_original", func(t *testing.T) {
+		lr, s, turnID := liveRouterFixture(t, "enforce")
+		lr.price = scriptedPrice()
+		v := lr.Decide(liveShape(), liveSess())
+		if !v.Apply {
+			t.Fatal("enforce did not apply")
+		}
+		// The response echoed a DATED alias of the ORIGINAL model — an
+		// availability-fallback annotation, but no route to price.
+		lr.RecordServed(v.Token, turnID, "claude-opus-4-8-20250805",
+			proxy.RouterUsage{Input: 10_000, Output: 1_000})
+		if row := lastRouterDecision(t, s); row.RealizedDeltaUSD != nil {
+			t.Errorf("realized_delta_usd = %v, want nil (same model, dated echo)", *row.RealizedDeltaUSD)
+		}
+	})
+	t.Run("zero_usage_turn", func(t *testing.T) {
+		lr, s, turnID := liveRouterFixture(t, "enforce")
+		lr.price = scriptedPrice()
+		v := lr.Decide(liveShape(), liveSess())
+		if !v.Apply {
+			t.Fatal("enforce did not apply")
+		}
+		lr.RecordServed(v.Token, turnID, "claude-haiku-4-5", proxy.RouterUsage{})
+		if row := lastRouterDecision(t, s); row.RealizedDeltaUSD != nil {
+			t.Errorf("realized_delta_usd = %v, want nil (no usage landed)", *row.RealizedDeltaUSD)
+		}
+	})
+	t.Run("unpriceable_served", func(t *testing.T) {
+		lr, s, turnID := liveRouterFixture(t, "enforce")
+		// The price seam knows the original but not the served model —
+		// no dollar claim can be honest.
+		lr.price = routing.PriceFn(func(model string, u routing.PromptUsage) (float64, bool) {
+			if model == "claude-opus-4-8" {
+				return float64(u.Input)*15/1e6 + float64(u.Output)*75/1e6, true
+			}
+			return 0, false
+		})
+		v := lr.Decide(liveShape(), liveSess())
+		if !v.Apply {
+			t.Fatal("enforce did not apply")
+		}
+		lr.RecordServed(v.Token, turnID, "claude-haiku-4-5",
+			proxy.RouterUsage{Input: 10_000, Output: 1_000})
+		if row := lastRouterDecision(t, s); row.RealizedDeltaUSD != nil {
+			t.Errorf("realized_delta_usd = %v, want nil (served model unpriceable)", *row.RealizedDeltaUSD)
+		}
+	})
 }

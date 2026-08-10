@@ -1814,11 +1814,33 @@ export type IntelligenceConfig = {
 // The full Config object — most sections are opaque to the dashboard
 // (we render them as read-only JSON). Intelligence + a few others
 // are typed enough to drive forms.
+export type LLMConnectionConfig = {
+  Name: string;
+  Kind: string;
+  BaseURL: string;
+  APIKeyEnv?: string;
+  APIKeyKeychain?: string;
+  Models?: string[] | null;
+  DefaultModel?: string;
+  TaskRoles?: string[] | null;
+  Enabled: boolean;
+  AllowRemote: boolean;
+  TimeoutMS?: number;
+  MaxTokens?: number;
+  NumCtx?: number;
+  Headers?: Record<string, string> | null;
+};
+
+export type LLMConfig = {
+  Connections?: Record<string, LLMConnectionConfig> | null;
+};
+
 export type ConfigShape = {
   Observer: Record<string, unknown>;
   Intelligence: IntelligenceConfig;
   Proxy: Record<string, unknown>;
   Compression: Record<string, unknown>;
+  LLM?: LLMConfig;
   [key: string]: unknown;
 };
 

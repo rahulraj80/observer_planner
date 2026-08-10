@@ -76,6 +76,12 @@ type Server struct {
 	// G13). Non-nil only when [digest].enabled AND the shared [email] notifier
 	// is present; runs alongside the HTTP server like the evaluators.
 	digestScheduler *digest.Scheduler
+	// briefingScheduler is the OPTIONAL daily manager-briefing digest (Phase C
+	// of docs/design/standup-briefing.md §4). Same gating as digestScheduler
+	// (needs [digest].enabled AND [email]); it carries its own send-once marker
+	// (kind='briefing') so it composes independently of the weekly/monthly org
+	// spend digest. Non-nil only when built in New.
+	briefingScheduler *digest.Scheduler
 }
 
 // New validates the config and performs all fallible setup: it opens the
@@ -293,7 +299,17 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 		logger.Warn("digest disabled: [digest].enabled set but [email] is not enabled")
 	}
 
-	return &Server{cfg: cfg, db: db, org: org, logger: logger, handler: handler, evaluator: evaluator, obsAlertEval: obsAlertEval, ccScheduler: ccScheduler, codexScheduler: codexScheduler, copilotSchedulers: copilotSchedulers, m365Schedulers: m365Schedulers, retentionSweeper: retentionSweeper, digestScheduler: digestScheduler}, nil
+	// Daily manager-briefing digest (Phase C of docs/design/standup-briefing.md
+	// §4) — the SAME gating as the spend digest: needs [digest].enabled AND the
+	// [email] channel (it is delivered by email). Its own kind='briefing'
+	// send-once marker keeps the two independent; the daily frequency is fixed
+	// regardless of [digest].frequency (that knob governs the org spend digest).
+	var briefingScheduler *digest.Scheduler
+	if cfg.Digest.Enabled && emailNotifier != nil {
+		briefingScheduler = digest.NewBriefingScheduler(db, org, cfg.Digest, emailNotifier, AppVersion, cfg.Email.To, logger)
+	}
+
+	return &Server{cfg: cfg, db: db, org: org, logger: logger, handler: handler, evaluator: evaluator, obsAlertEval: obsAlertEval, ccScheduler: ccScheduler, codexScheduler: codexScheduler, copilotSchedulers: copilotSchedulers, m365Schedulers: m365Schedulers, retentionSweeper: retentionSweeper, digestScheduler: digestScheduler, briefingScheduler: briefingScheduler}, nil
 }
 
 // buildCCScheduler constructs the CC Analytics poller/scheduler (native-console
@@ -515,6 +531,12 @@ func (s *Server) Run(ctx context.Context) error {
 		go s.digestScheduler.Run(ctx)
 	}
 
+	// Daily manager-briefing digest (optional) runs alongside; stops on ctx
+	// cancel. Independent send-once marker, so both may run.
+	if s.briefingScheduler != nil {
+		go s.briefingScheduler.Run(ctx)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		s.logger.Info("org server listening", "addr", s.cfg.Server.Listen, "org", s.org.OrgName)
@@ -693,6 +715,22 @@ func buildMux(d buildDeps) http.Handler {
 	mux.Handle("GET /api/org/obs/eval/run/content", requireAdminSAML(obsEvalRunContentHandler(d.db)))
 	mux.Handle("GET /api/org/obs/eval/run", requireAdminSAML(obsEvalRunHandler(d.db)))
 	mux.Handle("GET /api/org/obs/eval/compare", requireAdminSAML(obsEvalCompareHandler(d.db)))
+
+	// Daily briefing (Phase C of docs/design/standup-briefing.md §4): the
+	// role-scoped COMPOSED briefing for any SAML member (admins see the whole
+	// org, leads only their teams — resolved per-request by the handler), and
+	// the pushed hash-only AGGREGATE feed (node [org_client.share]
+	// briefing_aggregates opt-in) for admins only. Manual routes — the org
+	// OpenAPI spec is gitignored in this checkout, so no codegen; they mirror
+	// the obs/enduser-spend manual-route pattern.
+	briefingSAML := auth.RequireSAMLSession(d.sessions, auth.JSONUnauthorized())
+	mux.Handle("GET /api/org/briefing", briefingSAML(http.HandlerFunc(d.orgAPI.GetOrgBriefing)))
+	mux.Handle("GET /api/org/briefing/aggregates", requireAdminSAML(http.HandlerFunc(d.orgAPI.GetOrgBriefingAggregates)))
+
+	// Virtuous-cycle trend (Stage 3 of docs/design/standup-briefing.md):
+	// admin-only endpoint for the cumulative CTA-applies → savings trend.
+	// Manual route — mirrors the obs/enduser-spend pattern.
+	mux.Handle("GET /api/org/virtuous-cycle", requireAdminSAML(virtuousCycleHandler(d.db)))
 
 	// Org dashboard data endpoints (/api/org/*) via the generated registrar.
 	// The scope-aware samlSecurity middleware enforces the SAML session on the

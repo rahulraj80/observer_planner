@@ -54,6 +54,10 @@ func NewWithOptions(s *scrub.Scrubber, roots []string) *Adapter {
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolCrush }
 
+// SQLiteBacked implements adapter.SQLiteBacked — the store is queried
+// incrementally by updated_at watermark, never read whole.
+func (*Adapter) SQLiteBacked() bool { return true }
+
 // WatchPaths implements adapter.Adapter. The roots are a snapshot taken at
 // construction: the Crush global state dirs plus the project data dirs
 // (<project>/.crush) read from projects.json. A project created AFTER the

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync"
@@ -30,6 +31,11 @@ type liveRouter struct {
 	store     *store.Store
 	logger    *slog.Logger
 	now       func() time.Time
+	// price prices a landed usage bundle at a model — the realized-
+	// benefit seam (router_decisions.realized_delta_usd). Same adapter
+	// the refresher's snapshot carries, so realized and estimated math
+	// share one pricing basis.
+	price routing.PriceFn
 
 	mu       sync.Mutex
 	sessions map[string]*liveSessionState
@@ -101,13 +107,14 @@ const pendingJanitorAge = 60 * time.Second
 // liveSessionCap bounds the coherence map on long-running daemons.
 const liveSessionCap = 1024
 
-func newLiveRouter(policy routing.Policy, mode string, refresher *store.RoutingRefresher, s *store.Store, logger *slog.Logger) *liveRouter {
+func newLiveRouter(policy routing.Policy, mode string, refresher *store.RoutingRefresher, s *store.Store, logger *slog.Logger, price routing.PriceFn) *liveRouter {
 	return &liveRouter{
 		policy:    policy,
 		mode:      mode,
 		refresher: refresher,
 		store:     s,
 		logger:    logger,
+		price:     price,
 		now:       time.Now,
 		sessions:  map[string]*liveSessionState{},
 		pending:   map[int64]pendingDecision{},
@@ -227,8 +234,11 @@ func (lr *liveRouter) Decide(shape proxy.RouterShape, sess proxy.RouterSession) 
 // decision row plus any janitor-expired orphans. A served model
 // differing from the decision's selection means the §R12.1 fallback
 // chain fired after the decision — the row is annotated with
-// availability_fallback and records what actually served.
-func (lr *liveRouter) RecordServed(token, apiTurnID int64, servedModel string) {
+// availability_fallback and records what actually served. The landed
+// usage bundle prices the realized benefit (realized_delta_usd) — the
+// Phase D virtuous-cycle "did it actually help" number, computed on
+// the p1-v1 basis that estimated it.
+func (lr *liveRouter) RecordServed(token, apiTurnID int64, servedModel string, usage proxy.RouterUsage) {
 	now := lr.now()
 	lr.mu.Lock()
 	rows := lr.collectExpiredLocked(now)
@@ -251,10 +261,55 @@ func (lr *liveRouter) RecordServed(token, apiTurnID int64, servedModel string) {
 			pend.row.Applied = true
 			pend.row.ReasonCodes = append(pend.row.ReasonCodes, string(routing.ReasonAvailabilityFallback))
 		}
+		pend.row.RealizedDeltaUSD = realizedDelta(lr.price, pend.row, servedModel, usage)
 		rows = append(rows, pend.row)
 	}
 	lr.mu.Unlock()
 	lr.insertRows(rows)
+}
+
+// realizedDelta prices the landed turn's usage at both the original
+// (the un-routed counterfactual) and the actually-served model and
+// returns the realized dollar delta = price(original) − price(served).
+// Written to router_decisions.realized_delta_usd at insert time. Nil
+// when no dollar claim is honest: no price seam, either model
+// unpriceable, no usage landed (error/zero-token turns), or no model
+// change happened this turn (advise mode / effort-only holds served
+// the original — nothing to measure, not a zero claim).
+func realizedDelta(price routing.PriceFn, row store.RouterDecisionRow, servedModel string, usage proxy.RouterUsage) *float64 {
+	if price == nil || servedModel == "" || row.OriginalModel == "" {
+		return nil
+	}
+	// No model change this turn — a dated echo of the original model
+	// (e.g. claude-opus-4-8-20250805) must not look like a route.
+	if sameModelID(servedModel, row.OriginalModel) {
+		return nil
+	}
+	u := routing.PromptUsage{
+		Input:           usage.Input,
+		Output:          usage.Output,
+		CacheRead:       usage.CacheRead,
+		CacheCreation:   usage.CacheCreation,
+		CacheCreation1h: usage.CacheCreation1h,
+		Fast:            usage.Fast,
+	}
+	if !usageObserved(u) {
+		return nil
+	}
+	before, ok1 := price(row.OriginalModel, u)
+	after, ok2 := price(servedModel, u)
+	if !ok1 || !ok2 {
+		return nil
+	}
+	delta := before - after
+	return &delta
+}
+
+// usageObserved reports whether the landed bundle carries any tokens
+// to price — a zero-usage turn can't realize a dollar claim.
+func usageObserved(u routing.PromptUsage) bool {
+	return u.Input > 0 || u.Output > 0 || u.CacheRead > 0 ||
+		u.CacheCreation > 0 || u.CacheCreation1h > 0
 }
 
 // sessionStateLocked returns (creating if needed) the session's
@@ -329,7 +384,7 @@ func decisionRow(d routing.Decision, mode, sessionID string, applied bool, ts ti
 	for i, rc := range d.ReasonCodes {
 		codes[i] = string(rc)
 	}
-	return store.RouterDecisionRow{
+	row := store.RouterDecisionRow{
 		SessionID:       sessionID,
 		Timestamp:       ts,
 		Mode:            mode,
@@ -344,7 +399,16 @@ func decisionRow(d routing.Decision, mode, sessionID string, applied bool, ts ti
 		CacheForfeitUSD: d.CacheForfeitUSD,
 		EstimateVersion: d.EstimateVersion,
 		Applied:         applied,
+		BenefitText:     d.BenefitText,
+		EntitlementKind: d.Entitlement,
+		EffectiveBasis:  d.EffectiveBasis,
 	}
+	if d.Benefit != nil {
+		if b, err := json.Marshal(d.Benefit); err == nil {
+			row.BenefitJSON = string(b)
+		}
+	}
+	return row
 }
 
 // sameModelID compares model ids ignoring case and a trailing

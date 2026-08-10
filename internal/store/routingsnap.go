@@ -67,6 +67,7 @@ type slowSignals struct {
 	budgetBurn []routing.BudgetBurnState
 	latencyP75 map[string]int64
 	window     *routing.WindowState
+	evidence   map[routing.EvidenceKey]routing.QualityEvidence
 }
 
 // Breaker thresholds (§R12.3). Passive: computed from the observed
@@ -174,6 +175,7 @@ func (r *RoutingRefresher) publish(ctx context.Context) error {
 		Window:           r.slow.window,
 		SessionCacheRead: cacheReads,
 		Sessions:         sessions,
+		Evidence:         r.slow.evidence,
 	}
 	r.snap.Store(snap)
 	return nil
@@ -194,7 +196,11 @@ func (r *RoutingRefresher) refreshSlow(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("store.RoutingRefresher: window: %w", err)
 	}
-	r.slow = slowSignals{budgetBurn: burn, latencyP75: lat, window: win}
+	ev, err := r.computeCalibrationEvidence(ctx)
+	if err != nil {
+		return fmt.Errorf("store.RoutingRefresher: calibration evidence: %w", err)
+	}
+	r.slow = slowSignals{budgetBurn: burn, latencyP75: lat, window: win, evidence: ev}
 	return nil
 }
 
@@ -765,6 +771,78 @@ func (s *Store) selectRoutingSessionMeta(ctx context.Context, since time.Time) (
 		}
 	}
 	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------- calibration evidence
+
+// computeCalibrationEvidence pools the model_calibration GLOBAL cells
+// (project_id 0 — the node-level §R7.2 substrate; per-project cells
+// inform the dashboard, node-level signals act on node-level evidence)
+// up to (turn-kind, tier), then grades each tier against the kind's
+// highest-tier baseline pool through the pure routing derivation (§5.4
+// evidence_quality). The calibration job refreshes the cells hourly; the
+// slow tick re-pools them. An empty table (or a kind with a single
+// tier) yields nothing — the engine then reports quality unknown.
+func (r *RoutingRefresher) computeCalibrationEvidence(ctx context.Context) (map[routing.EvidenceKey]routing.QualityEvidence, error) {
+	rows, err := r.store.SelectModelCalibrations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pools := map[routing.EvidenceKey]*routing.EvidenceSample{}
+	for _, row := range rows {
+		if row.ProjectID != 0 {
+			continue
+		}
+		tier, _ := r.resolver.Lookup(row.Model)
+		if tier == routing.TierUnclassified {
+			continue // nothing meaningful to pool against
+		}
+		key := routing.EvidenceKey{Kind: routing.TurnKind(row.TurnKind), Tier: tier}
+		acc := pools[key]
+		if acc == nil {
+			acc = &routing.EvidenceSample{}
+			pools[key] = acc
+		}
+		acc.N += row.N
+		acc.ErrorGraded += row.ErrorGraded
+		acc.ErrorCount += row.ErrorCount
+		acc.ToolGraded += row.ToolActionCount
+		acc.ToolFailures += row.ToolFailureCount
+	}
+
+	byKind := map[routing.TurnKind]map[routing.Tier]*routing.EvidenceSample{}
+	for key, acc := range pools {
+		tiers := byKind[key.Kind]
+		if tiers == nil {
+			tiers = map[routing.Tier]*routing.EvidenceSample{}
+			byKind[key.Kind] = tiers
+		}
+		tiers[key.Tier] = acc
+	}
+
+	out := map[routing.EvidenceKey]routing.QualityEvidence{}
+	for kind, tiers := range byKind {
+		if len(tiers) < 2 {
+			continue // no second tier to grade against
+		}
+		var (
+			baselineTier routing.Tier
+			baseline     *routing.EvidenceSample
+			first        bool
+		)
+		for tier, acc := range tiers {
+			if !first || tier.Rank() > baselineTier.Rank() {
+				baselineTier, baseline, first = tier, acc, true
+			}
+		}
+		for tier, acc := range tiers {
+			if tier == baselineTier || tier.Rank() >= baselineTier.Rank() {
+				continue // only downshift targets carry a signal
+			}
+			out[routing.EvidenceKey{Kind: kind, Tier: tier}] = routing.QualityEvidenceFor(*acc, *baseline, routing.MinEvidenceSample)
+		}
+	}
+	return out, nil
 }
 
 // logWarn writes a refresher warning through the observer log; best
