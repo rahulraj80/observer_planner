@@ -37,6 +37,86 @@
 
 ---
 
+## This fork (`observer_planner`)
+
+`observer_planner` is a feature fork of
+[`superbasedapp/observer`](https://github.com/superbasedapp/observer) (v1.27.0
+baseline) maintained by `rahulraj80`. Everything above this section describes
+the upstream product; the sections below describe what this fork adds on top.
+
+**Source of truth for the delta:** this fork is a **single squashed commit**
+(`67a855e`) over the upstream baseline — no upstream history is rewritten.
+All added functionality ships in the ordinary places (pure composer in
+`internal/briefing/`, API routes in
+`internal/intelligence/dashboard/briefing.go` / `cta.go`, store seams in
+`internal/store/briefing*.go`, embedded web builds in
+`internal/intelligence/dashboard/webapp/dist/`, org-side rollup in
+`internal/orgserver/rollup/briefing.go`).
+
+### What this fork adds
+
+- **Daily Briefing planner** (`/briefing` in the solo dashboard and org
+  dashboard). A data-only stand-up page that tells yesterday's story in one
+  screen: at-a-glance KPIs, per-tool activity, top sessions, a narrative, and
+  expandable opportunity cards (routing-shadow savings, trivial-model
+  overprovisioning, low cache hit-rate, long-context surcharge, recurring
+  failures, realized-vs-estimated, virtuous-cycle). The composer
+  (`internal/briefing/`) is pure and deterministic: zero network, no prompt
+  text, no file paths — identical inputs always produce the identical
+  Briefing, served from a per-day snapshot for reproducibility + audit.
+- **One-click CTA on opportunity cards** (Stage 1 + Stage 2). Every
+  actionable card carries Apply / Pause / Snooze / Resume / Revert buttons
+  backed by a durable, append-only JSONL ledger
+  (`~/.observer/briefing-cta-ledger.jsonl`). Applying a routing lever
+  (mode / policy / stickiness) edits `config.toml` through a single
+  write-owner with an atomic `.bak` backup; reverts are keyed so a per-card
+  applied badge never drifts; snoozed/paused cards move to a suspended strip
+  with one-click Resume. Everything is per-node and opt-in — no remote toggle.
+- **LLM analysis connections** (opt-in). `observer llm` manages keychain-backed
+  connections (anthropic / openai-compat / local models) that upgrade the
+  briefing's narrative, open questions, and ask-your-past retrieval — with
+  **zero configured connections the fork behaves byte-for-byte like upstream**
+  (deterministic template narrative). Analysis calls are accounted separately
+  in `analysis_calls` (migration `079`) and never leave the machine.
+- **Org manager briefing** (Phase C). The org dashboard composes the org's day
+  from every enrolled node into the same pure `internal/briefing` document,
+  shipped hash-only under `[org_client.share] briefing_aggregates = true`, plus
+  a daily `observer-org digest --kind briefing` email.
+- **Realized-vs-estimated + virtuous-cycle reporting.** Routing CTAs report
+  measured savings against the apply-time estimate; the virtuous-cycle rollup
+  tracks repeated applies week over week (migrations `082`, `085`).
+- **Supporting infra.** New migrations `078`–`085` (briefing snapshots,
+  analysis calls, turn-kind dispatch, license usage, dispatch benefit,
+  cross-provider rollup, session-summary FTS, token-usage timestamp index);
+  `observer demoseed` deterministic dataset generator; routing benefit /
+  evidence seams; licenses + ModelFit dashboard pages; observer.ps1/bat
+  daemon scripts.
+
+### Compatibility guarantees
+
+- **No-network-by-default** is preserved — every added read surface is local;
+  the only new outbound channels are individually opt-in (LLM connections,
+  org push).
+- **Org push stays hash-only** — the briefing aggregate is content-free by
+  construction (counts / tokens / costs / model / tool / project-hash only).
+- **Idempotency + migration discipline** hold — new work reuses the existing
+  `(source_file, source_event_id)` keying and adds numbered migrations; none
+  of the upstream `001`–`077` files are modified.
+- The `tests/invariant` golden net still passes: solo-local responses are
+  unchanged by the added Teams code.
+
+### Applying this fork over upstream
+
+```bash
+git clone https://github.com/superbasedapp/observer
+cd observer
+git fetch https://github.com/rahulraj80/observer_planner main
+git cherry-pick 67a855e   # or: git apply <observer-full-changes.patch>
+make build
+```
+
+---
+
 ## What it is in 30 seconds
 
 A single local Go binary built on three things a hosted usage console
