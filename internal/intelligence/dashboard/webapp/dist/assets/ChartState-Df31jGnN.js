@@ -1,2 +1,0 @@
-import{j as e}from"./vendor-react-DcQPdiaM.js";import{e as i}from"./index-CDdi28Ub.js";function m({loading:s,error:r,empty:n,emptyHint:x,height:t=220,children:a}){return s?e.jsx(i,{height:t}):r?e.jsx("div",{className:"flex items-center justify-center px-4 text-center text-[11px] text-danger",style:{height:t},children:r.message.slice(0,240)}):n?e.jsx("div",{className:"flex items-center justify-center text-[11px] text-fg-3",style:{height:t},children:x||"No data."}):e.jsx(e.Fragment,{children:a})}export{m as C};
-//# sourceMappingURL=ChartState-Df31jGnN.js.map

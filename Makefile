@@ -29,7 +29,7 @@ OAPI         := $(GO) tool oapi-codegen
 
 all: fmt vet lint test build
 
-build: build-observer build-antigravity-bridge build-orgserver
+build: check-web-dist build-observer build-antigravity-bridge build-orgserver
 
 build-observer:
 	@mkdir -p $(BUILD_DIR)
@@ -141,11 +141,15 @@ clean:
 # ---------------------------------------------------------------
 # Web (redesigned React/Vite dashboard, mounted at /v2/).
 #
-# `make build` stays pure-Go and does NOT require Node. The built
-# artifacts at $(WEB_EMBED_DIST) are committed; regenerate them
-# via `make web-build` whenever you touch web/ sources, before
-# committing.
+# `make build` stays pure-Go and does NOT require Node — but it DOES
+# require the embedded bundles on disk. dist/ is gitignored (never
+# committed): run `make web-build` once after cloning and whenever
+# you touch web/ sources. The check-web-dist guard fails fast with
+# that hint instead of shipping an empty UI.
 # ---------------------------------------------------------------
+check-web-dist:
+	@test -f $(WEB_EMBED_DIST)/index.html || (echo "error: $(WEB_EMBED_DIST)/index.html missing - run 'make web-build' first (dist/ is gitignored)" >&2; exit 1)
+	@test -f $(WEB2_EMBED_DIST)/index.html || (echo "error: $(WEB2_EMBED_DIST)/index.html missing - run 'make web-build-org' first (dist/ is gitignored)" >&2; exit 1)
 web-install:
 	cd $(WEB_DIR) && npm ci
 
@@ -162,9 +166,9 @@ web-build:
 web-clean:
 	rm -rf $(WEB_DIST) $(WEB_DIR)/node_modules
 
-# Build the org dashboard SPA (web2/) and refresh its embedded dist. Mirrors
-# web-build; the artifacts at $(WEB2_EMBED_DIST) are committed and embedded
-# into the observer-org binary.
+# Build the org dashboard SPA (web2/) and refresh its embedded dist.
+# Mirrors web-build; the bundle is gitignored and embedded into the
+# observer-org binary at compile time.
 web-build-org:
 	cd $(WEB2_DIR) && npm ci --silent && npm run build
 	@rm -rf $(WEB2_EMBED_DIST)

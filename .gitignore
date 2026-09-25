@@ -23,22 +23,13 @@ bin/
 !vscode/bin/
 !vscode/bin/.gitkeep
 
-# Build artifacts
+# Build artifacts — NEVER committed (2026-09-25: committed 20–50 MB
+# minified bundles bloated every git diff and downstream session store).
+# The embedded dashboards are built from web/ sources at build time:
+# local dev runs `make web-build` / `make web-build-org`, CI passes
+# dist via job artifacts, releases build it in npm-release.yml.
 dist/
 build/
-
-# Re-include committed React/Vite build outputs (the embedded /v2/
-# dashboard is shipped as part of the Go binary; web-build regenerates
-# these from web/ sources). Without these re-includes the global
-# dist/ rule above silently swallows the committed bundles.
-!web/dist
-!web/dist/**
-!internal/intelligence/dashboard/webapp/dist
-!internal/intelligence/dashboard/webapp/dist/**
-!web2/dist
-!web2/dist/**
-!internal/orgserver/dashboard/webapp/dist
-!internal/orgserver/dashboard/webapp/dist/**
 
 # React/Vite ephemeral state
 web/node_modules/

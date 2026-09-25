@@ -1,8 +1,10 @@
 # Continuous-integration gates — run on every PR + every push to
 # main. Catches frontend type errors, Go vet/test regressions, and
-# the "I forgot to run `make web-build` before committing" class of
-# bug that silently shipped pre-v1.6.0.
+# stale-embed bugs (a frontend change that never makes it into the
+# built bundle fails the UI tests, not a diff gate).
 #
+# Build outputs are NEVER committed (see .gitignore): the frontend job
+# builds both SPAs fresh and passes them to the go job as artifacts.
 # Tagged-release builds are handled by npm-release.yml; this file is
 # the pre-merge / pre-tag safety net.
 
@@ -18,11 +20,10 @@ permissions:
 
 jobs:
   # ----------------------------------------------------------------
-  # React frontend gates: install, typecheck, build. Also asserts the
-  # committed embedded dist matches what a fresh build produces — if
-  # `web/src/` was edited without rerunning `make web-build`, this
-  # job fails with a clear actionable message. Without this gate the
-  # embedded bundle silently drifted from the React source.
+  # React frontend gates: install, typecheck, build both SPAs. The
+  # bundles are uploaded as artifacts for the go job — nothing built
+  # is committed to git. A stale UI can't ship: the go job tests and
+  # compiles against exactly what this job just built.
   # ----------------------------------------------------------------
   frontend:
     name: frontend
@@ -51,36 +52,63 @@ jobs:
           cd web
           npm run build
 
-      - name: dist consistency check
-        # Mirrors `make web-build`'s second half: regenerates the
-        # embedded dir from web/dist and asserts it matches what's
-        # committed. If it doesn't, the dev edited web/src/ but
-        # forgot to commit the rebuilt bundle — a stale embed would
-        # ship on the next release.
+      - name: build web2
+        run: |
+          cd web2
+          npm ci
+          npm run build
+
+      - name: upload web dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+          if-no-files-found: error
+
+      - name: upload web2 dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web2-dist
+          path: web2/dist/
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------
+  # Go gates — vet, test, build. Depends on the frontend job: dist/
+  # is gitignored, so this job downloads both SPA bundles as
+  # artifacts and stages them into the embed dirs before compiling.
+  # ----------------------------------------------------------------
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    needs: [frontend]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: fetch frontend bundles
+        # dist/ is gitignored: populate both embed dirs from the
+        # frontend job's artifacts (mirrors `make web-build`).
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+
+      - name: fetch web2 bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: web2-dist
+          path: web2/dist/
+
+      - name: stage embedded dists
         run: |
           set -euo pipefail
           rm -rf internal/intelligence/dashboard/webapp/dist
           mkdir -p internal/intelligence/dashboard/webapp/dist
           cp -R web/dist/. internal/intelligence/dashboard/webapp/dist/
-          if ! git diff --quiet --exit-code internal/intelligence/dashboard/webapp/dist; then
-            echo "::error::Committed webapp/dist drifted from web/dist. Run \`make web-build\` and commit the result."
-            git diff --stat internal/intelligence/dashboard/webapp/dist | head -40
-            exit 1
-          fi
-          echo "embedded dist matches fresh build ✓"
-
-  # ----------------------------------------------------------------
-  # Go gates — vet, test, build. Pure-Go so no special toolchain
-  # beyond setup-go. Frontend build is independent (this job doesn't
-  # need a fresh dist to compile; the committed embed satisfies the
-  # //go:embed directive at compile time, even if it's stale for the
-  # purposes of the runtime UI).
-  # ----------------------------------------------------------------
-  go:
-    name: go
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
+          rm -rf internal/orgserver/dashboard/webapp/dist
+          mkdir -p internal/orgserver/dashboard/webapp/dist
+          cp -R web2/dist/. internal/orgserver/dashboard/webapp/dist/
+          test -f internal/intelligence/dashboard/webapp/dist/index.html
+          test -f internal/orgserver/dashboard/webapp/dist/index.html
 
       - uses: actions/setup-go@v6
         with:
@@ -118,10 +146,9 @@ jobs:
         run: go test -race -timeout 40m ./...
 
       - name: build
-        # `make build` skipped here — that target requires Node for
-        # web-build, which the frontend job already verified. This
-        # step exercises the Go compile path against the committed
-        # embedded dist.
+        # `make build` skipped here — that target requires a populated
+        # embed dist, which the artifact steps above just staged. This
+        # step exercises the Go compile path against the fresh bundle.
         run: |
           mkdir -p bin
           go build -trimpath -o bin/observer ./cmd/observer
