@@ -213,7 +213,7 @@ func policyChangesWithin(log []PolicyStateEntry, p Period) []PolicyStateEntry {
 // verification, coverage matrix, exception register.
 func RenderText(r Report) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Guard evidence pack — period %s (%s — %s)\n",
+	fmt.Fprintf(&b, "Guard evidence pack - period %s (%s - %s)\n",
 		r.Period.Label, stamp(r.Period.Start), stamp(r.Period.End))
 	fmt.Fprintf(&b, "Generated %s · observer %s · guard %s mode %s\n",
 		stamp(r.GeneratedAt), orDash(r.ObserverVersion), onOff(r.GuardEnabled), orDash(r.Mode))
@@ -253,7 +253,7 @@ func RenderText(r Report) string {
 
 	b.WriteString("\n== Audit-chain verification ==\n")
 	if r.Chain.OK {
-		fmt.Fprintf(&b, "  OK — %d row(s) verified (tamper-evident, not tamper-proof: see docs/guard-compliance.md)\n", r.Chain.Checked)
+		fmt.Fprintf(&b, "  OK - %d row(s) verified (tamper-evident, not tamper-proof: see docs/guard-compliance.md)\n", r.Chain.Checked)
 	} else {
 		fmt.Fprintf(&b, "  BROKEN at id %d (%d row(s) walked) — %s\n",
 			r.Chain.FirstDivergenceID, r.Chain.Checked, r.Chain.Detail)

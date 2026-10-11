@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 SuperBased
 
@@ -18,7 +20,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/record"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // This file is the COMPOSED-ENVELOPE sentinel for the 2026-08-26 host-crash
@@ -406,7 +408,7 @@ func seedEveryWireFamily(t *testing.T, s *Store) {
 	for i := 0; i < 20; i++ {
 		seedNetworkEvent(t, s, sessionID, "proxy:env", now.Add(-time.Duration(i)*time.Second),
 			map[string]any{"capture_source": "proxy", "method": "POST"},
-			&processobs.NetworkBodyCapture{CaptureSource: "proxy", RequestBody: body, ResponseBody: body})
+			&procmodel.NetworkBodyCapture{CaptureSource: "proxy", RequestBody: body, ResponseBody: body})
 	}
 
 	// project_patterns → ProjectPatterns.

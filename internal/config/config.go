@@ -18,18 +18,22 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/marmutapp/superbased-observer/internal/notify/digest"
-	"github.com/marmutapp/superbased-observer/internal/notify/email"
-	"github.com/marmutapp/superbased-observer/internal/sandboxnet"
+	"github.com/marmutapp/superbased-observer/internal/notifycfg"
+	"github.com/marmutapp/superbased-observer/internal/sandboxcidr"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
-	"github.com/marmutapp/superbased-observer/internal/sshprofile"
-	"github.com/marmutapp/superbased-observer/internal/update"
+	"github.com/marmutapp/superbased-observer/internal/sshspec"
+	"github.com/marmutapp/superbased-observer/internal/updatespec"
 )
 
 // Config is the root configuration for the observer. Field defaults are set
 // by Default(). Partial TOML files (including missing sections) are supported
 // — unspecified fields retain their defaults.
 type Config struct {
+	// Deferred lists the settings Load switched off because this build
+	// cannot honour them yet (D-514), one reason each. Never read from or
+	// written to the file; `observer start` prints them once.
+	Deferred []string `toml:"-" json:"-"`
+
 	Observer     ObserverConfig     `toml:"observer"`
 	Proxy        ProxyConfig        `toml:"proxy"`
 	Dashboard    DashboardConfig    `toml:"dashboard"`
@@ -79,12 +83,12 @@ type Config struct {
 	// (a fired alert makes an outbound SMTP call). Reused by the node-side
 	// obs-alert loop; the org server has its own [email] block. See
 	// internal/notify/email.
-	Email email.Config `toml:"email"`
+	Email notifycfg.EmailConfig `toml:"email"`
 	// Digest is the [digest] surface — the scheduled personal cost digest
 	// (gap-register G13): a weekly/monthly per-tool/per-model spend rollup
 	// emailed through the shared [email] channel. LOCAL-ONLY. OPT-IN: default
 	// off, and additionally requires [email].enabled. See internal/notify/digest.
-	Digest digest.Config `toml:"digest"`
+	Digest notifycfg.DigestConfig `toml:"digest"`
 	// Observability is the [observability] surface — the generalized
 	// observability subsystem (internal/obs). OPT-IN: default false.
 	Observability ObservabilityConfig `toml:"observability"`
@@ -115,17 +119,26 @@ type Config struct {
 	// CloudConfig for the precedence rule (flag > env > this > built-in
 	// default). LOCAL-ONLY; never distributed via the org policy registry.
 	Cloud CloudConfig `toml:"cloud"`
-	// Pricing is the [pricing] surface — today only the [pricing.feed]
-	// sub-block, the standalone-node opt-in pricing feed client (docs/plans/
+	// Pricing is the [pricing] surface: today only the [pricing.feed]
+	// sub-block, the standalone-node pricing feed client (docs/plans/
 	// pricing-sync-tokenomics-to-platform-plan-2026-09-11.md §C.4 / D7: a NEW
 	// top-level block, kept distinct from [intelligence.pricing] which is the
-	// node's OWN authored price table). LOCAL-ONLY, never distributed, and OFF
-	// by default in every path — an enrolled node receives prices through its
-	// org rail and never consults the public feed (§C.3/D8).
+	// node's OWN authored price table). LOCAL-ONLY and never distributed. The
+	// feed is ON by default (operator decisions 2026-09-20 and D-374: a stale
+	// feed breaks budgets, and only the superbased.app Tokenomics database
+	// keeps it fresh); a standalone node that wants zero egress opts OUT with
+	// `[pricing.feed] enabled = false`. An enrolled node receives prices
+	// through its org rail and never consults the public feed (§C.3/D8). See
+	// PricingFeedConfig.
 	Pricing PricingSectionConfig `toml:"pricing"`
 	// Experiments is the [[experiments]] list — productized profile
 	// A/B runs (usability arc P6.4). See experiments.go.
 	Experiments []ExperimentConfig `toml:"experiments"`
+	// Components is the [components] block: the node operator's component
+	// selection (modular packaging P1). LOCAL-ONLY. The zero value keeps
+	// every compiled component active, exactly as before the block existed.
+	// See ComponentsConfig.
+	Components ComponentsConfig `toml:"components,omitempty"`
 }
 
 // Device-session lifetime defaults for the [remote] block, in MINUTES. They are
@@ -325,7 +338,7 @@ type CloudConfig struct {
 	AutoSync bool `toml:"auto_sync"`
 	// AutoSyncIntervalMinutes is how often the background sync service (R2a)
 	// spawns `observer cloud sync`. 0 means "use the built-in default"
-	// (cloudAutoSyncDefaultMinutes, 60). Read only when AutoSync is true;
+	// (CloudAutoSyncDefaultMinutes, 15). Read only when AutoSync is true;
 	// must be 0 or >= cloudAutoSyncMinMinutes (5) — see validateCloud.
 	AutoSyncIntervalMinutes int `toml:"auto_sync_interval_minutes"`
 	// AutoEnrich opts INTO automatic per-session enrichment (arc 2 R8: the
@@ -1025,6 +1038,25 @@ type GuardBudgetConfig struct {
 	// W3a because the governance vocabulary row must resolve against a real
 	// config key (TestEveryPinnableKeyResolvesInConfig).
 	FromOrg bool `toml:"from_org"`
+	// FailClosed is the ORGANIZATION's explicit opt-in to refusing proxied
+	// requests (rule B-625) while a managed node that holds enforce.budget has
+	// no verified org budget in hand: before the first pull after an
+	// enrolment, while the org server has never been reached, or when the
+	// signed document did not verify. Default FALSE (operator ruling D-502,
+	// 2026-10-09): such a node FAILS OPEN on its own [guard.budget] numbers and
+	// says so loudly, because a requirement this node cannot currently satisfy
+	// for reasons outside the request must never stop a developer's session.
+	// A node with NO live enrolment never fails closed, whatever this says.
+	//
+	// It is pinnable through node governance (restrictive-only, Safe=true) so
+	// the org opts a fleet in through its signed node.governance body; a
+	// developer may also set it locally to be stricter. Unlike the other
+	// pinned keys it is NOT restart-bound in the daemon: the org-budget
+	// composition resolves it live on every cycle from the node's own value
+	// and the CURRENT governance pin (REVIEW-4 P4-04), so a left
+	// organization's pin does not outlive its governance. The launcher reads
+	// it from the config it loads for each launch.
+	FailClosed bool `toml:"fail_closed"`
 	// MaxDocumentAge is the freshness window a SIGNED org budget document
 	// must fall inside to be applied: the node refuses a 200 whose issued_at
 	// is older than this, or in the future beyond a small clock skew. A Go
@@ -1978,10 +2010,10 @@ type SSHProfileConfig struct {
 	// does not configure the remote tool for you.
 	ReverseProxy bool `toml:"reverse_proxy"`
 	// ReverseProxyPort is the port the `-R` forward binds on the REMOTE
-	// side. 0 (the default) means sshprofile.DefaultReverseProxyPort
+	// side. 0 (the default) means sshspec.DefaultReverseProxyPort
 	// (8820). The LOCAL side is always this machine's own Observer proxy
 	// port and is not configurable here — see
-	// sshprofile.DefaultObserverProxyPort.
+	// sshspec.DefaultObserverProxyPort.
 	ReverseProxyPort int `toml:"reverse_proxy_port"`
 }
 
@@ -2268,17 +2300,22 @@ type BenchmarkConfig struct {
 // CodeIntelConfig is the [codeintel] surface — the in-process code-
 // intelligence module (docs/codeintel/). LOCAL-ONLY, never distributed
 // to an org (same posture as [routing]/[predict]/[cachewarm]). Same
-// partial-merge invariant as CacheTrackConfig: an install with no
-// [codeintel] section gets Enabled=true (Default() seeds it); a partial
-// section keeps unset fields at their Default() values.
+// partial-merge invariant as CacheTrackConfig: Default() seeds every
+// field, a TOML section only overrides the keys it names. The module is
+// OPT-IN (operator ruling D-307, 2026-10-05: indexing is CPU and disk
+// heavy, so it runs only when the user asks): an install with no
+// [codeintel] section, or a partial section that does not name
+// `enabled`, gets Enabled=false; an explicit `enabled = true` turns it on.
 //
 // Defaults are conservative: indexing is read-only on the repo; the
 // only model-visible change (compression.code_aggressive) is OFF and
 // opt-in per project AND language.
 type CodeIntelConfig struct {
-	// Enabled gates the whole module. When false the indexer doesn't
-	// run, the native provider reports unavailable, and the CLI/MCP
-	// surfaces stay empty.
+	// Enabled gates the whole module. Default false (opt-in). When false
+	// the indexer doesn't run, the native provider reports unavailable,
+	// the MCP symbol tools answer with the codeintel_disabled warning, and
+	// body-collapse compression is a no-op. Turn it on from Settings >
+	// Intelligence > Code intelligence, or set it to true here.
 	Enabled bool `toml:"enabled"`
 	// Languages, when non-empty, restricts indexing to this subset of
 	// the embedded language set. Empty = all supported languages.
@@ -3752,6 +3789,18 @@ type ProxyConfig struct {
 	// this file) — the two sources merge at the live lane table, and
 	// this TOML block remains the node-local layer.
 	Upstreams map[string]string `toml:"upstreams"`
+	// AgentUpstreams maps a lane id to the upstream host of a local CODING
+	// AGENT's own provider (Plane B), selected by the same `/up/<id>/`
+	// prefix but kept OUT of the Upstreams lane table: an agent lane only
+	// picks the upstream host, the request keeps pid-derived session
+	// attribution, gets no hosted-app admission or obs-trace synthesis,
+	// and is not part of the gateway.providers lane policy (so a node
+	// with only the default agent lane still reports no local lane
+	// policy). A same-id [proxy.upstreams] lane wins. Default:
+	// OpenCodeZenLane -> https://opencode.ai/zen (OpenCode's built-in Zen
+	// provider; `observer opencode` points it here). The loader merges map
+	// keys over the default.
+	AgentUpstreams map[string]string `toml:"agent_upstreams"`
 	// AutoDefaultLane names the Upstreams lane id the virtual `/up/auto/`
 	// lane falls back to (gateway config plane spec Phase 2) when the
 	// request's top-level model has no `<lane>/` prefix matching a
@@ -3863,6 +3912,10 @@ type ShellConfig struct {
 
 // IndexingConfig controls FTS5 tool output indexing.
 type IndexingConfig struct {
+	// Enabled is the one switch for every writer of action_excerpts: the
+	// watcher and the hook processes both obey it (T-420). Off skips only the
+	// FTS5 excerpt insert; capture is unchanged, and search_past_outputs and
+	// the dashboard search find only excerpts indexed while it was on.
 	Enabled         bool `toml:"enabled"`
 	MaxExcerptBytes int  `toml:"max_excerpt_bytes"`
 	Embeddings      bool `toml:"embeddings"`
@@ -4767,12 +4820,15 @@ func Default() Config {
 		Benchmark: BenchmarkConfig{
 			RetentionDays: 180,
 		},
-		// CodeIntel (the in-process code-intelligence module) is
-		// default-ON for indexing (read-only on the repo, zero LLM cost),
-		// but the only model-visible change (compression.code_aggressive)
-		// stays OFF. Same partial-merge rule as CacheTrack.
+		// CodeIntel (the in-process code-intelligence module) is OPT-IN
+		// (D-307): indexing is read-only on the repo and costs no LLM
+		// tokens, but it is CPU and disk heavy, so it runs only once the
+		// user turns it on. The non-zero defaults below only decide HOW it
+		// behaves after that. The only model-visible change
+		// (compression.code_aggressive) stays OFF even then. Same
+		// partial-merge rule as CacheTrack.
 		CodeIntel: CodeIntelConfig{
-			Enabled:        true,
+			Enabled:        false,
 			AutoIndexLimit: 25000,
 			MaxFileBytes:   2_000_000,
 			RetentionDays:  90,
@@ -4941,6 +4997,13 @@ func Default() Config {
 				"https://chatgpt.com/",
 				"https://api.openai.com/",
 			},
+			// OpenCodeZenLane: OpenCode's built-in "opencode" provider
+			// (OpenCode Zen, e.g. the free big-pickle model) talks to
+			// opencode.ai/zen, not to OPENAI_BASE_URL, so before this lane
+			// existed a Zen session bypassed the proxy entirely: no
+			// accurate tokens and no prompt-lane intervention (demo node 1,
+			// 2026-10-02). `observer opencode` points that provider here.
+			AgentUpstreams: map[string]string{OpenCodeZenLane: "https://opencode.ai/zen"},
 		},
 		Compression: CompressionConfig{
 			Shell: ShellConfig{
@@ -5194,6 +5257,10 @@ func LoadGovernance(opts LoadOptions) (Config, GovernanceOutcome, error) {
 	cfg.Loc.EditorTokenFile = expandHome(cfg.Loc.EditorTokenFile)
 	cfg.Update.StateDir = expandHome(cfg.Update.StateDir)
 
+	// D-514: a setting this build cannot honour yet is switched off here,
+	// with one reason, instead of failing Validate (deferred.go).
+	cfg.Deferred = deferUnsupported(&cfg)
+
 	// Governance overlay — the LAST merge step (§1.3). Everything above is
 	// the ungoverned config; the overlay is applied to a COPY so a
 	// Validate failure can fall back to it without re-parsing.
@@ -5201,7 +5268,8 @@ func LoadGovernance(opts LoadOptions) (Config, GovernanceOutcome, error) {
 	if opts.GovernanceNow != nil {
 		now = opts.GovernanceNow
 	}
-	file, gout := readGovernanceSidecar(cfg, opts.GovernanceSidecar, now())
+	at := now()
+	file, gout := readGovernanceSidecar(cfg, opts.GovernanceSidecar, at)
 	if file == nil {
 		if err := Validate(cfg); err != nil {
 			return Config{}, gout, err
@@ -5209,7 +5277,14 @@ func LoadGovernance(opts LoadOptions) (Config, GovernanceOutcome, error) {
 		return cfg, gout, nil
 	}
 	governed := cfg
-	applyGovernancePins(&governed, file.Pinned, &gout)
+	// Request-grants G8: a feature-access exception lifts its pin (the
+	// node's own value stands) until its own instant. Exceptions live in
+	// their OWN file beside the sidecar, bound to this posture's hash, so
+	// the sidecar body stays readable by released builds.
+	pinned, excepted := governancePinsInForce(file, gout.Path, at)
+	gout.Excepted = excepted
+	applyGovernancePins(&governed, pinned, &gout)
+	governed.Deferred = append(append([]string(nil), governed.Deferred...), deferUnsupported(&governed)...)
 	if err := Validate(governed); err != nil {
 		// Review B4: a well-formed, correctly-typed pinned value that
 		// Validate rejects must NEVER make Load fail. Six of the nine
@@ -5259,7 +5334,7 @@ func emitDeprecationOnce(msg string) {
 	fmt.Fprintln(os.Stderr, "config: deprecation: "+msg)
 	if !deprecationEmit.hintDone {
 		deprecationEmit.hintDone = true
-		fmt.Fprintln(os.Stderr, "config: deprecation: the keys above are deprecated aliases still honored this run — "+
+		fmt.Fprintln(os.Stderr, "config: deprecation: the keys above are deprecated aliases still honored this run - "+
 			"edit ~/.observer/config.toml to adopt the new keys (or run `observer config migrate`); this notice prints once per process.")
 	}
 }
@@ -5374,7 +5449,7 @@ func validateObservabilityJudges(cfg Config) error {
 			return errors.New("config: observability judge timeout_ms/max_tokens/num_ctx must be >= 0")
 		}
 		if jc.UseOrgRelay && (jc.BaseURL != "" || jc.APIKeyEnv != "") {
-			return errors.New("config: observability judge use_org_relay=true is ambiguous with base_url/api_key_env set on the same block — the relay ignores both")
+			return errors.New("config: observability judge use_org_relay=true is ambiguous with base_url/api_key_env set on the same block - the relay ignores both")
 		}
 	}
 	switch strings.TrimSpace(cfg.Observability.Admission.OnJudgeError) {
@@ -5500,14 +5575,14 @@ func validateMCPRelay(m MCPRelayConfig) error {
 		}
 		n, err := strconv.Atoi(port)
 		if err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("config: mcp_relay.listen %q needs a port in 1–65535 (got %q)", addr, port)
+			return fmt.Errorf("config: mcp_relay.listen %q needs a port in 1-65535 (got %q)", addr, port)
 		}
 		if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-			return fmt.Errorf("config: mcp_relay.listen %q must be a loopback address (127.0.0.1, localhost or ::1) — the relay is never exposed beyond this machine", addr)
+			return fmt.Errorf("config: mcp_relay.listen %q must be a loopback address (127.0.0.1, localhost or ::1) - the relay is never exposed beyond this machine", addr)
 		}
 	}
 	if m.PollIntervalSeconds != 0 && (m.PollIntervalSeconds < 10 || m.PollIntervalSeconds > 3600) {
-		return fmt.Errorf("config: mcp_relay.poll_interval_seconds %d out of range (10–3600)", m.PollIntervalSeconds)
+		return fmt.Errorf("config: mcp_relay.poll_interval_seconds %d out of range (10-3600)", m.PollIntervalSeconds)
 	}
 	return nil
 }
@@ -5518,7 +5593,7 @@ func validateMCPRelay(m MCPRelayConfig) error {
 // http(s) URL and LoginPort must be a valid TCP port.
 func validateCloud(c CloudConfig) error {
 	if c.LoginPort < 0 || c.LoginPort > 65535 {
-		return fmt.Errorf("config: cloud.login_port %d out of range (0-65535; 0 means unset — use the command's built-in default)", c.LoginPort)
+		return fmt.Errorf("config: cloud.login_port %d out of range (0-65535; 0 means unset - use the command's built-in default)", c.LoginPort)
 	}
 	if c.AutoSyncIntervalMinutes < 0 || (c.AutoSyncIntervalMinutes > 0 && c.AutoSyncIntervalMinutes < CloudAutoSyncMinMinutes) {
 		return fmt.Errorf("config: cloud.auto_sync_interval_minutes %d out of range (0 means the built-in default; otherwise >= %d)", c.AutoSyncIntervalMinutes, CloudAutoSyncMinMinutes)
@@ -5634,6 +5709,10 @@ var policyResourceSupportedFamilies = map[string]bool{
 	// and this copy lagged, which the sync test caught (the same drift class
 	// gateway.providers taught us to gate).
 	"tools.mcp_access": true,
+	// node.components (modular packaging P4, lane MP-GOV): the managed
+	// component-set family. Added in the SAME change as
+	// policyfam.FamilyNodeComponents (policyfam_sync_test.go pins the two).
+	"node.components": true,
 }
 
 // validateOrgClientPolicy checks [org_client.policy]: every listed family
@@ -5751,7 +5830,7 @@ func validateTerminal(c TerminalConfig) error {
 // typo'd host or a relative key_path is caught loudly at load time rather than
 // silently at the operator's first click.
 //
-// It delegates every field rule to internal/sshprofile — the single owner of
+// It delegates every field rule to internal/sshspec - the single owner of
 // the closed-vocabulary validators — so config and the launch path can never
 // disagree about what a valid profile is. The launch path re-validates anyway
 // (with the filesystem check), mirroring the ValidateProjectRoot-at-spawn
@@ -5778,10 +5857,10 @@ func validateTerminalSSH(c TerminalSSHConfig) error {
 
 // SSHProfile converts one config entry into the pure-package Profile the
 // validator and argv composer operate on. It is the ONE translation point
-// between the TOML shape and internal/sshprofile (module-boundary rule #2), so
+// between the TOML shape and internal/sshspec (module-boundary rule #2), so
 // a field added to the config block has exactly one place to be threaded.
-func SSHProfile(p SSHProfileConfig) sshprofile.Profile {
-	return sshprofile.Profile{
+func SSHProfile(p SSHProfileConfig) sshspec.Profile {
+	return sshspec.Profile{
 		Name:             p.Name,
 		Label:            p.Label,
 		Host:             p.Host,
@@ -5797,11 +5876,11 @@ func SSHProfile(p SSHProfileConfig) sshprofile.Profile {
 
 // SSHProfiles converts the whole configured list. Callers wiring the terminal
 // service use this so the daemon holds pure Profiles, never TOML structs.
-func SSHProfiles(c TerminalSSHConfig) []sshprofile.Profile {
+func SSHProfiles(c TerminalSSHConfig) []sshspec.Profile {
 	if len(c.Profiles) == 0 {
 		return nil
 	}
-	out := make([]sshprofile.Profile, 0, len(c.Profiles))
+	out := make([]sshspec.Profile, 0, len(c.Profiles))
 	for _, p := range c.Profiles {
 		out = append(out, SSHProfile(p))
 	}
@@ -5810,8 +5889,8 @@ func SSHProfiles(c TerminalSSHConfig) []sshprofile.Profile {
 
 // SSHOptions maps the block's connection-tuning knobs onto the pure package's
 // Options. A zero value resolves to the sshprofile defaults.
-func SSHOptions(c TerminalSSHConfig) sshprofile.Options {
-	return sshprofile.Options{
+func SSHOptions(c TerminalSSHConfig) sshspec.Options {
+	return sshspec.Options{
 		ConnectTimeoutSeconds: c.ConnectTimeoutSeconds,
 		KeepaliveSeconds:      c.KeepaliveSeconds,
 	}
@@ -5843,7 +5922,7 @@ func validateTerminalSandbox(c TerminalSandboxConfig) error {
 	default:
 		return fmt.Errorf("config: terminal.sandbox.egress %q not in {host, internet, proxy_only, none}", c.Egress)
 	}
-	if _, err := sandboxnet.ParseAllowCIDRs(c.EgressAllowCIDRs); err != nil {
+	if _, err := sandboxcidr.ParseAllowCIDRs(c.EgressAllowCIDRs); err != nil {
 		return fmt.Errorf("config: terminal.sandbox.egress_allow_cidrs: %w", err)
 	}
 	return nil
@@ -5905,7 +5984,7 @@ func validateRemote(c RemoteConfig) error {
 				return err
 			}
 		case "lan":
-			return fmt.Errorf("config: remote.mode %q is deferred (Phase 3, operator decision 2026-07-12 — tailnet-HTTPS-only for v1); use \"tailscale\"", c.Mode)
+			return fmt.Errorf("config: remote.mode %q is deferred (Phase 3, operator decision 2026-07-12 - tailnet-HTTPS-only for v1); use \"tailscale\"", c.Mode)
 		default:
 			return fmt.Errorf("config: remote.mode %q not in {off, tailscale, lan}", c.Mode)
 		}
@@ -5947,10 +6026,10 @@ func validateRemote(c RemoteConfig) error {
 			idle = DefaultRemoteSessionIdleMinutes
 		}
 		if idle > ttl {
-			return fmt.Errorf("config: remote.session_idle_minutes %d exceeds remote.session_ttl_minutes %d — the absolute cap would expire the session first, making the idle window unreachable", idle, ttl)
+			return fmt.Errorf("config: remote.session_idle_minutes %d exceeds remote.session_ttl_minutes %d - the absolute cap would expire the session first, making the idle window unreachable", idle, ttl)
 		}
 		if c.Enabled && len(c.TrustedHosts) == 0 && strings.EqualFold(strings.TrimSpace(c.Mode), "tailscale") {
-			return errors.New("config: remote.trusted_hosts must name the tailnet host (the Host the browser sends) when remote.mode = \"tailscale\" — `observer remote enable --tailscale` populates it")
+			return errors.New("config: remote.trusted_hosts must name the tailnet host (the Host the browser sends) when remote.mode = \"tailscale\" - `observer remote enable --tailscale` populates it")
 		}
 	}
 	if c.Notify.Enabled {
@@ -5991,10 +6070,10 @@ func validateDashboard(d DashboardConfig) error {
 // config check and the apply gate can never disagree about a string like
 // "22:00-02:00".
 func validateUpdate(u UpdateConfig) error {
-	if _, err := update.ParseWindow(u.Window); err != nil {
+	if _, err := updatespec.ParseWindow(u.Window); err != nil {
 		return fmt.Errorf("config: update.window: %w", err)
 	}
-	if u.Channel != "" && !update.KnownChannel(update.Channel(u.Channel)) {
+	if u.Channel != "" && !updatespec.KnownChannel(updatespec.Channel(u.Channel)) {
 		return fmt.Errorf("config: update.channel %q not in {stable, lts, edge} (empty = whatever the org assigns)", u.Channel)
 	}
 	if u.KeepPreviousDays < 0 {
@@ -6047,7 +6126,7 @@ func ValidateDashboardAddr(addr string) error {
 		return fmt.Errorf("config: dashboard.addr %q needs a numeric port (got %q)", addr, port)
 	}
 	if n < 1 || n > 65535 {
-		return fmt.Errorf("config: dashboard.addr %q port %d out of range (1–65535)", addr, n)
+		return fmt.Errorf("config: dashboard.addr %q port %d out of range (1-65535)", addr, n)
 	}
 	return nil
 }
@@ -6059,7 +6138,7 @@ func ValidateDashboardAddr(addr string) error {
 func validateTailscaleBackendAddr(addr string) error {
 	addr = strings.TrimSpace(addr)
 	if addr == "" {
-		return errors.New("config: remote.tailscale_backend_addr is required when remote.mode = \"tailscale\" (a loopback IP:port for `tailscale serve` to forward to) — `observer remote enable --tailscale` pins one")
+		return errors.New("config: remote.tailscale_backend_addr is required when remote.mode = \"tailscale\" (a loopback IP:port for `tailscale serve` to forward to) - `observer remote enable --tailscale` pins one")
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -6070,7 +6149,7 @@ func validateTailscaleBackendAddr(addr string) error {
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("config: remote.tailscale_backend_addr host %q must be an explicit loopback IP (127.0.0.1 / ::1) — the tailnet-serve backend is loopback-only (plan §4.4)", host)
+		return fmt.Errorf("config: remote.tailscale_backend_addr host %q must be an explicit loopback IP (127.0.0.1 / ::1) - the tailnet-serve backend is loopback-only (plan §4.4)", host)
 	}
 	return nil
 }
@@ -6204,6 +6283,10 @@ func validateObservabilityAlerts(a ObservabilityAlertsConfig) error {
 	return nil
 }
 
+// OpenCodeZenLane is the default [proxy.agent_upstreams] lane id for
+// OpenCode's built-in Zen provider (see Default()).
+const OpenCodeZenLane = "opencode-zen"
+
 // validateProxyUpstreams enforces the gateway config plane spec's two
 // [proxy.upstreams]/auto_default_lane invariants: "auto" is a reserved
 // virtual lane id (Phase 2 — it can never be a real configured lane,
@@ -6309,7 +6392,7 @@ func validateGuard(g GuardConfig) error {
 		return fmt.Errorf("config: guard.proxy.egress_action %q not in {flag, mask, deny}", g.Proxy.EgressAction)
 	}
 	if g.Rules.CEL {
-		return errors.New("config: guard.rules.cel is not yet supported (CEL user rules are deferred — matchers v1)")
+		return errors.New("config: guard.rules.cel is not yet supported (CEL user rules are deferred - matchers v1)")
 	}
 	b := g.Budget
 	for _, usd := range []float64{b.SessionUSD, b.DailyUSD, b.WeeklyUSD, b.MonthlyUSD} {

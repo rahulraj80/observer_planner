@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,6 +18,10 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
+
+// defaultTracesPath is the OTLP/HTTP traces path a path-less endpoint URL
+// posts to.
+const defaultTracesPath = "/v1/traces"
 
 // tracerName is the instrumentation scope name on every emitted span.
 const tracerName = "github.com/marmutapp/superbased-observer/internal/exporter/otel"
@@ -75,7 +80,8 @@ func New(cfg Config, src TurnSource, resolver ProjectResolver, logger *slog.Logg
 // (e.g. internal/selfobs/emit's credential-bearing path) constructs its own
 // Config and relies on WithEndpointURL, whose explicit scheme sets the insecure
 // flag AFTER the SDK layers the env config (verified against the vendored
-// otlptracehttp v1.43.0: NewHTTPConfig applies env first, then explicit options,
+// otlptracehttp v1.43.0 and re-checked at v1.45.0 (T-688): NewHTTPConfig applies
+// env first, then explicit options,
 // and WithEndpointURL sets Traces.Insecure = scheme != "https").
 //
 // A full-URL Endpoint (with a scheme) is passed via WithEndpointURL so the
@@ -86,6 +92,13 @@ func NewTracerProvider(cfg Config) (*sdktrace.TracerProvider, error) {
 	opts := []otlptracehttp.Option{}
 	if strings.Contains(cfg.Endpoint, "://") {
 		opts = append(opts, otlptracehttp.WithEndpointURL(cfg.Endpoint))
+		// otlptracehttp v1.45.0 sends a URL with NO path to "/" (before, the
+		// default /v1/traces). Every endpoint Observer is configured with has
+		// meant the default signal path, so keep it (T-688); an explicit path,
+		// "/" included, is kept as written.
+		if u, err := url.Parse(cfg.Endpoint); err == nil && u.Path == "" {
+			opts = append(opts, otlptracehttp.WithURLPath(defaultTracesPath))
+		}
 	} else {
 		opts = append(opts, otlptracehttp.WithEndpoint(cfg.Endpoint))
 	}

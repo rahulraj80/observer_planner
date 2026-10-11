@@ -209,7 +209,7 @@ func ntfyMessage(ev Event) (title, body, tag, priority string) {
 		priority = "default"
 	}
 	if ev.Detail != "" {
-		body += " — " + ev.Detail
+		body += " - " + ev.Detail
 	}
 	return title, body, tag, priority
 }

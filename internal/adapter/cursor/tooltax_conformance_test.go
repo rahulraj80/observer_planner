@@ -45,12 +45,12 @@ func TestPrivateMappingAgreesWithTooltax(t *testing.T) {
 			}
 			checked++
 			if got != e.ActionType {
-				t.Errorf("drift: %s %q — adapter classifies as %q, tooltax table says %q",
+				t.Errorf("drift: %s %q - adapter classifies as %q, tooltax table says %q",
 					tool, e.Native, got, e.ActionType)
 			}
 		}
 		if checked == 0 {
-			t.Errorf("no %s row in the tooltax table reached the adapter's classifier — "+
+			t.Errorf("no %s row in the tooltax table reached the adapter's classifier - "+
 				"the pin is vacuous (did the tool id or the classifier change?)", tool)
 		}
 	}
@@ -104,7 +104,7 @@ func TestClassifierDomainIsSubsetOfTooltax(t *testing.T) {
 		t.Fatalf("extracting the classifier domain: %v", err)
 	}
 	if len(domain) < 3 {
-		t.Fatalf("extracted only %d case labels (%q) — too few to be the real domain; "+
+		t.Fatalf("extracted only %d case labels (%q) - too few to be the real domain; "+
 			"the classifier shape probably changed", len(domain), domain)
 	}
 	inDomain := make(map[string]bool, len(domain))
@@ -115,7 +115,7 @@ func TestClassifierDomainIsSubsetOfTooltax(t *testing.T) {
 		got := classifyForTooltax(native)
 		if got == "" || got == models.ActionUnknown {
 			if _, frozen := unclassifiedDomain[native]; !frozen {
-				t.Errorf("case %q resolves to %q when fed back through the classifier — "+
+				t.Errorf("case %q resolves to %q when fed back through the classifier - "+
 					"either a DELIBERATE unknown or a DEAD case whose label the "+
 					"classifier's own normalization can never produce; say which in "+
 					"unclassifiedDomain", native, got)
@@ -129,12 +129,12 @@ func TestClassifierDomainIsSubsetOfTooltax(t *testing.T) {
 					continue
 				}
 				t.Errorf("the classifier maps %q → %q but internal/tooltax has no "+
-					"%s-specific row for it — add the name to tooltax's table",
+					"%s-specific row for it - add the name to tooltax's table",
 					native, got, tool)
 				continue
 			}
 			if got != e.ActionType {
-				t.Errorf("drift: %s %q — classifier says %q, tooltax says %q",
+				t.Errorf("drift: %s %q - classifier says %q, tooltax says %q",
 					tool, native, got, e.ActionType)
 			}
 		}
@@ -142,19 +142,19 @@ func TestClassifierDomainIsSubsetOfTooltax(t *testing.T) {
 	for native := range unclassifiedDomain {
 		if !inDomain[native] {
 			t.Errorf("unclassifiedDomain entry %q is no longer a case label of the "+
-				"classifier — remove the stale freeze", native)
+				"classifier - remove the stale freeze", native)
 		}
 	}
 	for native := range missingTooltaxRows {
 		if !inDomain[native] {
 			t.Errorf("missingTooltaxRows entry %q is no longer a case label of the "+
-				"classifier — remove the stale freeze", native)
+				"classifier - remove the stale freeze", native)
 			continue
 		}
 		for _, tool := range tooltaxTools {
 			if e, ok := tooltax.Resolve(tool, native); ok && e.Tool == tool {
 				t.Errorf("missingTooltaxRows still lists %q but tooltax now carries a "+
-					"%s-specific row for it — delete the freeze", native, tool)
+					"%s-specific row for it - delete the freeze", native, tool)
 			}
 		}
 	}

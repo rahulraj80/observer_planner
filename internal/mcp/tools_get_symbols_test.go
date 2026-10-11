@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package mcp
 
 import (
@@ -226,15 +228,6 @@ func editorTSXContent() string {
 		}
 	}
 	return sb.String()
-}
-
-func defaultGetSymbolsOpts() GetSymbolsOptions {
-	return GetSymbolsOptions{
-		AllowExtensions: []string{"tsx", "ts", "js", "go"},
-		MaxResponseKB:   100,
-		MaxCallers:      20,
-		MaxCallees:      20,
-	}
 }
 
 func TestGetSymbols_SingleNamedMatch(t *testing.T) {

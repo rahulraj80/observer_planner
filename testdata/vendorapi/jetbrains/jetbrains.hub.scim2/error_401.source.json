@@ -1,0 +1,23 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "detail": "VerifiedOfficial",
+    "schemas": "VerifiedOfficial",
+    "status": "VerifiedOfficial"
+  },
+  "fixture_sha256": "989eeb3b760557a03abfaa7528f530c97a7ebfe7eff28d0607e51a208997d31b",
+  "http": {
+    "method": "GET",
+    "path": "/api/rest/scim2/Users",
+    "status": 401
+  },
+  "notes": "The RFC 7644 3.12 error response (status is a JSON string) for 401; detail synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "RFC 7644 (SCIM 2.0 protocol) sections 3.4.2 and 3.12, with RFC 7643 section 8.2 user attributes",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b9078e016c98b86934a23c80926b74fc8b59885ab2943729ec2493c17488a09b",
+  "source_url": "https://www.rfc-editor.org/rfc/rfc7644.txt",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "jetbrains.hub.scim2"
+}

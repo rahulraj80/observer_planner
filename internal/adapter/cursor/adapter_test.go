@@ -322,7 +322,7 @@ func TestBuildEvent_AfterAgentResponse(t *testing.T) {
 		"generation_id": "4d5d4102-34a7-48fd-aeb8-eee33729bf98",
 		"workspace_roots": ["/c:/programsx/marmutmain"],
 		"model": "default",
-		"text": "Auto is the agent/router identity in Cursor — how this chat is presented to you — not the foundation model.",
+		"text": "Auto is the agent/router identity in Cursor - how this chat is presented to you - not the foundation model.",
 		"input_tokens": 21268,
 		"output_tokens": 593,
 		"cache_read_tokens": 20992,
@@ -486,7 +486,7 @@ func TestNormalizeWorkspaceRoot_HookMatchesWatcher(t *testing.T) {
 	// .workspace-trusted supplies the authoritative Windows path.
 	watcherRoot := projectRootResolver{}.doTranslate(workspace)
 	if hookRoot != watcherRoot {
-		t.Fatalf("hook root %q != watcher root %q — project identity is split", hookRoot, watcherRoot)
+		t.Fatalf("hook root %q != watcher root %q - project identity is split", hookRoot, watcherRoot)
 	}
 	if hookRoot != "/mnt/c/programsx/model_pricing" {
 		t.Errorf("converged root = %q, want /mnt/c/programsx/model_pricing", hookRoot)
@@ -1079,7 +1079,7 @@ func TestBuildEvent_PostToolUseAndAfterEventsNoRow(t *testing.T) {
 				t.Fatalf("BuildEvent: %v", err)
 			}
 			if ok {
-				t.Errorf("expected (zero, false) for %s — paired-after enrichment is deferred", evt)
+				t.Errorf("expected (zero, false) for %s - paired-after enrichment is deferred", evt)
 			}
 		})
 	}

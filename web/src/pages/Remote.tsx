@@ -7,10 +7,17 @@ import {
   InlineLoading,
   PageHeader,
   Pill,
+  SinglePicker,
   Table,
+  TabPanel,
+  TabStrip,
   Toggle,
   Tooltip,
+  useTabVisited,
 } from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { REMOTE_TABS, defaultTab, type RemoteTab } from "@/lib/nodePageTabs";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/DataTable";
 import { navIcon } from "@/lib/nav";
@@ -187,7 +194,16 @@ export function RemotePage() {
     [],
     { refreshMs: 15_000 },
   );
-  const audit = useApi<{ events: AuditRow[]; immutable: boolean }>("/api/remote/audit");
+  // Page tabs (platform tabs plan §2.2): Pairing / Terminal control /
+  // Tailscale / Access audit, lazy per tab and kept mounted. Config, device
+  // sessions and tailnet status feed several tabs (and the header), so they
+  // stay page level; the audit tail and the live-terminal list load when
+  // their tab is first opened.
+  const pageTabs = usePageTabs("remote", REMOTE_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const auditVisited = useTabVisited<RemoteTab>("audit", tab);
+  const controlVisited = useTabVisited<RemoteTab>("terminal-control", tab);
+  const audit = useApi<{ events: AuditRow[]; immutable: boolean }>(auditVisited ? "/api/remote/audit" : null);
   const tailscale = useApi<TailscaleStatus>("/api/remote/tailscale/status", undefined, [], {
     refreshMs: 20_000,
   });
@@ -195,7 +211,7 @@ export function RemotePage() {
   // moved here from the Terminals page — grant control of a live terminal to a
   // paired device, revoke it, or take control back locally.
   const launchSessions = useApi<{ sessions: LaunchInfoWire[] }>(
-    "/api/launch/sessions",
+    controlVisited ? "/api/launch/sessions" : null,
     undefined,
     [],
     { refreshMs: 8_000 },
@@ -441,6 +457,9 @@ export function RemotePage() {
   // view so the QR is actually visible (the panel sits above the controls).
   async function pairDevice() {
     await arm("add-device");
+    // The reveal lives on the Pairing tab ("Pair a device" is also offered
+    // from the Tailscale setup ladder).
+    setTab("pairing");
     setTimeout(
       () =>
         document
@@ -603,15 +622,21 @@ export function RemotePage() {
   }
 
   function goToPairing() {
-    document.getElementById("remote-arm")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTab("pairing");
+    window.setTimeout(
+      () => document.getElementById("remote-arm")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0,
+    );
   }
 
   // Scroll to the Tailscale setup card — the destination for the "finish the
   // Tailscale step" hint under a gated "Pair a device" button.
   function goToTailscaleSetup() {
-    document
-      .getElementById("tailscale-setup")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTab("tailscale");
+    window.setTimeout(
+      () => document.getElementById("tailscale-setup")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      0,
+    );
   }
 
   // revoke is gated by the row's in-place ConfirmButton (never window.confirm).
@@ -637,7 +662,8 @@ export function RemotePage() {
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
+      <div className="mb-4 space-y-6">
       <PageHeader
         title="Remote access"
         icon={navIcon("remote")}
@@ -667,11 +693,24 @@ export function RemotePage() {
       {/* Honest disabled state: what enabling does + the restart requirement. */}
       {!c?.config_writable && (
         <div className="rounded-2 border border-line-2 bg-bg-2 px-3 py-2 text-[12px] text-fg-3">
-          This dashboard was started without a writable config path, so remote access can't be armed from
-          here. Use <code className="text-fg-2">observer remote enable --tailscale --host …</code> instead.
+          This dashboard has no config path: no --config was given and no home directory could be resolved, so
+          there is nowhere to save remote access (the CLI cannot save it either). Restart the daemon with{" "}
+          <code className="text-fg-2">--config &lt;path&gt;</code> to arm it from this page.
         </div>
       )}
 
+      </div>
+
+      <TabStrip
+        tabs={pageTabs.ids.map((id) => ({ id, label: REMOTE_TABS.labels[id] }))}
+        value={tab}
+        onChange={setTab}
+        idPrefix="remote"
+        ariaLabel="Remote access sections"
+        className="mb-4"
+      />
+
+      <TabPanel id="pairing" active={tab} idPrefix="remote" className="space-y-6">
       {/* Pairing reveal (§11) - one-time, in-memory, masked after ~60s. */}
       {pairing?.pairing_url && (
         <div id="pairing-reveal">
@@ -907,16 +946,28 @@ export function RemotePage() {
             </>
           ) : (
             <>
-              <label className="block">
+              {/* D-571: the host tailscale reports is offered as a pick; any
+                  other HTTPS host can still be typed. A div, not a label: a
+                  picker never sits in a label. */}
+              <div className="block">
                 <span className="mb-1 block text-[11px] text-fg-3">tailnet host (e.g. box.tailnet.ts.net)</span>
-                <input
+                <SinglePicker
+                  options={[
+                    ...(tailscale.data?.host
+                      ? [{ id: tailscale.data.host, label: tailscale.data.host, group: "Reported by tailscale" }]
+                      : []),
+                    ...(host && host !== tailscale.data?.host ? [{ id: host, label: host }] : []),
+                  ]}
                   value={host}
-                  onChange={(e) => {
-                    setHost(e.target.value);
+                  onChange={(v) => {
+                    setHost(v);
                     setHostEdited(true);
                   }}
+                  allowFree
+                  freeLabel="Use host"
                   placeholder="my-machine.tailnet-name.ts.net"
-                  className="w-full rounded-2 border border-line-2 bg-bg-3 px-2 py-1 font-mono text-[12px] text-fg-1 outline-none focus:border-accent"
+                  emptyHint="Tailscale reports no host here; type the HTTPS host."
+                  ariaLabel="Tailnet host"
                 />
                 {!host.trim() && (
                   <span className="mt-1 block text-[11px] text-warn">
@@ -925,7 +976,7 @@ export function RemotePage() {
                       : "Tailscale not detected - install it and run `tailscale up`, or type the HTTPS host manually."}
                   </span>
                 )}
-              </label>
+              </div>
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -953,68 +1004,6 @@ export function RemotePage() {
           )}
         </div>
       </ChartShell>
-      </div>
-
-      {/* Terminal control for paired devices - grant a paired device control of
-          a live terminal (mints a one-time capability + confirm code scoped to
-          ONE device AND ONE terminal), revoke it, or take control back. Depends
-          on the "allow terminal" enablement in Configuration above. Owner-local
-          only. Moved here from the Terminals page so enablement → grant →
-          standing reads as one flow. */}
-      <RemoteTerminalControl
-        sessions={(launchSessions.data?.sessions ?? []).filter((s) => s.token && !s.exited)}
-        devices={sessions.data?.sessions ?? []}
-        controllerLive={sessions.data?.controller_live ?? false}
-        confirmToken={confirmToken}
-        configWritable={c?.config_writable ?? false}
-        onReload={() => {
-          launchSessions.reload();
-          sessions.reload();
-        }}
-        onTakeOver={(handle, tool, sessionId, hasProjectRoot) => {
-          const arg = { tool, sessionId, hasProjectRoot } as unknown as DockSession;
-          arg.token = handle;
-          dock.launch(arg);
-        }}
-      />
-
-      {/* Standing terminal-control access - opt-in, off by default, owner-local.
-          Rendered below the single-use grant flow so the safer per-terminal path
-          reads as the primary one. */}
-      <StandingTerminalAccess confirmToken={confirmToken} />
-
-      {/* Tailscale setup + detection (§D) - a guided state machine: install →
-          log in → arm → serve → pair, each step naming what's next + the
-          expected outcome. When serve needs the operator grant it runs in an
-          embedded terminal (the sudo password is typed here, not in a bounced
-          shell). */}
-      <div id="tailscale-setup">
-      <TailscaleCard
-        data={tailscale.data}
-        onServe={setupServe}
-        serveBusy={serveBusy}
-        serveResult={serveResult}
-        onRunGrant={runOperatorGrant}
-        grantBusy={grantBusy}
-        grantHandle={grantHandle}
-        grantErr={grantErr}
-        onGrantStatus={onGrantTerminalStatus}
-        onCancelGrant={() => void cancelSetupTerminal(grantHandle, () => setGrantHandle(null))}
-        onRunLogin={runLogin}
-        loginBusy={loginBusy}
-        loginHandle={loginHandle}
-        loginErr={loginErr}
-        onLoginStatus={onLoginTerminalStatus}
-        onCancelLogin={() => void cancelSetupTerminal(loginHandle, () => setLoginHandle(null))}
-        onRunInstall={runInstall}
-        installBusy={installBusy}
-        installHandle={installHandle}
-        installErr={installErr}
-        onInstallStatus={onInstallTerminalStatus}
-        onCancelInstall={() => void cancelSetupTerminal(installHandle, () => setInstallHandle(null))}
-        onGoToPairing={goToPairing}
-        onPairDevice={pairDevice}
-      />
       </div>
 
       {/* Live device sessions. */}
@@ -1053,13 +1042,86 @@ export function RemotePage() {
         </div>
       </ChartShell>
 
+      </TabPanel>
+
+      <TabPanel id="terminal-control" active={tab} idPrefix="remote" className="space-y-6">
+      {/* Terminal control for paired devices - grant a paired device control of
+          a live terminal (mints a one-time capability + confirm code scoped to
+          ONE device AND ONE terminal), revoke it, or take control back. Depends
+          on the "allow terminal" enablement in Configuration (Pairing tab). Owner-local
+          only. Moved here from the Terminals page so enablement → grant →
+          standing reads as one flow. */}
+      <RemoteTerminalControl
+        sessions={(launchSessions.data?.sessions ?? []).filter((s) => s.token && !s.exited)}
+        devices={sessions.data?.sessions ?? []}
+        controllerLive={sessions.data?.controller_live ?? false}
+        confirmToken={confirmToken}
+        configWritable={c?.config_writable ?? false}
+        onReload={() => {
+          launchSessions.reload();
+          sessions.reload();
+        }}
+        onTakeOver={(handle, tool, sessionId, hasProjectRoot) => {
+          const arg = { tool, sessionId, hasProjectRoot } as unknown as DockSession;
+          arg.token = handle;
+          dock.launch(arg);
+        }}
+      />
+
+      {/* Standing terminal-control access - opt-in, off by default, owner-local.
+          Rendered below the single-use grant flow so the safer per-terminal path
+          reads as the primary one. */}
+      <StandingTerminalAccess confirmToken={confirmToken} />
+
+      </TabPanel>
+
+      <TabPanel id="tailscale" active={tab} idPrefix="remote" className="space-y-6">
+      {/* Tailscale setup + detection (§D) - a guided state machine: install →
+          log in → arm → serve → pair, each step naming what's next + the
+          expected outcome. When serve needs the operator grant it runs in an
+          embedded terminal (the sudo password is typed here, not in a bounced
+          shell). */}
+      <div id="tailscale-setup">
+      <TailscaleCard
+        data={tailscale.data}
+        onServe={setupServe}
+        serveBusy={serveBusy}
+        serveResult={serveResult}
+        onRunGrant={runOperatorGrant}
+        grantBusy={grantBusy}
+        grantHandle={grantHandle}
+        grantErr={grantErr}
+        onGrantStatus={onGrantTerminalStatus}
+        onCancelGrant={() => void cancelSetupTerminal(grantHandle, () => setGrantHandle(null))}
+        onRunLogin={runLogin}
+        loginBusy={loginBusy}
+        loginHandle={loginHandle}
+        loginErr={loginErr}
+        onLoginStatus={onLoginTerminalStatus}
+        onCancelLogin={() => void cancelSetupTerminal(loginHandle, () => setLoginHandle(null))}
+        onRunInstall={runInstall}
+        installBusy={installBusy}
+        installHandle={installHandle}
+        installErr={installErr}
+        onInstallStatus={onInstallTerminalStatus}
+        onCancelInstall={() => void cancelSetupTerminal(installHandle, () => setInstallHandle(null))}
+        onGoToPairing={goToPairing}
+        onPairDevice={pairDevice}
+      />
+      </div>
+
+      </TabPanel>
+
+      <TabPanel id="audit" active={tab} idPrefix="remote" className="space-y-6">
       {/* Audit tail. */}
       <ChartShell
         title="Access audit"
         sub="Recent remote-access + management events (metadata only). Not compliance-immutable - a local owner can edit the underlying SQLite."
       >
         <div className="p-1">
-          {(audit.data?.events.length ?? 0) === 0 ? (
+          {!audit.data && !audit.error ? (
+            <InlineLoading label="Loading the access audit" block />
+          ) : (audit.data?.events.length ?? 0) === 0 ? (
             <div className="text-[11px] text-fg-3">No events yet.</div>
           ) : (
             <Table
@@ -1093,6 +1155,7 @@ export function RemotePage() {
           )}
         </div>
       </ChartShell>
+      </TabPanel>
     </div>
   );
 }
@@ -1636,7 +1699,7 @@ function CopyButton({ text }: { text: string }) {
 // control (DELETE the remote controller's device session), and Take over (open
 // the terminal locally, which the backend treats as a local takeover that
 // demotes the remote writer). Granting depends on the "allow terminal"
-// enablement in Configuration above. All routes are owner-loopback-only, so this
+// enablement in Configuration (Pairing tab). All routes are owner-loopback-only, so this
 // panel works only from the local dashboard.
 function RemoteTerminalControl({
   sessions,
@@ -1683,7 +1746,7 @@ function RemoteTerminalControl({
   async function approve(handle: string) {
     const device = pickDevice[handle] || devices[0]?.fingerprint || "";
     if (!device) {
-      setErr("No paired device to grant - pair one in Configuration above first.");
+      setErr("No paired device to grant - pair one under Configuration on the Pairing tab first.");
       return;
     }
     if (!confirmToken) {
@@ -1737,7 +1800,7 @@ function RemoteTerminalControl({
   return (
     <ChartShell
       title={<TitleWithHelp text="Terminal control for paired devices" helpId="card.terminal_control" />}
-      sub="Grant a paired remote device control of a live terminal, revoke it, or take control back. Granting mints a ONE-TIME capability + confirm code scoped to ONE device AND ONE terminal (execute tier) - shown once; held only in memory (never written to disk) until it is consumed or expires. Depends on “allow terminal” enablement in Configuration above. Owner-local only."
+      sub="Grant a paired remote device control of a live terminal, revoke it, or take control back. Granting mints a ONE-TIME capability + confirm code scoped to ONE device AND ONE terminal (execute tier) - shown once; held only in memory (never written to disk) until it is consumed or expires. Depends on “allow terminal” enablement in Configuration (Pairing tab). Owner-local only."
       right={
         <Pill variant={controllerLive ? "success" : "neutral"}>
           {controllerLive ? "remote live" : "remote off"}
@@ -1758,7 +1821,7 @@ function RemoteTerminalControl({
         )}
         {!controllerLive && (
           <div className="rounded-2 border border-warn/40 bg-warn/10 px-3 py-2 text-warn">
-            Remote access isn't live. Arm it and pair a device in <span className="font-medium">Configuration</span> above
+            Remote access isn't live. Arm it and pair a device in <span className="font-medium">Configuration</span> on the Pairing tab
             before you can grant terminal control.
           </div>
         )}
@@ -1979,13 +2042,13 @@ function StandingTerminalAccess({
   const canManage = !!st?.config_writable;
   const prereqOK = !!st?.remote_enabled && !!st?.allow_terminal;
   // Honest disabled copy: name the exact missing dependency. Both prerequisites
-  // now live on THIS page (Configuration above), so point there.
+  // now live on THIS page (Configuration, on the Pairing tab), so point there.
   const disabledReason = !canManage
     ? "This dashboard has no writable config path, so standing access can't be managed here."
     : !st?.remote_enabled
-      ? "Remote access is off. Arm it in Configuration above first."
+      ? "Remote access is off. Arm it in Configuration on the Pairing tab first."
       : !st?.allow_terminal
-        ? "“Allow terminal” is off. Turn it on in Configuration above first - standing access only grants what allow terminal permits."
+        ? "“Allow terminal” is off. Turn it on in Configuration on the Pairing tab first - standing access only grants what allow terminal permits."
         : "";
 
   async function mint() {

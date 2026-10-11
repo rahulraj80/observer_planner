@@ -25,7 +25,7 @@ import (
 func TestHandoffTargetsLaunchGating(t *testing.T) {
 	off := handoffTargets(false)
 	if len(off) == 0 {
-		t.Fatal("handoffTargets(false) returned no targets — the migration picker would be empty")
+		t.Fatal("handoffTargets(false) returned no targets - the migration picker would be empty")
 	}
 	for _, tg := range off {
 		if tg.Launchable {

@@ -127,7 +127,7 @@ func (e *LunaExecutor) Execute(ctx context.Context, lj *store.LeasedJob, route s
 	// evidence ref against the envelope's allowed set (FE3).
 	cleaned, rejection := ProcessLunaCompletion(res.Content, allowedRefs)
 	if rejection != "" {
-		return ExecResult{Outcome: ExecInvalidOutput, TokensIn: tokensIn, TokensOut: tokensOut, Detail: rejection}, nil
+		return ExecResult{Outcome: ExecInvalidOutput, TokensIn: tokensIn, TokensOut: tokensOut, Detail: InvalidOutputDetail(res, rejection)}, nil
 	}
 
 	// Marshal the OPAQUE normalized result — the JSON sink runs through
@@ -156,6 +156,20 @@ func (e *LunaExecutor) Execute(ctx context.Context, lj *store.LeasedJob, route s
 		return ExecResult{Outcome: ExecAborted, TokensIn: tokensIn, TokensOut: tokensOut, Detail: "completion superseded"}, nil
 	}
 	return ExecResult{Outcome: ExecSucceeded, TokensIn: tokensIn, TokensOut: tokensOut}, nil
+}
+
+// InvalidOutputDetail is the attempt-ledger detail for a rejected completion.
+// A completion cut at the route's max_output_tokens is incomplete JSON, so the
+// post-call stage already rejects it (invalid output: retried within the
+// attempt budget, then the job fails and the user unit is refunded; a partial
+// answer is never stored). This only names the cause, so an operator can see
+// how often the cap truncates an answer (operator ruling D-313, T-414: the cap
+// is deliberate and the residual risk is accepted).
+func InvalidOutputDetail(res foundry.Response, rejection string) string {
+	if res.Truncated() {
+		return "truncated at max_output_tokens (finish_reason=length): " + rejection
+	}
+	return rejection
 }
 
 func tokenCost(tokensIn, tokensOut int64, route store.RouteInfo) float64 {

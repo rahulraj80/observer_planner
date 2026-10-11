@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/cachetrack"
@@ -88,6 +89,33 @@ type Store struct {
 	// (internal/store/mcpinventory.go, Agent Access P11 (c)). A zero value
 	// composes no MCPInventoryRow. See SetMCPInventoryProviders.
 	mcpInventory MCPInventoryProviders
+	// agentConfigStateGate reports whether this node reports the org AI tool
+	// settings state (a MANAGED enrolment holding a live grant;
+	// internal/store/agentconfigorgstate.go). nil = never report.
+	agentConfigStateGate func(ctx context.Context) bool
+	// agentConfigDigest is the last AgentConfigState digest the org server
+	// ACCEPTED from this process; agentConfigDigestPending is the one the last
+	// compose carried, promoted by CommitPushedSnapshots (a change forces a
+	// push until it is delivered; agentconfigorg.go, review C156-39).
+	// componentPosture is the component posture provider seam
+	// (componentposture.go, T-682); nil reports nothing.
+	componentPosture ComponentPostureProvider
+	// componentPostureDigest is the last component posture the org server
+	// accepted from this process; componentPostureDigestPending is the one
+	// the last compose carried (promoted by CommitPushedSnapshots);
+	// componentPostureCommittedAt is when it was promoted.
+	componentPostureMu            sync.Mutex
+	componentPostureDigest        string
+	componentPostureDigestPending string
+	componentPostureCommittedAt   time.Time
+	agentConfigDigestMu           sync.Mutex
+	agentConfigDigest             string
+	agentConfigDigestPending      string
+	// agentConfigInventory is the managed node's latest AI tool
+	// configuration inventory and its delivery digests (D-112, T-427;
+	// internal/store/agentconfiginventory.go). In memory only: it is rebuilt
+	// from the files, never a table.
+	agentConfigInventory agentConfigInventoryHolder
 }
 
 // SetObsOrgProviders wires the org-tier observability provider seam
@@ -460,6 +488,12 @@ func (s *Store) SetSessionLineage(ctx context.Context, lin models.SessionLineage
 // persisted. Used by Ingest to stop a terminal lifecycle marker
 // (session_end) from bootstrapping a phantom session that has no other
 // record (the empty Windows-CC session case).
+// SessionExists reports whether a sessions row with id exists. The lifecycle
+// spool drainer asks it before landing a held hook record (T-320).
+func (s *Store) SessionExists(ctx context.Context, id string) (bool, error) {
+	return s.sessionExists(ctx, id)
+}
+
 func (s *Store) sessionExists(ctx context.Context, id string) (bool, error) {
 	var present int
 	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM sessions WHERE id = ? LIMIT 1`, id).Scan(&present)
@@ -1164,9 +1198,9 @@ func (s *Store) updateActionOutcome(
 	// the hook path already behaves.
 	//
 	// Index failures are swallowed: the outcome columns are the
-	// load-bearing write. (The indexer's own DELETE+INSERT is not
-	// atomic — a pre-existing property shared with the hook path, out
-	// of scope here.)
+	// load-bearing write. The indexer's replace (delete prior + insert)
+	// is one transaction and seeks the prior row by rowid, so this costs
+	// two index probes, not a scan of every excerpt (T-412).
 	if n > 0 && toolOutput != "" && idx != nil {
 		var (
 			actionID  int64
@@ -2297,6 +2331,7 @@ func (s *Store) ingest(ctx context.Context, events []models.ToolEvent, tokens []
 					Timestamp:   e.Timestamp,
 					TurnIndex:   e.TurnIndex,
 					Success:     e.Success,
+					PromptText:  guardPromptText(e.ActionType, e.RawToolInput),
 				},
 			})
 		}
@@ -2807,7 +2842,10 @@ func (s *Store) indexOutputs(
 		if isMCPToolName(e.RawToolName) {
 			continue
 		}
-		if err := idx.Index(ctx, a.ID, e.RawToolName, a.Target, e.ToolOutput, a.ErrorMessage); err != nil {
+		// a.ID != 0 only for a row InsertActions TRULY inserted in this
+		// batch (an upsert onto an existing row leaves it 0), so no prior
+		// excerpt can carry this id: skip the replace-delete (T-412).
+		if err := idx.IndexNew(ctx, a.ID, e.RawToolName, a.Target, e.ToolOutput, a.ErrorMessage); err != nil {
 			return err
 		}
 	}

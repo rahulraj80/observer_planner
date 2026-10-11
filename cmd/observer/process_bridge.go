@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -56,7 +58,7 @@ func newProcessBridgeCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&intervalMS, "interval-ms", 2000, "poll interval in milliseconds")
 	cmd.Flags().BoolVar(&useETW, "etw", false,
-		"additionally start an ETW network capture for per-process byte counters (Windows only; requires an ELEVATED process — fails open to poll-only capture)")
+		"additionally start an ETW network capture for per-process byte counters (Windows only; requires an ELEVATED process - fails open to poll-only capture)")
 	cmd.Flags().StringVar(&connectAddr, "connect", "",
 		"dial this host:port (the observer daemon's loopback listener) and stream frames over the socket instead of stdout; reconnects forever")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "",

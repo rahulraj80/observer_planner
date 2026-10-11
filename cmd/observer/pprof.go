@@ -37,11 +37,11 @@ func maybeServePprof(ctx context.Context, addr string, out, errOut io.Writer) {
 	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		fmt.Fprintf(errOut, "pprof disabled — %s=%q is not a valid host:port: %v\n", pprofEnvVar, addr, err)
+		fmt.Fprintf(errOut, "pprof disabled - %s=%q is not a valid host:port: %v\n", pprofEnvVar, addr, err)
 		return
 	}
 	if !hostIsLoopback(host) {
-		fmt.Fprintf(errOut, "pprof disabled — %s=%q is not a loopback address; profiling endpoints must never be exposed off-box\n", pprofEnvVar, addr)
+		fmt.Fprintf(errOut, "pprof disabled - %s=%q is not a loopback address; profiling endpoints must never be exposed off-box\n", pprofEnvVar, addr)
 		return
 	}
 
@@ -60,10 +60,10 @@ func maybeServePprof(ctx context.Context, addr string, out, errOut io.Writer) {
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		fmt.Fprintf(errOut, "pprof disabled — cannot listen on %s: %v\n", addr, err)
+		fmt.Fprintf(errOut, "pprof disabled - cannot listen on %s: %v\n", addr, err)
 		return
 	}
-	fmt.Fprintf(out, "  (diagnostic) pprof → http://%s/debug/pprof/ — armed via %s\n", addr, pprofEnvVar)
+	fmt.Fprintf(out, "  (diagnostic) pprof → http://%s/debug/pprof/ - armed via %s\n", addr, pprofEnvVar)
 
 	go func() {
 		<-ctx.Done()

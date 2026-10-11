@@ -121,7 +121,7 @@ func TestGuidanceInventoryEndpoint(t *testing.T) {
 	}
 	measurable, ok := got.ToolsMeasurable["cursor"]
 	if !ok {
-		t.Error("tools_measurable is missing the cursor key — a tool present in rows must get an answer")
+		t.Error("tools_measurable is missing the cursor key - a tool present in rows must get an answer")
 	}
 	if measurable {
 		t.Error("tools_measurable[cursor] = true, but no cursor capture names a guidance file")
@@ -176,7 +176,7 @@ func TestGuidanceFileEndpoint(t *testing.T) {
 		t.Errorf("rel_path = %q", got.RelPath)
 	}
 	if !got.Scrubbed {
-		t.Error("scrubbed = false — the viewer has no raw mode")
+		t.Error("scrubbed = false - the viewer has no raw mode")
 	}
 	if !strings.Contains(got.Content, "# Project rules") {
 		t.Errorf("content lost the prose: %q", got.Content)
@@ -218,7 +218,7 @@ func TestGuidanceSummaryEndpoint(t *testing.T) {
 		Files       int    `json:"files"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode (want a bare array): %v — %s", err, rr.Body.String())
+		t.Fatalf("decode (want a bare array): %v - %s", err, rr.Body.String())
 	}
 	if len(got) != 1 || got[0].ProjectRoot != root {
 		t.Fatalf("summary = %+v, want one entry for %q", got, root)

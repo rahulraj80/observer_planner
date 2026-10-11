@@ -1,8 +1,10 @@
 import clsx from "clsx";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Sparkline } from "./Sparkline";
+import { Sparkline, hasSparkline } from "./Sparkline";
 import { StatDelta } from "./StatDelta";
+
+export { hasSparkline };
 import { useHelpSlot } from "./helpSlot";
 import { AnimatedValue, staleClass } from "./Motion";
 
@@ -99,9 +101,9 @@ export function StatCard(props: StatCardProps) {
           loading && "animate-shimmer overflow-hidden",
         )}
       >
-        <Body {...rest} loading={loading} />
+        <Body {...rest} loading={loading} reserveSpark={hasSparkline(spark)} />
       </div>
-      {spark && spark.length >= 2 && (
+      {spark && hasSparkline(spark) && (
         <div
           aria-hidden
           className="pointer-events-none absolute bottom-2.5 right-3 opacity-[0.85]"
@@ -134,11 +136,15 @@ function Body({
   cornerPill,
   loading,
   animate = true,
+  reserveSpark,
   children,
 }: Omit<
   StatCardProps,
   "linkTo" | "className" | "warn" | "accent" | "spark" | "sparkColor" | "stale"
->) {
+> & {
+  /** Keep the sub row clear of the floating sparkline (only when drawn). */
+  reserveSpark: boolean;
+}) {
   const renderHelp = useHelpSlot();
   return (
     <>
@@ -187,7 +193,12 @@ function Body({
         )}
       </div>
       {(sub || delta != null || deltaPrior != null) && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pr-[88px] text-[11px] text-fg-3">
+        <div
+          className={clsx(
+            "mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fg-3",
+            reserveSpark && "pr-[88px]",
+          )}
+        >
           {/* Cost-aware delta (UP = danger, DOWN = success), then the prior
               value or label: the shared StatDelta, also HeroStat's. */}
           <StatDelta delta={delta} deltaLabel={deltaLabel} deltaPrior={deltaPrior} />

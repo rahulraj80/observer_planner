@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Tooltip } from "../../primitives";
-import { fmtUSD } from "../../lib/format";
+import { fmtCost, fmtUSD, getCostDisplayMode } from "../../lib/format";
 
 // RenderCostContext is the optional second argument every internal cost call
 // passes: the token count behind this figure (when known) and the KIND of
@@ -25,10 +25,19 @@ export type RenderCost = (usd: number, ctx?: RenderCostContext) => ReactNode;
 // exact value on hover. It is the default for every renderCost slot, so a
 // caller that passes nothing gets the node's rendering unchanged. It ignores
 // the RenderCostContext (a one-parameter function is assignable to RenderCost).
-export const defaultRenderCost: RenderCost = (usd) => (
-  <Tooltip content={fmtUSD(usd, true)}>
-    <span tabIndex={0} className="cursor-help focus:outline-none">
-      {fmtUSD(usd)}
-    </span>
-  </Tooltip>
-);
+//
+// When the developer's org chose token usage for developers' dashboards
+// (format.ts "Developer cost display") it renders the token count the caller
+// passed in ctx, or the hidden-value glyph where there is none; the precise-
+// dollar tooltip is dropped because it would print the figure the org asked
+// not to show. The org passes its own renderer, so web2 is unaffected.
+export const defaultRenderCost: RenderCost = (usd, ctx) =>
+  getCostDisplayMode() === "tokens" ? (
+    <span>{fmtCost(usd, ctx?.tokens)}</span>
+  ) : (
+    <Tooltip content={fmtUSD(usd, true)}>
+      <span tabIndex={0} className="cursor-help focus:outline-none">
+        {fmtUSD(usd)}
+      </span>
+    </Tooltip>
+  );

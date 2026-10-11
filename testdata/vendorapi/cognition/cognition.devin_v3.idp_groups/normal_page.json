@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "idp_group_name": "eng-all"
+    },
+    {
+      "idp_group_name": "eng-admins"
+    }
+  ],
+  "has_next_page": true,
+  "end_cursor": "synthidpgroups0002",
+  "total": 3
+}

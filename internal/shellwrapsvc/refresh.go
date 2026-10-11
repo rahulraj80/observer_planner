@@ -31,42 +31,60 @@ type RefreshOutcome struct {
 // enable's: only a regular, marker-carrying file inside the shim directory,
 // unchanged since it was read, is replaced - atomically, mode 0755.
 func (s Service) RefreshStale(ctx context.Context) (RefreshOutcome, error) {
+	return s.RefreshStaleFor(ctx, TargetNative)
+}
+
+// RefreshStaleFor is RefreshStale for one target. On the WSL bridge target
+// the baked observer is the binary INSIDE the distro, so a bridge shim is
+// re-pointed exactly like a native one when that binary moves.
+func (s Service) RefreshStaleFor(ctx context.Context, target Target) (RefreshOutcome, error) {
 	if err := ctx.Err(); err != nil {
 		return RefreshOutcome{}, err
 	}
 	applyMu.Lock()
 	defer applyMu.Unlock()
 
-	h, err := s.Host()
+	home, err := s.home()
 	if err != nil {
 		return RefreshOutcome{}, err
 	}
-	cfg, err := s.loadConfig(s.configPath(h.Home))
+	cfg, err := s.loadConfig(s.configPath(home))
 	if err != nil {
 		return RefreshOutcome{}, err
 	}
 	out := RefreshOutcome{Rewritten: []shellwrap.ShimRefresh{}}
-	if !cfg.ShellWrap.Enabled {
-		out.Plan, err = shellwrap.PlanRefresh(shellwrap.RefreshInput{GOOS: h.GOOS})
+	if !targetView(cfg, target).Enabled {
+		out.Plan, err = shellwrap.PlanRefresh(shellwrap.RefreshInput{GOOS: s.goos()})
 		return out, err
 	}
+	te, err := s.targetEnv(cfg, target)
+	if err != nil {
+		return out, err
+	}
+	h := te.host
 	obs, err := s.observerPath()
 	if err != nil {
 		return out, err
 	}
-	shimDir := s.shimDir(h, cfg)
-	tools, _ := configuredSelection(cfg)
+	shimDir := te.shimDir()
+	localDir, err := te.local(shimDir)
+	if err != nil {
+		return out, err
+	}
+	tools, _ := configuredSelection(te.view)
 	plan, err := shellwrap.PlanRefresh(shellwrap.RefreshInput{
 		GOOS:             h.GOOS,
+		Bridge:           h.Bridge,
 		Enabled:          true,
 		Selected:         tools,
 		ShimDir:          shimDir,
 		ObserverPath:     obs,
+		ConfigPath:       te.shimConfig,
 		ResolvedObserver: s.resolveSymlinks(obs),
 		Resolve:          s.resolveSymlinks,
 		Exists:           s.fileExists,
 		ObserverRunnable: s.observerRunnable,
-		Shims:            inspectShims(shimDir),
+		Shims:            inspectShims(shimDir, localDir, h.Join),
 	})
 	if err != nil {
 		return out, err
@@ -74,7 +92,12 @@ func (s Service) RefreshStale(ctx context.Context) (RefreshOutcome, error) {
 	out.Plan, out.ObserverPath = plan, obs
 	var errs []error
 	for _, r := range plan.Rewrites() {
-		if err := rewriteShim(shimDir, r); err != nil {
+		lp, lerr := te.local(r.Path)
+		if lerr != nil {
+			errs = append(errs, lerr)
+			continue
+		}
+		if err := rewriteShimAt(localDir, lp, r); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -123,24 +146,30 @@ func (s Service) resolveSymlinks(p string) string {
 // write that the file is still the marked, regular file the plan was made
 // against and that it sits directly in the shim directory.
 func rewriteShim(shimDir string, r shellwrap.ShimRefresh) error {
-	if filepath.Dir(r.Path) != filepath.Clean(shimDir) || filepath.Base(r.Path) != r.FileName {
+	return rewriteShimAt(shimDir, r.Path, r)
+}
+
+// rewriteShimAt is rewriteShim with the file's LOCAL path (the drive-mount
+// path on the WSL bridge target) given separately from r.Path.
+func rewriteShimAt(shimDir, local string, r shellwrap.ShimRefresh) error {
+	if filepath.Dir(local) != filepath.Clean(shimDir) || filepath.Base(local) != r.FileName {
 		return fmt.Errorf("shellwrapsvc: refresh %s: not directly inside the shim dir - not touched", r.Path)
 	}
-	fi, err := os.Lstat(r.Path)
+	fi, err := os.Lstat(local)
 	if err != nil {
 		return fmt.Errorf("shellwrapsvc: refresh %s: %w", r.Path, err)
 	}
 	if !fi.Mode().IsRegular() {
 		return fmt.Errorf("shellwrapsvc: refresh %s: not a regular file - not touched", r.Path)
 	}
-	cur, err := os.ReadFile(r.Path) /* #nosec G304 -- a marked shim inside the observer-owned shim directory */
+	cur, err := os.ReadFile(local) /* #nosec G304 -- a marked shim inside the observer-owned shim directory */
 	if err != nil {
 		return fmt.Errorf("shellwrapsvc: refresh %s: %w", r.Path, err)
 	}
 	if !shellwrap.IsShim(cur) || string(cur) != r.Before {
 		return fmt.Errorf("shellwrapsvc: refresh %s: changed since it was read - not touched", r.Path)
 	}
-	if err := fsatomic.WriteFile(r.Path, []byte(r.Content), fsatomic.Options{FilePerm: 0o755, DirPerm: 0o755, TempPattern: ".sbo-shim-*.tmp"}); err != nil {
+	if err := fsatomic.WriteFile(local, []byte(r.Content), fsatomic.Options{FilePerm: 0o755, DirPerm: 0o755, TempPattern: ".sbo-shim-*.tmp"}); err != nil {
 		return fmt.Errorf("shellwrapsvc: refresh %s: %w", r.Path, err)
 	}
 	return nil

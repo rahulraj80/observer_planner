@@ -148,7 +148,7 @@ func printAdvise(w io.Writer, r advisor.Report) {
 // save $X; here is how") — plan Phase 4. Pull-based: pipe it wherever a
 // scheduler wants it.
 func printAdviseDigest(w io.Writer, r advisor.Report) {
-	fmt.Fprintf(w, "# Observer advisor digest — last %d day(s)\n\n", r.WindowDays)
+	fmt.Fprintf(w, "# Observer advisor digest - last %d day(s)\n\n", r.WindowDays)
 	fmt.Fprintf(w, "**Avoidable spend: $%.2f** across %d suggestions (%d sessions scanned).\n\n",
 		r.TotalSavingsUSD, len(r.Suggestions), r.SessionsScanned)
 	byCat := map[string]float64{}

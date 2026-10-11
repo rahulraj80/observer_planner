@@ -7,12 +7,12 @@
 //   - internal/guard's ConformanceMatrix() — can the developer's PROMPT be
 //     blocked/asked-about before it ever reaches the model?
 //
-// Neither source package imports the other (internal/guard imports only
-// internal/models + internal/policy; internal/integration imports neither
-// internal/guard nor internal/policy in production code — only a guard test
-// cross-checks against the registry). This package is the one place
-// permitted to depend on both, so the two classifiers stay independently
-// pure while still answering the combined question an operator or org admin
+// internal/integration imports neither internal/guard nor internal/policy;
+// internal/guard reads the registry's hook bindings to GENERATE its
+// conformance matrix (hook-parity Lane 0 step 5) but keeps its own
+// enforcement vocabulary. This package is the one place that joins the two
+// classifiers' answers, so each stays independently pure while still
+// answering the combined question an operator or org admin
 // actually asks: "what, if anything, controls this developer's use of this
 // tool?"
 //
@@ -109,6 +109,27 @@ type Row struct {
 	// honest-zero explanation) — never fabricated, never paraphrased away
 	// from its source.
 	Note string
+	// PromptWarnBeforeModel is true for a tool with no pre-send prompt
+	// seam whose hook can still WARN before the model sees a new prompt
+	// (integration.HookSpec.PromptWarnOnly: Antigravity CLI's
+	// PreInvocation). It never makes HasPreSendPromptSeam true.
+	PromptWarnBeforeModel bool
+	// RouteProbeRequired is true for a tool with no proxy route yet whose
+	// registry Routability is probe_required: a documented API-key/BYOK
+	// base-URL path exists but is not live-verified, so the default mode
+	// is not proxy-routable.
+	RouteProbeRequired bool
+	// PromptHookScope is the registry's HookSpec.PromptScope: the
+	// surfaces a prompt hook covers when it does not cover all of them.
+	PromptHookScope string
+	// PromptProxyScope is the registry's ProxyRoute.PromptScope: which of
+	// a routed tool's turns the proxy actually carries.
+	PromptProxyScope string
+	// Caps is the per-capability hook coverage view (caps.go): for every
+	// capability of the closed integration.HookCap vocabulary, how far
+	// Observer reaches it on this tool and the first non-hook seam that can
+	// stand in for it. Additive: every field above keeps its value.
+	Caps map[integration.HookCap]CapCoverage
 }
 
 // promptSubmitEvents is the closed set of guard.ConformanceMatrix channel
@@ -142,6 +163,43 @@ func Rows() []Row {
 	return rows
 }
 
+// preSendPromptChannels is the closed set of PromptSubmitChannel values that
+// are themselves a working pre-send seam (prompt-guard coverage audit
+// 2026-10-02). probe_required and none are not: their hook wire shape is
+// unverified or absent.
+var preSendPromptChannels = map[PromptSubmitChannel]bool{
+	PromptSubmitBlockAsk:  true,
+	PromptSubmitBlockOnly: true,
+	PromptSubmitProxyOnly: true,
+}
+
+// HasPreSendPromptSeam reports whether ANY lane can judge this tool's prompt
+// before it reaches the model: a verified prompt-submit hook dialect, or a
+// proxy route — the proxy request-path prompt scan runs on every proxied
+// request whatever the row's PromptLane says, so a probe_required tool that
+// is proxy-routable still has one. False means the prompt rules (R-172 /
+// R-190) can only flag this tool's prompts AFTER they were sent, via the
+// post-hoc capture lane (internal/guard/posthocprompt.go). The seam still
+// has to be wired on the node (hook registered, traffic routed): this is the
+// static capability, the same honesty level as every other Row field.
+func (r Row) HasPreSendPromptSeam() bool {
+	return preSendPromptChannels[r.PromptSubmit] || r.RouteProof != RouteProofStateNone
+}
+
+// PostHocOnlyPromptTools returns, sorted, every registry tool with no
+// pre-send prompt seam at all (!HasPreSendPromptSeam) — the ONE list the
+// node dashboard and the org coverage surface both render, so the two can
+// never disagree about which tools a prompt rule cannot stop.
+func PostHocOnlyPromptTools() []string {
+	out := []string{}
+	for _, r := range Rows() {
+		if !r.HasPreSendPromptSeam() {
+			out = append(out, r.Tool)
+		}
+	}
+	return out
+}
+
 // For returns the single control-coverage row for tool. ok=false when tool
 // is not a registered adapter.
 func For(tool string) (Row, bool) {
@@ -160,6 +218,13 @@ func buildRow(c integration.Capability, matrix []guard.ConformanceEntry) Row {
 		RouteProof:      routeProofFor(c),
 	}
 	row.PromptSubmit, row.Note = promptSubmitFor(c, matrix)
+	row.PromptWarnBeforeModel = c.Hook.PromptWarnOnly && c.Hook.Mechanism != integration.HookNone
+	row.RouteProbeRequired = c.Proxy == nil && c.Routability == integration.RouteStatusProbeRequired
+	row.PromptHookScope = c.Hook.PromptScope
+	if c.Proxy != nil {
+		row.PromptProxyScope = c.Proxy.PromptScope
+	}
+	row.Caps = capsFor(c)
 	return row
 }
 
@@ -178,7 +243,7 @@ func promptSubmitFor(c integration.Capability, matrix []guard.ConformanceEntry) 
 	case integration.PromptLaneNone:
 		return PromptSubmitNone, ""
 	case integration.PromptLaneProbeRequired:
-		return PromptSubmitProbeRequired, "vendor prompt-submit wire shape unverified — `observer doctor --probe-hook` decides"
+		return PromptSubmitProbeRequired, "vendor prompt-submit wire shape unverified - `observer doctor --probe-hook` decides"
 	case integration.PromptLaneProxyOnly:
 		return PromptSubmitProxyOnly, "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever"
 	case integration.PromptLaneHook:
@@ -189,7 +254,7 @@ func promptSubmitFor(c integration.Capability, matrix []guard.ConformanceEntry) 
 			// but if a future edit ever breaks that pairing, degrade to
 			// an honest "investigate" note rather than silently claiming
 			// "none".
-			return PromptSubmitProbeRequired, "PromptLane=hook declared but no blocking conformance row found — investigate"
+			return PromptSubmitProbeRequired, "PromptLane=hook declared but no blocking conformance row found - investigate"
 		}
 		// AskOnceKeyless is the STRUCTURAL capability that degrades
 		// CanAsk=true to block-only (2026-09-22 review finding 12): the

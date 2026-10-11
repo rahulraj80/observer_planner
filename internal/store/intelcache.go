@@ -293,6 +293,23 @@ func (s *Store) DeleteForeignOrgIntelResults(ctx context.Context, keepOrgID stri
 	return nil
 }
 
+// DeleteOrgIntelResultsThrough clears the cached results of one session that a
+// VERIFIED org purge tombstone names (parity follow-up ruling 1): every row of
+// the session bound to orgID whose job id is at or below throughJobID. A row a
+// later admin Re-enrich produced carries a higher job id and survives. The org
+// title the Sessions list shows is read from these rows, so it goes with them.
+// Returns how many rows it removed.
+func (s *Store) DeleteOrgIntelResultsThrough(ctx context.Context, orgID, sessionID string, throughJobID int64) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM org_intel_cache WHERE org_id = ? AND session_id = ? AND CAST(job_id AS INTEGER) <= ?`,
+		orgID, sessionID, throughJobID)
+	if err != nil {
+		return 0, fmt.Errorf("store.DeleteOrgIntelResultsThrough: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // ClearOrgIntelCache removes every cached result. DeleteEnrolment calls it so a
 // departed org's derived intel does not outlive the enrolment that produced it
 // (finding 6), matching the announcement/routing-policy caches it clears beside.

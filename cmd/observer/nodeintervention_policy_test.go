@@ -153,7 +153,10 @@ func TestNodeInterventionBudgetUsesLiveGrantAndFreshCap(t *testing.T) {
 		t.Fatalf("removed cap still stopped: %+v", got)
 	}
 	rewriteBudgetLaunchEnrolment(t, dbPath, func(e *store.Enrolment) { e.UserID = "member-two" })
-	if got := decide(true); got.Authority == before.Authority || !got.Stop || got.RuleID != "B-625" {
+	// D-502 / D-509: the replaced member gets a fresh authority and, with no
+	// fail_closed opt-in, the absent body does not stop the process (this used
+	// to assert a B-625 stop).
+	if got := decide(true); got.Authority == before.Authority || got.Stop {
 		t.Fatalf("member replacement reused authority or old cap: %+v", got)
 	}
 	rewriteBudgetLaunchGrant(t, dbPath, func(g *store.EnrolmentGrant) { g.Authority = nil })
@@ -429,6 +432,9 @@ func TestNodeInterventionNilGuardClassifiesDurableBudgetState(t *testing.T) {
 			st := store.New(database)
 			cfg := config.Default()
 			cfg.Guard.Enabled, cfg.Guard.Mode, cfg.Guard.Budget.FromOrg = true, "enforce", true
+			// The B-625 stop on a missing / unverified document is the org's
+			// fail_closed posture (D-502 / D-509).
+			cfg.Guard.Budget.FailClosed = true
 			w := intervention.Workload{SurfaceID: "fixture/cli", Identity: intervention.Identity{UID: 1000}}
 			d, err := nodeInterventionBudget(ctx, st, cfg, nil, w, nodeInterventionSource{Tool: "fixture", Reason: "parse_error"}, time.Now().UTC())
 			if err != nil {

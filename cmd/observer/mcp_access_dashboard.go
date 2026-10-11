@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 import (
@@ -22,7 +24,7 @@ import (
 // ONE payload behind the Security page's "MCP access" section and the VS
 // Code "MCP access" status item. It is composed here, in the only package
 // that owns the relay, and handed to the dashboard as a plain func
-// (dashboard.Options.MCPAccessStatus) - the dashboard never imports the
+// (dashapi.Options.MCPAccessStatus) - the dashboard never imports the
 // relay packages and there is no second relay derivation:
 //
 //   - status        = buildMCPRelayStatus, the SAME body `observer mcp
@@ -139,7 +141,7 @@ type mcpAccessConnect struct {
 	ConnectableServers []mcpConnectableServer `json:"connectable_servers"`
 }
 
-// mcpAccessStatusSeam builds the dashboard.Options.MCPAccessStatus func for
+// mcpAccessStatusSeam builds the dashapi.Options.MCPAccessStatus func for
 // the daemon: configPath is re-read on every call (like the CLI) so the page
 // reflects the file, database is the daemon's own handle.
 func mcpAccessStatusSeam(configPath string, database *sql.DB) func(ctx context.Context, verifyChain bool) (any, error) {

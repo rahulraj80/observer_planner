@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 import (
@@ -150,7 +152,7 @@ var mcpDoctorProbes = []mcpDoctorProbe{
 			return mcpDoctorOne("org.enrolled", mcpDoctorFail, "enrolment unreadable: "+err.Error())
 		}
 		if enr == nil {
-			return mcpDoctorOne("org.enrolled", mcpDoctorFail, "not enrolled: the relay's grant, STS and gateway all come from the org (run `observer org enroll`)")
+			return mcpDoctorOne("org.enrolled", mcpDoctorFail, "not enrolled: the relay's grant, STS and gateway all come from the org (run `observer enroll`)")
 		}
 		e.enr = enr
 		return mcpDoctorOne("org.enrolled", mcpDoctorPass, fmt.Sprintf("org %s at %s (tenancy %s)", enr.OrgID, enr.OrgServerURL, tenancyOrIndividual(enr.Tenancy)))
@@ -292,7 +294,7 @@ func mcpDoctorAudience(h *mcpRelayHandle) string {
 type mcpDoctorClientFacts struct {
 	tool         string
 	configExists bool
-	verified     bool // current bytes == the applied digest of a journal row
+	verified     bool // a journal row's entry still holds its owned digest
 	unmediated   int  // stdio entries a preview shows run direct
 	rows         int
 }
@@ -323,14 +325,14 @@ var mcpDoctorClientRules = []mcpDoctorClientRule{
 		name: "edited_since", status: mcpDoctorWarn,
 		match: func(f mcpDoctorClientFacts) bool { return !f.verified },
 		detail: func(f mcpDoctorClientFacts) string {
-			return "config edited since the projection (not the bytes the relay wrote); its stdio entries still spawn the relay"
+			return "a relay-owned entry was edited since the projection (it is not the wrapper or remote entry the relay wrote)"
 		},
 	},
 	{
 		name: "wrapped", status: mcpDoctorPass,
 		match: func(mcpDoctorClientFacts) bool { return true },
 		detail: func(f mcpDoctorClientFacts) string {
-			return fmt.Sprintf("%d journaled entr%s, config unchanged since the projection; every stdio entry spawns the relay", f.rows, mcpPlural(f.rows, "y", "ies"))
+			return fmt.Sprintf("%d journaled entr%s, relay-owned entries unchanged since the projection; every stdio entry spawns the relay", f.rows, mcpPlural(f.rows, "y", "ies"))
 		},
 	},
 }
@@ -391,11 +393,13 @@ func mcpDoctorClients(e *mcpDoctorEnv) []mcpDoctorCheck {
 	return out
 }
 
-// mcpDoctorJournal checks every launch-journal row: the backup is present
-// and hashes to its recorded digest (a restore would otherwise refuse), a
-// stdio row carries its approved binding (the wrapper refuses an unbound
-// row), the row carries an applied digest, and - with the relay disabled -
-// that no row is stranded (a wrapped entry the wrapper now refuses).
+// mcpDoctorJournal checks every launch-journal row: a stdio row carries its
+// approved binding (the wrapper refuses an unbound row), the row carries an
+// applied digest, a row still naming a whole-file backup an older build
+// took is reported (it is converted and the file removed at the next
+// projection or disable; it is never read, T-397), and - with the relay
+// disabled - that no row is stranded (a wrapped entry the wrapper now
+// refuses).
 func mcpDoctorJournal(e *mcpDoctorEnv) []mcpDoctorCheck {
 	if e.specsErr != nil {
 		return mcpDoctorOne("journal.consistent", mcpDoctorFail, "launch journal unreadable: "+e.specsErr.Error())
@@ -409,18 +413,14 @@ func mcpDoctorJournal(e *mcpDoctorEnv) []mcpDoctorCheck {
 	}
 	for _, s := range e.specs {
 		id := s.Client + "/" + s.EntryKey
-		raw, err := os.ReadFile(s.BackupPath)
-		switch {
-		case err != nil:
-			fails = append(fails, id+": backup unreadable ("+err.Error()+"), restore will refuse")
-		case mcprelay.HashBytes(raw) != s.BackupSHA256:
-			fails = append(fails, id+": backup hash mismatch (tampered), restore will refuse")
+		if s.BackupPath != "" {
+			warns = append(warns, id+": still names a whole-file config backup from an older build; the next projection or disable removes it")
 		}
 		if s.OrigCommand != project.RemoteOrigCommand && s.VServer == "" {
 			fails = append(fails, id+": stdio row has no approved vserver binding - "+errMCPRelayUnbound.Error())
 		}
 		if s.AppliedSHA256 == "" {
-			warns = append(warns, id+": no applied digest (pre-132 row): restore reverses entries instead of a byte-identical rewrite")
+			warns = append(warns, id+": no applied digest (pre-132 row): reported not applied until the next projection")
 		}
 	}
 	switch {
@@ -429,7 +429,7 @@ func mcpDoctorJournal(e *mcpDoctorEnv) []mcpDoctorCheck {
 	case len(warns) > 0:
 		return mcpDoctorOne("journal.consistent", mcpDoctorWarn, strings.Join(warns, "; "))
 	}
-	return mcpDoctorOne("journal.consistent", mcpDoctorPass, fmt.Sprintf("%d row(s): backups present and hash-verified, every stdio row bound", len(e.specs)))
+	return mcpDoctorOne("journal.consistent", mcpDoctorPass, fmt.Sprintf("%d row(s): every stdio row bound, no config backups kept", len(e.specs)))
 }
 
 // runMCPDoctor walks the probe table over an assembled environment.

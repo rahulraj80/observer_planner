@@ -88,10 +88,10 @@ type RouteAttestation struct {
 // those fall to traffic attestation instead.
 func IsExempt(cap integration.Capability) (bool, string) {
 	if cap.Routability == integration.RouteStatusNativeExempt {
-		return true, "registry Routability=native_exempt — no routable proxy surface"
+		return true, "registry Routability=native_exempt - no routable proxy surface"
 	}
 	if cap.Hook.Mechanism == integration.HookBrowserExtension {
-		return true, "browser-extension capture (Hook=chrome_native_messaging) — no proxy-route surface by design"
+		return true, "browser-extension capture (Hook=chrome_native_messaging) - no proxy-route surface by design"
 	}
 	return false, ""
 }

@@ -23,6 +23,11 @@ export interface ApiFailure {
   /** The permission key the SERVER named in its 403 body, when it named one.
    *  Never inferred: null means "not stated". */
   permission: string | null;
+  /** The component a 404 component_not_installed names (modular packaging
+   *  plan 7.3): the read belongs to a component that is not active on this
+   *  machine, so the panel renders NotInstalled, not an error. Null for
+   *  every other failure. */
+  notInstalled: { component: string; state: string } | null;
 }
 
 // Permission keys are `<verb>:<noun>` (the same closed verb set the org
@@ -51,13 +56,30 @@ export function statusOf(e: unknown): number | null {
   return null;
 }
 
+/** notInstalledOf reads the component_not_installed class off a 404's body
+ *  (ApiError carries the full body as `body`), or null. */
+export function notInstalledOf(e: unknown): { component: string; state: string } | null {
+  if (statusOf(e) !== 404 || !e || typeof e !== "object" || !("body" in e)) return null;
+  const body = (e as { body: unknown }).body;
+  if (typeof body !== "string" || !body.includes("component_not_installed")) return null;
+  try {
+    const v = JSON.parse(body) as { error?: unknown; component?: unknown; state?: unknown };
+    if (v.error === "component_not_installed" && typeof v.component === "string") {
+      return { component: v.component, state: typeof v.state === "string" ? v.state : "" };
+    }
+  } catch {
+    // Not JSON: an ordinary 404.
+  }
+  return null;
+}
+
 /** describeApiFailure classifies any thrown value from an API read. */
 export function describeApiFailure(e: unknown): ApiFailure {
   const status = statusOf(e);
   const rule = status == null ? undefined : STATUS_RULES.find((r) => r.status === status);
   const denied = rule?.denied ?? false;
   const text = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-  return { status, denied, permission: denied ? permissionNamedIn(text) : null };
+  return { status, denied, permission: denied ? permissionNamedIn(text) : null, notInstalled: notInstalledOf(e) };
 }
 
 /** isAccessDenied reports whether a thrown value is a denial. */

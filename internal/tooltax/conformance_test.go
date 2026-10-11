@@ -72,6 +72,7 @@ func TestActionTypeValuesMatchModels(t *testing.T) {
 		tooltax.ActionConfigChange:        models.ActionConfigChange,
 		tooltax.ActionWorktreeCreate:      models.ActionWorktreeCreate,
 		tooltax.ActionWorktreeRemove:      models.ActionWorktreeRemove,
+		tooltax.ActionTaskEvent:           models.ActionTaskEvent,
 		tooltax.ActionRateLimit:           models.ActionRateLimit,
 		tooltax.ActionUnknown:             models.ActionUnknown,
 		// The eight types WP-T1 introduced to close the measured
@@ -92,13 +93,13 @@ func TestActionTypeValuesMatchModels(t *testing.T) {
 			t.Errorf("tooltax action type %q != models %q", tt, mm)
 		}
 	}
-	if len(pairs) != 48 {
-		t.Errorf("expected 48 mirrored action types, got %d — a constant was added or "+
+	if len(pairs) != 49 {
+		t.Errorf("expected 49 mirrored action types, got %d — a constant was added or "+
 			"two collapsed onto one key", len(pairs))
 	}
 	// The mirror must be TOTAL: every canonical action type tooltax
 	// registers has to appear above. Without this the count check is
-	// satisfiable by adding any 48 pairs, and a newly registered type
+	// satisfiable by adding any 49 pairs, and a newly registered type
 	// could ship with no models counterpart at all.
 	for _, at := range tooltax.ActionTypes() {
 		if _, ok := pairs[at]; !ok {

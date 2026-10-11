@@ -11,6 +11,9 @@ import {
   Stagger,
 } from "@/components/primitives";
 import { useApi } from "@/lib/useApi";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { POLICIES_TABS, defaultTab, type PoliciesTab } from "@/lib/nodePageTabs";
 import { ApiError, fetchJSON } from "@/lib/api";
 import { fmtShortId, fmtUSD } from "@/lib/format";
 import { pushToast } from "@/components/Toast";
@@ -59,7 +62,11 @@ import { MetricIcon } from "@/components/MetricIcon";
 // instance, which a live apply does NOT reach: those need Save (persist) + a
 // daemon restart. The UI must never imply every edit is instant.
 
-type PolicyTab = "overview" | "templates" | "guardrails" | "routing" | "test" | "activity";
+// The page's `?tab=` ids (platform tabs plan §2.2: the tab moved from local
+// state to the URL, so every tab is a cold deep link and Back walks tabs).
+// The ids and labels live in lib/nodePageTabs.ts (POLICIES_TABS), the table
+// the command palette and the breadcrumb read too.
+type PolicyTab = PoliciesTab;
 
 // One glyph per Policies tab.
 const POLICY_TAB_ICONS: Record<PolicyTab, LucideIcon> = {
@@ -101,7 +108,9 @@ type EgressStatus = {
 };
 
 export function PoliciesPage() {
-  const [tab, setTab] = useState<PolicyTab>("overview");
+  // The tabs the organization left visible on this machine (T-132).
+  const pageTabs = usePageTabs("policies", POLICIES_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
 
   const admission = useApi<AdmissionStatus>("/api/obs/admission/status");
   const budget = useApi<AdmissionBudget>("/api/obs/admission/budget");
@@ -115,24 +124,25 @@ export function PoliciesPage() {
     (e) => e != null && (!(e instanceof ApiError) || e.status === 404),
   );
 
-  const tabs: TabDef<PolicyTab>[] = [
-    { id: "overview", label: "Overview", icon: POLICY_TAB_ICONS.overview },
-    { id: "templates", label: "Templates", icon: POLICY_TAB_ICONS.templates },
+  const allTabs: TabDef<PolicyTab>[] = [
+    { id: "overview", label: POLICIES_TABS.labels.overview, icon: POLICY_TAB_ICONS.overview },
+    { id: "templates", label: POLICIES_TABS.labels.templates, icon: POLICY_TAB_ICONS.templates },
     {
       id: "guardrails",
-      label: "Guardrails",
+      label: POLICIES_TABS.labels.guardrails,
       icon: POLICY_TAB_ICONS.guardrails,
       count: admission.data?.criteria_count ?? null,
     },
     {
       id: "routing",
-      label: "Routing",
+      label: POLICIES_TABS.labels.routing,
       icon: POLICY_TAB_ICONS.routing,
       count: egress.data?.rules?.length ?? null,
     },
-    { id: "test", label: "Test", icon: POLICY_TAB_ICONS.test },
-    { id: "activity", label: "Activity", icon: POLICY_TAB_ICONS.activity },
+    { id: "test", label: POLICIES_TABS.labels.test, icon: POLICY_TAB_ICONS.test },
+    { id: "activity", label: POLICIES_TABS.labels.activity, icon: POLICY_TAB_ICONS.activity },
   ];
+  const tabs = allTabs.filter((t) => pageTabs.ids.includes(t.id));
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

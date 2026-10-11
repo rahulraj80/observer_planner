@@ -88,7 +88,7 @@ func (s *Server) portalTxnCookieName() string {
 // SameSite=Lax (it MUST survive the cross-site AuthKit callback), Secure
 // whenever the deployment uses the __Host- name.
 func (s *Server) setTxnCookie(w http.ResponseWriter, raw string) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly, SameSite=Lax for the AuthKit callback; Secure follows the deployment
 		Name:     s.portalTxnCookieName(),
 		Value:    raw,
 		Path:     "/",
@@ -102,7 +102,7 @@ func (s *Server) setTxnCookie(w http.ResponseWriter, raw string) {
 // clearTxnCookie expires the transaction cookie. The callback calls it on EVERY
 // outcome, so a failed attempt never leaves a reusable transaction cookie.
 func (s *Server) clearTxnCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly, SameSite=Lax for the AuthKit callback; Secure follows the deployment
 		Name:     s.portalTxnCookieName(),
 		Value:    "",
 		Path:     "/",

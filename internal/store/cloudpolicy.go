@@ -149,7 +149,7 @@ func (s *Store) SetCloudEnrichPolicy(ctx context.Context, p CloudEnrichPolicy) e
 		if err := p.EvidenceSettings.Validate(); err != nil {
 			return err
 		}
-		effective := p.EvidenceSettings.ForLevel(p.Level)
+		effective := CloudEvidenceSettingsForLevel(*p.EvidenceSettings, p.Level)
 		var err error
 		settingsJSON, err = effective.JSON()
 		if err != nil {

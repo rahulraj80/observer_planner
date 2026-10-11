@@ -616,9 +616,10 @@ func TestAutoLaneEndToEnd(t *testing.T) {
 
 // TestAutoLane_NoDefaultConfigured_WarnsOnce pins the fully-unresolvable
 // fallback: with no auto_default_lane (or one that can't resolve) and no
-// prefix match, the request falls through EXACTLY like an unknown
-// /up/<id> today (fixed upstream, warn-once) — sharing
-// warnUnknownUpstreamOnce's dedup, keyed by the literal "auto".
+// prefix match, the request is treated EXACTLY like an unknown /up/<id>
+// (refused locally since Sol A5-02, warn-once) — sharing
+// warnUnknownUpstreamOnce's dedup, keyed by the literal "auto". The refusal
+// itself is pinned by TestUnknownUpstreamLaneNeverForwardsCredentials.
 func TestAutoLane_NoDefaultConfigured_WarnsOnce(t *testing.T) {
 	fixedUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_notify_email
+
 package main
 
 import (

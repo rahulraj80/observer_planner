@@ -52,7 +52,7 @@ func TestCheckAdapter_LaunchResolutionVerdicts(t *testing.T) {
 			res: toolresolve.Resolution{
 				Verdict: toolresolve.VerdictOKOffPath,
 				Bin:     "/home/u/.opencode/bin/opencode",
-				Notes:   []string{"opencode resolved from /home/u/.opencode/bin, which is not on PATH — add it to PATH to silence this note"},
+				Notes:   []string{"opencode resolved from /home/u/.opencode/bin, which is not on PATH - add it to PATH to silence this note"},
 			},
 			wantStatus: StatusWarn,
 			wantSubs: []string{
@@ -108,20 +108,20 @@ func TestCheckAdapter_LaunchResolutionVerdicts(t *testing.T) {
 			wantStatus: StatusWarn,
 			wantSubs: []string{
 				"installed on Windows, not in WSL",
-				"no grounded install command — see the vendor's docs",
+				"no grounded install command - see the vendor's docs",
 			},
 		},
 		{
 			name:       "not_found with install hint",
 			res:        toolresolve.Resolution{Verdict: toolresolve.VerdictNotFound, Installs: []integration.InstallHint{{Display: "npm install -g opencode-ai@latest"}}},
 			wantStatus: StatusWarn,
-			wantSubs:   []string{"launcher binary not found — install: npm install -g opencode-ai@latest"},
+			wantSubs:   []string{"launcher binary not found - install: npm install -g opencode-ai@latest"},
 		},
 		{
 			name:       "not_found no grounded install",
 			res:        toolresolve.Resolution{Verdict: toolresolve.VerdictNotFound},
 			wantStatus: StatusWarn,
-			wantSubs:   []string{"launcher binary not found — install: no grounded install command — see the vendor's docs"},
+			wantSubs:   []string{"launcher binary not found - install: no grounded install command - see the vendor's docs"},
 		},
 	}
 
@@ -227,7 +227,7 @@ func TestCheckAdapters_ForeignOnlyBucket(t *testing.T) {
 		t.Errorf("foreign-only bucket = %q, want opencode listed", foreignLine)
 	}
 	if idleLine != "enabled, no data yet: cline" {
-		t.Errorf("idle bucket = %q, want cline listed (no Binary spec — never resolved)", idleLine)
+		t.Errorf("idle bucket = %q, want cline listed (no Binary spec - never resolved)", idleLine)
 	}
 }
 
@@ -271,6 +271,6 @@ func TestCheckAdapters_ForeignOnlyBucket_NoBinaryToolsUnaffected(t *testing.T) {
 	check := checkAdapters(cfg)
 	joined := strings.Join(check.Details, "\n")
 	if strings.Contains(joined, "installed on Windows only") {
-		t.Errorf("cline has no Binary spec — should never land in the foreign-only bucket: %v", check.Details)
+		t.Errorf("cline has no Binary spec - should never land in the foreign-only bucket: %v", check.Details)
 	}
 }

@@ -27,8 +27,10 @@ func TestBuildPrivacySocketsDefault(t *testing.T) {
 		addr   string
 		active bool
 	}{
-		"proxy":             {"127.0.0.1:8820", true},
-		"dashboard":         {"127.0.0.1:8081", true},
+		// A build without capture.proxy / ui.dashboard never binds them
+		// (REVIEW-4 P4-19, MP-L1M), so the omit-tag test builds expect false.
+		"proxy":             {"127.0.0.1:8820", !proxyNotInBuild()},
+		"dashboard":         {"127.0.0.1:8081", dashboardInBuild},
 		"browser-ingest":    {"127.0.0.1:8821", false},
 		"otlp-ingest":       {"127.0.0.1:4317 (gRPC), 127.0.0.1:4318 (HTTP)", false},
 		"processobs-accept": {"127.0.0.1:8823", false},
@@ -73,8 +75,16 @@ func TestBuildPrivacySocketsProxyAlwaysActive(t *testing.T) {
 	if proxyRow == nil {
 		t.Fatalf("expected a proxy socket row, got none: %+v", sockets)
 	}
+	if proxyNotInBuild() {
+		// REVIEW-4 P4-19: nothing binds the port in this build, and the row
+		// names the build instead of claiming a listener.
+		if proxyRow.Active || !strings.Contains(proxyRow.Purpose, "not in this build") {
+			t.Errorf("no proxy in this build: row = %+v", *proxyRow)
+		}
+		return
+	}
 	if !proxyRow.Active {
-		t.Errorf("proxy socket Active = false with [proxy].enabled=false, want true (the listener binds regardless — F8)")
+		t.Errorf("proxy socket Active = false with [proxy].enabled=false, want true (the listener binds regardless - F8)")
 	}
 	if !strings.Contains(proxyRow.Purpose, "REGARDLESS of [proxy].enabled") {
 		t.Errorf("proxy socket Purpose does not explain the [proxy].enabled honesty note: %q", proxyRow.Purpose)
@@ -139,37 +149,37 @@ func TestBuildPrivacySocketsRemoteBoundVsArmed(t *testing.T) {
 		wantActive bool
 	}{
 		{
-			name:       "lan mode with bind addr — bound",
+			name:       "lan mode with bind addr - bound",
 			mode:       "lan",
 			bindAddr:   "192.168.1.5:8081",
 			wantAddr:   "192.168.1.5:8081",
 			wantActive: true,
 		},
 		{
-			name:       "lan mode with no bind addr — armed but not bound",
+			name:       "lan mode with no bind addr - armed but not bound",
 			mode:       "lan",
 			bindAddr:   "",
-			wantAddr:   "(exposure mode not yet configured — substrate armed, nothing bound)",
+			wantAddr:   "(exposure mode not yet configured - substrate armed, nothing bound)",
 			wantActive: false,
 		},
 		{
-			name:       "tailscale mode with backend addr — bound",
+			name:       "tailscale mode with backend addr - bound",
 			mode:       "tailscale",
 			tsAddr:     "127.0.0.1:58123",
 			wantAddr:   "127.0.0.1:58123 (tailnet-local backend, TLS terminated by tailscale serve)",
 			wantActive: true,
 		},
 		{
-			name:       "tailscale mode with no backend addr — armed but not bound",
+			name:       "tailscale mode with no backend addr - armed but not bound",
 			mode:       "tailscale",
 			tsAddr:     "",
-			wantAddr:   "(exposure mode not yet configured — substrate armed, nothing bound)",
+			wantAddr:   "(exposure mode not yet configured - substrate armed, nothing bound)",
 			wantActive: false,
 		},
 		{
-			name:       "enabled but no mode chosen yet — armed but not bound",
+			name:       "enabled but no mode chosen yet - armed but not bound",
 			mode:       "off",
-			wantAddr:   "(exposure mode not yet configured — substrate armed, nothing bound)",
+			wantAddr:   "(exposure mode not yet configured - substrate armed, nothing bound)",
 			wantActive: false,
 		},
 	}
@@ -196,7 +206,7 @@ func TestBuildPrivacySocketsRemoteBoundVsArmed(t *testing.T) {
 				t.Errorf("remote-access addr = %q, want %q", got.Addr, tt.wantAddr)
 			}
 			if got.Active != tt.wantActive {
-				t.Errorf("remote-access active = %v, want %v (bound-vs-armed honesty — F10)", got.Active, tt.wantActive)
+				t.Errorf("remote-access active = %v, want %v (bound-vs-armed honesty - F10)", got.Active, tt.wantActive)
 			}
 		})
 	}
@@ -517,7 +527,7 @@ func TestBuildPrivacyEgressRemoteNotifyGate(t *testing.T) {
 	}{
 		{name: "both off", remoteEnabled: false, notifyEnabled: false, wantActive: false},
 		{name: "remote on, notify off", remoteEnabled: true, notifyEnabled: false, wantActive: false},
-		{name: "remote off, notify on — still fires (F4)", remoteEnabled: false, notifyEnabled: true, wantActive: true},
+		{name: "remote off, notify on - still fires (F4)", remoteEnabled: false, notifyEnabled: true, wantActive: true},
 		{name: "both on", remoteEnabled: true, notifyEnabled: true, wantActive: true},
 	}
 
@@ -589,7 +599,7 @@ func TestBuildPrivacyEgressGatedRowsFlipActive(t *testing.T) {
 			rowName: "email / digest alerts",
 		},
 		{
-			name:    "remote notify enabled (alone — F4)",
+			name:    "remote notify enabled (alone - F4)",
 			mutate:  func(c *config.Config) { c.Remote.Notify.Enabled = true },
 			rowName: "remote-access notify",
 		},

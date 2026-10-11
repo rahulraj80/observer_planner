@@ -160,7 +160,7 @@ func TestPortalLoginSetsCookieAndReadsOverview(t *testing.T) {
 	if ov.JobsTotal != 0 || ov.Results != 0 {
 		t.Fatalf("fresh account overview not empty: %+v", ov)
 	}
-	if ov.Allowance.DailyCap != 20 || ov.Allowance.MonthlyCap != 100 {
+	if ov.Allowance.DailyCap != 100 || ov.Allowance.MonthlyCap != 3000 {
 		t.Fatalf("unexpected allowance caps: %+v", ov.Allowance)
 	}
 }
@@ -317,8 +317,8 @@ func TestPortalConsentsAndUsage(t *testing.T) {
 
 	var snap store.UsageSnapshot
 	decode(t, c.get("/portal/api/usage"), &snap)
-	if snap.DailyCap != 20 || snap.MonthlyCap != 100 {
-		t.Fatalf("usage caps=%+v, want 20/100", snap)
+	if snap.DailyCap != 100 || snap.MonthlyCap != 3000 {
+		t.Fatalf("usage caps=%+v, want 100/3000 (free v3, migration 0041)", snap)
 	}
 }
 

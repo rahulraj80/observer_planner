@@ -82,7 +82,7 @@ func TestPlanReasoningSession(t *testing.T) {
 		wantCarryCount int
 	}{
 		{
-			name: "happy path — reasoning carries onto the next action",
+			name: "happy path - reasoning carries onto the next action",
 			in: []reasoningAction{
 				res(1, "crush", "thought preview", "thought preview and then some more"),
 				act(2, "file_read", ""),
@@ -92,7 +92,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 1,
 		},
 		{
-			name: "consumed-once — the second successor gets nothing",
+			name: "consumed-once - the second successor gets nothing",
 			in: []reasoningAction{
 				res(1, "crush", "only once", ""),
 				act(2, "file_read", ""),
@@ -103,7 +103,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 1,
 		},
 		{
-			name: "last-wins — the later reasoning reaches the successor",
+			name: "last-wins - the later reasoning reaches the successor",
 			in: []reasoningAction{
 				res(1, "codex", "first thought", ""),
 				res(2, "codex", "second thought", ""),
@@ -117,7 +117,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 1,
 		},
 		{
-			name: "turn-boundary-discarded — a user_prompt drops it",
+			name: "turn-boundary-discarded - a user_prompt drops it",
 			in: []reasoningAction{
 				res(1, "pi", "pre-boundary thought", ""),
 				act(2, "user_prompt", ""),
@@ -128,7 +128,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 0,
 		},
 		{
-			name: "never-overwrite — a populated successor keeps its text",
+			name: "never-overwrite - a populated successor keeps its text",
 			in: []reasoningAction{
 				res(1, "opencode", "the residue thought", ""),
 				act(2, "file_read", "a completely different preamble"),
@@ -138,7 +138,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 0,
 		},
 		{
-			name: "already-preserved — the successor already contains the text",
+			name: "already-preserved - the successor already contains the text",
 			in: []reasoningAction{
 				res(1, "cowork", "shared thought", ""),
 				act(2, "file_read", "shared thought"),
@@ -148,7 +148,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 0,
 		},
 		{
-			name: "no successor — the session ends on the reasoning row",
+			name: "no successor - the session ends on the reasoning row",
 			in: []reasoningAction{
 				act(1, "file_read", ""),
 				res(2, "hermes", "trailing thought", ""),
@@ -157,7 +157,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 0,
 		},
 		{
-			name: "divergent body — never converged, never deleted",
+			name: "divergent body - never converged, never deleted",
 			in: []reasoningAction{
 				res(1, "cursor", "the user wants a summary", "I have reviewed the project"),
 				act(2, "file_read", ""),
@@ -169,7 +169,7 @@ func TestPlanReasoningSession(t *testing.T) {
 
 		// ---- DECOYS (after the real bindings, on purpose) ----------
 		{
-			name: "decoy — a lone ordinary action plans nothing",
+			name: "decoy - a lone ordinary action plans nothing",
 			in: []reasoningAction{
 				act(1, "file_read", ""),
 				act(2, "file_write", ""),
@@ -178,7 +178,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 0,
 		},
 		{
-			name: "decoy — user_prompt AFTER the carry does not undo it",
+			name: "decoy - user_prompt AFTER the carry does not undo it",
 			in: []reasoningAction{
 				res(1, "crush", "carried before the boundary", ""),
 				act(2, "file_read", ""),
@@ -189,7 +189,7 @@ func TestPlanReasoningSession(t *testing.T) {
 			wantCarryCount: 1,
 		},
 		{
-			name: "decoy — last-wins across a boundary still discards the first",
+			name: "decoy - last-wins across a boundary still discards the first",
 			in: []reasoningAction{
 				res(1, "codex", "before boundary", ""),
 				act(2, "user_prompt", ""),
@@ -253,7 +253,7 @@ func TestPlanReasoningSessionNeverCrossesSessions(t *testing.T) {
 	// The concatenation is what a session-blind implementation would see.
 	// It MUST NOT be what the pass plans.
 	if blind := planReasoningSession(append(append([]reasoningAction{}, sessionA...), sessionB...)); len(blind.Carries) != 1 {
-		t.Fatalf("control: a session-blind walk should carry once, got %d — the control itself is wrong", len(blind.Carries))
+		t.Fatalf("control: a session-blind walk should carry once, got %d - the control itself is wrong", len(blind.Carries))
 	}
 }
 
@@ -266,15 +266,15 @@ func TestCarryText(t *testing.T) {
 		wantText       string
 		wantConvergeOK bool
 	}{
-		{"body extends target — carry the full body", "abc", "abcdef", "abcdef", true},
-		{"body equals target — carry either", "abc", "abc", "abc", true},
-		{"no body — carry the preview", "abc", "", "abc", true},
-		{"body diverges from target — refuse", "abc", "xyz", "", false},
-		{"both empty — refuse", "", "", "", false},
-		{"body without a target to prove it against — refuse", "", "xyz", "", false},
+		{"body extends target - carry the full body", "abc", "abcdef", "abcdef", true},
+		{"body equals target - carry either", "abc", "abc", "abc", true},
+		{"no body - carry the preview", "abc", "", "abc", true},
+		{"body diverges from target - refuse", "abc", "xyz", "", false},
+		{"both empty - refuse", "", "", "", false},
+		{"body without a target to prove it against - refuse", "", "xyz", "", false},
 		// Decoy: a body that CONTAINS target but does not start with it
 		// is not a prefix-extension and must still be refused.
-		{"decoy — body contains target mid-string — refuse", "abc", "zzabcdef", "", false},
+		{"decoy - body contains target mid-string - refuse", "abc", "zzabcdef", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -418,10 +418,10 @@ func TestBackfillReasoningConverge_DryRunThenApply(t *testing.T) {
 		t.Errorf("dry ExcerptsDeleted = %d, want 1", dry.ExcerptsDeleted)
 	}
 	if n := rcScanInt(t, ctx, database, `SELECT COUNT(*) FROM actions WHERE id = 1`); n != 1 {
-		t.Errorf("dry run deleted the residue row — it must write nothing")
+		t.Errorf("dry run deleted the residue row - it must write nothing")
 	}
 	if got := rcScanStr(t, ctx, database, `SELECT preceding_reasoning FROM actions WHERE id = 2`); got != "" {
-		t.Errorf("dry run wrote preceding_reasoning = %q — it must write nothing", got)
+		t.Errorf("dry run wrote preceding_reasoning = %q - it must write nothing", got)
 	}
 
 	// --- apply ----------------------------------------------------
@@ -440,13 +440,13 @@ func TestBackfillReasoningConverge_DryRunThenApply(t *testing.T) {
 		t.Errorf("carried residue row survived the apply")
 	}
 	if n := rcScanInt(t, ctx, database, `SELECT COUNT(*) FROM action_excerpts WHERE action_id = 1`); n != 0 {
-		t.Errorf("action_excerpts row survived — FTS5 search never joins actions, so this is a searchable ghost")
+		t.Errorf("action_excerpts row survived - FTS5 search never joins actions, so this is a searchable ghost")
 	}
 	if n := rcScanInt(t, ctx, database, `SELECT COUNT(*) FROM actions WHERE id = 3`); n != 1 {
-		t.Errorf("never-overwrite row was deleted — its text exists nowhere else")
+		t.Errorf("never-overwrite row was deleted - its text exists nowhere else")
 	}
 	if n := rcScanInt(t, ctx, database, `SELECT COUNT(*) FROM actions WHERE id = 5`); n != 1 {
-		t.Errorf("devin's deliberate task_complete row was deleted — it is not a B3 candidate")
+		t.Errorf("devin's deliberate task_complete row was deleted - it is not a B3 candidate")
 	}
 
 	// --- idempotency: a second apply changes nothing ---------------
@@ -484,14 +484,14 @@ func TestBackfillReasoningConverge_NeverCrossesSessionID(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Carried != 0 || got.RetainedNoSuccessor != 1 {
-		t.Errorf("carried %d / no-successor %d, want 0 / 1 — reasoning crossed a session id",
+		t.Errorf("carried %d / no-successor %d, want 0 / 1 - reasoning crossed a session id",
 			got.Carried, got.RetainedNoSuccessor)
 	}
 	if p := rcScanStr(t, ctx, database, `SELECT preceding_reasoning FROM actions WHERE id = 2`); p != "" {
-		t.Errorf("s2's action received s1's reasoning (%q) — sessions must never mix", p)
+		t.Errorf("s2's action received s1's reasoning (%q) - sessions must never mix", p)
 	}
 	if n := rcScanInt(t, ctx, database, `SELECT COUNT(*) FROM actions WHERE id = 1`); n != 1 {
-		t.Errorf("the uncarried residue row was deleted — its text would be destroyed")
+		t.Errorf("the uncarried residue row was deleted - its text would be destroyed")
 	}
 }
 
@@ -532,7 +532,7 @@ func TestBackfillReasoningConverge_DiscardUnresolved(t *testing.T) {
 		t.Errorf("--discard-unresolved did not delete the occupied row")
 	}
 	if n := rcScanInt(t, ctx, database, `SELECT COUNT(*) FROM actions WHERE id = 3`); n != 1 {
-		t.Errorf("a divergent-body row was deleted — it is out of reach under BOTH settings")
+		t.Errorf("a divergent-body row was deleted - it is out of reach under BOTH settings")
 	}
 }
 

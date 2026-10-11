@@ -35,6 +35,7 @@ func HashSecret(secret []byte) (string, error) {
 		return "", fmt.Errorf("remoteauth.HashSecret: rng failure: %w", err)
 	}
 	key := argon2.IDKey(secret, salt, argonTime, argonMemoryKiB, argonThreads, argonKeyLen)
+	// no-bare-usd:allow (not money: the PHC string format)
 	return fmt.Sprintf(
 		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argonVersion, argonMemoryKiB, argonTime, argonThreads,

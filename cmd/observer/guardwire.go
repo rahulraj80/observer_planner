@@ -15,7 +15,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/orgbudget"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/policy"
-	"github.com/marmutapp/superbased-observer/internal/proxy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -81,6 +80,30 @@ func lookupProcessGuard(dbPath string) *guard.Guard {
 	return processGuards.m[dbPath]
 }
 
+// nodeGuardPolicyInputs is the ONE source of the org-policy inputs a node
+// guard is built from: the enrolment key pin the cached org bundle must be
+// signed under (from guard_policy_state) and the tenancy lookup (the
+// org's SIGNED enrolment grant). The daemon (buildGuardForStore) and the
+// hook's failure-posture fallback (hookFallbackGateEnforcement) both call
+// it, so the bundle is verified identically in both and their gate
+// postures cannot drift. A nil store gives no pin (self-contained
+// signature check only) and no tenancy (unresolved, read as managed).
+func nodeGuardPolicyInputs(ctx context.Context, st *store.Store, logger *slog.Logger) (pin string, managed func() bool) {
+	if st == nil {
+		return "", nil
+	}
+	if states, serr := st.LatestGuardPolicyStates(ctx); serr == nil {
+		for _, ps := range states {
+			if ps.Layer == "org" && strings.HasSuffix(ps.Path, orgclient.PolicyKeyPinSuffix) {
+				pin = ps.ContentHash
+			}
+		}
+	} else if logger != nil {
+		logger.Warn("guard: org policy key pin unavailable; bundle loads with self-contained verification only", "err", serr)
+	}
+	return pin, managedTenancyLookup(st)
+}
+
 // buildGuardForStore constructs the guard composition layer wired to
 // one store handle: policy layers via guard.New, the §14.4
 // policy-change log callback, and the §6.3 approval lookup. Every
@@ -101,16 +124,7 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 	// they still verify the envelope's own signature). One indexed
 	// read at construction; a read failure degrades to the
 	// self-contained check, never blocks the daemon.
-	var orgKeyPin string
-	if states, serr := st.LatestGuardPolicyStates(ctx); serr == nil {
-		for _, ps := range states {
-			if ps.Layer == "org" && strings.HasSuffix(ps.Path, orgclient.PolicyKeyPinSuffix) {
-				orgKeyPin = ps.ContentHash
-			}
-		}
-	} else {
-		logger.Warn("guard: org policy key pin unavailable; bundle loads with self-contained verification only", "err", serr)
-	}
+	orgKeyPin, managedTenancy := nodeGuardPolicyInputs(ctx, st, logger)
 	g, err := guard.New(guard.Options{
 		Config:            cfg.Guard,
 		Home:              home,
@@ -122,7 +136,7 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 		// a floor over the rules the bundle names on an individual
 		// one. Resolved from the org's SIGNED enrolment grant, the
 		// same input `observer org status` reports.
-		ManagedTenancy: managedTenancyLookup(st),
+		ManagedTenancy: managedTenancy,
 		OnPolicyState: func(ps guard.PolicyState) {
 			// Project layers load lazily mid-run; use a fresh
 			// short-lived context rather than the (possibly long-gone)
@@ -153,6 +167,10 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 		defer cancel()
 		return st.ApprovalActiveFor(lctx, ruleID, sessionID, rootHash, time.Now().UTC())
 	})
+	// Org access grants (request-grants G3): the same claim the hook
+	// process composes, over the daemon's long-lived handle.
+	g.SetOrgGrantClaim(newOrgGrantClaim(daemonOrgGrantOpener(st), 2*time.Second))
+	g.SetRequestAccessBase(requestAccessBase(cfg))
 	// §6.3 project scope on the PROXY lane (adversarial review P2-7).
 	// A proxy egress/injection/budget event is built from a request
 	// body, which carries no path, so scope='project' grants could
@@ -190,7 +208,7 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 	// ok=false (rules fail toward silence, never a spurious breach).
 	// Wired whenever the guard runs — user cost-matcher rules work
 	// even with no [guard.budget] thresholds set.
-	g.SetBudgetAccountingLookup(func(sessionID string, accounting guard.BudgetAccountingContext) (guard.BudgetSnapshot, bool) {
+	accountingLookup := guard.BudgetAccountingLookup(func(sessionID string, accounting guard.BudgetAccountingContext) (guard.BudgetSnapshot, bool) {
 		lctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		now := time.Now().UTC()
@@ -319,6 +337,11 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 		}
 		return snap, true
 	})
+	g.SetBudgetAccountingLookup(accountingLookup)
+	// The budget-warning service measures per-tool / per-model caps through
+	// THIS lookup (budgetwarn_subjects.go, Sol A5-04): one accounting owner for
+	// what the guard enforces and what the developer is warned about.
+	registerProcessBudgetAccounting(cfg.Observer.DBPath, accountingLookup)
 	// §9.2 pin lookup: pinned-and-approved MCP servers stop marking
 	// mcp_unpinned taint. One indexed read, only on MCP-result paths;
 	// errors report false (fail toward "unpinned", never toward
@@ -365,6 +388,11 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 			return st.ConfirmPromptReconsider(cctx, fp, now)
 		},
 	})
+	// Post-hoc prompt lane dedupe (prompt-guard coverage audit
+	// 2026-10-02): a captured prompt a hook/proxy lane already judged is
+	// not recorded a second time. Errors report false — a duplicate flag
+	// is noise, a missed one is the silent gap the lane closes.
+	g.SetPromptPreSendLookup(preSendPromptLookup(st, logger))
 	// §9.2 config-change re-scan: a watcher-ingested write to a
 	// locate-table MCP registry file re-runs the config scan
 	// (debounced — editor save bursts coalesce to one pass).
@@ -408,6 +436,25 @@ func buildGuardForStore(ctx context.Context, cfg config.Config, st *store.Store,
 // precedent): the mutex only guards the cached tuple, so a stale-but-known
 // answer is served immediately to every caller while one refresh is in
 // flight, and a blocking decision never queues behind a DB read.
+// preSendPromptLookup builds the post-hoc prompt lane's dedupe lookup over
+// st (guard.PromptPreSendLookup). Shared by the daemon guard and the
+// `observer guard rescan|simulate` replay so both judge a captured prompt
+// the same way. A store error is logged at debug and reports false.
+func preSendPromptLookup(st *store.Store, logger *slog.Logger) guard.PromptPreSendLookup {
+	return func(sessionID, digest string, at time.Time) bool {
+		lctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		ok, err := st.PreSendPromptJudged(lctx, sessionID, digest, at)
+		if err != nil {
+			if logger != nil {
+				logger.Debug("guard: pre-send prompt lookup failed", "session_id", sessionID, "err", err)
+			}
+			return false
+		}
+		return ok
+	}
+}
+
 func managedTenancyLookup(st *store.Store) func() bool {
 	if st == nil {
 		return nil
@@ -523,124 +570,4 @@ func subjectWindowsOf(in map[string]store.GuardBudgetSubjectWindows) map[string]
 		}
 	}
 	return out
-}
-
-// guardScannerAdapter bridges the daemon's shared *guard.Guard +
-// *store.Store behind proxy.GuardScanner — the pipelineAdapter /
-// costEngineAdapter pattern: the proxy package holds only its own
-// plain types; persistence and alerting live here, behind the seam.
-// mcp, when non-nil, receives the §9.2 MCP tool-declaration
-// observations the request scan surfaces.
-type guardScannerAdapter struct {
-	g      *guard.Guard
-	st     *store.Store
-	logger *slog.Logger
-	mcp    *mcpsecRunner
-}
-
-// ScanRequest implements proxy.GuardScanner (§8.2 + §8.4). Verdicts
-// persist synchronously through the one-owner store seam before the
-// decision returns — rare (only verdict-bearing requests pay it), and
-// an enforced deny/mask should be on the audit chain before the
-// synthetic response leaves. Persistence failure is log-and-continue
-// (§17.4): it never blocks the request decision.
-//
-// MCP declaration observations (§9.2) run DETACHED: the pin diff
-// reads + writes the DB, and the request must not wait on it — the
-// declarations describe config state, not this request's content.
-func (a guardScannerAdapter) ScanRequest(_ context.Context, provider string, body []byte, sessionID string) proxy.GuardRequestResult {
-	return a.finishScan(a.g.ScanProxyRequest(provider, body, sessionID, time.Now().UTC()))
-}
-
-// ScanPrompt / ScanRequestAfterPrompt implement proxy.PromptPhaseScanner
-// (LIVE CORRECTION 2026-09-07): the proxy runs the prompt lane on the
-// pre-compression body and the remaining scans on the final body -- see
-// the interface's doc comment for why one post-compression scan cannot
-// see a pasted secret (the pipeline forward-scrubs it first).
-func (a guardScannerAdapter) ScanPrompt(_ context.Context, provider string, body []byte, sessionID string) proxy.GuardRequestResult {
-	return a.finishScan(a.g.ScanProxyPrompt(provider, body, sessionID, time.Now().UTC()))
-}
-
-func (a guardScannerAdapter) ScanRequestAfterPrompt(_ context.Context, provider string, body []byte, sessionID string) proxy.GuardRequestResult {
-	return a.finishScan(a.g.ScanProxyRequestAfterPrompt(provider, body, sessionID, time.Now().UTC()))
-}
-
-// finishScan persists/alerts the verdicts, hands MCP declarations to
-// the off-path runner, and maps the guard result onto the proxy's
-// action vocabulary -- shared by all three scan entry points.
-func (a guardScannerAdapter) finishScan(res guard.ProxyRequestResult) proxy.GuardRequestResult {
-	a.persistAndAlert(res.Verdicts)
-	if len(res.MCPDecls) > 0 && a.mcp != nil {
-		decls := res.MCPDecls
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			a.mcp.ObserveDecls(ctx, decls)
-		}()
-	}
-	var out proxy.GuardRequestResult
-	switch {
-	// Group 3 (phase-3a review, docs/guard-prompt.md "Two follow-ups"
-	// item 2): a prompt-lane block sets PromptDeny/PromptStatus/
-	// PromptRuleID/PromptReason ALONGSIDE the generic Deny/DenyRuleID/
-	// DenyReason fields (scanPrompt never sets Deny alone for a
-	// prompt-lane block — see ProxyRequestResult's own doc comment),
-	// so this case MUST be checked before the plain res.Deny case
-	// below or a prompt-submit interrupt would render through the
-	// wrong (egress-worded, always-403) body builder. Switches a
-	// proxy-lane deny to the intended 400-for-ask-once/403-for-block
-	// developer-facing wording (guardPromptDenyBody).
-	case res.PromptDeny:
-		out.Action = "prompt_deny"
-		out.RuleID = res.PromptRuleID
-		out.Reason = res.PromptReason
-		out.Status = res.PromptStatus
-	case res.Deny:
-		out.Action = "deny"
-		out.RuleID = res.DenyRuleID
-		out.Reason = res.DenyReason
-		// Track B: empty unless an org bundle applies.
-		out.HumanLine = res.DenyHumanLine
-	case res.MaskedBody != nil:
-		out.Action = "mask"
-		out.Body = res.MaskedBody
-	}
-	return out
-}
-
-// InspectResponse implements proxy.GuardScanner (§8.3): flag/alert
-// only — the proxy already delivered the response. apiTurnID anchors
-// each persisted verdict to the api_turn this response was captured as
-// (0 when the turn was dropped) so the obs trajectory enrichment can
-// surface the verdict on the span.
-func (a guardScannerAdapter) InspectResponse(_ context.Context, sessionID string, apiTurnID int64, tools []proxy.GuardToolUse) {
-	in := make([]guard.ProxyToolUse, 0, len(tools))
-	for _, t := range tools {
-		in = append(in, guard.ProxyToolUse{Name: t.Name, Input: t.Input})
-	}
-	verdicts := a.g.InspectProxyResponse(sessionID, in, time.Now().UTC())
-	if apiTurnID != 0 {
-		for i := range verdicts {
-			verdicts[i].Input.APITurnID = apiTurnID
-		}
-	}
-	a.persistAndAlert(verdicts)
-}
-
-// persistAndAlert writes record-worthy verdicts through the one-owner
-// guard store seam (detached context — the request context may die
-// the moment the client has its bytes) and fires desktop alerts
-// post-persist (the MaybeAlert call-site contract).
-func (a guardScannerAdapter) persistAndAlert(verdicts []guard.ActionVerdict) {
-	if len(verdicts) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if _, err := a.st.PersistGuardVerdicts(ctx, verdicts); err != nil {
-		a.logger.Warn("guard: proxy verdict persist failed", "err", err)
-	}
-	for i := range verdicts {
-		a.g.MaybeAlert(verdicts[i])
-	}
 }

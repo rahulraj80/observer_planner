@@ -231,8 +231,9 @@ func TestWrappedCommandFor(t *testing.T) {
 		{"claude-code", true, LaunchKindTerminal, []string{"claude"}, true, true},
 		{"vscode", true, LaunchKindGUI, []string{GUILaunchVerb, "vscode"}, true, false},
 		{"cursor-ide", true, LaunchKindGUI, []string{GUILaunchVerb, "cursor-ide"}, false, false},
-		{"hermes-desktop", false, "", nil, false, false}, // ungrounded, never offered
-		{"cline", false, "", nil, false, false},          // an extension has no launch row
+		{"zed-ide", true, LaunchKindGUI, []string{GUILaunchVerb, "zed-ide"}, false, false}, // D-177, WrapNone
+		{"hermes-desktop", false, "", nil, false, false},                                   // ungrounded, never offered
+		{"cline", false, "", nil, false, false},                                            // an extension has no launch row
 		{"no-such-id", false, "", nil, false, false},
 	}
 	for _, tt := range tests {
@@ -267,6 +268,7 @@ func TestGUIRowForID(t *testing.T) {
 		{"vscode", "vscode", true},
 		{"cursor-ide", "cursor-ide", true},
 		{"cursor", "cursor-ide", true},
+		{"zed", "zed-ide", true},   // D-177: the capture-only adapter key reaches the editor row
 		{"claude-code", "", false}, // no GUI row of its own
 		{"nope", "", false},
 	}

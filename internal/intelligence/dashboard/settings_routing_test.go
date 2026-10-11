@@ -79,7 +79,19 @@ local_only = true
 	// Body deliberately zeroes every file-only shape (a real UI draft
 	// round-trips them from GET /api/config; a hostile/buggy one might
 	// send zeros — either way they must not land).
-	body := `{"Enabled":true,"Mode":"enforce","Policy":"frugal","DecisionLogRetentionDays":365,` +
+	// A build without proxy.routing knows no policy templates, only "custom"
+	// (routingpolicy_omit.go), and refuses a template name at the PUT (D-535).
+	policy := "frugal"
+	if len(routingPolicyTemplateNames()) == 0 {
+		policy = "custom"
+		rr := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rr, confirmedReq(t, server, httptest.NewRequest(http.MethodPut,
+			"/api/config/section/routing", strings.NewReader(`{"Enabled":true,"Mode":"advise","Policy":"frugal"}`))))
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("a template policy in a build without proxy.routing must 400, got %d %s", rr.Code, rr.Body.String())
+		}
+	}
+	body := `{"Enabled":true,"Mode":"enforce","Policy":"` + policy + `","DecisionLogRetentionDays":365,` +
 		`"Tiers":{},"BenchmarkFiles":[],"KeyPool":{},"LocalUpstreams":[],"Rules":[],` +
 		`"Budget":{"Scopes":[]},"Privacy":{"Rules":[]},"PathClasses":{},` +
 		`"Stickiness":{"RespectCache":false,"MinTurnsBetweenSwitches":9},` +
@@ -87,7 +99,7 @@ local_only = true
 		`"Calibration":{"Enabled":true,"MinSamples":75,"AutoDemote":false}}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/routing", strings.NewReader(body)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/routing", strings.NewReader(body))))
 	if rr.Code != 200 {
 		t.Fatalf("PUT routing: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -128,7 +140,7 @@ local_only = true
 	}
 
 	// 3. The knobs the section owns did land.
-	if !rc.Enabled || rc.Mode != "enforce" || rc.Policy != "frugal" {
+	if !rc.Enabled || rc.Mode != "enforce" || rc.Policy != policy {
 		t.Errorf("gate/mode/policy not persisted: enabled=%v mode=%q policy=%q", rc.Enabled, rc.Mode, rc.Policy)
 	}
 	if rc.DecisionLogRetentionDays != 365 {

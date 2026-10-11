@@ -1,3 +1,5 @@
+//go:build !sbo_omit_export_otel
+
 package main
 
 import (
@@ -13,6 +15,16 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
+// otel.go is the on side of the OpenTelemetry export wiring (component
+// export.otel, modular packaging plan 5.1, lane MP-L1C); otel_omit.go is the
+// off side. start.go holds the exporter only through otelExporterHandle, so
+// it never names internal/exporter/otel itself.
+
+// otelExporterHandle is the daemon's handle on the running exporter: the
+// exporter itself in this build, a never-constructed placeholder in a
+// `-tags sbo_omit_export_otel` build.
+type otelExporterHandle = *otelexp.Exporter
+
 // buildOTelExporter constructs the agent-side OpenTelemetry exporter (Teams M4)
 // from the [exporter.otel] config. The exporter tails api_turns independently
 // of the dashboard and org client (it needs M0 only and never couples to the
@@ -20,7 +32,7 @@ import (
 //
 // Returns a nil exporter with enabled=false when the section is disabled — the
 // solo-local default — so no OTLP client is built and no network call is made.
-func buildOTelExporter(ctx context.Context, configPath string) (e *otelexp.Exporter, cleanup func(), enabled bool, err error) {
+func buildOTelExporter(ctx context.Context, configPath string) (e otelExporterHandle, cleanup func(), enabled bool, err error) {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
 	if err != nil {
 		return nil, func() {}, false, fmt.Errorf("load config: %w", err)

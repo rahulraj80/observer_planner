@@ -145,7 +145,7 @@ export type MCPAccessSectionState =
 
 const DISABLED_MESSAGE =
   "The node MCP relay is off ([mcp_relay].enabled = false): no MCP call on this machine is mediated, " +
-  "and no org grant is enforced here. Turn it on with `observer mcp-relay enable`.";
+  "and no org grant is enforced here. Turn it on with the 'Turn on the relay' button below.";
 
 /** mcpAccessSectionState is the frame the section renders. */
 export function mcpAccessSectionState(
@@ -170,7 +170,7 @@ export function mcpAccessNotes(v: MCPAccessView): string[] {
     notes.push(
       `${s.launch_specs} journaled client MCP entr${s.launch_specs === 1 ? "y is" : "ies are"} still wrapped` +
         (who ? ` (${who})` : "") +
-        ": while the relay is off those servers refuse to start. Run `observer mcp unwrap` to restore the originals.",
+        ": while the relay is off those servers refuse to start. Use the 'Restore original configs' button below to put the originals back.",
     );
   }
   if (s.enabled && !v.daemon_relay) {
@@ -356,10 +356,10 @@ export function approvedServerCount(vservers: MCPAccessVServer[]): number {
 export function chainLine(s: MCPRelayStatus, verified: boolean): { text: string; tone: "ok" | "warn" | "danger" | "neutral" } {
   if (s.chain_head === 0) return { text: "no decision records yet", tone: "neutral" };
   if (!verified || s.chain_ok === undefined) {
-    return { text: `${s.chain_head} records, not verified on this read (observer mcp doctor verifies it)`, tone: "neutral" };
+    return { text: `${s.chain_head} records, not verified on this read (Run doctor below verifies it)`, tone: "neutral" };
   }
   if (s.chain_ok) return { text: `${s.chain_head} records, chain intact`, tone: "ok" };
-  return { text: `${s.chain_head} records, chain BROKEN - run observer mcp doctor`, tone: "danger" };
+  return { text: `${s.chain_head} records, chain BROKEN - use Run doctor below`, tone: "danger" };
 }
 
 /** remoteLine words remote forwarding with its source. */

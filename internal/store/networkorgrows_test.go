@@ -6,22 +6,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // seedNetworkEvent persists one network_connect event through the real
 // PersistProcessEvents write path (mirroring processobs_test.go's own
 // seeding style), optionally attaching a body.
-func seedNetworkEvent(t *testing.T, s *Store, sessionID, processKey string, ts time.Time, details map[string]any, body *processobs.NetworkBodyCapture) {
+func seedNetworkEvent(t *testing.T, s *Store, sessionID, processKey string, ts time.Time, details map[string]any, body *procmodel.NetworkBodyCapture) {
 	t.Helper()
-	ev := processobs.ProcessEvent{
+	ev := procmodel.ProcessEvent{
 		ProcessKey: processKey,
 		Timestamp:  ts,
-		Type:       processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{
+		Type:       procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{
 			SessionID:  sessionID,
-			Source:     processobs.AttrHeuristic,
-			Confidence: processobs.ConfMedium,
+			Source:     procmodel.AttrHeuristic,
+			Confidence: procmodel.ConfMedium,
 		},
 		TargetKind:  "url",
 		Target:      "https://api.example.test/v1/messages",
@@ -29,7 +29,7 @@ func seedNetworkEvent(t *testing.T, s *Store, sessionID, processKey string, ts t
 		Details:     details,
 		NetworkBody: body,
 	}
-	if _, err := s.PersistProcessEvents(context.Background(), []processobs.ProcessEvent{ev}); err != nil {
+	if _, err := s.PersistProcessEvents(context.Background(), []procmodel.ProcessEvent{ev}); err != nil {
 		t.Fatalf("seedNetworkEvent: PersistProcessEvents: %v", err)
 	}
 }
@@ -52,7 +52,7 @@ func TestSelectSessionNetworkEvents_ProxyEventWithBody(t *testing.T) {
 			"duration_ms":    321,
 			"stream":         true,
 		},
-		&processobs.NetworkBodyCapture{
+		&procmodel.NetworkBodyCapture{
 			CaptureSource:         "proxy",
 			RequestID:             "req_abc",
 			Method:                "POST",
@@ -169,10 +169,10 @@ func TestSelectSessionNetworkEvents_ExcludesUnattributedAndOldEvents(t *testing.
 		map[string]any{"capture_source": "process_backend"}, nil)
 	// No session attribution at all: PersistProcessEvents stores session_id
 	// NULL, so the WHERE session_id IS NOT NULL AND != '' filter drops it.
-	if _, err := s.PersistProcessEvents(ctx, []processobs.ProcessEvent{{
+	if _, err := s.PersistProcessEvents(ctx, []procmodel.ProcessEvent{{
 		ProcessKey: "os:unattributed",
 		Timestamp:  now.Add(-time.Minute),
-		Type:       processobs.EventNetworkConnect,
+		Type:       procmodel.EventNetworkConnect,
 		TargetKind: "network_endpoint",
 		Target:     "5.6.7.8:443",
 		Details:    map[string]any{"capture_source": "process_backend"},
@@ -249,7 +249,7 @@ func TestSelectSessionNetworkEventsBounded_CapsAcrossSessionsByBytes(t *testing.
 	for i := 0; i < 3; i++ {
 		seedNetworkEvent(t, s, sessionID, "proxy:bounded", now.Add(time.Duration(i)*time.Second),
 			map[string]any{"capture_source": "proxy", "method": "POST"},
-			&processobs.NetworkBodyCapture{CaptureSource: "proxy", RequestBody: "request-body", ResponseBody: "response-body"})
+			&procmodel.NetworkBodyCapture{CaptureSource: "proxy", RequestBody: "request-body", ResponseBody: "response-body"})
 	}
 
 	all, err := s.SelectSessionNetworkEvents(ctx)
@@ -285,7 +285,7 @@ func TestSelectUnpushedSince_NetworkEventsRespectEnvelopeBudget(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		seedNetworkEvent(t, s, sessionID, "proxy:budget", now.Add(time.Duration(i)*time.Second),
 			map[string]any{"capture_source": "proxy", "method": "POST"},
-			&processobs.NetworkBodyCapture{CaptureSource: "proxy", RequestBody: body, ResponseBody: body})
+			&procmodel.NetworkBodyCapture{CaptureSource: "proxy", RequestBody: body, ResponseBody: body})
 	}
 
 	const maxBytes = 1 << 20

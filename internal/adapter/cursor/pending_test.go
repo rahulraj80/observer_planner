@@ -246,7 +246,7 @@ func TestStashProtocol_ClearDoesNotEatALaterThought(t *testing.T) {
 		}
 	}
 	if lost == iters {
-		t.Fatalf("every iteration lost the new thought — clear is still deleting by name")
+		t.Fatalf("every iteration lost the new thought - clear is still deleting by name")
 	}
 }
 

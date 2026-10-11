@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "date": "2026-01-15",
+      "daily_active_users": 128,
+      "weekly_active_users": 312,
+      "monthly_active_users": 485,
+      "daily_active_users_by_client": {
+        "terminal-ui": 95,
+        "web": 42,
+        "non-interactive-cli": 18
+      },
+      "sessions": 890,
+      "messages": 12500,
+      "user_messages": 4200
+    }
+  ],
+  "meta": {
+    "org_id": "org_01HPMQ6ABCDE",
+    "start_date": "2026-01-15",
+    "end_date": "2026-01-15"
+  }
+}

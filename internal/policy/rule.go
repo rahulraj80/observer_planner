@@ -156,6 +156,20 @@ type Rule struct {
 	// org-granted", which is byte-identical to the pre-wave behaviour:
 	// a deny stays a deny and nothing consults it.
 	Overridable bool
+	// EnforceCappedBy is the policy layer ("org", "user",
+	// "trusted_project") whose [[override]] wrote an explicit
+	// `enforce = false` on this rule, or "" when none did (D-030: an
+	// explicit enforce=false caps the rule at FLAG on every seam, tool
+	// and prompt alike, whatever the engine mode). verdictFor applies the
+	// cap; a later `enforce = true` override clears it.
+	EnforceCappedBy string
+	// ReadsBudgetStamps declares that the row's matcher reads the guard-stamped
+	// spend or usage fields (Event.SessionCostUSD and its siblings). A compiled
+	// policy-file rule sets it when it uses a spend matcher; the built-in budget
+	// rows leave it false because their thresholds are on Config and
+	// Engine.ReadsBudgetStamps reads those directly. It feeds that one
+	// predicate and nothing else (T-418).
+	ReadsBudgetStamps bool
 }
 
 // Override tunes rule rows by public ID without redefining them (spec
@@ -180,6 +194,12 @@ type Override struct {
 	// "false wins" and a lower-trust layer cannot grant what the org
 	// withheld.
 	Overridable bool
+	// EnforceOff is an explicit `enforce = false`: it caps the rule at
+	// FLAG (Rule.EnforceCappedBy = Source) and clears Rule.Enforced. The
+	// guard merge decides which layers may write it; New refuses it on a
+	// protected row (an integrity rule, or an org-authoritative hard
+	// budget row) from any source but the org budget boundary.
+	EnforceOff bool
 	// Source labels the layer the override came from ("user",
 	// "project", "org") so the verdict attributes to the layer that
 	// last tuned the rule.

@@ -1253,3 +1253,61 @@ func TestScanProxyPrompt_RetryFloor(t *testing.T) {
 		t.Fatalf("floor disabled but immediate resend still blocked: %+v", r)
 	}
 }
+
+// TestScanProxyPrompt_PreSendMark pins the proxy lane's pre-send mark
+// (ProxyRequestResult.PromptPreSendDigest) the post-hoc capture lane
+// dedupes on: set for a record-worthy prompt and for an allowed one whose
+// stored form will carry a typed marker, empty for a plain prompt.
+func TestScanProxyPrompt_PreSendMark(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 2, 18, 0, 0, 0, time.UTC)
+	pat := "github_pat_11" + strings.Repeat("Pr0x_", 6)
+	cases := []struct {
+		name     string
+		cfg      func() config.GuardConfig
+		text     string
+		wantMark bool
+	}{
+		{"record-worthy prompt", func() config.GuardConfig { return promptProxyCfg("ask-once", false) }, "here is my card " + promptTestPAN, true},
+		{"allow-listed fixture still marks", func() config.GuardConfig {
+			c := promptProxyCfg("ask-once", false)
+			c.Prompt.Allow = []string{`^github_pat_11`}
+			return c
+		}, "use " + pat + " in the test", true},
+		{"plain prompt", func() config.GuardConfig { return promptProxyCfg("ask-once", false) }, "hello there", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newTestGuard(t, tc.cfg(), nil)
+			g.SetPromptReconsiderStore(newMemPromptStore().funcs())
+			res := g.ScanProxyPrompt(models.ProviderAnthropic, anthropicUserOnlyBody(tc.text), "s-mark", now)
+			if (res.PromptPreSendDigest != "") != tc.wantMark {
+				t.Fatalf("PromptPreSendDigest = %q, want mark=%v", res.PromptPreSendDigest, tc.wantMark)
+			}
+			if tc.wantMark && (res.PromptPreSendSessionID != "s-mark" || res.PromptPreSendDigest != PromptCaptureDigest(tc.text)) {
+				t.Errorf("mark = (%q, %q), want the session and the prompt's capture digest", res.PromptPreSendSessionID, res.PromptPreSendDigest)
+			}
+		})
+	}
+}
+
+// TestScanProxyPromptFor_StampsClientTool pins audit P9 on the guard side:
+// the tool the proxy resolved lands on the persisted verdict, and the
+// reason records the proxy lane (the node dashboard no longer has to infer
+// the lane from an empty tool).
+func TestScanProxyPromptFor_StampsClientTool(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	g := newTestGuard(t, promptProxyCfg("warn", false), nil)
+	res := g.ScanProxyPromptFor("codex", models.ProviderAnthropic, anthropicUserOnlyBody("here is my card "+promptTestPAN), "s-p9", now)
+	if len(res.Verdicts) != 1 {
+		t.Fatalf("verdicts = %+v, want one flag", res.Verdicts)
+	}
+	av := res.Verdicts[0]
+	if av.Input.Tool != "codex" {
+		t.Errorf("tool = %q, want codex", av.Input.Tool)
+	}
+	if !strings.Contains(av.Verdict.Reason, "[lane=proxy]") || !strings.Contains(av.Verdict.Reason, "[action=flag-after]") {
+		t.Errorf("reason = %q, want the proxy lane and flag-after markers", av.Verdict.Reason)
+	}
+}

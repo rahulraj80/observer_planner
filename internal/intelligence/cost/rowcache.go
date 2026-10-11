@@ -127,6 +127,7 @@ type rowCacheKey struct {
 	projectID   int64
 	projectRoot string
 	tool        string
+	model       string
 }
 
 type rowCacheSlot struct {
@@ -258,6 +259,7 @@ func rowCacheKeyFor(db *sql.DB, kind string, opts Options, since time.Time) (row
 		projectID:   opts.ProjectID,
 		projectRoot: opts.ProjectRoot,
 		tool:        opts.Tool,
+		model:       opts.Model,
 	}
 	if !opts.Until.IsZero() {
 		k.until = opts.Until.UTC().Format(time.RFC3339Nano)

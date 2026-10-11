@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useApi } from "@/lib/useApi";
+import { fetchJSON } from "@/lib/api";
+import { ConfirmButton } from "@/components/primitives";
 import type { UpdateStatusResponse } from "@/lib/types";
 
 // UpdateBanner - the slim strip under the TopBar when the ORG has something to
@@ -48,6 +50,10 @@ export type UpdateBannerNotice = {
   label: string;
   body: string;
   dismissible: boolean;
+  // installable: the banner offers "Install now" (POST /api/update/apply, the
+  // `observer update apply` seam) - only for an available update this node
+  // can apply itself and does not already apply on its own.
+  installable?: boolean;
 };
 
 export function updateBannerNotice(
@@ -100,8 +106,9 @@ export function updateBannerNotice(
       label: "Update available",
       body: d.auto_apply
         ? `Your org has published ${d.target_version}. This node applies updates automatically and will install it in its next maintenance window.`
-        : `Your org has published ${d.target_version}. Run \`observer update apply\` to install it.`,
+        : `Your org has published ${d.target_version}. Install it here when you are ready.`,
       dismissible: true,
+      installable: !d.auto_apply && d.self_apply !== false,
     };
   }
   return null;
@@ -125,6 +132,9 @@ const toneClass: Record<UpdateBannerNotice["tone"], { strip: string; label: stri
 export function UpdateBanner() {
   const st = useApi<UpdateStatusResponse>("/api/update/status");
   const [, bump] = useState(0);
+  const [install, setInstall] = useState<{ state: "idle" | "working" | "started" | "err"; message?: string }>({
+    state: "idle",
+  });
   const notice = updateBannerNotice(st.data);
   if (!notice) return null;
   const acked = acks();
@@ -149,8 +159,37 @@ export function UpdateBanner() {
       className={`flex items-center gap-2 border-b px-4 py-1.5 text-[11.5px] text-fg-2 ${style.strip}`}
     >
       <span className={style.label}>{notice.label}</span>
-      <span className="min-w-0 truncate">{notice.body}</span>
+      <span className="min-w-0 truncate">
+        {install.state === "started"
+          ? "Installing. The daemon drains in-flight requests, swaps the binary and restarts; reload this page in a minute."
+          : install.state === "err"
+            ? `Install failed: ${install.message}`
+            : notice.body}
+      </span>
       <div className="flex-1" />
+      {notice.installable && install.state !== "started" && (
+        <ConfirmButton
+          size="sm"
+          variant="primary"
+          armedVariant="primary"
+          confirmLabel="Install?"
+          loading={install.state === "working"}
+          onConfirm={() => {
+            setInstall({ state: "working" });
+            fetchJSON("/api/update/apply", undefined, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: "{}",
+            })
+              .then(() => setInstall({ state: "started" }))
+              .catch((e: unknown) =>
+                setInstall({ state: "err", message: e instanceof Error ? e.message.replace(/^api \d+ \S+: /, "") : String(e) }),
+              );
+          }}
+        >
+          Install now
+        </ConfirmButton>
+      )}
       <Link
         to="/settings?section=health"
         className="shrink-0 text-[11px] font-medium text-accent hover:text-accent-strong"

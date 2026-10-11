@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package dashboard
 
 import (
@@ -66,6 +68,14 @@ func arenaWorkspaceDir() string {
 	return filepath.Join(os.TempDir(), "observer-arena")
 }
 
+// arenaProxyURLFor is the Observer proxy base an Arena drive routes through.
+// Every Arena drive is routed (token capture rides the proxy); the model
+// pickers read the same value so a lane's provider-prefix rule matches what
+// the runner will enforce.
+func arenaProxyURLFor(port int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
+
 func (s *Server) newArenaRunner() (*arena.Runner, error) {
 	st := s.remoteManageStore()
 	if st == nil {
@@ -74,9 +84,12 @@ func (s *Server) newArenaRunner() (*arena.Runner, error) {
 	return arena.NewRunner(arena.Options{
 		Store:        st,
 		WorkspaceDir: arenaWorkspaceDir(),
-		ProxyURL:     fmt.Sprintf("http://127.0.0.1:%d", s.opts.ProxyPort),
+		ProxyURL:     s.arenaProxyURL(),
 		MaxParallel:  3,
 		Admission:    s.opts.ArenaAdmission,
+		// The kept commit's provenance footer follows the developer cost
+		// display (T-204), resolved per keep like the statusline tile.
+		CostDisplay: func() string { return s.statuslineCostDisplay(context.Background()) },
 	})
 }
 

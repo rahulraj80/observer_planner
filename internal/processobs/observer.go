@@ -78,13 +78,6 @@ type DeepEnricher interface {
 	DeepEnrich(run *ProcessRun)
 }
 
-// Sink persists finished runs. The store implements it and translates
-// ProcessRun into its own SQL row type at the boundary; process_key is
-// UNIQUE, so PersistRuns upserts (insert at exec, update at exit).
-type Sink interface {
-	PersistRuns(ctx context.Context, runs []ProcessRun) (int, error)
-}
-
 // Options configures an Observer.
 type Options struct {
 	Backend             Backend
@@ -389,7 +382,7 @@ func (o *Observer) Health() *Health { return o.health }
 func (o *Observer) SetActiveSessionRoots(roots []string) {
 	m := make(map[string]struct{}, len(roots))
 	for _, r := range roots {
-		if n := normalizePath(r); n != "" {
+		if n := NormalizePath(r); n != "" {
 			m[n] = struct{}{}
 		}
 	}
@@ -404,7 +397,7 @@ func (o *Observer) cwdInActiveRoot(cwd string) bool {
 	if m == nil || len(*m) == 0 {
 		return false
 	}
-	n := normalizePath(cwd)
+	n := NormalizePath(cwd)
 	if n == "" {
 		return false
 	}
@@ -642,7 +635,7 @@ func (o *Observer) shutdownAwareContext(ctx context.Context) (func() context.Con
 			return ctx
 		}
 		if shutdown == nil {
-			shutdown, cancelShutdown = context.WithTimeout(
+			shutdown, cancelShutdown = context.WithTimeout( //nolint:gosec // G118: cancelShutdown is called by the returned cleanup func
 				context.WithoutCancel(ctx), o.shutdownFlushTimeout,
 			)
 		}

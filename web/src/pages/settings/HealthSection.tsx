@@ -1,4 +1,3 @@
-import clsx from "clsx";
 import {
   CircleAlert,
   Download,
@@ -7,7 +6,6 @@ import {
   Server,
   type LucideIcon,
 } from "lucide-react";
-import { VOCAB_ICONS } from "@shared/lib/vocabIcons";
 import { Link } from "react-router-dom";
 import {
   Button,
@@ -18,9 +16,14 @@ import {
   Tooltip,
   TruncatedPath,
 } from "@/components/primitives";
+import { useState } from "react";
 import { ChartState } from "@/components/ChartState";
+import { Summary } from "@/components/Summary";
 import { RestartOverlay } from "@/components/RestartOverlay";
+import { DoctorChecks } from "@/components/DoctorChecks";
+import { IntegrityCheckCard } from "./IntegrityCheckCard";
 import { useApi } from "@/lib/useApi";
+import { useTileVisible } from "@/lib/useComponents";
 import { useDaemonRestart } from "@/lib/useDaemonRestart";
 import { integrityHealthRow } from "@/lib/integrity";
 import { isUpdateAvailable, useUpdateCheck } from "@/lib/version";
@@ -42,12 +45,19 @@ import type {
 export function HealthSection({ icon }: { icon?: LucideIcon }) {
   return (
     <>
-      <DaemonCard />
+      <div id="daemon">
+        <DaemonCard />
+      </div>
       <div className="mt-4">
         <UpdateCard />
       </div>
       <div className="mt-4">
         <DoctorCard icon={icon} />
+      </div>
+      <div className="mt-4">
+        <div id="integrity">
+          <IntegrityCheckCard />
+        </div>
       </div>
       <div className="mt-4">
         <FailuresCard />
@@ -118,6 +128,9 @@ function UpdateCard() {
   const { latest, checking, error, lastCheckedAt, checkNow } =
     useUpdateCheck();
   const updateAvailable = isUpdateAvailable(current, latest);
+  // The org-served half reads /api/update: hidden when that component is not
+  // active here (T-670); the npm check above is core and always shown.
+  const showOrgUpdate = useTileVisible()({ route: "/api/update/status" });
   return (
     <ChartShell
       title="Updates"
@@ -175,8 +188,76 @@ function UpdateCard() {
           )}
         </p>
       )}
-      <OrgUpdatePosture />
+      {showOrgUpdate && <OrgUpdatePosture />}
+      {showOrgUpdate && <UpdateHistory />}
     </ChartShell>
+  );
+}
+
+type UpdateHistoryEvent = {
+  id: number;
+  at: string;
+  from_version: string;
+  to_version: string;
+  state: string;
+  error_class?: string;
+  detail: string;
+};
+
+// UpdateHistory is `observer update history` (backlog item 6, sweep row 23):
+// every apply, rollback and refusal this node recorded, newest first, from
+// the node-local ledger. Loaded only when opened. A reason can name a local
+// path, which is why the read is owner-local and never leaves the machine.
+function UpdateHistory() {
+  const [open, setOpen] = useState(false);
+  const hist = useApi<{ events: UpdateHistoryEvent[] } | null>(open ? "/api/update/history" : null);
+  const events = hist.data?.events ?? [];
+  return (
+    <details
+      className="mt-3 border-t border-line-1 pt-3 text-[11.5px]"
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <Summary className="w-fit text-fg-3 hover:text-fg-2">Update history (this node)</Summary>
+      <div className="mt-2">
+        <ChartState
+          loading={hist.loading && !hist.data}
+          error={hist.error}
+          denied={hist.denied}
+          deniedPermission={hist.deniedPermission}
+          empty={!hist.loading && events.length === 0}
+          emptyHint="No update events recorded on this node."
+          height={80}
+        >
+          <Table
+            minWidth={560}
+            head={
+              <tr>
+                <th className="pb-1.5 pr-3 font-semibold">When</th>
+                <th className="pb-1.5 pr-3 font-semibold">From</th>
+                <th className="pb-1.5 pr-3 font-semibold">To</th>
+                <th className="pb-1.5 pr-3 font-semibold">State</th>
+                <th className="pb-1.5 font-semibold">Detail</th>
+              </tr>
+            }
+          >
+            {events.map((e) => (
+              <tr key={e.id} className="border-t border-line-1 align-top">
+                <td className="whitespace-nowrap py-1.5 pr-3 text-fg-2">{fmtDateTime(e.at)}</td>
+                <td className="py-1.5 pr-3 font-mono text-fg-2">{e.from_version || "-"}</td>
+                <td className="py-1.5 pr-3 font-mono text-fg-2">{e.to_version || "-"}</td>
+                <td className="py-1.5 pr-3">
+                  <span className={e.error_class ? "text-danger" : "text-fg-1"}>
+                    {e.state}
+                    {e.error_class ? ` (${e.error_class})` : ""}
+                  </span>
+                </td>
+                <td className="break-words py-1.5 text-fg-3">{e.detail}</td>
+              </tr>
+            ))}
+          </Table>
+        </ChartState>
+      </div>
+    </details>
   );
 }
 
@@ -256,24 +337,13 @@ function OrgUpdatePosture() {
       )}
       {d.error_class && (
         <p className="mt-1 text-danger">
-          Last update attempt failed at the {d.error_class} step. Run{" "}
-          <kbd>observer update history</kbd> for the local ledger.
+          Last update attempt failed at the {d.error_class} step. The update
+          history below has the local ledger.
         </p>
       )}
     </div>
   );
 }
-
-// CHECK_MARK maps a doctor check status to its glyph, tone and accessible
-// name - one row per status, so a new status is one table row (an unknown
-// value falls back to the fail row rather than rendering nothing). The
-// glyphs are VOCAB_ICONS.healthCheck (the one glyph owner); the colours match
-// CHECK_STATUS in @/lib/vocabTones (ok success, warn warn, fail danger).
-const CHECK_MARK: Record<string, { icon: LucideIcon; tone: string; label: string }> = {
-  ok: { icon: VOCAB_ICONS.healthCheck.ok, tone: "text-success", label: "ok" },
-  warn: { icon: VOCAB_ICONS.healthCheck.warn, tone: "text-warn", label: "warning" },
-  fail: { icon: VOCAB_ICONS.healthCheck.fail, tone: "text-danger", label: "failed" },
-};
 
 function DoctorCard({ icon }: { icon?: LucideIcon }) {
   const report = useApi<DoctorReport>("/api/health/doctor");
@@ -318,45 +388,10 @@ function DoctorCard({ icon }: { icon?: LucideIcon }) {
             projection (Go `omitempty`) and on any daemon older than the
             feature, and `undefined` must render exactly like `false`. */}
         {d?.local_detail_withheld === true && <RedactionNotice />}
-        <div className="space-y-1.5">
-          {rows.map((c) => (
-            <div
-              key={c.name}
-              className={clsx(
-                "rounded-2 border border-line-1 px-3 py-2",
-                c.name === "db.integrity.startup" && c.status === "ok"
-                  ? "bg-bg-1 text-fg-3"
-                  : "bg-bg-2",
-              )}
-            >
-              <div className="flex items-baseline gap-2">
-                <span className="flex w-4 shrink-0 justify-center self-center">
-                  <Icon
-                    icon={(CHECK_MARK[c.status] ?? CHECK_MARK.fail).icon}
-                    size="sm"
-                    label={(CHECK_MARK[c.status] ?? CHECK_MARK.fail).label}
-                    className={(CHECK_MARK[c.status] ?? CHECK_MARK.fail).tone}
-                  />
-                </span>
-                <span className="font-mono text-[11.5px] text-fg-1">
-                  {c.name}
-                </span>
-                <span className="flex-1 text-[11.5px] text-fg-2">
-                  {c.message}
-                </span>
-              </div>
-              {c.details && c.details.length > 0 && (
-                <ul className="ml-6 mt-1 list-disc space-y-0.5 text-[11px] text-fg-3">
-                  {c.details.map((line, i) => (
-                    <li key={i} className="whitespace-pre-wrap">
-                      {line}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
-        </div>
+        <DoctorChecks
+          rows={rows}
+          muted={(c) => c.name === "db.integrity.startup" && c.status === "ok"}
+        />
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line-1 pt-3">
           <Button variant="secondary" size="sm" iconLeft={RefreshCw} onClick={report.reload}>
             Re-run checks

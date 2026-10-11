@@ -320,6 +320,12 @@ func TestShimInterpreterNote(t *testing.T) {
 			if r.Interpreter != tc.wantInterp {
 				t.Errorf("interpreter = %q, want %q", r.Interpreter, tc.wantInterp)
 			}
+			// The structured flag is set exactly when the "nowhere on the
+			// merged PATH" note is - the two come from one site.
+			wantMissing := tc.wantNoteSub == "not found anywhere on the merged PATH"
+			if r.InterpreterMissing != wantMissing {
+				t.Errorf("InterpreterMissing = %v, want %v", r.InterpreterMissing, wantMissing)
+			}
 			hasShimNote := containsNote(r.Notes, "#!/usr/bin/env")
 			if tc.wantNoNote {
 				if hasShimNote {
@@ -429,8 +435,8 @@ func TestResolveNpmPrefixProbe(t *testing.T) {
 func TestNoGroundedInstallMsgIsTheOneSentence(t *testing.T) {
 	t.Parallel()
 
-	if NoGroundedInstallMsg != "no grounded install command — see the vendor's docs" {
-		t.Fatalf("NoGroundedInstallMsg changed: %q — update internal/diag and the dashboard together", NoGroundedInstallMsg)
+	if NoGroundedInstallMsg != "no grounded install command - see the vendor's docs" {
+		t.Fatalf("NoGroundedInstallMsg changed: %q - update internal/diag and the dashboard together", NoGroundedInstallMsg)
 	}
 	for _, v := range []Verdict{VerdictForeignOnly, VerdictNotFound} {
 		out := FormatVerdict("opencode", "--opencode-path", Resolution{Verdict: v})

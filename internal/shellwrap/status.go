@@ -66,10 +66,13 @@ type RCStatus struct {
 
 // Status is the full report the CLI and the dashboard render.
 type Status struct {
-	GOOS         string `json:"goos"`
-	Enabled      bool   `json:"enabled"`
-	ShimDir      string `json:"shim_dir"`
-	ObserverPath string `json:"observer_path"`
+	GOOS string `json:"goos"`
+	// Bridge is set on the WSL bridge target (Windows shells reaching a
+	// daemon inside WSL); nil on a native target.
+	Bridge       *WSLBridge `json:"bridge,omitempty"`
+	Enabled      bool       `json:"enabled"`
+	ShimDir      string     `json:"shim_dir"`
+	ObserverPath string     `json:"observer_path"`
 	// Shells are the shells manageable on this OS, and which the plan uses.
 	Shells         []Shell `json:"shells"`
 	DetectedShells []Shell `json:"detected_shells"`
@@ -77,11 +80,14 @@ type Status struct {
 	// Active: any shim or block is installed.
 	Active bool `json:"active"`
 	// InSync: the installed files equal the configured plan (nothing to do).
-	InSync   bool         `json:"in_sync"`
-	Tools    []ToolStatus `json:"tools"`
-	RC       []RCStatus   `json:"rc"`
-	Orphans  []OnDiskShim `json:"orphans"`
-	Warnings []string     `json:"warnings"`
+	InSync bool         `json:"in_sync"`
+	Tools  []ToolStatus `json:"tools"`
+	// Unavailable are the advertised rows with no command to wrap on this
+	// target, each with its reason (T-492): none is dropped silently.
+	Unavailable []Unavailable `json:"unavailable"`
+	RC          []RCStatus    `json:"rc"`
+	Orphans     []OnDiskShim  `json:"orphans"`
+	Warnings    []string      `json:"warnings"`
 }
 
 // StatusInput is ComputeStatus's input.
@@ -103,6 +109,7 @@ type StatusInput struct {
 func ComputeStatus(in StatusInput) Status {
 	st := Status{
 		GOOS:           in.Host.GOOS,
+		Bridge:         in.Host.Bridge,
 		Enabled:        in.Enabled,
 		ShimDir:        in.Disk.ShimDir,
 		ObserverPath:   in.ObserverPath,
@@ -117,6 +124,7 @@ func ComputeStatus(in StatusInput) Status {
 	}
 	var known map[string]bool
 	st.Tools, known = toolStatuses(in, planned)
+	st.Unavailable = UnavailableOn(in.Host)
 	var shimsInSync, rcInSync bool
 	st.Orphans, shimsInSync = shimSync(in.Disk.Shims, planned, known)
 	st.RC, rcInSync, st.Warnings = rcStatuses(in.Disk.RC, in.Plan.RC, st.Warnings)
@@ -153,7 +161,7 @@ func toolStatuses(in StatusInput, planned map[string]ShimFile) ([]ToolStatus, ma
 	}
 	known := map[string]bool{}
 	out := []ToolStatus{}
-	for _, c := range Candidates(in.Host.GOOS) {
+	for _, c := range CandidatesOn(in.Host) {
 		ts := ToolStatus{Candidate: c, Selected: selected[c.ID], Active: []string{}}
 		if in.Installed != nil {
 			v := in.Installed(c.ID)

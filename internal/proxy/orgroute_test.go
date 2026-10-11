@@ -105,13 +105,10 @@ func doPost(t *testing.T, url, body string, setHeaders func(*http.Request)) *htt
 // upstreamLaneID, "x" or "auto") and so NEVER fall through to org-route,
 // even though the auto lane's own resolution (resolveAutoLane) is a
 // completely separate mechanism from upstreamForPath's org-route branch.
-// An unresolved-auto request keeps that same exemption — the placeholder
-// upstreamForPath computed BEFORE the body was read already saw
-// upstreamLaneID=="auto" (non-empty) and so never considered org-route,
-// and resolveAutoLane's own "unresolvable" branch never revisits it. Only
-// genuinely lane-less traffic — no /up/ prefix at all, OR an unrecognized
-// /up/<badid>/ id (stripUpstreamPrefix fails open to upstreamLaneID=="")
-// — is eligible for org-route redirection.
+// An unresolved-auto request and an unrecognized /up/<badid>/ id are both
+// REFUSED locally since Sol A5-02 (502, no upstream dialed): neither falls
+// through to a fixed provider NOR to org-route. Only genuinely lane-less
+// traffic (no /up/ prefix at all) is eligible for org-route redirection.
 func TestOrgRoute_PlaneBoundaryTable(t *testing.T) {
 	gateway := newCountingUpstream(t)
 	anthropic := newCountingUpstream(t)
@@ -165,16 +162,16 @@ func TestOrgRoute_PlaneBoundaryTable(t *testing.T) {
 			want: "lane-a",
 		},
 		{
-			name: "unresolved-auto still exempt (falls to the fixed provider upstream, not the gateway)",
+			name: "unresolved-auto is refused (no fixed provider, no gateway)",
 			path: "/up/auto/v1/chat/completions",
 			body: `{"model":"unmatched/gpt-mini","messages":[{"role":"user","content":"hi"}]}`,
-			want: "openai",
+			want: "",
 		},
 		{
-			name: "unknown /up/<id> fails open into org-route",
+			name: "unknown /up/<id> is refused (no fixed provider, no gateway)",
 			path: "/up/totally-not-configured/v1/chat/completions",
 			body: `{"model":"whatever","messages":[{"role":"user","content":"hi"}]}`,
-			want: "gateway",
+			want: "",
 		},
 		{
 			name: "no /up/ prefix at all — the default lane — is org-routed",
@@ -193,8 +190,12 @@ func TestOrgRoute_PlaneBoundaryTable(t *testing.T) {
 			resp := doPost(t, ts.URL+tc.path, tc.body, nil)
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			wantStatus := http.StatusOK
+			if tc.want == "" {
+				wantStatus = unknownLaneStatus
+			}
+			if resp.StatusCode != wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, wantStatus)
 			}
 			for k, u := range upstreams {
 				delta := u.count() - before[k]

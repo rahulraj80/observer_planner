@@ -68,7 +68,7 @@ func TestCursorReadTranscript(t *testing.T) {
 		t.Errorf("trailing call = %+v, want dangling (no turn_ended)", last.ToolCalls)
 	}
 	if !msgs[0].Time.IsZero() {
-		t.Error("cursor transcripts carry no timestamps — times must stay zero")
+		t.Error("cursor transcripts carry no timestamps - times must stay zero")
 	}
 }
 

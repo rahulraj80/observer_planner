@@ -1,0 +1,52 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "categories": "VerifiedOfficial",
+    "categories[]": "VerifiedOfficial",
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].end_time": "VerifiedOfficial",
+    "data[].results": "VerifiedOfficial",
+    "data[].results[]": "VerifiedOfficial",
+    "data[].results[].by_categories": "VerifiedOfficial",
+    "data[].results[].by_categories.Comet": "VerifiedOfficial",
+    "data[].results[].by_categories.Comet[]": "VerifiedOfficial",
+    "data[].results[].by_categories.Comet[].category": "Inferred",
+    "data[].results[].by_categories.Comet[].count": "VerifiedOfficial",
+    "data[].results[].by_categories.Feature": "VerifiedOfficial",
+    "data[].results[].by_categories.Feature[]": "VerifiedOfficial",
+    "data[].results[].by_categories.Feature[].category": "Inferred",
+    "data[].results[].by_categories.Feature[].count": "VerifiedOfficial",
+    "data[].results[].by_categories.Project": "VerifiedOfficial",
+    "data[].results[].by_categories.Project[]": "VerifiedOfficial",
+    "data[].results[].by_categories.Project[].category": "Inferred",
+    "data[].results[].by_categories.Project[].count": "VerifiedOfficial",
+    "data[].results[].count": "VerifiedOfficial",
+    "data[].results[].user_email": "VerifiedOfficial",
+    "data[].start_time": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "16c4471343f98e3de898272b4eabd05163990abe1d8d7aca2ef0acf12eb6faae",
+  "http": {
+    "method": "GET",
+    "path": "/v2/analytics/computer/usage",
+    "query": {
+      "dataset": "query_volume",
+      "group_by": "user_email",
+      "start_time": "1746057600",
+      "end_time": "1746144000",
+      "limit": "100"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the ComputerUsageV2Response schema: the reference's only example is credit_usage, and it documents that query_volume carries Feature, Project and Comet breakdowns, not Model. The category values of all three breakdowns are Inferred; the totals are larger than a single breakdown where usage has no attribution, as the count description allows.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Perplexity Computer Analytics API v2 OpenAPI (getComputerUsageAnalyticsV2), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "29ecd7d855d64790edcb5301b3fc399b6a8eb00e6cca02478e26460a25e9f68a",
+  "source_url": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-v2-get.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "perplexity.ent.analytics_v2_member_query_volume"
+}

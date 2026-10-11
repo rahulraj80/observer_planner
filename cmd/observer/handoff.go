@@ -140,7 +140,7 @@ func newHandoffCmd() *cobra.Command {
 		Long: "Re-reads the session's conversation from the source tool's own files,\n" +
 			"distills it into a handover document, prices every carry option at the\n" +
 			"target model, and writes HANDOFF-<id>.md into the project root for the\n" +
-			"target tool to read. The provider cache cannot move with the session —\n" +
+			"target tool to read. The provider cache cannot move with the session -\n" +
 			"the estimate shows what rehydration costs instead.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -234,7 +234,7 @@ func newHandoffListCmd() *cobra.Command {
 				return err
 			}
 			if len(rows) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no handoffs recorded yet — run `observer handoff <session-id> --to <tool>`")
+				fmt.Fprintln(cmd.OutOrStdout(), "no handoffs recorded yet - run `observer handoff <session-id> --to <tool>`")
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
@@ -298,12 +298,12 @@ func printHandoff(cmd *cobra.Command, sessionID string, res handoffsvc.Result, d
 	}
 
 	if dryRun {
-		fmt.Fprintln(w, "\ndry run — nothing written. Re-run without --dry-run to produce the handover doc.")
+		fmt.Fprintln(w, "\ndry run - nothing written. Re-run without --dry-run to produce the handover doc.")
 		return
 	}
 	fmt.Fprintf(w, "\nhandover written: %s (%s tokens, carry %s)\n", res.DocPath, fmtTokens(handoff.TokenEstimate(res.Doc)), res.CarryUsed)
 	if res.Delivery == integration.InjectHook && !res.HookExpiresAt.IsZero() {
-		fmt.Fprintf(w, "hook armed for %s until %s — the next %s session in this project starts with the handover in context (one-shot).\n",
+		fmt.Fprintf(w, "hook armed for %s until %s - the next %s session in this project starts with the handover in context (one-shot).\n",
 			res.TargetTool, res.HookExpiresAt.Local().Format("2006-01-02 15:04"), res.TargetTool)
 	} else {
 		fmt.Fprintln(w, "open the target tool in this project and ask it to read that file.")
@@ -313,7 +313,7 @@ func printHandoff(cmd *cobra.Command, sessionID string, res handoffsvc.Result, d
 		}
 	}
 	if res.GitignoreHint {
-		fmt.Fprintln(w, "hint: add `HANDOFF-*.md` to .gitignore — the handover carries conversation excerpts.")
+		fmt.Fprintln(w, "hint: add `HANDOFF-*.md` to .gitignore - the handover carries conversation excerpts.")
 	}
 }
 

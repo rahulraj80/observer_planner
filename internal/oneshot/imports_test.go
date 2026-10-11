@@ -29,7 +29,7 @@ func TestNoForbiddenImports(t *testing.T) {
 		t.Fatalf("glob: %v", err)
 	}
 	if len(matches) == 0 {
-		t.Fatal("no .go files found in internal/oneshot — glob broken?")
+		t.Fatal("no .go files found in internal/oneshot - glob broken?")
 	}
 
 	for _, f := range matches {

@@ -3,8 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { IdLink, ModelId, SegmentedControl, Table, Tooltip } from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
 import { describeTruncation, TruncationBanner } from "@/components/projectdetail/TruncationBanner";
+import { windowKey, type WindowParams } from "@/lib/projectDrawer";
 import { useApi } from "@/lib/useApi";
-import { fmtInt, fmtShortId, fmtUSD } from "@/lib/format";
+import { dollarsShown, fmtInt, fmtShortId, fmtUSD } from "@/lib/format";
 import type { ProjectCostBy, ProjectCostRowsResponse } from "@/lib/types";
 import { CodeCommentSplit } from "@shared/primitives/CodeCommentSplit";
 
@@ -33,14 +34,14 @@ const KEY_CELL_BY: Partial<Record<ProjectCostBy, (key: string) => ReactNode>> = 
   model: (key) => <ModelId model={key} className="min-w-0 text-[11px]" />,
 };
 
-export function SpendTab({ projectId, days }: { projectId: number; days: number }) {
+export function SpendTab({ projectId, win }: { projectId: number; win: WindowParams }) {
   const [by, setBy] = useState<ProjectCostBy>("session");
   const navigate = useNavigate();
 
   const cost = useApi<ProjectCostRowsResponse>(
     `/api/project/${projectId}/cost`,
-    { by, days },
-    [projectId, by, days],
+    { by, ...win },
+    [projectId, by, windowKey(win)],
   );
   const rows = cost.data?.rows ?? [];
   const total = rows.reduce((a, r) => a + r.cost_usd, 0);
@@ -51,7 +52,10 @@ export function SpendTab({ projectId, days }: { projectId: number; days: number 
       <div className="flex items-center justify-between gap-3">
         <SegmentedControl options={BY_OPTIONS} value={by} onChange={setBy} size="sm" />
         <span className="font-mono text-[11px] text-fg-3">
-          {fmtInt(rows.length)} rows · <span className="text-fg-1">{fmtUSD(total)}</span>
+          {fmtInt(rows.length)} rows
+          {/* The rows carry no token counts: in the org's token-usage view
+              (format.ts cost affordances) the tab is turns and counts only. */}
+          {dollarsShown() && <> · <span className="text-fg-1">{fmtUSD(total)}</span></>}
         </span>
       </div>
 
@@ -63,14 +67,14 @@ export function SpendTab({ projectId, days }: { projectId: number; days: number 
         denied={cost.denied}
         deniedPermission={cost.deniedPermission}
         empty={!cost.loading && rows.length === 0}
-        emptyHint={`No spend by ${by} in this window.`}
+        emptyHint={dollarsShown() ? `No spend by ${by} in this window.` : `No activity by ${by} in this window.`}
         height={200}
       >
         <Table
           head={
             <tr>
               <th className="py-1.5 pl-1 font-medium">{by === "session" ? "Session" : "Key"}</th>
-              <th className="py-1.5 text-right font-medium">Cost</th>
+              {dollarsShown() && <th className="py-1.5 text-right font-medium">Cost</th>}
               <th className="py-1.5 text-right font-medium">Turns</th>
               <th className="py-1.5 pr-1 text-right font-medium">Count</th>
             </tr>
@@ -98,14 +102,14 @@ export function SpendTab({ projectId, days }: { projectId: number; days: number 
                   <span className="font-mono text-[11px] text-fg-1">{r.label || r.key}</span>
                 )}
               </td>
-              <td className="py-1.5 text-right tabular-nums text-fg-1">
+              {dollarsShown() && <td className="py-1.5 text-right tabular-nums text-fg-1">
                 <Tooltip content={r.unpriced_turns ? `${fmtInt(r.unpriced_turns)} unpriced turn(s) in this bucket (unknown model) - the cost is a floor, not an exact figure` : undefined}>
                   <span tabIndex={r.unpriced_turns ? 0 : undefined} className="focus:outline-none">
                     {fmtUSD(r.cost_usd)}
                     {r.unpriced_turns ? <span className="ml-0.5 text-warn">*</span> : null}
                   </span>
                 </Tooltip>
-              </td>
+              </td>}
               <td className="py-1.5 text-right tabular-nums text-fg-3">
                 {r.turns != null ? fmtInt(r.turns) : "-"}
               </td>

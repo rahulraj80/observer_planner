@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -74,7 +76,12 @@ func defaultCloudConsentSpawner(ctx context.Context, sessionID, purpose, configP
 	if configPath != "" {
 		args = append(args, "--config", configPath)
 	}
-	return exec.CommandContext(ctx, self, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, self, args...)
+	// T-553: on a daemon stop CommandContext kills only the direct child;
+	// WaitDelay stops Wait from blocking on a grandchild that inherited the
+	// output pipe.
+	cmd.WaitDelay = 2 * time.Second
+	return cmd.CombinedOutput()
 }
 
 // cloudAutoEnrichSpawnTimeout bounds one `observer cloud consent` spawn. It
@@ -149,9 +156,9 @@ func cloudAutoEnrichLoop(
 			state := on
 			lastOn = &state
 			if on {
-				fmt.Fprintf(out, "cloud auto-enrich: active — background enrichment is on (policy %s)\n", policy.Level)
+				fmt.Fprintf(out, "cloud auto-enrich: active - background enrichment is on (policy %s)\n", policy.Level)
 			} else {
-				fmt.Fprintln(out, "cloud auto-enrich: idle — Cloud Intelligence is off, or background enrichment is off")
+				fmt.Fprintln(out, "cloud auto-enrich: idle - Cloud Intelligence is off, or background enrichment is off")
 			}
 		}
 		if perr != nil || !on {

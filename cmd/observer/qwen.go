@@ -46,7 +46,7 @@ func newQwenCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "qwen [-- qwen-args...]",
 		Short: "Launch Qwen Code; with --continue-from, seed a handover via qwen -i",
-		Long: "Wraps `qwen` (Qwen Code). This launcher is NON-PROXIED — Qwen Code's\n" +
+		Long: "Wraps `qwen` (Qwen Code). This launcher is NON-PROXIED - Qwen Code's\n" +
 			"OpenAI-compatible base-URL lane is unprobed, and overriding it would\n" +
 			"redirect an already-configured provider. Token capture happens via\n" +
 			"observer's local qwen-code transcript adapter, not the proxy.\n\n" +
@@ -179,6 +179,12 @@ func runSeedOnlyLaunchSeeded(configPath, dbPath, tool, label, bin string, args [
 func runSeedOnlyLaunchSeededWithEvidence(configPath, dbPath, tool, label, bin string, args []string, dir string, evidence budgetLaunchEvidence) error {
 	evidence.Executable = bin
 	evidence.Arguments = args
+	// P6 item 5 + G8: this process starts the tool, so it is where an
+	// org-disallowed tool is refused and a tool grant's use is counted, once
+	// per launch (review M3-10: the dashboard's own gate only peeks).
+	if err := refuseIfToolDisallowedDB(dbPath, tool, os.Stderr); err != nil {
+		return err
+	}
 	if err := enforceBudgetControlledLaunch(context.Background(), configPath, tool, evidence); err != nil {
 		return err
 	}

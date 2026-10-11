@@ -166,9 +166,10 @@ func TestExtractionAuthorityAuthorizesShareClass(t *testing.T) {
 
 // TestManagedRaiseAppliesEvenWhenPostureIsInert pins the PARTIAL-APPLICATION
 // HONESTY rule against the fix: a grant that carries extraction authority but
-// no dashboard.visibility still drops the always-present `sections` class, so
-// the posture reports StateInert — and the share raise it DID authorize is
-// applied all the same.
+// no feature.lock drops the body's `features` class, so the posture reports
+// StateInert — and the share raise it DID authorize is applied all the same.
+// (Until backlog item 4 this used the always-present `sections` class; on a
+// managed grant that class is now authorized by managed consent itself.)
 //
 // That is by design, not a contradiction. StateInert means "something was
 // refused", never "nothing ran": each directive class is intersected with the
@@ -177,14 +178,14 @@ func TestExtractionAuthorityAuthorizesShareClass(t *testing.T) {
 // tempted to make StateInert suppress application would silently re-open the
 // S1 defect on every managed grant that omits dashboard.visibility.
 func TestManagedRaiseAppliesEvenWhenPostureIsInert(t *testing.T) {
-	e := Resolve(phase1bDelivered(t, `{"schema":2,"share":{"full_tool_bodies":true}}`),
+	e := Resolve(phase1bDelivered(t, `{"schema":2,"share":{"full_tool_bodies":true},"features":{"guard":true}}`),
 		managedRaiseGrant(ConsentManaged, AuthorityExtractManaged), testLive(), testNow)
 
 	if e.State != StateInert {
-		t.Fatalf("State = %q, want inert (the sections class has no authority here)", e.State)
+		t.Fatalf("State = %q, want inert (the features class has no authority here)", e.State)
 	}
-	if len(e.Dropped) != 1 || e.Dropped[0].Directive != "sections" {
-		t.Fatalf("Dropped = %+v, want exactly the sections class", e.Dropped)
+	if len(e.Dropped) != 1 || e.Dropped[0].Directive != "features" {
+		t.Fatalf("Dropped = %+v, want exactly the features class", e.Dropped)
 	}
 	if !e.RaiseBool("full_tool_bodies", false) {
 		t.Fatal("an inert posture swallowed the share raise it was authorized to apply")

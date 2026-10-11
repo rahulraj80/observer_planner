@@ -13,11 +13,22 @@ import (
 type Options struct {
 	// WindowDays is the evidence window. Zero means the default 14.
 	WindowDays int
+	// Since, when non-zero, is the evidence window's lower bound and
+	// overrides WindowDays (the dashboard's global window, REVIEW-3 P3-19).
+	Since time.Time
+	// Until, when non-zero, closes the evidence window: no row at or after
+	// it is read. Zero leaves the window open-ended (until now). The engine
+	// still runs as of now (snoozes, cooldowns and the "today" spike check
+	// read the real clock).
+	Until time.Time
 	// ProjectRoot filters to a single project (matches projects.root_path).
 	ProjectRoot string
 	// Tool filters to a single AI tool (matches sessions.tool) — mirrors
 	// the dashboard's global Tool dropdown.
 	Tool string
+	// Model filters to sessions that used one model (session grain, via
+	// internal/modelfilter) — mirrors the dashboard's global Model filter.
+	Model string
 	// MinConfidence hides suggestions below this floor. Zero means 0.5.
 	MinConfidence float64
 	// MinSavingsUSD hides cost suggestions claiming less than this. Zero

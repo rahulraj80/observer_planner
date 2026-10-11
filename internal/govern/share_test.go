@@ -8,7 +8,7 @@ import "testing"
 // The load-bearing rows are the two `local=false, org=true` ones. Before
 // ShareSourceOrgRaised existed they BOTH fell through to ShareSourceLocal —
 // so on a managed node, where RaiseBool really does turn the tier on, the
-// surface named the developer as the source of a decision their organisation
+// surface named the developer as the source of a decision their organization
 // made. Splitting them on Managed is the whole fix, and the unmanaged row is
 // what proves the split did not widen anything: raising stays inert on the
 // individual plane, and there the source is still "you".

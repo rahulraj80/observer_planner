@@ -74,7 +74,7 @@ func exfilRules() []Rule {
 			Match:     matchRemoteCodePipe,
 			Observe:   DecisionFlag, Enforce: DecisionDeny,
 			Doc:    "remote content piped into an interpreter (curl|sh-class remote-code execution)",
-			Advice: "Download to a file, review it, then execute — or pin the script to a checksum you have verified.",
+			Advice: "Download to a file, review it, then execute - or pin the script to a checksum you have verified.",
 		},
 		{
 			ID: "R-171", Category: CategoryExfil, Severity: SeverityHigh,
@@ -91,7 +91,7 @@ func exfilRules() []Rule {
 			Match:     nil, MatchCmd: matchSecretsInNetworkArgs,
 			Observe: DecisionFlag, Enforce: DecisionDeny,
 			Doc:    "secret-shaped value in the arguments of a network-touching command",
-			Advice: "Pass credentials via files with restrictive permissions or environment configuration the command reads itself — never inline on a network command line.",
+			Advice: "Pass credentials via files with restrictive permissions or environment configuration the command reads itself - never inline on a network command line.",
 		},
 		{
 			// The §8.2 proxy half: the guard layer runs the typed

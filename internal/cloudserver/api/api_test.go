@@ -298,8 +298,8 @@ func TestExchangeAndAuthenticatedUsage(t *testing.T) {
 	}
 	var snap store.UsageSnapshot
 	decode(t, resp, &snap)
-	// free v2 (migration 0039): daily 20, monthly 100.
-	if snap.DailyCap != 20 || snap.MonthlyCap != 100 {
+	// free v3 (migration 0041, D-299): daily 100, monthly 3000.
+	if snap.DailyCap != 100 || snap.MonthlyCap != 3000 {
 		t.Fatalf("unexpected caps: %+v", snap)
 	}
 }

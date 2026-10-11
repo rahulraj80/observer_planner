@@ -129,7 +129,7 @@ func FixtureByName(name string) (Fixture, bool) {
 func structuralOnlyFixture() Fixture {
 	return Fixture{
 		Name:    "structural_only",
-		Purpose: "metadata-only envelope (no excerpts, no feedback) — the narrowest grant shape",
+		Purpose: "metadata-only envelope (no excerpts, no feedback) - the narrowest grant shape",
 		envelope: cloudcontract.Envelope{
 			SchemaVersion:   cloudcontract.EnvelopeSchemaVersion,
 			CloudSessionID:  "fixture-session-structural-only",
@@ -171,7 +171,7 @@ func boundedContextFixture() Fixture {
 	rating := 8
 	return Fixture{
 		Name:    "bounded_context",
-		Purpose: "bounded-excerpt + user-feedback envelope — the context-enrichment grant shape",
+		Purpose: "bounded-excerpt + user-feedback envelope - the context-enrichment grant shape",
 		envelope: cloudcontract.Envelope{
 			SchemaVersion:   cloudcontract.EnvelopeSchemaVersion,
 			CloudSessionID:  "fixture-session-bounded-context",
@@ -206,12 +206,12 @@ func boundedContextFixture() Fixture {
 			Context: []cloudcontract.ContextExcerpt{
 				{
 					Source:         "task_excerpt",
-					Text:           SyntheticMarker + " (task): lorem ipsum dolor sit amet — add a bounded retry to the lorem widget loader and cover it with a table-driven test. This text is invented for the proving lane and describes no real work.",
+					Text:           SyntheticMarker + " (task): lorem ipsum dolor sit amet - add a bounded retry to the lorem widget loader and cover it with a table-driven test. This text is invented for the proving lane and describes no real work.",
 					LengthCapBytes: 512,
 				},
 				{
 					Source:         "final_summary_excerpt",
-					Text:           SyntheticMarker + " (summary): consectetur adipiscing elit — the lorem widget loader now retries twice and the table-driven test covers both branches. This text is invented for the proving lane.",
+					Text:           SyntheticMarker + " (summary): consectetur adipiscing elit - the lorem widget loader now retries twice and the table-driven test covers both branches. This text is invented for the proving lane.",
 					LengthCapBytes: 512,
 				},
 			},
@@ -238,7 +238,7 @@ func boundedContextFixture() Fixture {
 func injectionCanaryFixture() Fixture {
 	return Fixture{
 		Name:    "injection_canary",
-		Purpose: "adversarial excerpt — exercises the evidence-as-data fence (FE2) and ref grounding (FE3)",
+		Purpose: "adversarial excerpt - exercises the evidence-as-data fence (FE2) and ref grounding (FE3)",
 		envelope: cloudcontract.Envelope{
 			SchemaVersion:   cloudcontract.EnvelopeSchemaVersion,
 			CloudSessionID:  "fixture-session-injection-canary",

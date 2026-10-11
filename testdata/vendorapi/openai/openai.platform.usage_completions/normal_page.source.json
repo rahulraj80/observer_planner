@@ -1,0 +1,51 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedSDK",
+    "data[]": "VerifiedSDK",
+    "data[].end_time": "VerifiedSDK",
+    "data[].object": "VerifiedSDK",
+    "data[].results": "VerifiedSDK",
+    "data[].results[]": "VerifiedSDK",
+    "data[].results[].api_key_id": "VerifiedSDK",
+    "data[].results[].batch": "VerifiedSDK",
+    "data[].results[].input_audio_tokens": "VerifiedSDK",
+    "data[].results[].input_cache_write_tokens": "VerifiedSDK",
+    "data[].results[].input_cached_tokens": "VerifiedSDK",
+    "data[].results[].input_tokens": "VerifiedSDK",
+    "data[].results[].input_uncached_tokens": "VerifiedSDK",
+    "data[].results[].model": "VerifiedSDK",
+    "data[].results[].num_model_requests": "VerifiedSDK",
+    "data[].results[].object": "VerifiedSDK",
+    "data[].results[].output_audio_tokens": "VerifiedSDK",
+    "data[].results[].output_tokens": "VerifiedSDK",
+    "data[].results[].project_id": "VerifiedSDK",
+    "data[].results[].service_tier": "VerifiedSDK",
+    "data[].results[].user_id": "VerifiedSDK",
+    "data[].start_time": "VerifiedSDK",
+    "has_more": "VerifiedSDK",
+    "next_page": "Inferred",
+    "object": "VerifiedSDK"
+  },
+  "fixture_sha256": "9e43753cc887690f4a05c7483da2756716d61bfe4e3c3ce65ccdcc7cf80ae158",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/usage/completions",
+    "query": {
+      "bucket_width": "1d",
+      "group_by[]": "project_id",
+      "limit": "31",
+      "start_time": "1730419200"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the generated SDK types: object page, buckets with Unix-second start_time/end_time, results typed organization.usage.completions.result. The next_page cursor value is an opaque example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-python main, generated from the OpenAI OpenAPI spec, fetched 2026-10-07",
+  "source_kind": "sdk_type",
+  "source_sha256": "5b1ae255aa4e43f3e016587b55fe06ffa961ba6a974a0909e3062d0553419b92",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/admin/organization/usage_completions_response.py",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.usage_completions"
+}

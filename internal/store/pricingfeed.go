@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/pricingfeed"
+	"github.com/marmutapp/superbased-observer/internal/pricingfeedwire"
 )
 
 // The STANDALONE node's PERSISTED copy of the public pricing feed
@@ -55,7 +55,7 @@ type PricingFeedCache struct {
 	Digest string
 	// Envelope is the whole accepted, verified feed document. The engine
 	// composes its rows (and economics) from here on a cold start.
-	Envelope pricingfeed.Envelope
+	Envelope pricingfeedwire.Envelope
 	// FetchedAt is when the verified 200 that produced this row landed.
 	FetchedAt time.Time
 	// State is the ladder outcome that produced the STORED body. See the file
@@ -72,7 +72,7 @@ type PricingFeedCache struct {
 // it. The caller is responsible for having verified env against the compiled
 // key set before calling — this seam performs no verification, it only durably
 // records what the ladder already accepted.
-func (s *Store) SavePricingFeed(ctx context.Context, env pricingfeed.Envelope, state string) error {
+func (s *Store) SavePricingFeed(ctx context.Context, env pricingfeedwire.Envelope, state string) error {
 	return s.SavePricingFeedRaw(ctx, env, nil, state)
 }
 
@@ -95,7 +95,7 @@ func (s *Store) SavePricingFeed(ctx context.Context, env pricingfeed.Envelope, s
 // that have no wire bytes to preserve. The version/key_id/digest columns are
 // always taken from the typed env (which was decoded from those same bytes), so
 // the provenance columns never disagree with the stored body.
-func (s *Store) SavePricingFeedRaw(ctx context.Context, env pricingfeed.Envelope, rawEnvelope []byte, state string) error {
+func (s *Store) SavePricingFeedRaw(ctx context.Context, env pricingfeedwire.Envelope, rawEnvelope []byte, state string) error {
 	blob, err := pricingFeedBodyBytes(env, rawEnvelope)
 	if err != nil {
 		return fmt.Errorf("store.SavePricingFeed: marshal: %w", err)
@@ -118,7 +118,7 @@ UPDATE pricing_feed_cache
 // lossless for the fields it knows. Invalid raw bytes are ignored rather than
 // trusted — marshalling an invalid json.RawMessage would fail the whole save,
 // and the typed fallback is the honest degrade.
-func pricingFeedBodyBytes(env pricingfeed.Envelope, rawEnvelope []byte) ([]byte, error) {
+func pricingFeedBodyBytes(env pricingfeedwire.Envelope, rawEnvelope []byte) ([]byte, error) {
 	if len(rawEnvelope) > 0 && json.Valid(rawEnvelope) {
 		return rawEnvelope, nil
 	}
@@ -154,7 +154,7 @@ SELECT version, key_id, digest, body_json, fetched_at, state
 		// The seeded row, untouched: the node has never accepted a feed.
 		return PricingFeedCache{}, nil
 	}
-	var env pricingfeed.Envelope
+	var env pricingfeedwire.Envelope
 	if uerr := json.Unmarshal([]byte(blob), &env); uerr != nil {
 		return PricingFeedCache{}, fmt.Errorf("store.LoadPricingFeed: decode stored envelope: %w", uerr)
 	}

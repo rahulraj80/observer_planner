@@ -3,6 +3,15 @@ package cursorusage
 import (
 	"fmt"
 	"strings"
+
+	"github.com/marmutapp/superbased-observer/internal/remedy"
+)
+
+// initCursor and doctorCursor are the two structured fixes the rows below
+// point at (internal/remedy owns how each audience spells them, T-421).
+var (
+	initCursor   = remedy.Of(remedy.InitTool, "cursor")
+	doctorCursor = remedy.Of(remedy.DoctorTool, "cursor")
 )
 
 // Row identity shared by the writer (internal/adapter/cursor, the
@@ -106,6 +115,9 @@ type rule struct {
 	match  func(Evidence) bool
 	note   func(Evidence) string
 	remedy string
+	// fixes are the row's structured remediations ("" commands included in
+	// remedy are spelled from them).
+	fixes []remedy.Remediation
 }
 
 var rules = []rule{
@@ -157,7 +169,7 @@ var rules = []rule{
 				unknownNotZero,
 			)
 		},
-		remedy: "stop and afterAgentResponse are registered, so re-running `observer init --cursor` changes nothing: the turn most likely never finished (let it finish, or press Esc to abort it, before quitting cursor-agent) or Cursor did not fire those hooks",
+		remedy: "stop and afterAgentResponse are registered, so re-running " + remedy.Quote(initCursor) + " changes nothing: the turn most likely never finished (let it finish, or press Esc to abort it, before quitting cursor-agent) or Cursor did not fire those hooks",
 	},
 	{
 		reason: ReasonFinishHooksMissing,
@@ -165,11 +177,12 @@ var rules = []rule{
 		note: func(e Evidence) string {
 			return joinSentences(
 				noFinishHookLead(e),
-				"Cursor's stop and afterAgentResponse hooks are not both registered on this machine; run `observer init --cursor` to register them.",
+				"Cursor's stop and afterAgentResponse hooks are not both registered on this machine; run "+remedy.Quote(initCursor)+" to register them.",
 				unknownNotZero,
 			)
 		},
-		remedy: "run `observer init --cursor` so stop and afterAgentResponse are registered, and keep the daemon running so the cursor-agent debug log is tailed",
+		remedy: "run " + remedy.Quote(initCursor) + " so stop and afterAgentResponse are registered, and keep the daemon running so the cursor-agent debug log is tailed",
+		fixes:  []remedy.Remediation{initCursor},
 	},
 	{
 		// The reader cannot see the node's hooks.json (the org drawer):
@@ -179,11 +192,12 @@ var rules = []rule{
 		note: func(e Evidence) string {
 			return joinSentences(
 				noFinishHookLead(e),
-				"Cursor fires those only when a turn finishes, so the turn most likely never finished; if it did, run `observer doctor cursor` on that machine to check the hook wiring.",
+				"Cursor fires those only when a turn finishes, so the turn most likely never finished; if it did, run "+remedy.Quote(doctorCursor)+" on that machine to check the hook wiring.",
 				unknownNotZero,
 			)
 		},
-		remedy: "run `observer doctor cursor` on the capturing machine: if stop and afterAgentResponse are registered the turn most likely never finished, otherwise `observer init --cursor` registers them",
+		remedy: "run " + remedy.Quote(doctorCursor) + " on the capturing machine: if stop and afterAgentResponse are registered the turn most likely never finished, otherwise " + remedy.Quote(initCursor) + " registers them",
+		fixes:  []remedy.Remediation{doctorCursor, initCursor},
 	},
 	{
 		reason: ReasonNoEvidence,
@@ -194,7 +208,8 @@ var rules = []rule{
 				unknownNotZero,
 			)
 		},
-		remedy: "run `observer doctor cursor`",
+		remedy: "run " + remedy.Quote(doctorCursor),
+		fixes:  []remedy.Remediation{doctorCursor},
 	},
 }
 
@@ -221,6 +236,17 @@ func Remedy(r Reason) string {
 		}
 	}
 	return ""
+}
+
+// Remediations returns the structured fixes for a reason (nil when the
+// remedy is not an Observer action, or the reason is unknown).
+func Remediations(r Reason) []remedy.Remediation {
+	for _, row := range rules {
+		if row.reason == r {
+			return row.fixes
+		}
+	}
+	return nil
 }
 
 func pick(e Evidence) rule {

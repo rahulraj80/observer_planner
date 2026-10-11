@@ -27,7 +27,8 @@
 // # Doc harvest
 //
 // The generator parses the packages that declare config structs
-// (internal/config, internal/notify/email, internal/notify/digest) with
+// (internal/config, internal/notify/email, internal/notify/digest,
+// internal/notifycfg) with
 // go/parser and indexes `<import path>.<Type>.<Field>` → the field's doc
 // comment (Doc, falling back to the trailing line Comment). A leaf's Owner +
 // Field (recorded by the reflect walk) selects its comment; a table's Owner
@@ -75,6 +76,9 @@ var docSources = []string{
 	"internal/config",
 	"internal/notify/email",
 	"internal/notify/digest",
+	// The [email] / [digest] shapes moved here (modular packaging, rev F1)
+	// so notify.email can compile out; the feature packages re-export them.
+	"internal/notifycfg",
 }
 
 // keyPattern is what a dotted key must look like to be emitted into a

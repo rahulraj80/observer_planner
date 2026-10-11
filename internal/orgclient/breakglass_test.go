@@ -60,6 +60,13 @@ func (b *bgServer) handler(agentPub func() ed25519.PublicKey) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
+		// The structured unenrol (T-718) tells the org the node left with
+		// one POST /api/agent/leave; it is not a push and carries no seal
+		// key, so only pushes are checked here (T-723).
+		if strings.HasSuffix(r.URL.Path, "/api/agent/leave") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		adv, present, err := orgcontract.ParseSealKeyHeader(r.Header.Get(orgcontract.HeaderSealKey))
 		if err != nil || !present {
 			b.t.Errorf("push carried no seal-key advertisement (err=%v)", err)

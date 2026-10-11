@@ -19,17 +19,18 @@ import { HelpInd } from "@/components/HelpInd";
 import { ChartState } from "@/components/ChartState";
 import { useFilters, windowParams } from "@/lib/filters";
 import { useApi } from "@/lib/useApi";
-import { fmtCompact, fmtInt, fmtUSD } from "@/lib/format";
+import { dollarsShown, fmtCompact, fmtCost, fmtInt, fmtUSD, withoutDollars } from "@/lib/format";
 import type { DiscoverResponse } from "@/lib/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { navIcon } from "@/lib/nav";
 import { MetricIcon } from "@/components/MetricIcon";
 
 export function DiscoveryPage() {
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
 
   const [stalePage, setStalePage] = useState(1);
   const [repeatedPage, setRepeatedPage] = useState(1);
@@ -40,12 +41,13 @@ export function DiscoveryPage() {
       ...winParams,
       project: projectParam,
       tool: toolParam,
+      model: modelParam,
       stale_page: stalePage,
       stale_limit: 20,
       repeated_page: repeatedPage,
       repeated_limit: 20,
     },
-    [win, customRange, tool, project, stalePage, repeatedPage],
+    [win, customRange, tool, model, project, stalePage, repeatedPage],
   );
 
   const summary = data.data?.summary;
@@ -62,7 +64,16 @@ export function DiscoveryPage() {
       {/* Design 1.24: HeroStat (danger) for Estimated waste +
           4 smaller StatCards on the right (Stale re-reads / Tokens
           wasted / Affected files / Repeated commands). */}
-      <Stagger className="grid grid-cols-1 gap-3 xl:grid-cols-[1.4fr_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      {/* In the org's token-usage view (format.ts cost affordances) the
+          hero reads the wasted tokens, so the Tokens wasted tile (and its
+          dollar rate) would only repeat it: the strip is hero + three. */}
+      <Stagger
+        className={
+          dollarsShown()
+            ? "grid grid-cols-1 gap-3 xl:grid-cols-[1.4fr_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]"
+            : "grid grid-cols-1 gap-3 xl:grid-cols-[1.4fr_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]"
+        }
+      >
         <HeroStat
           label={`Estimated waste - last ${win}`}
           helpId="metric.stale_count"
@@ -70,7 +81,7 @@ export function DiscoveryPage() {
           loading={data.loading}
           value={
             summary
-              ? fmtUSD(estWasteUSD(summary.est_wasted_tokens, rate))
+              ? fmtCost(estWasteUSD(summary.est_wasted_tokens, rate), summary.est_wasted_tokens)
               : "-"
           }
           sub={
@@ -103,18 +114,20 @@ export function DiscoveryPage() {
               : "same-session only"
           }
         />
-        <StatCard
-          label="Tokens wasted"
-          helpId="metric.stale_count"
-          icon={<MetricIcon metric="tokens" />}
-          loading={data.loading}
-          value={summary ? fmtCompact(summary.est_wasted_tokens) : "-"}
-          sub={
-            summary
-              ? `${fmtUSD(rate)}/M blended input rate`
-              : undefined
-          }
-        />
+        {dollarsShown() && (
+          <StatCard
+            label="Tokens wasted"
+            helpId="metric.stale_count"
+            icon={<MetricIcon metric="tokens" />}
+            loading={data.loading}
+            value={summary ? fmtCompact(summary.est_wasted_tokens) : "-"}
+            sub={
+              summary
+                ? `${fmtUSD(rate)}/M blended input rate`
+                : undefined
+            }
+          />
+        )}
         <StatCard
           label="Affected files"
           icon={<MetricIcon metric="files" />}
@@ -377,7 +390,12 @@ function StaleReadsTable({
   rate: number;
 }) {
   const maxReads = Math.max(1, ...rows.map((r) => r.total_reads));
-  const columns = useMemo(() => staleReadColumns(rate, maxReads), [rate, maxReads]);
+  // Est. waste $ is dollars only; Est. tokens beside it carries the figure
+  // in the org's token-usage view.
+  const columns = useMemo(
+    () => withoutDollars(staleReadColumns(rate, maxReads), (c) => c.id === "est_waste"),
+    [rate, maxReads],
+  );
   return (
     <DataTable<StaleReadRow>
       data={rows}

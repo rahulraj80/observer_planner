@@ -392,13 +392,13 @@ func TestServerScrubBackstopFullGranularity(t *testing.T) {
 	if strings.Contains(user.RawToolInput, ghToken) {
 		t.Errorf("user RawToolInput leaked the raw token: %q", user.RawToolInput)
 	}
-	if !strings.Contains(user.RawToolInput, scrub.Redacted) {
+	if !scrub.HasRedaction(user.RawToolInput) {
 		t.Errorf("user RawToolInput not scrubbed (no %s sentinel): %q", scrub.Redacted, user.RawToolInput)
 	}
 	if strings.Contains(assistant.ToolOutput, awsKey) {
 		t.Errorf("assistant ToolOutput leaked the raw AWS key: %q", assistant.ToolOutput)
 	}
-	if !strings.Contains(assistant.ToolOutput, scrub.Redacted) {
+	if !scrub.HasRedaction(assistant.ToolOutput) {
 		t.Errorf("assistant ToolOutput not scrubbed (no %s sentinel): %q", scrub.Redacted, assistant.ToolOutput)
 	}
 }

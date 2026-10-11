@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
 )
 
@@ -79,14 +79,14 @@ func (p *Proxy) captureProcessNetwork(ctx context.Context, in networkCaptureInpu
 		details["body_unavailable_reason"] = in.Unavailable
 	}
 
-	ev := processobs.ProcessEvent{
+	ev := procmodel.ProcessEvent{
 		ProcessKey: "proxy:" + shortHash(reqID),
 		Timestamp:  p.now().UTC(),
-		Type:       processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{
+		Type:       procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{
 			SessionID:  in.SessionID,
-			Source:     processobs.AttrHeuristic,
-			Confidence: processobs.ConfMedium,
+			Source:     procmodel.AttrHeuristic,
+			Confidence: procmodel.ConfMedium,
 		},
 		TargetKind: "url",
 		Target:     in.URL,
@@ -96,7 +96,7 @@ func (p *Proxy) captureProcessNetwork(ctx context.Context, in networkCaptureInpu
 	if captureBodies {
 		reqCap := capBody(in.RequestBody, p.networkCapture.MaxRequestBytes, in.RequestType, p.networkCapture.ScrubBodies, p.networkCapture.StoreBinary)
 		respCap := capBody(in.ResponseBody, p.networkCapture.MaxResponseBytes, in.ContentType, p.networkCapture.ScrubBodies, p.networkCapture.StoreBinary)
-		body := &processobs.NetworkBodyCapture{
+		body := &procmodel.NetworkBodyCapture{
 			CaptureSource:         "proxy",
 			APITurnID:             in.APITurnID,
 			RequestID:             reqID,
@@ -129,7 +129,7 @@ func (p *Proxy) captureProcessNetwork(ctx context.Context, in networkCaptureInpu
 
 	insertCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := p.networkSink.PersistProcessEvents(insertCtx, []processobs.ProcessEvent{ev}); err != nil {
+	if _, err := p.networkSink.PersistProcessEvents(insertCtx, []procmodel.ProcessEvent{ev}); err != nil {
 		p.logger.Warn("proxy: persist process network event", "err", err)
 		_ = ctx
 	}

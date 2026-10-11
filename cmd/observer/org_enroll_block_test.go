@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,5 +118,45 @@ func TestEnsureOrgClientBlockIgnoresCommentMentions(t *testing.T) {
 				t.Fatalf("appended block count = %d, want 1", got)
 			}
 		})
+	}
+}
+
+// TestEnsureOrgClientBlockLeavesPushIntervalAtDefault pins the 2026-10-02
+// budget-latency fix: enrolment used to write `push_interval_seconds = 900`,
+// which silently overrode the 120 s code default on every enrolled node and
+// made a session's spend reach the org up to 15 minutes late. The block now
+// only DOCUMENTS the key (commented out), so a fresh enrolment runs the
+// default ceiling, and an org that wants a faster cadence lowers it through
+// signed node governance instead of a config rewrite.
+func TestEnsureOrgClientBlockLeavesPushIntervalAtDefault(t *testing.T) {
+	for _, managed := range []bool{false, true} {
+		path := filepath.Join(t.TempDir(), "config.toml")
+		if _, err := ensureOrgClientBlock(path, "https://org.acme.example", managed); err != nil {
+			t.Fatalf("managed=%v: ensureOrgClientBlock: %v", managed, err)
+		}
+		body, _ := os.ReadFile(path)
+		for _, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "push_interval_seconds") {
+				t.Fatalf("managed=%v: enrolment wrote an explicit push interval %q", managed, trimmed)
+			}
+		}
+		// T-403: the block says WHY the key is left unset and names the
+		// default the push loop actually falls back to (rendered from the
+		// constant, so the comment cannot drift from the behaviour).
+		wantExample := fmt.Sprintf("# push_interval_seconds = %d\n", config.DefaultPushIntervalSeconds)
+		if !strings.Contains(string(body), wantExample) {
+			t.Fatalf("managed=%v: block lacks the documented default %q:\n%s", managed, wantExample, body)
+		}
+		if !strings.Contains(string(body), "# Left unset on purpose: unset follows the release default") {
+			t.Fatalf("managed=%v: block does not say why push_interval_seconds is unset:\n%s", managed, body)
+		}
+		cfg, err := config.Load(config.LoadOptions{GlobalPath: path})
+		if err != nil {
+			t.Fatalf("managed=%v: config.Load: %v", managed, err)
+		}
+		if got := cfg.OrgClient.PushIntervalSeconds; got != config.DefaultPushIntervalSeconds {
+			t.Fatalf("managed=%v: push interval = %d, want the %d s default", managed, got, config.DefaultPushIntervalSeconds)
+		}
 	}
 }

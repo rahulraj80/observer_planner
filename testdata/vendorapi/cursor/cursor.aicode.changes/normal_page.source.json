@@ -1,0 +1,39 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].changeId": "VerifiedOfficial",
+    "items[].createdAt": "VerifiedOfficial",
+    "items[].metadata": "VerifiedOfficial",
+    "items[].metadata[]": "VerifiedOfficial",
+    "items[].metadata[].fileExtension": "VerifiedOfficial",
+    "items[].metadata[].fileName": "VerifiedOfficial",
+    "items[].metadata[].linesAdded": "VerifiedOfficial",
+    "items[].metadata[].linesDeleted": "VerifiedOfficial",
+    "items[].model": "VerifiedOfficial",
+    "items[].source": "VerifiedOfficial",
+    "items[].totalLinesAdded": "VerifiedOfficial",
+    "items[].totalLinesDeleted": "VerifiedOfficial",
+    "items[].userEmail": "VerifiedOfficial",
+    "items[].userId": "VerifiedOfficial",
+    "page": "VerifiedOfficial",
+    "pageSize": "VerifiedOfficial",
+    "totalCount": "VerifiedOfficial"
+  },
+  "fixture_sha256": "1105489ea39ae606d128a9d4b4f6355452d33d020fa5b4cf334a8400b08d084a",
+  "http": {
+    "method": "GET",
+    "path": "/analytics/ai-code/changes",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get AI Code Change Metrics (JSON, paginated)\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor AI Code Tracking API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "b4980d64bd47e2e247750db17500395347b73c8aa2a6a05e2b8ee90be34071ad",
+  "source_url": "https://cursor.com/docs/account/teams/ai-code-tracking-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.aicode.changes"
+}

@@ -175,6 +175,15 @@ func normalize(v any) any {
 				x[k] = "<GOOS>"
 				continue
 			}
+			// host_name is os.Hostname (added to /api/status by T-425 so
+			// a remote node dashboard can always name the machine it
+			// shows; D-337). Machine-specific like host_os, so it is
+			// TOKENISED for the same reason: the value differs per host
+			// but the field's presence pins the T-425 contract.
+			if k == "host_name" {
+				x[k] = "<HOSTNAME>"
+				continue
+			}
 			x[k] = normalize(val)
 		}
 		return x

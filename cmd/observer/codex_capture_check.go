@@ -120,12 +120,12 @@ func validateCaptureRate(ctx context.Context, configPath string, cmdStart time.T
 	switch {
 	case proxyTotal == 0 && len(preflight) > 0:
 		return fmt.Sprintf(
-			"observer codex: 0 of %d codex turn(s) reached observer's proxy in this run — confirms V5-1 bypass from the shared app-server(s) above. Re-run with `observer codex --exclusive`, or see docs/codex-shared-app-server-gotcha.md.",
+			"observer codex: 0 of %d codex turn(s) reached observer's proxy in this run - confirms V5-1 bypass from the shared app-server(s) above. Re-run with `observer codex --exclusive`, or see docs/codex-shared-app-server-gotcha.md.",
 			jsonlTotal,
 		), nil
 	case proxyTotal == 0:
 		return fmt.Sprintf(
-			"observer codex: 0 of %d codex turn(s) reached observer's proxy in this run — capture failed but no shared app-server was detected at pre-flight; please report at docs/observer-platform-issues-v5.md as a V5 follow-up. See docs/codex-shared-app-server-gotcha.md.",
+			"observer codex: 0 of %d codex turn(s) reached observer's proxy in this run - capture failed but no shared app-server was detected at pre-flight; please report at docs/observer-platform-issues-v5.md as a V5 follow-up. See docs/codex-shared-app-server-gotcha.md.",
 			jsonlTotal,
 		), nil
 	case proxyTotal < jsonlTotal:

@@ -1,0 +1,20 @@
+{
+  "session_id": "7d1e0f22-3a4b-4c5d-8e6f-a1b2c3d4e5f6",
+  "parent_session_id": null,
+  "start_time": "2026-10-03T09:06:10.716000+00:00",
+  "end_time": "2026-10-03T09:07:01.099000+00:00",
+  "git_commit": null,
+  "git_branch": null,
+  "environment": {
+    "working_directory": "/home/dev/work/fork-demo"
+  },
+  "origin_directory": "/home/dev/work/fork-demo",
+  "username": "dev",
+  "child_sessions": [],
+  "loops": [],
+  "title": null,
+  "title_source": "auto",
+  "config": null,
+  "import_provenance": null,
+  "created_worktree": null
+}

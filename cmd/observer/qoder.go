@@ -38,7 +38,7 @@ func newQoderCmd() *cobra.Command {
 		Use:   "qoder [-- qoder-args...]",
 		Short: "Launch Qoder CLI; with --continue-from, seed a handover via qoder's -i flag",
 		Long: "Wraps Alibaba's Qoder CLI (binary `qodercli`). This launcher is\n" +
-			"NON-PROXIED — qoder has no base-URL knob (hardcoded api.qoder.com),\n" +
+			"NON-PROXIED - qoder has no base-URL knob (hardcoded api.qoder.com),\n" +
 			"so there is no proxy lane. Session capture happens via observer's\n" +
 			"local qoder adapter; qoder's local stores carry no model or token\n" +
 			"data (server-side only).\n\n" +

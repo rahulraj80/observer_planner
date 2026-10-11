@@ -1,0 +1,33 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].display_name": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].name": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "data[].updated_at": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "79a51c3c40df0b647b1460d277d3d0ac64f29044477022e1cecb33772e6e6232",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/rbac_roles",
+    "query": {
+      "page": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/organizations/rbac_roles. Terminal page derived from the normal page: the paging flag is set to its documented terminal value (has_more false and next_page null, or hasNextPage false); every other value is unchanged.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.custom_roles"
+}

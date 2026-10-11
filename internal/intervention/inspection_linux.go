@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs/poll"
+	"github.com/marmutapp/superbased-observer/internal/bootid"
 )
 
 // inspectScanProcess supplements only an otherwise permission-denied inventory
@@ -28,7 +28,7 @@ func inspectScanProcess(ctx context.Context, pid int, opts ScanOptions) (Identit
 	if birthErr != nil {
 		return Identity{}, err
 	}
-	bootID := poll.PlatformBootID()
+	bootID := bootid.Get()
 	uid, uidErr := readUniformUID(pid)
 	if uidErr != nil || uid != opts.TargetUID || bootID == "" {
 		return Identity{}, fmt.Errorf("intervention: protected inventory principal: %w", ErrIdentityMismatch)

@@ -119,7 +119,7 @@ func (b *Backend) Start(ctx context.Context) (<-chan processobs.RawEvent, error)
 	}
 	path, ok := ResolveWindowsObserver(b.explicitPath)
 	if !ok {
-		return nil, errors.New("processobs/bridge: Windows observer.exe not found — set [observer.process].windows_binary_path to a /mnt/... path")
+		return nil, errors.New("processobs/bridge: Windows observer.exe not found - set [observer.process].windows_binary_path to a /mnt/... path")
 	}
 	b.resolvedPath = path
 	b.out = make(chan processobs.RawEvent, 1024)
@@ -140,7 +140,7 @@ func (b *Backend) loop(ctx context.Context) {
 	// Whatever ends this loop — ctx cancel, Close, or the failure cap — no
 	// capturer is running afterwards, so a positive network-accounting claim
 	// must not outlive it.
-	defer b.invalidateNetworkStatus("cross-OS process capturer stopped — per-process network bytes are no longer being measured")
+	defer b.invalidateNetworkStatus("cross-OS process capturer stopped - per-process network bytes are no longer being measured")
 
 	backoff := b.minBackoff
 	failures := 0
@@ -154,7 +154,7 @@ func (b *Backend) loop(ctx context.Context) {
 		}
 		// The capturer is gone. Anything it claimed about live byte counting
 		// is now stale, and stale is a lie — withdraw it before the respawn.
-		b.invalidateNetworkStatus("cross-OS process capturer exited — per-process network bytes are not being measured until it respawns")
+		b.invalidateNetworkStatus("cross-OS process capturer exited - per-process network bytes are not being measured until it respawns")
 
 		if produced > 0 {
 			failures, backoff = 0, b.minBackoff
@@ -168,12 +168,12 @@ func (b *Backend) loop(ctx context.Context) {
 			// Terminal for this backend: say so explicitly rather than leaving
 			// the daemon's generic default, which cannot name the cause.
 			b.netStatus.Set(processobs.NetworkAccountingUnavailable,
-				fmt.Sprintf("cross-OS process capturer exited %d times without producing events — capture disabled", failures))
-			b.warn("process bridge: capturer failing repeatedly — capture disabled (daemon continues)",
+				fmt.Sprintf("cross-OS process capturer exited %d times without producing events - capture disabled", failures))
+			b.warn("process bridge: capturer failing repeatedly - capture disabled (daemon continues)",
 				"failures", failures, "err", err)
 			return
 		}
-		b.warn("process bridge: capturer exited — respawning", "err", err, "backoff", backoff.String(), "events", produced)
+		b.warn("process bridge: capturer exited - respawning", "err", err, "backoff", backoff.String(), "events", produced)
 		if !sleepCtx(ctx, b.stop, backoff) {
 			return
 		}
@@ -268,12 +268,12 @@ func (b *Backend) onCapturerStats(s CapturerStats) {
 	decode := s.DecodeStats()
 	switch {
 	case decode.Any():
-		b.warn("process bridge: the capturer's network-telemetry decoder is REFUSING events — "+
+		b.warn("process bridge: the capturer's network-telemetry decoder is REFUSING events - "+
 			"per-process byte totals from this host may be wrong, not merely missing",
 			"dropped", decode.NetworkDropped,
 			"unsupported_version", decode.NetworkUnsupportedVersion)
 	case decode.NothingClassified():
-		b.warn("process bridge: the capturer's network-telemetry decoder has classified NO data events — "+
+		b.warn("process bridge: the capturer's network-telemetry decoder has classified NO data events - "+
 			"it refused nothing, but it accepted nothing either, so it is measuring no bytes at all; "+
 			"if this host was moving TCP traffic, the provider's event ids no longer match this build's layout table",
 			"ignored", decode.NetworkIgnored,

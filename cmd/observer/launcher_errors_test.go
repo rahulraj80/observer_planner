@@ -33,7 +33,7 @@ func TestSuppressedLauncherErrorRendersSafeMessageExactlyOnce(t *testing.T) {
 }
 
 func TestLauncherErrorRendererDoesNotDuplicateCobraOrVendorExit(t *testing.T) {
-	budgetErr := budgetLaunchRefusal("opencode", "this invocation's final model route is direct or cannot be verified")
+	budgetErr := budgetLaunchRefusal("opencode", budgetLaunchCauseRouteUnverified)
 	root, child, output := executeLauncherError(t, false, budgetErr)
 	before := output.String()
 	if !strings.Contains(before, budgetErr.Error()) {
@@ -53,7 +53,7 @@ func TestLauncherErrorRendererDoesNotDuplicateCobraOrVendorExit(t *testing.T) {
 }
 
 func TestBudgetLaunchRefusalCarriesExactSafeTerminalMessage(t *testing.T) {
-	err := budgetLaunchRefusal("muse", "this tool has no verified Observer budget-admission route")
+	err := budgetLaunchRefusal("muse", budgetLaunchCauseNoRoute)
 	if !errors.Is(err, errBudgetLaunchUncontrolled) {
 		t.Fatalf("refusal lost sentinel: %v", err)
 	}

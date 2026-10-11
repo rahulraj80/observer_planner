@@ -124,31 +124,31 @@ func TestManagedRaiseChainShipsToolBodies(t *testing.T) {
 	}
 	// Bodies grant, not paths — full_content stays where the node left it.
 	if managed.FullContent {
-		t.Errorf("full_tool_bodies raise also raised full_content — the tiers must stay orthogonal")
+		t.Errorf("full_tool_bodies raise also raised full_content - the tiers must stay orthogonal")
 	}
 
 	batch := raiseBatchUnder(ctx, t, managed)
 	for _, s := range []string{raiseSentinelInput, raiseSentinelOutput, raiseSentinelReasoning, raiseSentinelErr} {
 		if !bytes.Contains(batch, []byte(s)) {
-			t.Errorf("body column %q did NOT ship after a managed raise — the resolve→raise→wire chain is broken", s)
+			t.Errorf("body column %q did NOT ship after a managed raise - the resolve→raise→wire chain is broken", s)
 		}
 	}
 	// full_tool_bodies is orthogonal to the path tier: it must not ship paths.
 	for _, s := range []string{raiseSentinelTarget, raiseSentinelSource} {
 		if bytes.Contains(batch, []byte(s)) {
-			t.Errorf("path/target %q leaked under a full_tool_bodies raise — the tier must not ship paths", s)
+			t.Errorf("path/target %q leaked under a full_tool_bodies raise - the tier must not ship paths", s)
 		}
 	}
 
 	// --- Individual plane: the identical body must be inert. ---
 	individual := resolveRaiseBody(t, raiseChainGrant(now, govern.ConsentInteractive), body)
 	if individual.FullToolBodies {
-		t.Fatalf("individual grant was server-RAISED by the same body — the Never-server-forced guarantee is broken; ShareOptions=%+v", individual)
+		t.Fatalf("individual grant was server-RAISED by the same body - the Never-server-forced guarantee is broken; ShareOptions=%+v", individual)
 	}
 	indBatch := raiseBatchUnder(ctx, t, individual)
 	for _, s := range []string{raiseSentinelInput, raiseSentinelOutput, raiseSentinelReasoning, raiseSentinelErr} {
 		if bytes.Contains(indBatch, []byte(s)) {
-			t.Errorf("body column %q shipped on the INDIVIDUAL plane under a raise body — individual nodes must never ship bodies without a local opt-in", s)
+			t.Errorf("body column %q shipped on the INDIVIDUAL plane under a raise body - individual nodes must never ship bodies without a local opt-in", s)
 		}
 	}
 }
@@ -203,7 +203,7 @@ func TestManagedRaiseChainPerTierIsolation(t *testing.T) {
 		t.Fatalf("extract.cache grant did not raise CacheDetail; ShareOptions=%+v", managed)
 	}
 	if managed.FullToolBodies {
-		t.Fatalf("extract.cache grant ALSO raised FullToolBodies — the per-tier split leaked; ShareOptions=%+v", managed)
+		t.Fatalf("extract.cache grant ALSO raised FullToolBodies - the per-tier split leaked; ShareOptions=%+v", managed)
 	}
 
 	// The umbrella extract.managed still raises both tiers (back-compat).
@@ -214,7 +214,7 @@ func TestManagedRaiseChainPerTierIsolation(t *testing.T) {
 	// A single per-tier token is NOT the enterprise-content grant: it raises
 	// its tier and nothing else, and raw content stays where the node left it.
 	if managed.EnterpriseGranted || managed.ShipsRawContent() {
-		t.Fatalf("a lone extract.cache grant set EnterpriseGranted — the per-tier split leaked into raw content; ShareOptions=%+v", managed)
+		t.Fatalf("a lone extract.cache grant set EnterpriseGranted - the per-tier split leaked into raw content; ShareOptions=%+v", managed)
 	}
 
 	// The same single-tier grant is inert on the individual plane.
@@ -260,12 +260,12 @@ func TestManagedRaiseChainUmbrella(t *testing.T) {
 		t.Fatalf("umbrella grant on a managed node did not raise to full content; ShareOptions=%+v", managed)
 	}
 	if managed.FullContent {
-		t.Errorf("the raise landed on FullContent — it must ride EnterpriseGranted so the node's own key is untouched; ShareOptions=%+v", managed)
+		t.Errorf("the raise landed on FullContent - it must ride EnterpriseGranted so the node's own key is untouched; ShareOptions=%+v", managed)
 	}
 	batch := raiseBatchUnder(ctx, t, managed)
 	for _, s := range []string{raiseSentinelTarget, raiseSentinelSource} {
 		if !bytes.Contains(batch, []byte(s)) {
-			t.Errorf("raw path %q did NOT ship under the umbrella grant — the R9.5 raise is broken", s)
+			t.Errorf("raw path %q did NOT ship under the umbrella grant - the R9.5 raise is broken", s)
 		}
 	}
 

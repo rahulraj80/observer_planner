@@ -12,7 +12,8 @@ import { ChartState } from "@/components/ChartState";
 import { GuidanceCard } from "@/components/GuidanceCard";
 import { ProjectDetailPanel } from "@/components/ProjectDetailPanel";
 import { useApi } from "@/lib/useApi";
-import { fmtInt, fmtRelative, fmtUSD } from "@/lib/format";
+import { useFilters, windowLabel, windowParams } from "@/lib/filters";
+import { costLabel, fmtInt, fmtRelative, fmtUSD, withoutDollars } from "@/lib/format";
 import { COMMIT_CAPTURE } from "@/lib/vocabTones";
 import { VocabPill } from "@shared/lib/vocabPill";
 import { CodeCommentSplit } from "@shared/primitives/CodeCommentSplit";
@@ -31,7 +32,24 @@ import { navIcon } from "@/lib/nav";
 // Clicking a row opens a deep-linkable (`?root=`) SlideOver with the full
 // GuidanceCard breakdown for that project.
 export function ProjectsPage() {
-  const projects = useApi<ProjectsResponse>("/api/projects");
+  // The whole filter bar applies (lib/filterScope.ts): the window bounds the
+  // counted activity and the spend / code / commit columns, tool and model
+  // narrow sessions, actions and spend, project keeps its one row.
+  const { win, customRange, tool, model, project } = useFilters();
+  const projects = useApi<ProjectsResponse>(
+    "/api/projects",
+    {
+      ...windowParams(win, customRange),
+      tool: tool !== "all" ? tool : undefined,
+      project: project !== "all" ? project : undefined,
+      model: model !== "all" ? model : undefined,
+    },
+    [win, customRange, tool, model, project],
+  );
+  const winText = windowLabel(win, customRange);
+  // The drawer follows the same window (REVIEW-3 P3-25), capped at the
+  // detail routes' 365-day ceiling.
+  const drawerWin = useMemo(() => windowParams(win, customRange, { maxDays: 365 }), [win, customRange]);
   const summary = useApi<GuidanceSummaryRow[]>(PROJECTS_GUIDANCE_SUMMARY_PATH);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -72,8 +90,15 @@ export function ProjectsPage() {
     for (const s of summary.data ?? []) {
       summaryByRoot.set(s.project_root, s);
     }
-    return projectColumns(summaryByRoot);
-  }, [summary.data]);
+    // Spend is dollars only: dropped in the org's token-usage view.
+    return withoutDollars(projectColumns(summaryByRoot, winText), (c) => c.id === "spend");
+  }, [summary.data, winText]);
+  // Code lines and commits belong to the project, not to a tool or model,
+  // so those two filters leave them as the window's project totals.
+  const narrowedNote =
+    tool !== "all" || model !== "all"
+      ? "Tool and model filters narrow sessions, actions and spend; AI code lines and commits stay project totals for the window."
+      : "";
 
   const rows = projects.data?.rows ?? [];
   const loading = projects.loading && !projects.data;
@@ -84,9 +109,10 @@ export function ProjectsPage() {
       <PageHeader
         icon={navIcon("projects")}
         title="Projects"
-        sub="Every project Observer has captured activity for: spend, commits, AI-vs-human lines, prompt-to-commit alignment, and the instructions/skills/agents/commands/rules/config files each AI tool reads from it (CLAUDE.md, AGENTS.md, .cursorrules, .claude/skills/*, and similar)."
+        sub={`Every project Observer has captured activity for: ${costLabel("spend, ", "")}commits, AI-vs-human lines, prompt-to-commit alignment, and the instructions/skills/agents/commands/rules/config files each AI tool reads from it (CLAUDE.md, AGENTS.md, .cursorrules, .claude/skills/*, and similar).`}
         helpId="tab.projects"
       />
+      {narrowedNote && <p className="-mt-3 text-[11.5px] text-fg-3">{narrowedNote}</p>}
 
       <ChartState
         loading={loading}
@@ -94,7 +120,11 @@ export function ProjectsPage() {
         denied={projects.denied}
         deniedPermission={projects.deniedPermission}
         empty={!loading && rows.length === 0}
-        emptyHint="No projects captured yet. Once an AI tool runs inside a project directory, it will show up here."
+        emptyHint={
+          win === "all" && tool === "all" && model === "all" && project === "all"
+            ? "No projects captured yet. Once an AI tool runs inside a project directory, it will show up here."
+            : "No project has activity under the current filters. Widen the window or clear a filter."
+        }
         height={240}
       >
         <div className="rounded-3 border border-line-2 bg-bg-2">
@@ -130,6 +160,9 @@ export function ProjectsPage() {
         projectId={selectedProjectId != null ? Number(selectedProjectId) : null}
         open={selectedProjectId != null}
         onClose={() => setSelectedProjectId(null)}
+        win={drawerWin}
+        tool={tool}
+        model={model}
       />
     </div>
   );
@@ -157,6 +190,7 @@ function timeOrNull(iso: string | null | undefined): number {
 // keep the server's order until a header is clicked.
 function projectColumns(
   summaryByRoot: Map<string, GuidanceSummaryRow>,
+  winText: string,
 ): ColumnDef<ProjectRow, unknown>[] {
   return [
     {
@@ -186,7 +220,7 @@ function projectColumns(
     },
     {
       id: "spend",
-      header: "Spend (30d)",
+      header: `Spend (${winText})`,
       accessorFn: (r) => numOrNull(r.spend_usd_30d),
       meta: { align: "right" },
       cell: ({ row }) => {

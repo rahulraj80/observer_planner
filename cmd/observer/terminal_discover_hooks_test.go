@@ -46,11 +46,11 @@ func TestInlineLaunchersWireGenericDiscovery(t *testing.T) {
 
 			wantCall := `prepareGenericDiscovery\([^,\n]+, ` + regexp.QuoteMeta(tc.toolKey)
 			if !regexp.MustCompile(wantCall).MatchString(body) {
-				t.Errorf("%s no longer calls %s(...) — generic post-launch session discovery is unwired for this launcher's inline exec lane", tc.file, wantCall)
+				t.Errorf("%s no longer calls %s(...) - generic post-launch session discovery is unwired for this launcher's inline exec lane", tc.file, wantCall)
 			}
 
 			if !strings.Contains(body, "recordLaunchSeed(") {
-				t.Fatalf("%s no longer calls recordLaunchSeed — test assumption broken, update this pin", tc.file)
+				t.Fatalf("%s no longer calls recordLaunchSeed - test assumption broken, update this pin", tc.file)
 			}
 
 			// Discovery must be cancelled via defer, matching the pattern in
@@ -59,7 +59,7 @@ func TestInlineLaunchersWireGenericDiscovery(t *testing.T) {
 			// the process lifetime. Whitespace-tolerant: just confirm the nil
 			// guard and the defer both exist, without pinning indentation.
 			if !strings.Contains(body, "discoverCancel != nil") || !strings.Contains(body, "defer discoverCancel()") {
-				t.Errorf("%s does not nil-check and defer-cancel discoverCancel next to the hook call — window must close on child exit", tc.file)
+				t.Errorf("%s does not nil-check and defer-cancel discoverCancel next to the hook call - window must close on child exit", tc.file)
 			}
 		})
 	}

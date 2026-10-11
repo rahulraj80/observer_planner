@@ -55,7 +55,11 @@
 //     fill the input/cache/reasoning gap for users not running in
 //     debug mode — without Tier 0, ~90% of cost would silently
 //     disappear off the dashboard. OutputTokens is left zero to
-//     avoid double-counting with Tier 3 per-message rows. When Tier 1
+//     avoid double-counting with Tier 3 per-message rows, EXCEPT when
+//     no assistant.message in the same span (since the last resume /
+//     shutdown) reported outputTokens: then the shutdown row carries
+//     modelMetrics' outputTokens so output is never silently zero (T-353,
+//     a copilot-cli 1.0.91 session recorded input only). When Tier 1
 //     rows exist for the same session, the store-layer dedup drops
 //     Tier 0 rows (Tier 1 has finer per-request granularity).
 //

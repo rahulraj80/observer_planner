@@ -160,7 +160,7 @@ func TestAPIGuardRules(t *testing.T) {
 	var found bool
 	for _, r := range resp.Rules {
 		if r.Doc == "" {
-			t.Errorf("rule %s has empty doc — the definition is the endpoint's whole point", r.ID)
+			t.Errorf("rule %s has empty doc - the definition is the endpoint's whole point", r.ID)
 		}
 		if r.ID == "R-151" {
 			found = true
@@ -333,7 +333,7 @@ func TestAPIGuardSimulate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sum.Total != 0 {
-		t.Errorf("simulate persisted %d guard events — must persist none", sum.Total)
+		t.Errorf("simulate persisted %d guard events - must persist none", sum.Total)
 	}
 }
 
@@ -374,6 +374,9 @@ func TestAPIGuardBudget(t *testing.T) {
 		Sessions      int     `json:"sessions"`
 		SessionP95USD float64 `json:"session_p95_usd"`
 		DailyP95USD   float64 `json:"daily_p95_usd"`
+		// T-204: the token caps and their usage ride along for the token view.
+		DailyTokens *int64 `json:"daily_tokens"`
+		UsageToday  *int64 `json:"usage_today_tokens"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -389,6 +392,12 @@ func TestAPIGuardBudget(t *testing.T) {
 	}
 	if resp.SessionP95USD < 2.5-1e-9 || resp.DailyP95USD < 2.5-1e-9 {
 		t.Errorf("p95 session/daily = %.4f/%.4f, want >= 2.50", resp.SessionP95USD, resp.DailyP95USD)
+	}
+	if resp.DailyTokens == nil || *resp.DailyTokens != 0 {
+		t.Errorf("daily_tokens = %v, want the configured 0 (off)", resp.DailyTokens)
+	}
+	if resp.UsageToday == nil || *resp.UsageToday < 20 {
+		t.Errorf("usage_today_tokens = %v, want >= 20 (the seeded turn)", resp.UsageToday)
 	}
 }
 

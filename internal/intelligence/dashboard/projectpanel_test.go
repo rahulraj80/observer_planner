@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -367,7 +369,7 @@ func TestProjectPanelServesWorkingDirRoot(t *testing.T) {
 			t.Fatalf("root = %q, want the spawn dir %q", resp.Root, dir)
 		}
 		if resp.RootKind != terminalRootKindWorking {
-			t.Fatalf("root_kind = %q, want %q — the panel must not call a default-cwd launch a project",
+			t.Fatalf("root_kind = %q, want %q - the panel must not call a default-cwd launch a project",
 				resp.RootKind, terminalRootKindWorking)
 		}
 	})

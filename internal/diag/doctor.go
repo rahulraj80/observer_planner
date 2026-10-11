@@ -2,9 +2,7 @@ package diag
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,9 +14,13 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/marmutapp/superbased-observer/internal/codextrust"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/mcp"
+	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/mcpregister"
+	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // Status is the outcome of a single check. Three levels — anything other
@@ -50,6 +52,12 @@ type Check struct {
 	Status  Status   // ok | warn | fail
 	Message string   // single-line summary
 	Details []string // optional bullet points (printed indented)
+
+	// Remediations are the finding's structured fixes (T-421 item 3): a
+	// closed action id plus a parameter, rendered by internal/remedy as the
+	// command the Message / Details already quote for the CLI and as a
+	// button linking to the dashboard control. Empty on a healthy check.
+	Remediations []remedy.Remediation `json:",omitempty"`
 
 	// pinned keeps the check through Report.Filter whatever the filter
 	// word: a line that explains why a scoped doctor left something out
@@ -98,8 +106,17 @@ type DoctorOptions struct {
 	// HomeDir overrides $HOME (for tests).
 	HomeDir string
 	// BinaryPath is the absolute path of the running observer binary.
-	// Required for hook + MCP registration checks.
+	// Required for hook + MCP registration checks. It is the REGISTRATION
+	// command (the npm / pip launcher for a package-manager install, U1),
+	// what hook and MCP entries are expected to name.
 	BinaryPath string
+	// RealBinaryPath is the running binary itself; an MCP entry naming it
+	// runs this same install, so init refreshes it without --force (U2).
+	RealBinaryPath string
+	// CLIVersion is this binary's release version; the daemon.version
+	// check compares the running daemon's with it (U3). Empty or "dev"
+	// skips the comparison.
+	CLIVersion string
 	// Scope is the doctor's single argument (`observer doctor <scope>`),
 	// "" for an unscoped run. A scope whose filter would not keep the
 	// db.integrity check (a per-tool doctor such as `observer doctor
@@ -142,13 +159,17 @@ func Run(ctx context.Context, opts DoctorOptions) Report {
 	r.add(checkAntigravityFamily(opts.HomeDir, opts.Config))
 	r.add(checkHookChecksums(opts.HomeDir))
 	r.add(checkHookCommandsBinary(opts.HomeDir, opts.BinaryPath))
-	r.add(checkMCPRegistrations(opts.HomeDir, opts.BinaryPath))
+	r.add(checkMCPRegistrations(opts.HomeDir, opts.BinaryPath, opts.RealBinaryPath))
 	r.add(checkClaudeCodePlugin(opts.HomeDir, homeOverride))
 	r.add(checkCursorHooks(opts.HomeDir, homeOverride))
+	r.add(checkCursorClaudeReplay(opts.HomeDir))
+	r.add(checkHooksDisabled(opts.HomeDir, homeOverride))
 	r.add(checkCursorUsage(ctx, opts.DB, cursorFinishHooksWiring(cursorHooksFiles(opts.HomeDir, homeOverride))))
 	r.add(checkPidBridge(ctx, opts.DB))
 	r.add(checkConcurrentDaemons(opts.Config))
+	r.add(checkDaemonVersion(opts.Config, opts.CLIVersion))
 	r.add(checkCodexHookTrust(opts.HomeDir))
+	r.add(checkRoutePort(opts.HomeDir, opts.Config))
 	r.add(checkCodexProviderRoute(opts.HomeDir, codexSystemRequirementsPath()))
 	r.add(checkProxyRoutingGap(ctx, opts.DB, opts.HomeDir))
 	if c, ok := checkWindowsProxyRoutes(ctx, opts.Config); ok {
@@ -163,6 +184,7 @@ func Run(ctx context.Context, opts DoctorOptions) Report {
 	r.add(checkCopilotTeams(opts.Config))
 	r.add(checkPromptGuardWiring(opts.Config))
 	r.add(checkCommitCapture(opts.Config))
+	r.add(checkCodeIntel(opts.Config))
 	for _, c := range opts.ExtraChecks {
 		r.add(c)
 	}
@@ -217,7 +239,8 @@ func checkOrgEnrolment(ctx context.Context, database *sql.DB, cfg config.Config)
 		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM org_enrolment`).Scan(&enrolled); err == nil && enrolled > 0 {
 			return Check{
 				Name: "org enrolment", Status: StatusWarn,
-				Message: "enrolled but [org_client] enabled = false — the org rail is NOT running (no push, no policy poll); set enabled = true in config.toml or run `observer unenroll`",
+				Message:      "enrolled but [org_client] enabled = false - the org rail is NOT running (no push, no policy poll); set enabled = true in config.toml or run " + remedy.Quote(remedy.Of(remedy.OrgUnenroll, "")),
+				Remediations: []remedy.Remediation{remedy.Of(remedy.OrgClientEnable, ""), remedy.Of(remedy.OrgUnenroll, "")},
 			}
 		}
 		return Check{Name: "org enrolment", Status: StatusOK, Message: "[org_client] disabled (solo-local mode)"}
@@ -234,7 +257,8 @@ func checkOrgEnrolment(ctx context.Context, database *sql.DB, cfg config.Config)
 	if enrolled == 0 {
 		return Check{
 			Name: "org enrolment", Status: StatusWarn,
-			Message: "[org_client] enabled but not enrolled — run `observer enroll --link <url>` to enrol",
+			Message:      "[org_client] enabled but not enrolled - run " + remedy.Quote(remedy.Of(remedy.OrgEnroll, "")) + " to enrol",
+			Remediations: []remedy.Remediation{remedy.Of(remedy.OrgEnroll, "")},
 		}
 	}
 	var orgID, orgName, orgURL, userEmail string
@@ -299,7 +323,7 @@ func checkOrgEnrolment(ctx context.Context, database *sql.DB, cfg config.Config)
 	orgServerURLUnset := strings.TrimSpace(cfg.OrgClient.OrgServerURL) == ""
 	if orgServerURLUnset {
 		details = append(details, fmt.Sprintf(
-			"config gap:    [org_client].org_server_url is unset — the node stays fully ACTIVE (push/announcement/routing-policy/guard-policy-poll all dial the persisted enrolment's server, %q, directly); the only effect is cosmetic — an R-205 bundle-rejection finding's Target string loses its server-URL prefix. Add org_server_url = %q to config.toml to restore that prefix", orgURL, orgURL,
+			"config gap:    [org_client].org_server_url is unset - the node stays fully ACTIVE (push/announcement/routing-policy/guard-policy-poll all dial the persisted enrolment's server, %q, directly); the only effect is cosmetic - an R-205 bundle-rejection finding's Target string loses its server-URL prefix. Add org_server_url = %q to config.toml to restore that prefix", orgURL, orgURL,
 		))
 	}
 	if len(cfg.OrgClient.Share.TargetActionAllowlist) > 0 {
@@ -327,7 +351,7 @@ func checkOrgEnrolment(ctx context.Context, database *sql.DB, cfg config.Config)
 		details = append(details, "last push:     could not read org_push_log: "+err.Error())
 		shareStatus = worseStatus(shareStatus, StatusWarn)
 	default:
-		summary := fmt.Sprintf("last push:     %s — %s, %d rows", lastPushedAt, lastStatus, lastRows)
+		summary := fmt.Sprintf("last push:     %s - %s, %d rows", lastPushedAt, lastStatus, lastRows)
 		if lastErr != "" {
 			summary += fmt.Sprintf(" (err: %s)", lastErr)
 		}
@@ -336,10 +360,10 @@ func checkOrgEnrolment(ctx context.Context, database *sql.DB, cfg config.Config)
 			shareStatus = worseStatus(shareStatus, StatusWarn)
 		}
 	}
-	msg := "enrolled — " + shareMsg
+	msg := "enrolled - " + shareMsg
 	if orgServerURLUnset {
 		msg = fmt.Sprintf(
-			"enrolled — ACTIVE, dialing the persisted server %s (org_server_url is unset in config; see the config gap detail for the one cosmetic thing that affects) — %s",
+			"enrolled - ACTIVE, dialing the persisted server %s (org_server_url is unset in config; see the config gap detail for the one cosmetic thing that affects) - %s",
 			orgURL, shareMsg,
 		)
 	}
@@ -394,7 +418,7 @@ func checkConcurrentDaemons(cfg config.Config) Check {
 	}
 	return Check{
 		Name: "daemon.unique", Status: StatusWarn,
-		Message: fmt.Sprintf("%d observer daemons running on the same DB — concurrent writers can desync cursor state",
+		Message: fmt.Sprintf("%d observer daemons running on the same DB - concurrent writers can desync cursor state",
 			len(locks)),
 		Details: details,
 	}
@@ -413,7 +437,8 @@ func checkPidBridge(ctx context.Context, database *sql.DB) Check {
 	if count == 0 {
 		return Check{
 			Name: "pidbridge.size", Status: StatusWarn,
-			Message: "no pid→session entries — host tool hasn't fired SessionStart yet (re-run `observer init` after upgrading)",
+			Message:      "no pid→session entries - host tool hasn't fired SessionStart yet (re-run " + remedy.Quote(initAll) + " after upgrading)",
+			Remediations: []remedy.Remediation{initAll},
 		}
 	}
 	return Check{Name: "pidbridge.size", Status: StatusOK, Message: fmt.Sprintf("%d pid→session entries", count)}
@@ -464,8 +489,15 @@ func scopeExcludesIntegrity(in integrityInput) bool {
 	return in.scope != "" && !strings.Contains(dbIntegrityCheckName, in.scope)
 }
 
-// integrityOnDemand is the one pointer every skip line gives.
-const integrityOnDemand = "run `observer doctor db` (or `observer doctor --integrity`) to run it on demand"
+// integrityOnDemand is the one pointer every skip line gives; its command is
+// remedy's DoctorDBIntegrity (the dashboard's forced integrity check).
+var integrityOnDemand = "run " + remedy.Quote(integrityRemedy) + " (or `observer doctor --integrity`) to run it on demand"
+
+// integrityRemedy is the structured fix a skipped integrity line carries.
+var integrityRemedy = remedy.Of(remedy.DoctorDBIntegrity, "")
+
+// initAll is the plain `observer init` remediation (Connected tools).
+var initAll = remedy.Of(remedy.Init, "")
 
 var integrityDecisions = []integrityDecision{
 	{
@@ -481,10 +513,11 @@ var integrityDecisions = []integrityDecision{
 		match: scopeExcludesIntegrity,
 		skip: func(in integrityInput) Check {
 			return Check{
-				Name:    dbIntegrityCheckName,
-				Status:  StatusOK,
-				Message: fmt.Sprintf("skipped: `observer doctor %s` is scoped to one tool and the whole-database PRAGMA quick_check is not; %s", in.scope, integrityOnDemand),
-				pinned:  true,
+				Name:         dbIntegrityCheckName,
+				Status:       StatusOK,
+				Message:      fmt.Sprintf("skipped: `observer doctor %s` is scoped to one tool and the whole-database PRAGMA quick_check is not; %s", in.scope, integrityOnDemand),
+				Remediations: []remedy.Remediation{integrityRemedy},
+				pinned:       true,
 			}
 		},
 	},
@@ -504,6 +537,7 @@ var integrityDecisions = []integrityDecision{
 				Status: StatusOK,
 				Message: fmt.Sprintf("skipped: database is %.1f GB, over [observer.db].integrity_check_max_gb = %d (the same gate as the daemon's startup check); %s",
 					float64(in.sizeBytes)/(1<<30), in.maxGB, integrityOnDemand),
+				Remediations: []remedy.Remediation{integrityRemedy},
 			}
 		},
 	},
@@ -624,7 +658,7 @@ func checkAntigravityFamily(homeDir string, cfg config.Config) Check {
 		return Check{
 			Name:    "antigravity.family",
 			Status:  StatusWarn,
-			Message: fmt.Sprintf("%d Antigravity-CLI .pb file(s) present but [observer.antigravity] network_recovery is %q — set to \"local\" so the gRPC fallback can recover CLI conversations", cliPbs, net),
+			Message: fmt.Sprintf("%d Antigravity-CLI .pb file(s) present but [observer.antigravity] network_recovery is %q - set to \"local\" so the gRPC fallback can recover CLI conversations", cliPbs, net),
 			Details: details,
 		}
 	}
@@ -678,14 +712,16 @@ func checkHookChecksums(homeDir string) Check {
 	raw, err := os.ReadFile(csPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Check{Name: "hooks.checksums", Status: StatusWarn, Message: "no hook_checksums.json yet — run `observer init` first"}
+			return Check{Name: "hooks.checksums", Status: StatusWarn, Message: "no hook_checksums.json yet - run " + remedy.Quote(initAll) + " first", Remediations: []remedy.Remediation{initAll}}
 		}
 		return Check{Name: "hooks.checksums", Status: StatusFail, Message: "read checksums: " + err.Error()}
 	}
 	var entries map[string]struct {
-		SHA256     string `json:"sha256"`
-		Registered string `json:"registered"`
-		BinaryPath string `json:"binary_path"`
+		SHA256      string `json:"sha256"`
+		DigestScope string `json:"digest_scope"`
+		HooksSHA256 string `json:"hooks_sha256"`
+		Registered  string `json:"registered"`
+		BinaryPath  string `json:"binary_path"`
 	}
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return Check{Name: "hooks.checksums", Status: StatusFail, Message: "parse checksums: " + err.Error()}
@@ -705,9 +741,7 @@ func checkHookChecksums(homeDir string) Check {
 			missing = append(missing, path+": "+err.Error())
 			continue
 		}
-		sum := sha256.Sum256(body)
-		got := hex.EncodeToString(sum[:])
-		if got != want.SHA256 {
+		if !hookEntryMatches(path, body, want.SHA256, want.DigestScope, want.HooksSHA256) {
 			drift = append(drift, path)
 			continue
 		}
@@ -724,164 +758,178 @@ func checkHookChecksums(homeDir string) Check {
 	case len(drift) > 0:
 		return Check{
 			Name: "hooks.checksums", Status: StatusWarn,
-			Message: fmt.Sprintf("%d config file(s) modified externally — re-run `observer init` to refresh", len(drift)),
-			Details: drift,
+			Message:      fmt.Sprintf("%d config file(s) modified externally - re-run %s to refresh", len(drift), remedy.Quote(initAll)),
+			Details:      drift,
+			Remediations: []remedy.Remediation{initAll},
 		}
 	}
 	return Check{Name: "hooks.checksums", Status: StatusOK, Message: fmt.Sprintf("%d config(s) match recorded checksums", matched)}
 }
 
-// checkCodexHookTrust reports whether observer-registered Codex hooks
-// have been trust-approved by the user. Codex 0.129.0+ requires the
-// user to manually mark each hook entry as trusted (via the codex
-// `/hooks` slash command) the first time it appears; until then the
-// hook is registered but won't fire. The trust state lives in
-// `~/.codex/config.toml` under `[hooks.state]`, keyed by an opaque
-// sha256 hash of the hook entry.
+// checkCodexHookTrust reports whether every Codex hook event Observer
+// registers will actually run. Codex (0.129.0+, still required on 0.160)
+// dispatches a hooks.json entry only after the user trusts it inside
+// Codex (`/hooks`); the approval lives in ~/.codex/config.toml
+// [hooks.state] as a trusted_hash over the entry's body, so an entry
+// whose command changed after it was trusted is untrusted again, and an
+// entry the user switched off carries `enabled = false`.
 //
-// The check has three outcomes:
+// The expected events come from the integration registry (the Registered
+// Codex bindings, pinned to the writer's list), so an event a newer
+// Observer adds is listed even before hooks.json carries it. The trust
+// hash is recomputed by internal/codextrust for DETECTION ONLY: this
+// check never writes Codex config and Observer never trusts a hook on the
+// user's behalf (decision D-148).
 //
-//   - StatusOK if no codex hooks are registered at all (codex not
-//     installed, or user opted out).
-//   - StatusOK if every observer-owned hook in `~/.codex/hooks.json`
-//     has a matching trusted_hash entry in config.toml.
-//   - StatusWarn listing the specific event names that need trust,
-//     with the exact instruction to fix.
-//
-// Pure read — never mutates user config. The trust hash itself isn't
-// reverse-engineered (codex can change the algorithm in any release);
-// we only check whether some `[hooks.state]` entry references our
-// hooks.json path for a given event name. Anything keyed against our
-// hooks.json counts as "the user has interacted with this entry"; the
-// presence of `trusted_hash` confirms approval.
+// Outcomes: OK when Codex has no Observer hooks or every expected event
+// is trusted; Warn otherwise, with the first detail line naming the
+// events that will not run ("untrusted: ...", read by
+// CaptureIntegritySignals) and one line per state.
 func checkCodexHookTrust(homeDir string) Check {
+	st := readCodexHookTrust(homeDir)
+	switch {
+	case st.noHooksFile:
+		return Check{Name: "codex.hook_trust", Status: StatusOK, Message: "no codex hooks registered"}
+	case st.err != "":
+		return Check{Name: "codex.hook_trust", Status: StatusWarn, Message: st.err}
+	case len(st.registered) == 0:
+		return Check{Name: "codex.hook_trust", Status: StatusOK, Message: "no observer-owned codex hooks found"}
+	}
+	return codexHookTrustCheck(st.report, st.hooksPath)
+}
+
+// codexTrustState is the parsed Codex hook trust state: the
+// observer-owned events in hooks.json and which of them Codex will run.
+// Shared by checkCodexHookTrust and the per-binding HookTrustFor read
+// (hook-parity Lane G), so the parse exists once; both are built on the
+// one internal/codextrust classification (T-039), so an entry changed or
+// switched off since it was trusted counts as not trusted in both.
+type codexTrustState struct {
+	hooksPath   string
+	noHooksFile bool
+	err         string
+	// registered lists the observer-owned events hooks.json carries.
+	registered []string
+	// trusted marks the registered events Codex will dispatch.
+	trusted map[string]bool
+	report  codextrust.Report
+}
+
+func readCodexHookTrust(homeDir string) codexTrustState {
 	hooksPath := filepath.Join(homeDir, ".codex", "hooks.json")
 	configPath := filepath.Join(homeDir, ".codex", "config.toml")
+	st := codexTrustState{hooksPath: hooksPath, trusted: map[string]bool{}}
 
 	hooksRaw, err := os.ReadFile(hooksPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Check{Name: "codex.hook_trust", Status: StatusOK, Message: "no codex hooks registered"}
+			st.noHooksFile = true
+			return st
 		}
-		return Check{Name: "codex.hook_trust", Status: StatusWarn, Message: "read codex hooks.json: " + err.Error()}
+		st.err = "read codex hooks.json: " + err.Error()
+		return st
 	}
-	var hooksFile struct {
-		Hooks map[string][]struct {
-			Hooks []struct {
-				Type    string `json:"type"`
-				Command string `json:"command"`
-			} `json:"hooks"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(hooksRaw, &hooksFile); err != nil {
-		return Check{Name: "codex.hook_trust", Status: StatusWarn, Message: "parse codex hooks.json: " + err.Error()}
-	}
-
-	// Collect event names that reference the observer binary. We
-	// don't have access to the running binary path here so we sniff
-	// for the `observer hook codex` command shape — narrow enough to
-	// avoid false positives, broad enough to survive binary path
-	// drift (the same logic the cursor-windows registration uses).
-	var registered []string
-	for event, groups := range hooksFile.Hooks {
-		for _, g := range groups {
-			for _, h := range g.Hooks {
-				if h.Type == "command" && strings.Contains(h.Command, " hook codex ") {
-					registered = append(registered, event)
-					break
-				}
-			}
-		}
-	}
-	sort.Strings(registered)
-	if len(registered) == 0 {
-		return Check{Name: "codex.hook_trust", Status: StatusOK, Message: "no observer-owned codex hooks found"}
-	}
-
-	// Read config.toml's [hooks.state] map. Keys look like
-	// "<hooks-file-path>:<event_snake_case>:<group_index>:<hook_index>".
 	cfgRaw, err := os.ReadFile(configPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		st.err = "read codex config.toml: " + err.Error()
+		return st
+	}
+	rep, err := codextrust.Classify(codextrust.Input{
+		HooksPath:  hooksPath,
+		HooksJSON:  hooksRaw,
+		ConfigTOML: cfgRaw,
+		Expected:   codexExpectedHookEvents(),
+		Owned:      isObserverCodexHook,
+	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return codexHookTrustWarn(registered, hooksPath, "config.toml does not exist (codex never opened?)")
-		}
-		return Check{Name: "codex.hook_trust", Status: StatusWarn, Message: "read codex config.toml: " + err.Error()}
+		st.err = err.Error()
+		return st
 	}
-	root := map[string]any{}
-	if len(cfgRaw) > 0 {
-		if err := toml.Unmarshal(cfgRaw, &root); err != nil {
-			return Check{Name: "codex.hook_trust", Status: StatusWarn, Message: "parse codex config.toml: " + err.Error()}
-		}
-	}
-	hooksState, _ := root["hooks"].(map[string]any)
-	state, _ := hooksState["state"].(map[string]any)
-
-	trustedEvents := map[string]bool{}
-	for key, v := range state {
-		entry, _ := v.(map[string]any)
-		hash, _ := entry["trusted_hash"].(string)
-		if hash == "" {
+	st.report = rep
+	for _, e := range rep.Entries {
+		if e.State == codextrust.StateMissing {
 			continue
 		}
-		// Key shape: "<hooks-file-path>:<event_snake>:<idx>:<idx>".
-		// Match by hooks-file-path prefix, then convert the snake-cased
-		// event name back to CamelCase to compare against `registered`.
-		if !strings.HasPrefix(key, hooksPath+":") {
-			continue
-		}
-		rest := strings.TrimPrefix(key, hooksPath+":")
-		parts := strings.SplitN(rest, ":", 2)
-		if len(parts) == 0 {
-			continue
-		}
-		camel := snakeToCamel(parts[0])
-		trustedEvents[camel] = true
-	}
-
-	var untrusted []string
-	for _, event := range registered {
-		if !trustedEvents[event] {
-			untrusted = append(untrusted, event)
+		st.registered = append(st.registered, e.Event)
+		if e.State == codextrust.StateTrusted {
+			st.trusted[e.Event] = true
 		}
 	}
-	if len(untrusted) == 0 {
-		return Check{
-			Name:    "codex.hook_trust",
-			Status:  StatusOK,
-			Message: fmt.Sprintf("all %d codex hook(s) are trust-approved", len(registered)),
-		}
-	}
-	return codexHookTrustWarn(untrusted, hooksPath, "")
+	sort.Strings(st.registered)
+	return st
 }
 
-func codexHookTrustWarn(events []string, hooksPath, extra string) Check {
-	msg := fmt.Sprintf("%d codex hook(s) need trust approval — open `codex` and run /hooks to mark them trusted", len(events))
-	if extra != "" {
-		msg += " (" + extra + ")"
+// codexExpectedHookEvents is every Codex hooks.json event Observer
+// registers, from the integration registry.
+func codexExpectedHookEvents() []string {
+	c, ok := integration.For(models.ToolCodex)
+	if !ok {
+		return nil
 	}
-	details := []string{
-		"untrusted: " + strings.Join(events, ", "),
-		"hooks file: " + hooksPath,
-		"why: codex requires per-hook user trust before dispatch (security feature; no programmatic shortcut)",
-	}
-	return Check{Name: "codex.hook_trust", Status: StatusWarn, Message: msg, Details: details}
+	return c.Hook.RegisteredEvents()
 }
 
-// snakeToCamel converts e.g. "session_start" → "SessionStart". Used to
-// match codex's snake-cased trust-state event keys against our CamelCase
-// hooks.json event names. Pure ASCII; codex doesn't use unicode events.
-func snakeToCamel(s string) string {
-	if s == "" {
-		return ""
-	}
-	parts := strings.Split(s, "_")
-	for i, p := range parts {
-		if p == "" {
-			continue
+// isObserverCodexHook sniffs the `observer hook codex` command shape:
+// narrow enough to skip a user's own hooks, broad enough to survive a
+// binary path change.
+func isObserverCodexHook(command string) bool {
+	return strings.Contains(command, " hook codex ")
+}
+
+// codexTrustStateLines is the per-state detail table, in display order.
+var codexTrustStateLines = []struct {
+	state codextrust.State
+	label string
+}{
+	{codextrust.StateUntrusted, "never trusted"},
+	{codextrust.StateModified, "changed since you trusted it (re-trust in /hooks)"},
+	{codextrust.StateDisabled, "switched off in /hooks"},
+	{codextrust.StateMissing, "not registered yet (run " + remedy.Quote(remedy.Of(remedy.InitTool, models.ToolCodex)) + ", or restart `observer start` to auto-register)"},
+	{codextrust.StateTrusted, "trusted"},
+}
+
+func codexHookTrustCheck(rep codextrust.Report, hooksPath string) Check {
+	blocked := rep.Events(codextrust.StateUntrusted, codextrust.StateModified, codextrust.StateDisabled)
+	missing := rep.Events(codextrust.StateMissing)
+	if len(blocked) == 0 && len(missing) == 0 {
+		msg := fmt.Sprintf("all %d codex hook(s) are trust-approved", len(rep.Entries))
+		if !rep.HashVerified {
+			msg += " (recorded approvals; this Codex version's trust hash could not be reproduced)"
 		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		return Check{Name: "codex.hook_trust", Status: StatusOK, Message: msg}
 	}
-	return strings.Join(parts, "")
+	var details []string
+	var msg string
+	if len(blocked) > 0 {
+		msg = fmt.Sprintf("%d codex hook(s) need trust approval, so Codex will not run them: open `codex`, run /hooks and trust each Observer entry", len(blocked))
+		details = append(details, "untrusted: "+strings.Join(blocked, ", "))
+	} else {
+		msg = fmt.Sprintf("%d codex hook event(s) Observer expects are not registered", len(missing))
+		details = append(details, "not registered: "+strings.Join(missing, ", "))
+	}
+	for _, row := range codexTrustStateLines {
+		if evs := rep.Events(row.state); len(evs) > 0 {
+			details = append(details, row.label+": "+strings.Join(evs, ", "))
+		}
+	}
+	if !rep.ConfigPresent {
+		details = append(details, "config.toml does not exist (codex never opened since the hooks were registered?)")
+	}
+	if !rep.HashVerified {
+		details = append(details, "note: no trust hash in this hooks.json reproduces, so a changed entry cannot be told apart from a trusted one")
+	}
+	details = append(details,
+		"hooks file: "+hooksPath,
+		"why: codex requires per-hook user trust before dispatch; Observer never trusts hooks for you",
+	)
+	var rems []remedy.Remediation
+	if len(blocked) > 0 {
+		rems = append(rems, remedy.Of(remedy.CodexTrust, ""))
+	}
+	if len(missing) > 0 {
+		rems = append(rems, remedy.Of(remedy.InitTool, models.ToolCodex))
+	}
+	return Check{Name: "codex.hook_trust", Status: StatusWarn, Message: msg, Details: details, Remediations: rems}
 }
 
 // checkHookCommandsBinary looks at every recorded hook config and verifies
@@ -912,56 +960,74 @@ func checkHookCommandsBinary(homeDir, binaryPath string) Check {
 	if len(drift) > 0 {
 		return Check{
 			Name: "hooks.binary", Status: StatusWarn,
-			Message: fmt.Sprintf("%d hook(s) point at a different binary path — re-run `observer init`", len(drift)),
-			Details: drift,
+			Message:      fmt.Sprintf("%d hook(s) point at a different binary path - re-run %s", len(drift), remedy.Quote(initAll)),
+			Details:      drift,
+			Remediations: []remedy.Remediation{initAll},
 		}
 	}
 	return Check{Name: "hooks.binary", Status: StatusOK, Message: "all hooks point at the running binary"}
 }
 
 // checkMCPRegistrations probes the three MCP config locations and reports
-// which contain an observer entry pointing at the running binary.
-func checkMCPRegistrations(homeDir, binaryPath string) Check {
+// which contain an observer entry pointing at the registration command
+// (binaryPath, the launcher U1 registers for an npm / pip install). A
+// mismatched entry's advice names the exact command that will fix it (U2):
+// `observer init --skip-hooks --skip-proxy-route` when init would refresh it
+// on its own (a stale entry whose binary is gone, or this same install by
+// another path), with --force only when init would really refuse.
+func checkMCPRegistrations(homeDir, binaryPath, realBinary string) Check {
 	if binaryPath == "" {
 		return Check{Name: "mcp.registrations", Status: StatusWarn, Message: "binary path unknown"}
 	}
 	cases := []struct {
 		tool string
 		path string
-		read func(string, string) (registered bool, mismatch bool, err error)
+		read func(string) (mcpEntry, bool, error)
 	}{
 		{"claude-code", filepath.Join(homeDir, ".claude.json"), readJSONMCPEntry},
 		{"cursor", filepath.Join(homeDir, ".cursor", "mcp.json"), readJSONMCPEntry},
 		{"codex", filepath.Join(homeDir, ".codex", "config.toml"), readTOMLMCPEntry},
 	}
 	var registered, mismatched, absent []string
+	needsForce := false
 	for _, c := range cases {
-		reg, mismatch, err := c.read(c.path, binaryPath)
+		entry, ok, err := c.read(c.path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			absent = append(absent, c.tool+": "+err.Error())
 			continue
 		}
 		switch {
-		case mismatch:
-			mismatched = append(mismatched, c.tool)
-		case reg:
+		case !ok:
+			absent = append(absent, c.tool)
+		case entry.command == binaryPath:
 			registered = append(registered, c.tool)
 		default:
-			absent = append(absent, c.tool)
+			mismatched = append(mismatched, c.tool)
+			if !mcpregister.InitRefreshes(entry.command, entry.args, binaryPath, realBinary) {
+				needsForce = true
+			}
 		}
 	}
 	if len(mismatched) > 0 {
+		fix := mcpRefreshRemedy
+		why := "init refreshes them without --force (the old binary is gone, or it is this same install by another path)"
+		if needsForce {
+			fix = mcpForceRemedy
+			why = "at least one names another program that still exists, so init only replaces it with --force"
+		}
 		return Check{
 			Name: "mcp.registrations", Status: StatusWarn,
-			Message: fmt.Sprintf("MCP entries for %s point at a different binary — re-run `observer init`", strings.Join(mismatched, ", ")),
-			Details: append([]string{"registered: " + strings.Join(registered, ", ")}, "absent: "+strings.Join(absent, ", ")),
+			Message:      fmt.Sprintf("MCP entries for %s point at a different command - run %s (%s)", strings.Join(mismatched, ", "), remedy.Quote(fix), why),
+			Details:      append([]string{"registered: " + strings.Join(registered, ", ")}, "absent: "+strings.Join(absent, ", ")),
+			Remediations: []remedy.Remediation{fix},
 		}
 	}
 	if len(registered) == 0 {
 		return Check{
 			Name: "mcp.registrations", Status: StatusWarn,
-			Message: "no MCP registrations found — run `observer init` to register",
-			Details: []string{"absent: " + strings.Join(absent, ", ")},
+			Message:      "no MCP registrations found - run " + remedy.Quote(initAll) + " to register",
+			Details:      []string{"absent: " + strings.Join(absent, ", ")},
+			Remediations: []remedy.Remediation{initAll},
 		}
 	}
 	return Check{
@@ -970,53 +1036,100 @@ func checkMCPRegistrations(homeDir, binaryPath string) Check {
 	}
 }
 
-func readJSONMCPEntry(path, binary string) (registered, mismatch bool, err error) {
+// mcpEntry is an observer MCP entry as doctor reads it.
+type mcpEntry struct {
+	command string
+	args    []string
+}
+
+// mcpRefreshRemedy / mcpForceRemedy are the exact commands that rewrite only
+// the MCP entries (hooks and routes untouched).
+var (
+	mcpRefreshRemedy = remedy.Of(remedy.Init, "--skip-hooks --skip-proxy-route")
+	mcpForceRemedy   = remedy.Of(remedy.Init, "--skip-hooks --skip-proxy-route --force")
+)
+
+func readJSONMCPEntry(path string) (mcpEntry, bool, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return false, false, err
+		return mcpEntry{}, false, err
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
-		return false, false, err
+		return mcpEntry{}, false, err
 	}
 	servers := map[string]struct {
-		Command string `json:"command"`
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
 	}{}
 	if raw, ok := top["mcpServers"]; ok {
 		_ = json.Unmarshal(raw, &servers)
 	}
-	entry, ok := servers[mcp.ServerName]
+	entry, ok := servers[mcpregister.ServerName]
 	if !ok {
-		return false, false, nil
+		return mcpEntry{}, false, nil
 	}
-	if entry.Command == binary {
-		return true, false, nil
-	}
-	return true, true, nil
+	return mcpEntry{command: entry.Command, args: entry.Args}, true, nil
 }
 
-func readTOMLMCPEntry(path, binary string) (registered, mismatch bool, err error) {
+func readTOMLMCPEntry(path string) (mcpEntry, bool, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return false, false, err
+		return mcpEntry{}, false, err
 	}
 	root := map[string]any{}
 	if err := toml.Unmarshal(body, &root); err != nil {
-		return false, false, err
+		return mcpEntry{}, false, err
 	}
 	servers, _ := root["mcp_servers"].(map[string]any)
-	entry, _ := servers[mcp.ServerName].(map[string]any)
+	entry, _ := servers[mcpregister.ServerName].(map[string]any)
 	if entry == nil {
-		return false, false, nil
+		return mcpEntry{}, false, nil
 	}
 	cmd, _ := entry["command"].(string)
-	if cmd == binary {
-		return true, false, nil
-	}
-	return true, true, nil
+	return mcpEntry{command: cmd, args: mcpregister.TOMLStringArgs(entry["args"])}, true, nil
 }
 
 func dirExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
+}
+
+// checkDaemonVersion compares the running daemon's version (its lockfile)
+// with this CLI's (U3, lane FIX-UPGRADE): after a package-manager upgrade the
+// CLI is new while the daemon still runs the old binary, and the database
+// stays on the old schema until the daemon restarts.
+func checkDaemonVersion(cfg config.Config, cliVersion string) Check {
+	const name = "daemon.version"
+	locks, err := LiveLocks(filepath.Dir(cfg.Observer.DBPath))
+	if err != nil || len(locks) == 0 {
+		return Check{Name: name, Status: StatusOK, Message: "no observer daemon running on this DB"}
+	}
+	cli := strings.TrimPrefix(cliVersion, "v")
+	if cli == "" || cli == "dev" {
+		return Check{Name: name, Status: StatusOK, Message: "this CLI is a development build: version comparison skipped"}
+	}
+	self := os.Getpid()
+	var stale []string
+	for _, l := range locks {
+		if l.PID == self {
+			continue
+		}
+		d := strings.TrimPrefix(l.Version, "v")
+		switch {
+		case d == "":
+			stale = append(stale, fmt.Sprintf("pid %d runs an older build (it predates version reporting)", l.PID))
+		case d != cli:
+			stale = append(stale, fmt.Sprintf("pid %d runs v%s", l.PID, d))
+		}
+	}
+	if len(stale) == 0 {
+		return Check{Name: name, Status: StatusOK, Message: "the running daemon is v" + cli + ", same as this CLI"}
+	}
+	return Check{
+		Name: name, Status: StatusWarn,
+		Message: fmt.Sprintf("the running daemon is not v%s (this CLI): %s - restart it to finish the upgrade (turn any proxy route off first, docs/daemon-restart-runbook.md)",
+			cli, strings.Join(stale, "; ")),
+		Remediations: []remedy.Remediation{remedy.Of(remedy.RestartDaemon, "")},
+	}
 }

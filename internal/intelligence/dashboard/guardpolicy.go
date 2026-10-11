@@ -428,7 +428,7 @@ func (s *Server) handleGuardPolicyBackup(w http.ResponseWriter, r *http.Request)
 	case http.MethodPost:
 		bak, readErr := os.ReadFile(bakPath)
 		if errors.Is(readErr, os.ErrNotExist) {
-			http.Error(w, "no backup exists yet — backups are created on the first editor save over an existing file", http.StatusNotFound)
+			http.Error(w, "no backup exists yet - backups are created on the first editor save over an existing file", http.StatusNotFound)
 			return
 		}
 		if readErr != nil {

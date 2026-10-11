@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/controlcoverage"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/integration"
@@ -78,6 +79,26 @@ var promptEventReasonPattern = regexp.MustCompile(`detected (.+?) in the prompt 
 // += .
 var promptEventOutcomePattern = regexp.MustCompile(`\[outcome=([a-z]+)\]`)
 
+// promptEventLanePattern / promptEventActionPattern match the "[lane=X]"
+// and "[action=X]" markers ActionVerdictFromPrompt appends since the
+// decision x capability table (internal/guard/promptaction.go). Rows
+// written before it carry neither; promptLaneFor falls back to the old
+// derivation for them.
+var (
+	promptEventLanePattern   = regexp.MustCompile(`\[lane=([a-z]+)\]`)
+	promptEventActionPattern = regexp.MustCompile(`\[action=([a-z-]+)\]`)
+)
+
+// parsePromptAction returns the developer action recorded on reason
+// ("warn" | "confirm" | "re-enter" | "block" | "flag-after"), "" for a
+// row written before the action table.
+func parsePromptAction(reason string) string {
+	if m := promptEventActionPattern.FindStringSubmatch(reason); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // parsePromptDetectors extracts the detector TYPE ids (never values)
 // from a guard_events Reason string, e.g. "credit_card×1, github_pat×2"
 // -> ["credit_card", "github_pat"]. Returns nil for a reason with no
@@ -141,7 +162,19 @@ func parsePromptOutcome(reason, decision, degradedFrom string) string {
 // SessionID/Target/Timestamp). Tool!="" is therefore a reliable
 // derived signal, not a stored fact — documented here rather than
 // silently assumed.
-func promptLaneFor(tool string) string {
+func promptLaneFor(reason, tool string, actionAnchored bool) string {
+	// The recorded lane wins: since P9 the proxy lane stamps the client
+	// tool too, so Tool alone no longer tells hook from proxy.
+	if m := promptEventLanePattern.FindStringSubmatch(reason); m != nil {
+		return m[1]
+	}
+	if actionAnchored {
+		// The post-hoc capture lane (internal/guard/posthocprompt.go) is
+		// the only prompt lane that anchors to an action row: the hook and
+		// proxy lanes judge before the action exists. It also sets Tool,
+		// so this check must come first.
+		return "capture"
+	}
 	if tool != "" {
 		return "hook"
 	}
@@ -197,11 +230,17 @@ type promptReconsiderRowJSON struct {
 }
 
 type promptStatusResponse struct {
-	GuardEnabled      bool                      `json:"guard_enabled"`
-	GuardMode         string                    `json:"guard_mode"`
-	Config            promptStatusConfigJSON    `json:"config"`
-	EffectiveModes    map[string]string         `json:"effective_modes"`
-	Clients           []promptClientJSON        `json:"clients"`
+	GuardEnabled   bool                   `json:"guard_enabled"`
+	GuardMode      string                 `json:"guard_mode"`
+	Config         promptStatusConfigJSON `json:"config"`
+	EffectiveModes map[string]string      `json:"effective_modes"`
+	Clients        []promptClientJSON     `json:"clients"`
+	// PostHocOnly lists every registry tool with NO pre-send prompt seam
+	// (controlcoverage.PostHocOnlyPromptTools: no verified prompt-submit
+	// hook and no proxy route), so R-172/R-190 can only flag such a tool's
+	// prompt AFTER it was sent, from the captured transcript (the post-hoc
+	// capture lane). The honest complement of Clients.
+	PostHocOnly       []string                  `json:"post_hoc_only"`
 	ReconsiderTotal   int                       `json:"reconsider_total"`
 	ReconsiderExpired int                       `json:"reconsider_expired"`
 	Pending           []promptReconsiderRowJSON `json:"pending"`
@@ -233,6 +272,7 @@ func (s *Server) handleGuardPromptStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	var clients []promptClientJSON
+	postHocOnly := controlcoverage.PostHocOnlyPromptTools()
 	for _, c := range integration.Capabilities() {
 		if c.PromptLane == integration.PromptLaneNone {
 			continue
@@ -305,6 +345,7 @@ func (s *Server) handleGuardPromptStatus(w http.ResponseWriter, r *http.Request)
 		},
 		EffectiveModes:    effective,
 		Clients:           clients,
+		PostHocOnly:       postHocOnly,
 		ReconsiderTotal:   total,
 		ReconsiderExpired: expired,
 		Pending:           pending,
@@ -341,6 +382,7 @@ type promptEventJSON struct {
 	Severity    string   `json:"severity,omitempty"`
 	Decision    string   `json:"decision,omitempty"`
 	Outcome     string   `json:"outcome,omitempty"`
+	Action      string   `json:"action,omitempty"`
 	Enforced    bool     `json:"enforced"`
 	Detectors   []string `json:"detectors,omitempty"`
 	Fingerprint string   `json:"fingerprint,omitempty"`
@@ -415,9 +457,9 @@ func (s *Server) handleGuardPromptEvents(w http.ResponseWriter, r *http.Request)
 		}
 		out = append(out, promptEventJSON{
 			ID: row.ID, Ts: row.TS.UTC().Format(time.RFC3339),
-			SessionID: row.SessionID, Tool: row.Tool, Lane: promptLaneFor(row.Tool),
+			SessionID: row.SessionID, Tool: row.Tool, Lane: promptLaneFor(row.Reason, row.Tool, row.ActionID != nil),
 			RuleID: row.RuleID, Category: row.Category, Severity: row.Severity,
-			Decision: row.Decision, Outcome: outcome, Enforced: row.Enforced,
+			Decision: row.Decision, Outcome: outcome, Action: parsePromptAction(row.Reason), Enforced: row.Enforced,
 			Detectors: detectors, Fingerprint: row.TargetExcerpt,
 		})
 		if len(out) >= limit {
@@ -613,7 +655,9 @@ func (s *Server) handleGuardPromptProbe(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, fmt.Errorf("resolve this binary's own path: %w", err))
 		return
 	}
-	args := []string{"doctor", "--probe-hook", "--json"}
+	// --gate prompt: this card probes prompt-submit hooks only (the
+	// tool-gate probe has its own Coverage-tab action, guard_hookcoverage.go).
+	args := []string{"doctor", "--probe-hook", "--gate", "prompt", "--json"}
 	if req.Tool != "" {
 		args = append(args, req.Tool)
 	}

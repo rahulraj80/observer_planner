@@ -91,20 +91,24 @@ type Decision struct {
 	Reason  string
 }
 
-// denyReason is the exact wording the org-parity W5.1 task specifies for a
-// policy-denied action, shared by every feature so the copy never drifts
-// between seams.
-const denyReason = "disabled by organization policy — request access via 'observer org request'"
+// featureDenyReason is the one wording for a policy-denied feature, shared
+// by every seam so the copy never drifts. It names the request path
+// (request-grants G8: `observer request feature <id>` asks the org for a
+// time-limited feature access grant, which lifts this denial while it
+// lasts).
+func featureDenyReason(feature string) string {
+	return fmt.Sprintf("disabled by organization policy; request access with `observer request feature %s \"<reason>\"` or the Requests page", feature)
+}
 
 // sandboxDenyReason is the terminals-specific denial when the feature is
 // enabled but the org additionally requires sandboxing and the caller did
 // not request one.
-const sandboxDenyReason = "organization policy requires a sandboxed terminal for this feature — retry with sandbox enabled"
+const sandboxDenyReason = "organization policy requires a sandboxed terminal for this feature; retry with sandbox enabled"
 
 // toolDenyReason names the specific disallowed tool so the operator sees
 // exactly what is blocked, rather than the generic denyReason.
 func toolDenyReason(tool string) string {
-	return fmt.Sprintf("organization policy disallows launching %q — request access via 'observer org request'", tool)
+	return fmt.Sprintf("organization policy disallows launching %q; request access with `observer request tool %s \"<reason>\"` or the Requests page", tool, tool)
 }
 
 // allowOpen is the shared fail-open Decision: no policy installed, or the
@@ -132,7 +136,7 @@ func FeatureDecision(spec *PolicySpec, feature string) Decision {
 	if !rule.Governed || rule.Enabled {
 		return allowOpen
 	}
-	return Decision{Allowed: false, Reason: denyReason}
+	return Decision{Allowed: false, Reason: featureDenyReason(feature)}
 }
 
 // TerminalDecision evaluates the terminals feature, which additionally
@@ -148,7 +152,7 @@ func TerminalDecision(spec *PolicySpec, requestedSandbox bool) Decision {
 		return allowOpen
 	}
 	if !rule.Enabled {
-		return Decision{Allowed: false, Reason: denyReason}
+		return Decision{Allowed: false, Reason: featureDenyReason(FeatureTerminals)}
 	}
 	if rule.SandboxRequired && !requestedSandbox {
 		return Decision{Allowed: false, Reason: sandboxDenyReason}
@@ -186,4 +190,27 @@ func ruleFor(spec *PolicySpec, feature string) (FeatureRule, bool) {
 	default:
 		return FeatureRule{}, false
 	}
+}
+
+// IsFeature reports whether id is one of AllFeatures: a feature an org can
+// disable, and a feature access grant can name (request-grants G8).
+func IsFeature(id string) bool {
+	for _, f := range AllFeatures {
+		if f == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TerminalDecisionEnabled is TerminalDecision with the terminals feature
+// treated as enabled: what a feature access grant for terminals leaves in
+// force (the grant lifts "disabled", never the sandbox requirement).
+func TerminalDecisionEnabled(spec *PolicySpec, requestedSandbox bool) Decision {
+	if spec == nil {
+		return allowOpen
+	}
+	cp := *spec
+	cp.Terminals.Enabled = true
+	return TerminalDecision(&cp, requestedSandbox)
 }

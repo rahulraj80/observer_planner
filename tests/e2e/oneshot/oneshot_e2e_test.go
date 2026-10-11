@@ -6,19 +6,16 @@
 // the usageDeps-injected in-process unit tests in
 // cmd/observer/usage_test.go.
 //
-// Known machine-dependent caveat (grounded empirically 2026-07-30, WSL2
-// dev host): internal/adapter/claudecode's adapter calls
+// Machine-dependent caveat (grounded empirically 2026-07-30, WSL2 dev
+// host): internal/adapter/claudecode's adapter calls
 // internal/platform/crossmount.AllHomes(), which on a WSL2 host also
 // enumerates every /mnt/c/Users/<u>/.claude/projects tree it finds —
-// INDEPENDENT of the spawned process's $HOME. On a bare Linux CI runner
-// (no /mnt/c/Users) this is a no-op; on a WSL2 workstation with a real
-// Windows-side Claude Code install, the scan below will additionally
-// pick up that real, non-fixture corpus. This is intentional product
-// behavior (the feature is supposed to find every detected AI-tool
-// home), not a bug — but it means the assertions here are deliberately
+// INDEPENDENT of the spawned process's $HOME. Since 2026-10-02
+// buildScratchEnv sets crossmount.EnvDisableForeignHomes, so the child no
+// longer sees that real corpus; the assertions stay deliberately
 // INCLUSIVE ("the fixture's row is present", "the tree we planted is
-// unchanged") rather than EXCLUSIVE ("the table has exactly N rows"),
-// so they hold on both a clean CI box and a contaminated WSL2 box.
+// unchanged") rather than EXCLUSIVE ("the table has exactly N rows") so
+// they do not depend on that knob.
 package e2e
 
 import (
@@ -39,6 +36,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 )
 
 // fixtureRelPath is the canonical claude-code fixture, relative to the
@@ -309,11 +308,14 @@ func assertNoNewListener(t *testing.T, before, after map[int]bool, label string)
 // spawned subprocess: HOME=home, TMPDIR=home/tmp, PATH inherited (needed
 // to resolve the dynamic loader / any shell-outs), and every other
 // variable — including all XDG_* dirs — unset by omission.
+// EnvDisableForeignHomes keeps the child off the real /mnt/c/Users mount,
+// which $HOME does not control (incident 2026-10-02).
 func buildScratchEnv(home, tmpdir string) []string {
 	return []string{
 		"HOME=" + home,
 		"TMPDIR=" + tmpdir,
 		"PATH=" + os.Getenv("PATH"),
+		crossmount.EnvDisableForeignHomes + "=1",
 	}
 }
 

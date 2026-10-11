@@ -104,7 +104,7 @@ func (s *Server) handleSessionHandoffEstimate(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if s.opts.BuildHandoff == nil {
-		http.Error(w, "handoff unavailable — this dashboard process runs without the handoff service", http.StatusServiceUnavailable)
+		http.Error(w, "handoff unavailable - this dashboard process runs without the handoff service", http.StatusServiceUnavailable)
 		return
 	}
 	q := r.URL.Query()
@@ -156,7 +156,7 @@ func (s *Server) handleSessionHandoffCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if s.opts.BuildHandoff == nil {
-		http.Error(w, "handoff unavailable — this dashboard process runs without the handoff service", http.StatusServiceUnavailable)
+		http.Error(w, "handoff unavailable - this dashboard process runs without the handoff service", http.StatusServiceUnavailable)
 		return
 	}
 	var body handoffCreateRequest

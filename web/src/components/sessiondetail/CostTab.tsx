@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useMemo, useState, memo } from "react";
 import clsx from "clsx";
 import { ComboChip, ModelId, Pill, Tooltip, type ComboOption } from "@/components/primitives";
@@ -6,7 +7,7 @@ import { ChartState } from "@/components/ChartState";
 import { HelpInd } from "@/components/HelpInd";
 import { useApi } from "@/lib/useApi";
 import { useNowTick } from "@/lib/useNowTick";
-import { fmtCompact, fmtInt, fmtUSD } from "@/lib/format";
+import { costLabel, dollarsShown, fmtCompact, fmtCost, fmtInt, fmtUSD } from "@/lib/format";
 import type {
   CacheForecastResponse,
   CacheForecastWarning,
@@ -37,7 +38,10 @@ export const CostTab = memo(function CostTab({ d }: { d: SessionDetail }) {
   return (
     <div className="space-y-5">
       <PredictorCard sessionId={d.id} tool={d.tool} />
-      {d.model ? (
+      {/* The model-switch forecast is dollar economics end to end (switch
+          cost, savings per turn, break-even): not offered in the org's
+          token-usage view (format.ts cost affordances). */}
+      {!dollarsShown() ? null : d.model ? (
         <ForecastWidget sessionId={d.id} />
       ) : (
         <p className="rounded-3 border border-dashed border-line-2 px-4 py-3 text-[11.5px] text-fg-3">
@@ -68,13 +72,15 @@ function PredictorCard({ sessionId, tool }: { sessionId: string; tool: string })
     <section className="mt-5 rounded-3 border bg-bg-2 px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">
-          Next-message cost predictor
+          {costLabel("Next-message cost predictor", "Next-message usage predictor")}
           <HelpInd id="glossary.cost_predictor" />
         </span>
       </div>
       <p className="mt-1 text-[10.5px] text-fg-3">
-        Estimated cost of your next message on this session's current model -
-        a low / typical / high range over the message's likely turn fan-out.
+        {costLabel(
+          "Estimated cost of your next message on this session's current model - a low / typical / high range over the message's likely turn fan-out.",
+          "Estimated billed tokens of your next message on this session's current model - a low / typical / high range over the message's likely turn fan-out.",
+        )}
       </p>
 
       <ChartState
@@ -142,7 +148,7 @@ function PredictorBody({ data, tool }: { data: PredictResponse; tool: string }) 
           <span className="font-medium text-fg-1">No cost estimate yet.</span>{" "}
           {data.reason ||
             "This session has no model/token data captured."}{" "}
-          {tool === "cursor" ? "Cursor must report usage through its hooks before a token-based estimate is available." : <>Route this client through the observer proxy (<code className="font-mono text-[10.5px] text-fg-2">observer init</code>) so future messages capture token &amp; cost data.</>}
+          {data.model ? null : tool === "cursor" ? "Cursor must report usage through its hooks before a token-based estimate is available." : <>Route this client through the observer proxy (<SetupLink />) so future messages capture token &amp; cost data.</>}
         </div>
       )}
 
@@ -209,7 +215,9 @@ function PredictBandStat({
           highlight ? "text-accent" : "text-fg-1",
         )}
       >
-        {fmtPredictUSD(band.message_usd)}
+        {/* In the org's token-usage view the headline is the band's billed
+            tokens (fmtCost renders the token count it is given). */}
+        {dollarsShown() ? fmtPredictUSD(band.message_usd) : fmtCost(band.message_usd, tok.billed)}
       </span>
       <span className="mt-0.5 text-[10px] text-fg-3">
         ~{band.turns} turns · {fmtCompact(band.output)} out/turn
@@ -311,9 +319,7 @@ function PredictLimitSection({ limit }: { limit: PredictResponse["limit"] }) {
         </p>
       ) : (
         <p className="mt-1 text-[10.5px] text-fg-3">
-          Route this client through the observer proxy (
-          <code className="font-mono text-[10.5px] text-fg-2">observer init</code>
-          ) to see how much of your 5-hour and weekly subscription window each
+          Route this client through the observer proxy (<SetupLink />) to see how much of your 5-hour and weekly subscription window each
           message consumes. These numbers live only in the provider's response
           headers, which the proxy is the only component able to read.
         </p>
@@ -428,6 +434,7 @@ function ForecastWidget({ sessionId }: { sessionId: string }) {
         // Label: family mark + the model id (ModelId).
         label: <ModelId model={modelId} className="min-w-0" />,
         searchable: modelId.toLowerCase(),
+        // no-bare-usd:allow (ForecastWidget renders only when dollarsShown() is true)
         rightMeta: inputRate > 0 ? `$${inputRate}/M` : undefined,
         title: `Input ${inputRate}/M · Output ${p?.output ?? 0}/M · Cache R ${p?.cache_read ?? 0}/M · Cache W ${p?.cache_creation ?? 0}/M`,
       };
@@ -596,4 +603,14 @@ function ForecastWarningPill({ kind }: { kind: CacheForecastWarning }) {
   const variant: "warn" | "neutral" =
     kind === "switch_never_pays_off" || kind === "cache_wont_engage" ? "warn" : "neutral";
   return <Pill variant={variant}>{labels[kind]}</Pill>;
+}
+
+// SetupLink points at Settings > Connected tools, where each tool's Set up
+// writes its proxy route (the dashboard twin of `observer init`).
+function SetupLink() {
+  return (
+    <Link to="/settings?section=tools" className="text-accent underline decoration-dotted decoration-accent/50 underline-offset-[3px] hover:decoration-accent">
+      Settings &gt; Connected tools &gt; Set up
+    </Link>
+  );
 }

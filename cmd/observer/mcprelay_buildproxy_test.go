@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay && !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -74,11 +76,13 @@ func isolateProcessMCPRelay(t *testing.T) {
 // runtime goroutine and the policy-state point reader see it); with it off
 // nothing is bound.
 func TestBuildProxy_BindsProcessMCPRelay(t *testing.T) {
+	requireComponents(t, "capture.proxy", "agentaccess.relay")
 	for _, enabled := range []bool{true, false} {
 		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
 			isolateProcessMCPRelay(t)
 			configPath, dbPath, bundlePath := writeMCPRelayProxyConfig(t, enabled, "http://127.0.0.1:3")
-			_, cleanup, _, _, _, _, _, err := buildProxy(context.Background(), configPath, "", 0, "127.0.0.1", nil)
+			pwire, err := buildProxy(context.Background(), configPath, "", 0, "127.0.0.1", nil)
+			cleanup := pwire.Cleanup
 			if err != nil {
 				t.Fatalf("buildProxy: %v", err)
 			}
@@ -119,6 +123,7 @@ func TestBuildProxy_BindsProcessMCPRelay(t *testing.T) {
 // (what a hook process and `observer mcp doctor` read), and the proxy's
 // tools[] seam strips the org-denied declaration on the wire.
 func TestBuildProxy_MCPAccessPublishReachesRelay(t *testing.T) {
+	requireComponents(t, "capture.proxy", "agentaccess.relay")
 	isolateProcessMCPRelay(t)
 
 	var (
@@ -147,7 +152,8 @@ func TestBuildProxy_MCPAccessPublishReachesRelay(t *testing.T) {
 	t.Cleanup(up.Close)
 
 	configPath, dbPath, bundlePath := writeMCPRelayProxyConfig(t, true, up.URL)
-	p, cleanup, _, _, _, _, _, err := buildProxy(context.Background(), configPath, "", 0, "127.0.0.1", nil)
+	pwire, err := buildProxy(context.Background(), configPath, "", 0, "127.0.0.1", nil)
+	p, cleanup := pwire.Proxy, pwire.Cleanup
 	if err != nil {
 		t.Fatalf("buildProxy: %v", err)
 	}

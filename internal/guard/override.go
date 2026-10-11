@@ -2,6 +2,7 @@ package guard
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/marmutapp/superbased-observer/internal/policy"
 )
@@ -176,6 +177,7 @@ func (g *Guard) stampOrgOverride(es *engineSet, av *ActionVerdict) {
 	}
 	av.Overridable = av.Verdict.Overridable
 	av.OrgLocked = orgLockedVerdict(av.Verdict, g.orgLocksVerdictRule(es, av.Verdict.RuleID))
+	av.RequestBase = g.requestBase
 }
 
 // blockedWhatByKind names the blocked thing for the human-first line,
@@ -234,9 +236,64 @@ func HumanBlockLine(av ActionVerdict, sessionID string) string {
 			"observer: %s blocked %s. The organization allows an override, but this lane reported no session id, so the override cannot be scoped from the command line here; grant it on the Observer dashboard Security page instead.",
 			av.Verdict.RuleID, what)
 	}
-	return fmt.Sprintf(
-		"observer: %s blocked %s. This rule is locked by your organization; ask your admin.",
-		av.Verdict.RuleID, what)
+	return requestAccessLine(av.Verdict.RuleID, what, av.RequestBase, sessionID)
+}
+
+// RequestAccessMaxBytes bounds the org-locked deny line (request-grants G4):
+// the node dashboard shows the first 200 bytes of an error body, and every
+// vendor reply leads with this line, so the request path must survive a
+// host that shows only the start of the reason.
+const RequestAccessMaxBytes = 200
+
+// requestAccessVariants is the ordered fallback table for the org-locked
+// line: the richest variant that fits RequestAccessMaxBytes wins. The link
+// opens the node dashboard's request form prefilled with the rule and the
+// session (it never submits; nothing leaves the machine until the developer
+// presses Send, GRANT-8). A variant that needs the dashboard origin is
+// skipped when none is known; the last row always fits.
+var requestAccessVariants = []struct {
+	needsBase    bool
+	needsSession bool
+	render       func(head, link, cli string) string
+}{
+	{true, true, func(h, l, c string) string { return h + " Request access: " + l + " or " + c }},
+	{true, true, func(h, l, _ string) string { return h + " Request access: " + l }},
+	{true, false, func(h, l, c string) string { return h + " Request access: " + l + " or " + c }},
+	{true, false, func(h, l, _ string) string { return h + " Request access: " + l }},
+	{false, false, func(h, _, c string) string { return h + " Request access: run " + c + "." }},
+}
+
+// requestAccessLine renders the org-locked block line: what was blocked,
+// that the organization locks the rule, and how to ask for an exception.
+// Hyphens only, US spelling, one line.
+func requestAccessLine(ruleID, what, base, sessionID string) string {
+	head := fmt.Sprintf("observer: %s blocked %s; your organization locks this rule.", ruleID, what)
+	cli := "`observer request access --rule " + ruleID + " \"<reason>\"`"
+	var last string
+	for _, v := range requestAccessVariants {
+		if v.needsBase && base == "" {
+			continue
+		}
+		if v.needsSession && sessionID == "" {
+			continue
+		}
+		link := base + "/requests?rule=" + url.QueryEscape(ruleID)
+		if v.needsSession {
+			link += "&session=" + url.QueryEscape(sessionID)
+		}
+		last = v.render(head, link, cli)
+		if len(last) <= RequestAccessMaxBytes {
+			return last
+		}
+	}
+	return last
+}
+
+// SetRequestAccessBase sets the node dashboard origin the org-locked deny
+// line links its request form under ("" = the CLI command only). Set once at
+// composition; stampOrgOverride copies it onto every verdict.
+func (g *Guard) SetRequestAccessBase(base string) {
+	g.requestBase = base
 }
 
 // HumanizeEmission prepends HumanBlockLine to a BLOCKING emission's

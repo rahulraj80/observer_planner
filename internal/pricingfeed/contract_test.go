@@ -402,7 +402,7 @@ func TestVerifyOverReceivedBytes_NoFreezeForKnownEnvelopes(t *testing.T) {
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal(wire): %v", err)
 	}
-	if decoded.rawRows == nil {
+	if decoded.RawRows() == nil {
 		t.Fatalf("decoded envelope has no rawRows captured — UnmarshalJSON did not run or did not populate it")
 	}
 
@@ -410,7 +410,7 @@ func TestVerifyOverReceivedBytes_NoFreezeForKnownEnvelopes(t *testing.T) {
 		t.Fatalf("Verify(decoded) = %v, want nil — a known-shape envelope must still verify after the raw-bytes fix", err)
 	}
 
-	fromRaw, err := canonicalRawRows(decoded.rawRows)
+	fromRaw, err := canonicalRawRows(decoded.RawRows())
 	if err != nil {
 		t.Fatalf("canonicalRawRows: %v", err)
 	}

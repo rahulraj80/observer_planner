@@ -204,10 +204,10 @@ func (claudeCodeDriver) NeedsIsolatedDaemon() bool { return true }
 // isolated daemon by hand (what the re-spike did).
 func (d claudeCodeDriver) Preflight() error {
 	if strings.TrimSpace(d.dbPath) == "" {
-		return fmt.Errorf("%w: no observer DB path resolved — re-run with --ephemeral-daemon to auto-provision an isolated benchmark daemon (or pass --config for your own)", ErrClaudeCodeNotIsolated)
+		return fmt.Errorf("%w: no observer DB path resolved - re-run with --ephemeral-daemon to auto-provision an isolated benchmark daemon (or pass --config for your own)", ErrClaudeCodeNotIsolated)
 	}
 	if def, err := defaultObserverDBPath(); err == nil && sameDBPath(d.dbPath, def) {
-		return fmt.Errorf("%w: refusing to run against the operator default DB %q — "+
+		return fmt.Errorf("%w: refusing to run against the operator default DB %q - "+
 			"claude-code hooks db.Open a large shared DB and stall (~100 s/Bash call, re-spike §Q2). "+
 			"Re-run with --ephemeral-daemon to auto-provision an isolated daemon, or point --config at "+
 			"one yourself (own db_path, non-default ports, auto_register=false)",
@@ -225,9 +225,9 @@ func (d claudeCodeDriver) Preflight() error {
 		return fmt.Errorf("%w: stat DB %q: %w", ErrClaudeCodeNotIsolated, d.dbPath, err)
 	}
 	if info.Size() > ceiling {
-		return fmt.Errorf("%w: observer DB %q is %d MiB (> %d MiB ceiling) — this is the "+
+		return fmt.Errorf("%w: observer DB %q is %d MiB (> %d MiB ceiling) - this is the "+
 			"large-DB stall condition the re-spike identified; re-run with --ephemeral-daemon "+
-			"to auto-provision a fresh claude-code-only daemon (18–117 MiB in the re-spike)",
+			"to auto-provision a fresh claude-code-only daemon (18-117 MiB in the re-spike)",
 			ErrClaudeCodeNotIsolated, d.dbPath, info.Size()>>20, ceiling>>20)
 	}
 	return nil

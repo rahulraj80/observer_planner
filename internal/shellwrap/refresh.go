@@ -45,6 +45,9 @@ const (
 type RefreshInput struct {
 	// GOOS is the target OS (selects the shim template and file names).
 	GOOS string
+	// Bridge is the WSL bridge target's distro (nil = a native target); a
+	// bridge shim is re-rendered as a bridge shim.
+	Bridge *WSLBridge
 	// Enabled is the recorded [shell_wrap].enabled.
 	Enabled bool
 	// Selected are the recorded tool ids ([shell_wrap.tools] id = true).
@@ -54,6 +57,9 @@ type RefreshInput struct {
 	// ObserverPath is the path a fresh shim bakes in: exactly what enable
 	// would write today, so a refreshed shim reads as in-sync in status.
 	ObserverPath string
+	// ConfigPath is the non-default config a rewritten shim carries, exactly
+	// what enable would write today ("" = the default config).
+	ConfigPath string
 	// ResolvedObserver is the running binary with symlinks resolved; an
 	// embedded path that resolves to it is current even when spelled
 	// differently (a stable symlink such as a package manager's bin link).
@@ -208,7 +214,7 @@ func PlanRefresh(in RefreshInput) (RefreshPlan, error) {
 	for _, s := range in.Shims {
 		c := refreshCtx{in: in, shim: s, selected: selected}
 		c.embedded, c.parsed = EmbeddedObserverPath(s.Content)
-		c.cand, c.wrapped = CandidateFor(s.ToolID, in.GOOS)
+		c.cand, c.wrapped = CandidateOn(s.ToolID, Host{GOOS: in.GOOS, Bridge: in.Bridge})
 		c.wrapped = c.wrapped && containsString(c.cand.Commands, s.Command)
 		r := ShimRefresh{
 			FileName: s.FileName, Path: s.Path, ToolID: s.ToolID, Command: s.Command,
@@ -221,7 +227,7 @@ func PlanRefresh(in RefreshInput) (RefreshPlan, error) {
 			}
 		}
 		if r.Action == RefreshRewrite {
-			content, err := renderShim(c.cand.shimSpec(s.Command, in.ObserverPath, in.ShimDir), in.GOOS)
+			content, err := renderShim(c.cand.shimSpec(s.Command, in.ObserverPath, in.ConfigPath, in.ShimDir), in.GOOS)
 			if err != nil {
 				r.Action, r.Reason = RefreshSkip, err.Error()
 			} else {

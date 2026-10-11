@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 // Lane HA - doc3 §18 gate 3 / §12.8 (node effective-state on a refused

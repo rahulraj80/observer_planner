@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/http2"
-
 	"github.com/marmutapp/superbased-observer/internal/platform/protowire"
 )
 
@@ -164,21 +162,27 @@ func framedGRPC(payload []byte) []byte {
 	return frame
 }
 
-// buildHTTP2Client constructs an http.Client that speaks HTTP/2,
-// either over TLS (skipping cert verify — language_server uses a
-// self-signed cert) or in plaintext h2c.
+// buildHTTP2Client constructs an http.Client that speaks ONLY HTTP/2,
+// either over TLS (skipping cert verify: language_server uses a
+// self-signed cert) or in plaintext h2c with prior knowledge. It is
+// net/http's own HTTP/2 client selected through Transport.Protocols,
+// the replacement x/net names for its deprecated http2.Transport, with
+// the same behaviour: no HTTP/1 fallback, no proxy, and a 5 s dial
+// timeout on the h2c path.
 func buildHTTP2Client(useTLS bool) *http.Client {
+	protocols := new(http.Protocols)
 	if useTLS {
-		return &http.Client{Transport: &http2.Transport{
+		protocols.SetHTTP2(true)
+		return &http.Client{Transport: &http.Transport{
+			Protocols:       protocols,
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // language_server self-signs at runtime
 		}}
 	}
-	return &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			d := net.Dialer{Timeout: 5 * time.Second}
-			return d.DialContext(ctx, network, addr)
-		},
+	protocols.SetUnencryptedHTTP2(true)
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	return &http.Client{Transport: &http.Transport{
+		Protocols:   protocols,
+		DialContext: d.DialContext,
 	}}
 }
 

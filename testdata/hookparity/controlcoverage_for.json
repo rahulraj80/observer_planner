@@ -1,0 +1,722 @@
+{
+  "aider": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "aider",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "antigravity": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "antigravity",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "antigravity-cli": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "antigravity-cli",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": true,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "chatgpt-web": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "chatgpt-web",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "claude-code": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "claude-code",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "proven",
+      "Note": "process exit code 2 with NO stdout reply; stderr is the user-visible reason and the prompt is erased (LIVE CORRECTION 2026-09-07: permissionDecision is PreToolUse-only and is silently ignored on this event). Allow/warn reply with the bare hookSpecificOutput envelope (+ additionalContext on warn)",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "claude-web": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "claude-web",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "cline": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "cline",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "probe_required",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "vendor prompt-submit wire shape unverified - `observer doctor --probe-hook` decides",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "cline-cli": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "cline-cli",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "proven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "codex": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "codex",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "proven",
+      "Note": "legacy {decision:block,reason} shown to the developer; prompt cannot be modified",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "command-code": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "command-code",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "block_only",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "Part B item 2, phase-3a - live-fetched 2026-09-07 (commandcode.ai/docs/mods): a Mods-SDK TypeScript module (cmd.hooks({transformInput({text}){...}})), not a shell hook - registered as ~/.commandcode/mods/observer-guard.ts (go:embed template, hermesplugin precedent) that shells out to `observer hook command-code transformInput`. The ONLY documented field is `text` - there is no session/conversation id anywhere in the signature, so an ask-once finding here fails closed to a HARD, unconditional block (no resend override) per the engine's own documented empty-session-id rule. REDACT wired (hook-parity Lane B, 2026-10-03): under [guard.prompt] mode redact a secret-only prompt is answered with {action:'transform',text} (masking needs no session key)",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "copilot": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "copilot",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "copilot-cli": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "copilot-cli",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "proven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": "Only BYOK sessions (your own COPILOT_PROVIDER_API_KEY plus a model) go through the proxy; a session on your GitHub Copilot sign-in cannot be routed and launches unrouted, captured from Copilot's own session files."
+    }
+  },
+  "copilot-web": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "copilot-web",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "cowork": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "cowork",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "crush": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "crush",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "cursor": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "cursor",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "continue:false + user_message (NOT the permission field the shell/MCP/file channels use); prompt cannot be modified",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "deepseek": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "deepseek",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "devin": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "devin",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_only",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "Part B item 2, phase-3a - live-fetched 2026-09-07 (docs.devin.ai/desktop/cascade/hooks): Windsurf/Devin Desktop Cascade's pre_user_prompt, exit code 2 blocks, no JSON reply and no user-visible message channel at all (show_output does not apply to this event, so ask-once degrades to a hard block); no session_id field is documented either - trajectory_id (the conversation identifier) is used as the session-scoping key instead; registered at ~/.codeium/windsurf/hooks.json",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "Devin Desktop / Windsurf only (Cascade pre_user_prompt). Devin CLI sessions have no registered prompt hook, so the rule flags them after send.",
+      "PromptProxyScope": ""
+    }
+  },
+  "droid": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "droid",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "same legacy {decision:block,reason} shape as Codex; vendor docs state outright \"hook feedback goes to the user, not the agent\". Not live: on node 1 (2026-10-04) `droid exec` 0.233.0 fired PreToolUse from the same hooks.json but never UserPromptSubmit; the interactive TUI is not probed",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "freebuff": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "freebuff",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "gemini-cli": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "gemini-cli",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "decision:deny discards the message; both reason and systemMessage are set (vendor docs call systemMessage user-visible in the terminal, and reason also renders when denying). Live (gemini 0.62.0, demo node 1): the block held with zero model requests and the developer saw \"Agent execution blocked: \u003creason\u003e\"; because the reply also exits 2, gemini additionally prints \"Hook(s) failed for event BeforeAgent\" beside the block",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": "Only Gemini API-key sessions (GEMINI_API_KEY exported where you launch) go through the proxy; a session signed in with Google, or on Vertex AI, talks to Google directly and is captured from Gemini's own session files."
+    }
+  },
+  "gemini-web": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "gemini-web",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "goose": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "goose",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "grok": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "grok",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "grokbot": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "grokbot",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "hermes": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "hermes",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "junie": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "junie",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "kilo-code": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "kilo-code",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "kilo-code-cli": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "kilo-code-cli",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "kimi-code": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "kimi-code",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "dialect built from the installed 2.1.1 source (hook-parity Lane B) and live-captured (T-378): stdin {hook_event_name, session_id, cwd, client_type, prompt, is_steer} where prompt is the turn's content parts [{type: text, text}] (not a string); exit 2 blocks and its stderr is appended to the conversation as a \u003chook_result\u003e message the developer sees; exit-0 stdout is appended to the model context, so the allow is an empty stdout; timeout or crash is an allow. T-378: registered beside the PreToolUse gate in ~/.kimi-code/config.toml under the D-270 credential-file exception",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "kiro-cli": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "kiro-cli",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "probe_required",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "vendor prompt-submit wire shape unverified - `observer doctor --probe-hook` decides",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "kiro-crew": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "kiro-crew",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "mistral-code": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "mistral-code",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "muse": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "muse",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "open-interpreter": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "open-interpreter",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "probe_required",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "vendor prompt-submit wire shape unverified - `observer doctor --probe-hook` decides",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "openclaw": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "openclaw",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "opencode": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "opencode",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "proven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "perplexity-web": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "perplexity-web",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "pi": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "pi",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": "Only turns sent to the \"observer\" provider the launcher writes go through the proxy, plus, on a managed node, every built-in provider the launcher can point at a proxy lane for the session; a switch to a built-in provider with no proxy lane (Bedrock, Azure, Vertex, Cloudflare, Mistral, the ChatGPT sign-in, GitHub Copilot, OpenCode) or to your own custom provider bypasses it and is flagged after send."
+    }
+  },
+  "poolside": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "poolside",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "Part B item 2, phase-3a - live-fetched 2026-09-07 (docs.poolside.ai/hooks): JSON decision shape ({\"decision\":\"block\",\"reason\",\"hook_specific_output\":{\"updated_prompt\",\"additional_context\"}}, snake_case); registered in ~/.config/poolside/settings.yaml. REDACT wired (hook-parity Lane B, 2026-10-03): under [guard.prompt] mode redact a secret-only prompt is answered with hook_specific_output.updated_prompt (the model receives the [REDACTED:type] text, the terminal keeps the typed prompt)",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "prime-agent": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "prime-agent",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "proxy_only",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "no prompt-submit hook exists; the proxy request-path prompt scan is this tool's only prompt-submit lever",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": "Only turns sent to the \"observer\" provider the launcher writes go through the proxy, plus, on a managed node, every built-in provider the launcher can point at a proxy lane for the session; a switch to a built-in provider with no proxy lane (Bedrock, Azure, Vertex, Cloudflare, Mistral, the ChatGPT sign-in, GitHub Copilot, OpenCode) or to your own custom provider bypasses it and is flagged after send."
+    }
+  },
+  "qoder": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "qoder",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "Part B item 2, phase-3a - live-fetched 2026-09-07 (docs.qoder.com/en/cli/hooks): exit code 2 blocks, plain-text stderr is the developer-visible reason (no JSON reply at all); ~/.qoder/settings.json shares Claude Code's exact hooks schema, so registration reuses registerGenericSettingsHooks",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "qwen-code": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "qwen-code",
+      "ToolCallChannel": "hook_block",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "observer_proxy",
+      "RouteProof": "unproven",
+      "Note": "documented decision enum is allow|deny|block|ask; observer emits \"block\" (the verb every sibling top-level-block vendor's docs confirm) rather than guessing a semantic split between deny/block/ask the docs don't draw",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": false,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "zcode": {
+    "has_pre_send_prompt_seam": true,
+    "ok": true,
+    "row": {
+      "Tool": "zcode",
+      "ToolCallChannel": "sandbox_enforce",
+      "PromptSubmit": "block_ask",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "Part B item 2, phase-3a - live-fetched 2026-09-07 (zcode.z.ai/en/docs/hooks): Claude-Code-shaped continue:false reply, ~/.zcode/cli/config.json registration. The dialect/receiver is built and tested; since hook-parity Lane A4 (2026-10-03) `observer init` registers it beside the PreToolUse gate, but zai-org/feedback #841 (open, v3.14.3) reports UserPromptSubmit never firing on the native agent (and #32 reported no hook firing at all), so prompt coverage there is unproven; doc-grounded, never written by `observer start`",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  },
+  "zed": {
+    "has_pre_send_prompt_seam": false,
+    "ok": true,
+    "row": {
+      "Tool": "zed",
+      "ToolCallChannel": "recorded_acceptance",
+      "PromptSubmit": "none",
+      "BudgetChannel": "",
+      "RouteProof": "none",
+      "Note": "",
+      "PromptWarnBeforeModel": false,
+      "RouteProbeRequired": true,
+      "PromptHookScope": "",
+      "PromptProxyScope": ""
+    }
+  }
+}

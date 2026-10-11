@@ -3,6 +3,7 @@ package adapter
 import (
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
@@ -110,6 +111,24 @@ func TestAppDataRootsIsOSShaped(t *testing.T) {
 			why:  "the flag only widens the Windows branch",
 		},
 		{
+			name: "XDG state shape adds .local/state under a linux home",
+			home: foreignLinux, spec: AppDataSpec{Name: "poolside", Shapes: ShapeWindowsLocal | ShapeDarwinAppSupport | ShapeXDGState},
+			want: []string{filepath.Join(foreignLinux.Path, ".local", "state", "poolside")},
+			why:  "the standalone pool CLI's trajectory home on Linux (node 1, 2026-10-08)",
+		},
+		{
+			name: "XDG state shape never reaches a windows or darwin home",
+			home: foreignWin, spec: AppDataSpec{Name: "poolside", Shapes: ShapeXDGState},
+			want: nil,
+			why:  "a Linux-only convention is impossible under /mnt/c",
+		},
+		{
+			name: "XDG state shape on darwin yields nothing",
+			home: nativeDarwin, spec: AppDataSpec{Name: "poolside", Shapes: ShapeXDGState},
+			want: nil,
+			why:  "macOS has no .local/state convention declared here",
+		},
+		{
 			name: "empty home yields nothing",
 			home: crossmount.HomeRoot{OS: crossmount.OSWindows}, spec: allShapes,
 			want: nil,
@@ -143,6 +162,34 @@ func TestAppDataRootsIsOSShaped(t *testing.T) {
 				t.Errorf("%s\n got: %#v\nwant: %#v", tc.why, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestAppDataRootsXDGStateHomeEnv pins the $XDG_STATE_HOME rung: honoured
+// (and listed first) for the native Linux home of a Linux process when
+// absolute, ignored when relative, and never applied to a foreign home.
+func TestAppDataRootsXDGStateHomeEnv(t *testing.T) {
+	// No t.Parallel: t.Setenv mutates process state.
+	spec := AppDataSpec{Name: "poolside", Shapes: ShapeXDGState}
+	native := crossmount.HomeRoot{Path: filepath.Join("/home", "me"), OS: crossmount.OSLinux, Origin: "native"}
+	foreign := crossmount.HomeRoot{Path: filepath.Join(`\\wsl.localhost\`, "Ubuntu", "home", "me"), OS: crossmount.OSLinux, Origin: "wslhost:Ubuntu/me"}
+	def := filepath.Join(native.Path, ".local", "state", "poolside")
+
+	t.Setenv("XDG_STATE_HOME", "/srv/state")
+	got := AppDataRoots(native, spec)
+	want := []string{def}
+	if runtime.GOOS == "linux" {
+		want = []string{filepath.Join("/srv/state", "poolside"), def}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("absolute XDG_STATE_HOME: got %#v want %#v", got, want)
+	}
+	if got := AppDataRoots(foreign, spec); !reflect.DeepEqual(got, []string{filepath.Join(foreign.Path, ".local", "state", "poolside")}) {
+		t.Errorf("foreign home consulted the env: %#v", got)
+	}
+	t.Setenv("XDG_STATE_HOME", "relative/state")
+	if got := AppDataRoots(native, spec); !reflect.DeepEqual(got, []string{def}) {
+		t.Errorf("relative XDG_STATE_HOME must be ignored: %#v", got)
 	}
 }
 

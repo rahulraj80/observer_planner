@@ -92,7 +92,7 @@ func newLearnCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", t.path, status)
 			}
 			if !changedAny {
-				fmt.Fprintln(cmd.OutOrStdout(), "no changes — existing managed block(s) already match")
+				fmt.Fprintln(cmd.OutOrStdout(), "no changes - existing managed block(s) already match")
 			}
 			return nil
 		},

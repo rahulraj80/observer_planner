@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -91,11 +93,7 @@ func newCompressionRouter(cfg config.Config, masterPath string, loadFresh func()
 	// owned, OFF by default. Resolved once here; applied per profile in
 	// newProfilePipeline when a stash is wired. The per-language opt-in
 	// is expanded to the concrete extension set the collapse hook checks.
-	if cfg.CodeIntel.Enabled && cfg.CodeIntel.Compression.CodeAggressive {
-		deps.aggressiveCodeEnabled = true
-		deps.aggressiveCodeExts = aggressiveExtsFor(cfg.CodeIntel.Compression.AggressiveLanguages)
-		deps.aggressiveCodePreview = cfg.CodeIntel.Compression.PreviewOnly
-	}
+	deps.aggressiveCodeEnabled, deps.aggressiveCodeExts, deps.aggressiveCodePreview = codeCollapseSettings(cfg)
 	if cfg.Compression.Conversation.Stash.Enabled {
 		st, err := stash.New(stash.Options{
 			Dir:        cfg.Compression.Conversation.Stash.Dir,

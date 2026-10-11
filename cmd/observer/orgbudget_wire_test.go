@@ -44,6 +44,16 @@ func localBudget(monthlyTokens int64, fromOrg bool) config.GuardBudgetConfig {
 	}
 }
 
+// failClosedBudget is localBudget with the org's [guard.budget].fail_closed
+// opt-in set. Since D-502 / D-509 an absent org body blocks a managed node
+// ONLY under that opt-in, so every test that asserts the blocking
+// budget_required posture builds its handle from this.
+func failClosedBudget(monthlyTokens int64, fromOrg bool) config.GuardBudgetConfig {
+	b := localBudget(monthlyTokens, fromOrg)
+	b.FailClosed = true
+	return b
+}
+
 func TestOrgBudgetWireRefusesStaleEnrollmentOutcome(t *testing.T) {
 	t.Parallel()
 	_, dbPath := writeManagedBudgetLaunchFixture(t, false, "enforce")
@@ -80,8 +90,12 @@ func TestOrgBudgetWireRefusesStaleEnrollmentOutcome(t *testing.T) {
 		SourceReady: true, BudgetBinding: identity.Binding,
 		Now: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
 	}
-	if got := gd.CheckInterventionBudget(in); !got.Deny || got.RuleID != "B-625" {
-		t.Fatalf("stale outcome did not fail closed for current member: %+v", got)
+	// D-502 / D-509: the stale outcome's body is dropped, and with no
+	// fail_closed opt-in an absent org body does not block (it used to assert
+	// B-625 here); what this row still proves is that the stale cap never
+	// governs the current member.
+	if got := gd.CheckInterventionBudget(in); got.Deny {
+		t.Fatalf("stale outcome governed the current member: %+v", got)
 	}
 
 	current := budgetOutcome(100, orgcontract.BudgetPolicyEnforcementHard)
@@ -99,9 +113,13 @@ func TestOrgBudgetWireRefusesStaleEnrollmentOutcome(t *testing.T) {
 		enr.UserID = "replacement-member"
 		enr.EnrolledAt = "2026-09-14T02:00:00Z"
 	})
+	// D-502 / REVIEW-4 P4-02: the replaced enrolment's cap no longer applies
+	// and, with no fail_closed opt-in, the request is evaluated against the
+	// node's own [guard.budget] numbers only (none here), so it is admitted.
+	// (Before D-502 this asserted a B-625 refusal.)
 	proxyDecision := gd.ScanProxyRequest("openai", []byte(`{"model":"test"}`), "", in.Now)
-	if !proxyDecision.Deny || proxyDecision.DenyRuleID != "B-625" {
-		t.Fatalf("external re-enrollment left old proxy cap active: %+v", proxyDecision)
+	if proxyDecision.Deny {
+		t.Fatalf("external re-enrollment left the old proxy cap active: %+v", proxyDecision)
 	}
 }
 
@@ -278,7 +296,7 @@ func TestOrgBudgetWirePublishesAPreFetchPosture(t *testing.T) {
 		t.Fatal("an opted-in node published no posture before its first poll")
 	}
 	if row.FetchState != orgcontract.BudgetFetchUnreachable || row.LastFetchOK {
-		t.Errorf("pre-fetch posture = %+v, want unreachable + last_fetch_ok=false — claiming ok before a successful poll would lie in the dangerous direction", row)
+		t.Errorf("pre-fetch posture = %+v, want unreachable + last_fetch_ok=false - claiming ok before a successful poll would lie in the dangerous direction", row)
 	}
 
 	off := newOrgBudgetHandle(nil, localBudget(0, false), nil, nil, slog.Default())
@@ -301,7 +319,7 @@ func TestWithThresholdsCarriesTheWindowBlock(t *testing.T) {
 		t.Errorf("window block = %+v, want %+v", out.Window, base.Window)
 	}
 	if out.FromOrg != base.FromOrg {
-		t.Errorf("from_org = %v, want %v — the opt-in is node config, not a composed number", out.FromOrg, base.FromOrg)
+		t.Errorf("from_org = %v, want %v - the opt-in is node config, not a composed number", out.FromOrg, base.FromOrg)
 	}
 }
 
@@ -359,12 +377,12 @@ func TestBudgetWindowCalendarFollowsTheOrgCap(t *testing.T) {
 	dayStart, weekStart, monthStart := budgetWindowStarts(now, calendars)
 	wantDay := time.Date(2026, 9, 7, 0, 0, 0, 0, la)
 	if !dayStart.Equal(wantDay) {
-		t.Errorf("dayStart = %s, want %s (LA midnight) — the node must bucket the budget's own calendar day",
+		t.Errorf("dayStart = %s, want %s (LA midnight) - the node must bucket the budget's own calendar day",
 			dayStart.UTC(), wantDay.UTC())
 	}
 	// The org authored no MONTHLY cap, so that window keeps the UTC calendar.
 	if want := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC); !monthStart.Equal(want) {
-		t.Errorf("monthStart = %s, want %s — an unauthored window keeps its own calendar", monthStart, want)
+		t.Errorf("monthStart = %s, want %s - an unauthored window keeps its own calendar", monthStart, want)
 	}
 	// weekly is a ROLLING window and has no calendar at all.
 	if want := now.Add(-7 * 24 * time.Hour); !weekStart.Equal(want) {
@@ -400,7 +418,7 @@ func TestOrgBudgetWireFailsClosedOnAManagedNode(t *testing.T) {
 
 	t.Run("managed + no verified body -> budget_required on the wire", func(t *testing.T) {
 		t.Parallel()
-		local := localBudget(5_000_000, true)
+		local := failClosedBudget(5_000_000, true)
 		g := newGuard(t, local)
 		h := newOrgBudgetHandle(g, local, func() bool { return true }, nil, slog.Default())
 		h.onBudgetFetch(orgclient.BudgetFetchOutcome{State: orgcontract.BudgetFetchUnverified})
@@ -413,7 +431,7 @@ func TestOrgBudgetWireFailsClosedOnAManagedNode(t *testing.T) {
 			t.Errorf("coverage = %q, want %q", row.Coverage, orgcontract.BudgetCoverageBudgetRequired)
 		}
 		if row.FetchState != orgcontract.BudgetFetchUnverified {
-			t.Errorf("fetch_state = %q, want the fetch's own unverified — the diagnosis must survive the block",
+			t.Errorf("fetch_state = %q, want the fetch's own unverified - the diagnosis must survive the block",
 				row.FetchState)
 		}
 		if !row.Hard || !row.Capped || row.LastFetchOK {
@@ -430,7 +448,7 @@ func TestOrgBudgetWireFailsClosedOnAManagedNode(t *testing.T) {
 
 		row, _ := h.postureProvider()()
 		if row.Coverage != orgcontract.BudgetCoverageProxyOnly {
-			t.Errorf("coverage = %q, want %q — the fail-closed path must need the grant",
+			t.Errorf("coverage = %q, want %q - the fail-closed path must need the grant",
 				row.Coverage, orgcontract.BudgetCoverageProxyOnly)
 		}
 		if row.Hard {
@@ -456,7 +474,7 @@ func TestOrgBudgetWireFailsClosedOnAManagedNode(t *testing.T) {
 
 	t.Run("a nil guard still publishes the blocking posture", func(t *testing.T) {
 		t.Parallel()
-		h := newOrgBudgetHandle(nil, localBudget(0, true), func() bool { return true }, nil, slog.Default())
+		h := newOrgBudgetHandle(nil, failClosedBudget(0, true), func() bool { return true }, nil, slog.Default())
 		h.Prime(orgclient.BudgetFetchOutcome{})
 		row, ok := h.postureProvider()()
 		if !ok {
@@ -467,7 +485,7 @@ func TestOrgBudgetWireFailsClosedOnAManagedNode(t *testing.T) {
 				row.Coverage, orgcontract.BudgetCoverageBudgetRequired)
 		}
 		if row.Mode != "off" {
-			t.Errorf("mode = %q, want off — there is no enforcement point at all", row.Mode)
+			t.Errorf("mode = %q, want off - there is no enforcement point at all", row.Mode)
 		}
 	})
 }
@@ -491,11 +509,11 @@ func TestShareModeLine(t *testing.T) {
 			wantContains: "[org_client.share].full_content is true",
 		},
 		{
-			name: "admin_managed — the input the old line ignored", admin: true,
+			name: "admin_managed - the input the old line ignored", admin: true,
 			wantContains: "[org_client.share].admin_managed is true",
 		},
 		{
-			name: "the enterprise enrolment grant — no TOML key records it", enterprise: true,
+			name: "the enterprise enrolment grant - no TOML key records it", enterprise: true,
 			wantContains: "managed enrolment grant",
 		},
 		{
@@ -544,25 +562,6 @@ func TestShareModeRulesAreOrderedAndNamed(t *testing.T) {
 	}
 }
 
-// TestEnrolledFeedLineAgreesWithTheGuardsPricingLine is the W2-6 pair: an
-// enrolled node with from_org OFF applies NEITHER the public feed nor the
-// org's rates, and both surfaces must say so.
-func TestEnrolledFeedLineAgreesWithTheGuardsPricingLine(t *testing.T) {
-	t.Parallel()
-
-	on := enrolledFeedLine(true)
-	if !strings.Contains(on, "prices come from the org rail") {
-		t.Errorf("org-rail line = %q", on)
-	}
-	off := enrolledFeedLine(false)
-	if !strings.Contains(off, "[guard.budget].from_org is off") {
-		t.Errorf("opted-out line = %q, want it to name the switch the guard's pricing line names", off)
-	}
-	if strings.Contains(off, "prices come from the org rail") {
-		t.Errorf("opted-out line = %q, must not claim the org rail applies", off)
-	}
-}
-
 // TestOrgBudgetWirePublishesNothingBeforePrime is finding H3c: the capability
 // this handle reports is resolved through the governance identity loader,
 // which `observer start` installs AFTER it builds the wire. A posture
@@ -575,9 +574,9 @@ func TestEnrolledFeedLineAgreesWithTheGuardsPricingLine(t *testing.T) {
 func TestOrgBudgetWirePublishesNothingBeforePrime(t *testing.T) {
 	t.Parallel()
 
-	h := newOrgBudgetHandle(nil, localBudget(0, true), func() bool { return true }, nil, slog.Default())
+	h := newOrgBudgetHandle(nil, failClosedBudget(0, true), func() bool { return true }, nil, slog.Default())
 	if _, ok := h.postureProvider()(); ok {
-		t.Fatal("a posture was published before Prime — with no identity loader it would report a managed node as un-required")
+		t.Fatal("a posture was published before Prime - with no identity loader it would report a managed node as un-required")
 	}
 
 	h.Prime(orgclient.BudgetFetchOutcome{})
@@ -586,7 +585,7 @@ func TestOrgBudgetWirePublishesNothingBeforePrime(t *testing.T) {
 		t.Fatal("Prime published no posture")
 	}
 	if row.Coverage != orgcontract.BudgetCoverageBudgetRequired {
-		t.Errorf("coverage = %q, want %q — Prime with nothing stored must ARM the block, not wait a push interval",
+		t.Errorf("coverage = %q, want %q - Prime with nothing stored must ARM the block, not wait a push interval",
 			row.Coverage, orgcontract.BudgetCoverageBudgetRequired)
 	}
 }
@@ -612,13 +611,13 @@ func TestOrgBudgetWirePrimeRestoresTheLastVerifiedBody(t *testing.T) {
 		t.Fatal("Prime published no posture")
 	}
 	if row.Coverage == orgcontract.BudgetCoverageBudgetRequired {
-		t.Fatal("a restored verified body still armed the block — the restart window is not closed")
+		t.Fatal("a restored verified body still armed the block - the restart window is not closed")
 	}
 	if !row.Capped || row.LastFetchOK {
 		t.Errorf("posture = %+v, want capped with last_fetch_ok=false (restored, not re-fetched)", row)
 	}
 	if row.Source != orgcontract.BudgetSourceOrgAuthoritative {
-		t.Errorf("source = %q, want org_authoritative — the restored body is the org's", row.Source)
+		t.Errorf("source = %q, want org_authoritative - the restored body is the org's", row.Source)
 	}
 }
 
@@ -628,7 +627,7 @@ func TestOrgBudgetWirePrimeRestoresTheLastVerifiedBody(t *testing.T) {
 func TestOrgBudgetWireArmsAndDisarmsAcrossASimulatedRestart(t *testing.T) {
 	t.Parallel()
 
-	local := localBudget(5_000_000, true)
+	local := failClosedBudget(5_000_000, true)
 	managed := func() bool { return true }
 
 	// Boot 1: nothing persisted yet.

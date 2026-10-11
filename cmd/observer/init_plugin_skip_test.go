@@ -30,6 +30,9 @@ import (
 // lands under t.TempDir() even if the gate were ever weakened. The
 // standing guard is TestWireAIClients_SandboxHomeNeverEscapes.
 func TestWireAIClientsSkipsClaudeCodeWhenPluginInstalled(t *testing.T) {
+	requireComponents(t, "integration.hooks", "integration.mcp-server")
+	requireActiveAdapters(t, "claude-code")
+	requireAdapter(t, "claude-code")
 	cases := []struct {
 		name     string
 		seed     func(t *testing.T, claudeDir string)
@@ -37,11 +40,11 @@ func TestWireAIClientsSkipsClaudeCodeWhenPluginInstalled(t *testing.T) {
 		wantSkip bool
 	}{
 		{
-			name: "no plugin — wires hooks and MCP",
+			name: "no plugin - wires hooks and MCP",
 			seed: func(*testing.T, string) {},
 		},
 		{
-			name: "plugin enabled — skips both",
+			name: "plugin enabled - skips both",
 			seed: func(t *testing.T, dir string) {
 				writeInitFixture(t, filepath.Join(dir, "settings.json"),
 					`{"enabledPlugins":{"`+claudeplugin.EnabledKey+`":true}}`)
@@ -49,7 +52,7 @@ func TestWireAIClientsSkipsClaudeCodeWhenPluginInstalled(t *testing.T) {
 			wantSkip: true,
 		},
 		{
-			name: "plugin cached (verified manifest) — skips both",
+			name: "plugin cached (verified manifest) - skips both",
 			seed: func(t *testing.T, dir string) {
 				writeInitFixture(t, filepath.Join(dir, "plugins", "cache",
 					claudeplugin.Marketplace, claudeplugin.Name, "1.29.0",
@@ -60,7 +63,7 @@ func TestWireAIClientsSkipsClaudeCodeWhenPluginInstalled(t *testing.T) {
 		},
 		{
 			// H2: a bare cache directory is not an install.
-			name: "empty plugin cache directory — wires normally",
+			name: "empty plugin cache directory - wires normally",
 			seed: func(t *testing.T, dir string) {
 				mkdirInitFixture(t, filepath.Join(dir, "plugins", "cache",
 					claudeplugin.Marketplace, claudeplugin.Name, "1.29.0"))
@@ -69,7 +72,7 @@ func TestWireAIClientsSkipsClaudeCodeWhenPluginInstalled(t *testing.T) {
 		},
 		{
 			// H2: same name, foreign marketplace.
-			name: "foreign same-named plugin — wires normally",
+			name: "foreign same-named plugin - wires normally",
 			seed: func(t *testing.T, dir string) {
 				writeInitFixture(t, filepath.Join(dir, "settings.json"),
 					`{"enabledPlugins":{"`+claudeplugin.Name+`@acme-internal":true}}`)

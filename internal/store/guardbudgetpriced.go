@@ -224,8 +224,10 @@ type guardBudgetSpendRow struct {
 // it names one, the node's windows otherwise.
 //
 // Normal rows are bounded by the earliest non-zero window start. Managed
-// reads additionally detect malformed timestamps across history, since those
-// rows cannot safely be assigned to a window. The caller bounds query time.
+// reads additionally detect malformed timestamps on every row written since
+// the window opened (guardBudgetMalformedFloorSQL, T-422), since those rows
+// cannot safely be assigned to a window; a malformed row written before the
+// window opened belongs to none of them. The caller bounds query time.
 // Other rows older than that bound are included only when they belong to
 // sessionID, because session budgets span the session lifetime. The production
 // caller supplies all three window starts. Missing bounds or a missing pricer
@@ -259,47 +261,16 @@ func (s *Store) GuardBudgetSpendPriced(
 	if candidate := monthStart.UTC(); candidate.Before(earliest) {
 		earliest = candidate
 	}
-	earliestStamp := guardBudgetWindowStamp(earliest)
 	// Keep the statement static so the SQL remains auditable and gosec cannot
 	// mistake a value-dependent predicate for SQL composition. For a requested
 	// session, the first arm retains its lifetime rows; the timestamp arm is
 	// the node-wide bounded read. With no session, the first arm is disabled.
-	args := []any{
-		sessionID, sessionID, earliest.UTC().Format("2006-01-02T15:04:05"), earliestStamp,
-		sessionID, sessionID, earliest.UTC().Format("2006-01-02T15:04:05"), earliestStamp,
-	}
+	now := time.Now()
+	args := append(guardBudgetUsageArgs(managed, sessionID, earliest, now),
+		guardBudgetUsageArgs(managed, sessionID, earliest, now)...)
 	s.refreshSpendVerdictsBounded(ctx)
 	//nolint:gosec // G202: the WHERE / verdict fragments are closed constant SQL; all caller values are bound in args.
-	q := `
-		SELECT 0 AS source, COALESCE(session_id, ''), timestamp,
-		       COALESCE((SELECT s.tool FROM sessions s WHERE s.id = api_turns.session_id), ''),
-		       COALESCE(model, ''), COALESCE(input_tokens, 0),
-		       ` + spendverdict.ProxyOutputOf("api_turns") + `, COALESCE(cache_read_tokens, 0),
-		       COALESCE(cache_creation_tokens, 0),
-		       COALESCE(cache_creation_1h_tokens, 0),
-		       ` + spendverdict.ProxyReasoningOf("api_turns") + `,
-		       COALESCE(web_search_requests, 0), COALESCE(cost_usd, 0),
-		       COALESCE(fast, 0), ` + spendverdict.ProxyInheritedFastOf("api_turns") + `,
-		       input_tokens IS NULL OR output_tokens IS NULL OR
-		       cache_read_tokens IS NULL OR cache_creation_tokens IS NULL
-		  FROM api_turns` + guardBudgetUsageWhere(managed, spendverdict.CountedProxyRowOf("api_turns")) + `
-		 UNION ALL
-		SELECT 1 AS source, COALESCE(session_id, ''), timestamp,
-		       COALESCE(tool, ''),
-		       COALESCE(model, ''), COALESCE(input_tokens, 0),
-		       COALESCE(output_tokens, 0), COALESCE(cache_read_tokens, 0),
-		       COALESCE(cache_creation_tokens, 0),
-		       COALESCE(cache_creation_1h_tokens, 0),
-		       COALESCE(reasoning_tokens, 0),
-		       COALESCE(web_search_requests, 0),
-		       COALESCE(estimated_cost_usd, 0), COALESCE(fast, 0), 0,
-		       input_tokens IS NULL OR output_tokens IS NULL OR
-		       cache_read_tokens IS NULL OR cache_creation_tokens IS NULL OR
-		       reasoning_tokens IS NULL OR
-		       COALESCE(reliability, '') NOT IN ('accurate', 'approximate') OR
-		       source NOT IN ('jsonl', 'otel', 'hook', 'proxy')
-		  FROM token_usage` + guardBudgetUsageWhere(managed, spendverdict.CountedTokenRow("token_usage"))
-
+	q := guardBudgetSpendPricedSQL(managed)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return GuardBudgetSpendResult{}, fmt.Errorf("store.GuardBudgetSpendPriced: query: %w", err)
@@ -848,4 +819,39 @@ func addSubjectWindow(dst *GuardBudgetSubjectWindows, window string, usd float64
 // guard.NormalizeBudgetSubjectID — the pair is pinned by the store test.
 func normalizeGuardBudgetSubject(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// guardBudgetSpendPricedSQL returns the GuardBudgetSpendPriced statement for
+// one read mode. It is built from closed constant fragments only; every
+// caller value binds through guardBudgetUsageArgs, one set per arm.
+func guardBudgetSpendPricedSQL(managed bool) string {
+	return `
+		SELECT 0 AS source, COALESCE(session_id, ''), timestamp,
+		       COALESCE((SELECT s.tool FROM sessions s WHERE s.id = api_turns.session_id), ''),
+		       COALESCE(model, ''), COALESCE(input_tokens, 0),
+		       ` + spendverdict.ProxyOutputOf("api_turns") + `, COALESCE(cache_read_tokens, 0),
+		       COALESCE(cache_creation_tokens, 0),
+		       COALESCE(cache_creation_1h_tokens, 0),
+		       ` + spendverdict.ProxyReasoningOf("api_turns") + `,
+		       COALESCE(web_search_requests, 0), COALESCE(cost_usd, 0),
+		       COALESCE(fast, 0), ` + spendverdict.ProxyInheritedFastOf("api_turns") + `,
+		       input_tokens IS NULL OR output_tokens IS NULL OR
+		       cache_read_tokens IS NULL OR cache_creation_tokens IS NULL
+		  FROM api_turns` + guardBudgetUsageWhere(managed, "api_turns", spendverdict.CountedProxyRowOf("api_turns")) + `
+		 UNION ALL
+		SELECT 1 AS source, COALESCE(session_id, ''), timestamp,
+		       COALESCE(tool, ''),
+		       COALESCE(model, ''), COALESCE(input_tokens, 0),
+		       COALESCE(output_tokens, 0), COALESCE(cache_read_tokens, 0),
+		       COALESCE(cache_creation_tokens, 0),
+		       COALESCE(cache_creation_1h_tokens, 0),
+		       COALESCE(reasoning_tokens, 0),
+		       COALESCE(web_search_requests, 0),
+		       COALESCE(estimated_cost_usd, 0), COALESCE(fast, 0), 0,
+		       input_tokens IS NULL OR output_tokens IS NULL OR
+		       cache_read_tokens IS NULL OR cache_creation_tokens IS NULL OR
+		       reasoning_tokens IS NULL OR
+		       COALESCE(reliability, '') NOT IN ('accurate', 'approximate') OR
+		       source NOT IN ('jsonl', 'otel', 'hook', 'proxy')
+		  FROM token_usage` + guardBudgetUsageWhere(managed, "token_usage", spendverdict.CountedTokenRow("token_usage"))
 }

@@ -123,7 +123,7 @@ func (m *mergeState) applyOrg(org *policyFile) {
 		}
 		if ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"org override on %s dropped: %q would relax the effective decision (the org layer is a strictness floor; it may only escalate — spec §4.6/§14.2)",
+				"org override on %s dropped: %q would relax the effective decision (the org layer is a strictness floor; it may only escalate - spec §4.6/§14.2)",
 				ov.RuleID, ov.Decision,
 			))
 			continue
@@ -162,9 +162,12 @@ func (m *mergeState) applyUser(user *policyFile) {
 		}
 		if m.floor[ov.RuleID] && ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"user override on %s dropped: %q would relax the org policy floor (org > user — spec §4.6)",
+				"user override on %s dropped: %q would relax the org policy floor (org > user - spec §4.6)",
 				ov.RuleID, ov.Decision,
 			))
+			continue
+		}
+		if m.dropBelowOrgEnforceOff("user", ov) {
 			continue
 		}
 		// R-160/R-161 are the guard's own integrity rules: no below-org
@@ -204,8 +207,15 @@ func (m *mergeState) applyProject(project *policyFile) {
 		}
 		if ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"project override on %s dropped: %q would relax the effective decision (project layer may only escalate — spec §4.6)",
+				"project override on %s dropped: %q would relax the effective decision (project layer may only escalate - spec §4.6)",
 				ov.RuleID, ov.Decision,
+			))
+			continue
+		}
+		if ov.EnforceOff {
+			m.issues = append(m.issues, fmt.Sprintf(
+				"project override on %s dropped: `enforce = false` would cap the rule at flag (project layer may only escalate - spec §4.6)",
+				ov.RuleID,
 			))
 			continue
 		}
@@ -226,7 +236,7 @@ func (m *mergeState) noteUngrantableOverridable(ov rawOverride) {
 		return
 	}
 	m.issues = append(m.issues, fmt.Sprintf(
-		"%s override on %s: `overridable` ignored — only the org policy bundle grants a per-rule override (spec §4.6/§14.2)",
+		"%s override on %s: `overridable` ignored - only the org policy bundle grants a per-rule override (spec §4.6/§14.2)",
 		ov.Layer, ov.RuleID,
 	))
 }
@@ -261,7 +271,7 @@ func (m *mergeState) applyTrustedProject(trusted *policyFile) {
 	for _, id := range trusted.disable {
 		if m.floor[id] {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"trusted project disable of %s dropped: an org-floored rule cannot be disabled (org > trusted project — spec §4.6)", id))
+				"trusted project disable of %s dropped: an org-floored rule cannot be disabled (org > trusted project - spec §4.6)", id))
 			continue
 		}
 		// R-160/R-161 are the guard's own integrity rules — never
@@ -307,9 +317,12 @@ func (m *mergeState) applyTrustedProject(trusted *policyFile) {
 		// not a behavior we need to loosen.
 		if m.floor[ov.RuleID] && ov.HasDec && (ov.Decision < s.observe || ov.Decision < s.enforce) {
 			m.issues = append(m.issues, fmt.Sprintf(
-				"trusted project override on %s dropped: %q would relax the org policy floor (org > trusted project — spec §4.6)",
+				"trusted project override on %s dropped: %q would relax the org policy floor (org > trusted project - spec §4.6)",
 				ov.RuleID, ov.Decision,
 			))
+			continue
+		}
+		if m.dropBelowOrgEnforceOff("trusted project", ov) {
 			continue
 		}
 		// R-160/R-161 are the guard's own integrity rules: no below-org
@@ -330,6 +343,32 @@ func (m *mergeState) applyTrustedProject(trusted *policyFile) {
 	}
 }
 
+// dropBelowOrgEnforceOff drops (with a recorded issue) an explicit
+// `enforce = false` from a below-org layer that may otherwise relax
+// (user, trusted project) when the rule is org-floored or one of the
+// guard's integrity rules: capping it at flag would weaken what that
+// layer may not weaken (Sol A2-06). It reports whether ov was dropped.
+func (m *mergeState) dropBelowOrgEnforceOff(layer string, ov rawOverride) bool {
+	if !ov.EnforceOff {
+		return false
+	}
+	switch {
+	case m.floor[ov.RuleID]:
+		m.issues = append(m.issues, fmt.Sprintf(
+			"%s override on %s dropped: `enforce = false` would cap an org-floored rule at flag (org > %s - spec §4.6)",
+			layer, ov.RuleID, layer,
+		))
+		return true
+	case policy.IsIntegrityRuleID(ov.RuleID):
+		m.issues = append(m.issues, fmt.Sprintf(
+			"%s override on %s dropped: %s is an integrity rule and cannot be capped at flag below the org (guard-rule-management-ui plan §3.4 / §2)",
+			layer, ov.RuleID, ov.RuleID,
+		))
+		return true
+	}
+	return false
+}
+
 // apply commits an accepted override to the stance reference and the
 // engine input list.
 func (m *mergeState) apply(s *stance, ov rawOverride) {
@@ -344,9 +383,10 @@ func (m *mergeState) apply(s *stance, ov rawOverride) {
 // mechanical form.
 func toPolicyOverride(ov rawOverride) policy.Override {
 	out := policy.Override{
-		RuleID:   ov.RuleID,
-		Enforced: ov.Enforced,
-		Source:   ov.Layer,
+		RuleID:     ov.RuleID,
+		Enforced:   ov.Enforced,
+		EnforceOff: ov.EnforceOff,
+		Source:     ov.Layer,
 		// Structural gate, not a caller courtesy: overridability is
 		// carried ONLY off the org layer, so no other call path can
 		// grant it even by mistake.

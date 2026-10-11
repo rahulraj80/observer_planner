@@ -63,6 +63,29 @@ func AllPurposes() []Purpose {
 	return out
 }
 
+// purposeLabels is the human-facing name of each purpose: the words the
+// personal plane's session card and grants table already use, so a consent
+// screen on either plane names a purpose the same way (Cloud Intelligence
+// parity ruling Q4, 2026-10-04: friendly label first, the id in small text).
+var purposeLabels = map[Purpose]string{
+	PurposeAccountDeviceOps:   "Account and device operations",
+	PurposeStructuralInsights: "Title only",
+	PurposeContextEnrichment:  "Title, tags and description",
+	PurposeExtendedEvidence:   "Deep review of previewed evidence",
+	PurposeCohortBenchmarking: "Community benchmarking",
+	PurposePublicProfile:      "Public community profile",
+	PurposeResearch:           "Research and model improvement",
+}
+
+// Label is the purpose's human-facing name; an unknown value reads as itself,
+// never as a friendlier name it does not have.
+func (p Purpose) Label() string {
+	if l, ok := purposeLabels[p]; ok {
+		return l
+	}
+	return string(p)
+}
+
 // Valid reports whether p is one of the seven known purposes.
 func (p Purpose) Valid() bool {
 	for _, known := range allPurposes {

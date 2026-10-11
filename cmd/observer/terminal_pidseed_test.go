@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -280,7 +282,7 @@ func TestTerminalPidSeederPidReuse(t *testing.T) {
 	s.OnRunCorrelated(context.Background(), "run-A", first)
 	s.Observe(exitEvent("hA", 100))
 	if _, ok := fb.lookup(100); ok {
-		t.Fatal("pid 100 still bridged after terminal A exited — a recycled pid would inherit a dead session")
+		t.Fatal("pid 100 still bridged after terminal A exited - a recycled pid would inherit a dead session")
 	}
 
 	// Terminal B is handed the SAME pid and correlates to a different session.
@@ -487,7 +489,7 @@ func TestTerminalPidSeederEndToEnd(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("pid 31337 still bridged after the PTY child exited — a recycled pid would be misattributed")
+	t.Fatal("pid 31337 still bridged after the PTY child exited - a recycled pid would be misattributed")
 }
 
 // pidSpawnerStub is a minimal pid-reporting PTY for the end-to-end test: it

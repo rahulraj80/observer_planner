@@ -38,11 +38,27 @@
 #   scripts/restart-daemon.sh --no-detach           # (default) refuse when daemon-launched instead of killing the session
 #   scripts/restart-daemon.sh --dry-run             # print the plan (incl. the detach decision) and exit
 #   scripts/restart-daemon.sh --port 8820
+#   scripts/restart-daemon.sh --stop-timeout 30     # seconds to wait for the old pid to EXIT before SIGKILL (default 30)
+#   scripts/restart-daemon.sh --log /tmp/obs.log    # where the relaunched daemon's output goes (default /tmp/obs.log)
+#   scripts/restart-daemon.sh --db PATH             # the daemon's DB (default: observer.db beside the config)
 #
 # Idempotent and conservative: backs up every file it edits, never uses
 # `pgrep observer` (that self-matches the caller's argv), finds the daemon
-# strictly by the listening :PORT socket, and restores the route even on
-# failure paths.
+# by the listening :PORT socket AND by every live `observer start` process
+# that still owns the DB (its observer-<pid>.lock beside the DB, or an open
+# handle on the DB file), and restores the route even on failure paths.
+#
+# NEVER TWO WRITERS (T-553, 2026-10-06 burn): a daemon releases its port
+# early in its stop and can keep running (DB open) after that, so "the port
+# is free" is not "the old daemon is gone". The script waits for the old PID
+# itself to exit, bounded by --stop-timeout, escalates to SIGKILL with a
+# clear log line when the bound passes (SQLite's WAL makes that safe), and
+# relaunches only once the old pid is confirmed gone. The daemon bounds its
+# own stop at 20s and names what blocked it, so the SIGKILL is a backstop.
+# A daemon that is ALREADY stopping (a dashboard restart, a manual SIGTERM)
+# has no listener left to find, so the script also finds it by its lock file
+# and by its open DB handle (P3-06, the D-349 second writer) and applies the
+# same wait / SIGKILL ladder to it before the relaunch.
 set -euo pipefail
 
 # Preserve the ORIGINAL argv verbatim so the detached re-exec re-runs the
@@ -63,7 +79,10 @@ BIN="${REPO_ROOT}/bin/observer"
 LOG="/tmp/obs.log"
 DETACH_LOG="/tmp/restart-daemon.log"
 
-usage() { sed -n '2,45p' "$0"; }
+STOP_TIMEOUT=30
+DB=""
+
+usage() { sed -n '2,64p' "$0"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,6 +95,9 @@ while [[ $# -gt 0 ]]; do
     --detached) DETACHED=1; shift ;;   # internal: the detached re-exec sets this
     --port) PORT="${2:-8820}"; shift 2 ;;
     --bin) BIN="${2:-}"; shift 2 ;;
+    --stop-timeout) STOP_TIMEOUT="${2:-30}"; shift 2 ;;
+    --log) LOG="${2:-/tmp/obs.log}"; shift 2 ;;
+    --db) DB="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
@@ -83,8 +105,85 @@ done
 
 log() { printf '[restart-daemon] %s\n' "$*"; }
 
+# The stop bound is arithmetic below (secs * 4 polls); a non-integer would
+# abort the script under `set -e` AFTER the SIGTERM, so refuse it up front.
+if ! [[ "$STOP_TIMEOUT" =~ ^[0-9]+$ ]] || [[ "$STOP_TIMEOUT" -lt 1 ]]; then
+  echo "ERROR: --stop-timeout must be a whole number of seconds >= 1 (got '$STOP_TIMEOUT')" >&2
+  exit 2
+fi
+[[ -n "$DB" ]] || DB="$(dirname "$CONFIG")/observer.db"
+
 daemon_pid() { ss -ltnp 2>/dev/null | grep ":${PORT} " | grep -oP 'pid=\K[0-9]+' | head -1; }
 port_up()    { ss -ltn 2>/dev/null | grep -q ":${PORT} "; }
+
+# pid_alive <pid> → 0 while the process exists and is not a zombie. A
+# zombie has exited (its DB handles are closed) and only awaits its parent's
+# reap, so it counts as gone.
+pid_alive() {
+  local st
+  [[ -e /proc/"$1" ]] || return 1
+  st="$(cat /proc/"$1"/stat 2>/dev/null)" || return 1
+  st="${st##*) }"
+  [[ "${st:0:1}" != "Z" ]]
+}
+
+# wait_pid_gone <pid> <seconds> → 0 once the pid has exited, 1 if it is
+# still alive after <seconds> (polled every 0.25s).
+wait_pid_gone() {
+  local pid="$1" secs="$2" i
+  for ((i = 0; i < secs * 4; i++)); do
+    pid_alive "$pid" || return 0
+    sleep 0.25
+  done
+  ! pid_alive "$pid"
+}
+
+# is_observer_daemon <pid> -> 0 when <pid> is a live `observer start`
+# process: its executable's basename starts with "observer" (a renamed hotfix
+# binary such as observer.stall4 included; a replaced binary reads
+# "(deleted)") and its argv carries the `start` verb. That excludes this
+# script, hook processes (`observer hook ...`) and `observer mcp`, which open
+# the DB briefly but are not daemons.
+is_observer_daemon() {
+  local pid="$1" exe args
+  [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]] || return 1
+  pid_alive "$pid" || return 1
+  exe="$(readlink /proc/"$pid"/exe 2>/dev/null)" || return 1
+  exe="${exe% (deleted)}"
+  [[ "${exe##*/}" == observer* ]] || return 1
+  args="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null)" || return 1
+  [[ " $args " == *" start "* ]]
+}
+
+# old_daemon_pids prints, one per line and de-duplicated, every pid that must
+# be gone before a relaunch: the :PORT listener (as before), plus every live
+# `observer start` that still owns the DB, found by
+#   (a) its per-PID lock file beside the DB (internal/diag/lockfile.go), and
+#   (b) an open handle on the DB file or its -wal / -shm siblings.
+# (b) catches a daemon whose lock file is gone or that predates lock files.
+old_daemon_pids() {
+  local dbdir f pid seen=" "
+  dbdir="$(dirname "$DB")"
+  {
+    daemon_pid || true
+    for f in "$dbdir"/observer-*.lock; do
+      [[ -f "$f" ]] || continue
+      pid="$(grep -oE '"pid"[[:space:]]*:[[:space:]]*[0-9]+' "$f" 2>/dev/null | grep -oE '[0-9]+$' || true)"
+      if [[ -n "$pid" ]] && is_observer_daemon "$pid"; then echo "$pid"; fi
+    done
+    if [[ -e "$DB" ]]; then
+      find /proc/[0-9]*/fd -maxdepth 1 \( -lname "$DB" -o -lname "$DB-wal" -o -lname "$DB-shm" \) 2>/dev/null |
+        while IFS= read -r f; do
+          pid="${f#/proc/}"; pid="${pid%%/*}"
+          if is_observer_daemon "$pid"; then echo "$pid"; fi
+        done
+    fi
+  } | while IFS= read -r pid; do
+    [[ -n "$pid" && "$seen" != *" $pid "* ]] || continue
+    seen="$seen$pid "
+    echo "$pid"
+  done
+}
 
 # proxy_ready reports whether the proxy is serving — it prefers the
 # unauthenticated liveness endpoint (internal/proxy serveHealthz: 200,
@@ -152,6 +251,9 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   log "  compression flip    : ${COMPRESSION:-<none>}"
   log "  route toggle        : $([[ "$ROUTE_TOGGLE" -eq 1 ]] && echo on || echo off) ($SETTINGS)"
   log "  daemon pid on :$PORT : ${DPID:-<none listening>}"
+  log "  database            : $DB"
+  log "  pids to stop first  : $(old_daemon_pids | tr '\n' ' ')"
+  log "  stop timeout        : ${STOP_TIMEOUT}s for the old pid to exit, then SIGKILL; relaunch only after it is gone"
   log "  this script's pid   : $$ (OBSERVER_DAEMON_CHILD=${OBSERVER_DAEMON_CHILD:-<unset>})"
   log "  daemon-launched?    : $([[ "$DAEMON_LAUNCHED" -eq 1 ]] && echo YES || echo no)"
   if [[ "$DAEMON_LAUNCHED" -eq 1 && "$NO_DETACH" -eq 0 && "$DETACHED" -eq 0 ]]; then
@@ -251,20 +353,42 @@ PY
   fi
 fi
 
-# --- 3. stop daemon (graceful, by :PORT socket only) ---
-PID="$(daemon_pid || true)"
-if [[ -n "$PID" ]]; then
-  log "stopping daemon pid=$PID on :$PORT (SIGTERM)"
-  kill -TERM "$PID" 2>/dev/null || true
-  for _ in $(seq 1 40); do port_up || break; sleep 0.25; done
-  if port_up; then log "WARN: :$PORT still listening after 10s; aborting before relaunch"; exit 1; fi
-  log "daemon stopped"
+# --- 3. stop every old daemon (listener, lock file, DB holder) ---
+# The listener alone is not enough: a daemon that is already stopping has
+# released :PORT but still holds the DB (P3-06). Every pid found here gets
+# SIGTERM, then the same bounded wait and SIGKILL ladder, and the relaunch
+# happens only when ALL of them are gone.
+mapfile -t OLD_PIDS < <(old_daemon_pids)
+PID="${OLD_PIDS[0]:-}"
+if [[ ${#OLD_PIDS[@]} -gt 0 ]]; then
+  log "stopping old daemon pid(s) ${OLD_PIDS[*]} (port :$PORT, db $DB) with SIGTERM; waiting up to ${STOP_TIMEOUT}s for each pid to exit"
+  for p in "${OLD_PIDS[@]}"; do kill -TERM "$p" 2>/dev/null || true; done
+  for p in "${OLD_PIDS[@]}"; do
+    if ! wait_pid_gone "$p" "$STOP_TIMEOUT"; then
+      log "WARN: old daemon pid=$p still running ${STOP_TIMEOUT}s after SIGTERM (port released: $(port_up && echo no || echo yes)); sending SIGKILL so there is never a second writer on the DB (SQLite WAL keeps it consistent)"
+      kill -KILL "$p" 2>/dev/null || true
+      if ! wait_pid_gone "$p" 10; then
+        log "ERROR: old daemon pid=$p survived SIGKILL for 10s; NOT relaunching (two writers on one DB)"
+        exit 1
+      fi
+      log "old daemon pid=$p killed"
+    fi
+  done
+  # A daemon that started while we waited is a writer too: look once more.
+  mapfile -t LEFT < <(old_daemon_pids)
+  if [[ ${#LEFT[@]} -gt 0 ]]; then
+    log "ERROR: observer daemon pid(s) ${LEFT[*]} still own :$PORT or $DB after the stop; NOT relaunching (two writers on one DB)"
+    exit 1
+  fi
+  if port_up; then log "ERROR: :$PORT still listening after the old daemon exited (another process holds it); aborting before relaunch"; exit 1; fi
+  # "daemon stopped (pid=" is the line scripts/test-restart-daemon.sh orders
+  # against the relaunch; several pids are comma-joined.
+  log "daemon stopped (pid=$(IFS=,; echo "${OLD_PIDS[*]}") exited)"
 else
-  log "no daemon listening on :$PORT (will just start one)"
+  log "no daemon on :$PORT and none holding $DB (will just start one)"
 fi
 
 # --- 3b. checkpoint WAL while down (best-effort) ---
-DB="$(dirname "$CONFIG")/observer.db"
 if command -v sqlite3 >/dev/null && [[ -f "$DB" ]]; then
   sqlite3 "$DB" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
   log "WAL checkpointed ($DB)"

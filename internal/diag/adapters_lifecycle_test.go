@@ -46,7 +46,7 @@ func TestLifecycleNote(t *testing.T) {
 				t.Errorf("status = %v, want %v", status, tc.wantStatus)
 			}
 			if status == StatusFail {
-				t.Error("a lifecycle note must never be a FAIL — capture keeps running for a sunset product")
+				t.Error("a lifecycle note must never be a FAIL - capture keeps running for a sunset product")
 			}
 			for _, want := range tc.wantSubstr {
 				if !strings.Contains(line, want) {
@@ -96,7 +96,7 @@ func TestCheckAdapterCarriesALifecycleNote(t *testing.T) {
 func TestCheckAdapterAnswersRowlessProducts(t *testing.T) {
 	c, ok := CheckAdapter("roo-code", config.Config{})
 	if !ok {
-		t.Fatal("CheckAdapter(\"roo-code\") ok = false — the rowless product path did not fire")
+		t.Fatal("CheckAdapter(\"roo-code\") ok = false - the rowless product path did not fire")
 	}
 	if c.Name != "roo-code" {
 		t.Errorf("Check.Name = %q, want roo-code", c.Name)

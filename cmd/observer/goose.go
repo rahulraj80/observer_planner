@@ -49,12 +49,12 @@ func newGooseCmd() *cobra.Command {
 		Use:   "goose [-- goose-args...]",
 		Short: "Launch goose; with --continue-from, seed a handover via goose run -t … -s",
 		Long: "Wraps Block's goose agent (binary `goose`). NON-PROXIED BY\n" +
-			"DEFAULT — token capture happens via observer's local goose\n" +
+			"DEFAULT - token capture happens via observer's local goose\n" +
 			"adapter (session-level counts in sessions.db), not the proxy.\n\n" +
 			"Pass --proxy to opt in: this sets OPENAI_HOST at the observer\n" +
 			"proxy's root (goose appends /v1 itself). WARNING: goose may\n" +
 			"already be configured to a non-OpenAI provider (e.g. openrouter)\n" +
-			"in config.yaml — --proxy overrides OPENAI_HOST unconditionally\n" +
+			"in config.yaml - --proxy overrides OPENAI_HOST unconditionally\n" +
 			"(unless you've already exported it yourself), which redirects\n" +
 			"that provider's traffic to the proxy's OpenAI-compatible\n" +
 			"upstream. Only pass --proxy when you want goose on OpenAI\n" +
@@ -120,7 +120,7 @@ func newGooseCmd() *cobra.Command {
 				// Fail fast, before the (comparatively expensive) handoff
 				// render.
 				if forwardedFlagConflict(args, "--no-session") {
-					err := fmt.Errorf("--continue-from opens a session-persisted seeded run, but you forwarded --no-session — drop it (observer's goose adapter captures via sessions.db)")
+					err := fmt.Errorf("--continue-from opens a session-persisted seeded run, but you forwarded --no-session - drop it (observer's goose adapter captures via sessions.db)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer goose: %v\n", err)
 					return err
 				}
@@ -195,7 +195,7 @@ func newGooseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&carry, "carry", "", "Carry mode for --continue-from: metadata|distilled|distilled_tail|full|full_cache (default from [handoff] config)")
 	cmd.Flags().IntVar(&fromMessage, "from-message", 0, "With --continue-from: fork after this 1-based transcript message (default: last message)")
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
-	cmd.Flags().BoolVar(&useProxy, "proxy", false, "Opt in to routing goose's traffic through the observer proxy (sets OPENAI_HOST at the proxy's OpenAI-compatible root; goose appends /v1 itself). WARNING: goose may be pre-configured to a non-OpenAI provider (e.g. openrouter) — this overrides OPENAI_HOST unconditionally (unless already set in your env) and redirects that provider's traffic to the proxy. Default off.")
+	cmd.Flags().BoolVar(&useProxy, "proxy", false, "Opt in to routing goose's traffic through the observer proxy (sets OPENAI_HOST at the proxy's OpenAI-compatible root; goose appends /v1 itself). WARNING: goose may be pre-configured to a non-OpenAI provider (e.g. openrouter) - this overrides OPENAI_HOST unconditionally (unless already set in your env) and redirects that provider's traffic to the proxy. Default off.")
 	attach, noAttach = registerAttachFlags(cmd, "goose")
 	resume = registerResumeFlag(cmd, "goose")
 	return cmd

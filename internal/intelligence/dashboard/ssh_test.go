@@ -113,7 +113,7 @@ func TestSSHLaunch_Success(t *testing.T) {
 		t.Fatalf("resp = %+v", resp)
 	}
 	if resp.Label != "Client demo" {
-		t.Errorf("label = %q — the tab header must name the system", resp.Label)
+		t.Errorf("label = %q - the tab header must name the system", resp.Label)
 	}
 	if lm.lastSpec.Profile != "demo-box" {
 		t.Fatalf("spec = %+v", lm.lastSpec)
@@ -219,7 +219,7 @@ func TestSSHRouteIsLocalOnly(t *testing.T) {
 		t.Fatal("/api/terminal/ssh is not in the route-capability registry")
 	}
 	if got != CapabilityLocal {
-		t.Fatalf("/api/terminal/ssh capability = %v, want CapabilityLocal — an SSH shell into a third-party machine must not be remote-drivable", got)
+		t.Fatalf("/api/terminal/ssh capability = %v, want CapabilityLocal - an SSH shell into a third-party machine must not be remote-drivable", got)
 	}
 	// Contrast pin: the ordinary terminal launch really is EXECUTE, so this
 	// test asserts a genuine difference rather than a tautology.

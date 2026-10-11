@@ -193,7 +193,7 @@ func (c *netClaim) apply(handle *processobs.NetworkAccounting, h Hello) {
 	if !processobs.KnownNetworkAccountingMode(mode) {
 		mode = processobs.NetworkAccountingUnavailable
 		reason = fmt.Sprintf(
-			"the cross-OS process capturer reported an unrecognised network-accounting mode %q — "+
+			"the cross-OS process capturer reported an unrecognised network-accounting mode %q - "+
 				"treated as unmeasured; upgrade the two halves to the same observer build",
 			clampRemoteText(h.NetworkAccountingMode),
 		)

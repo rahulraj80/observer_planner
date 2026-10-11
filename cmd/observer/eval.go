@@ -21,7 +21,7 @@ import (
 func newEvalCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "eval",
-		Short: "Score captured trajectories — datasets + code/LLM-judge scorers (obs eval plane)",
+		Short: "Score captured trajectories - datasets + code/LLM-judge scorers (obs eval plane)",
 		Long: "The minimal eval plane over captured trajectories (requires\n" +
 			"[observability] enabled). Build a dataset from recent LLM spans, then\n" +
 			"run scorers over it; `eval run --fail-under` is the CI regression gate.",
@@ -97,7 +97,7 @@ func newEvalDatasetListCmd() *cobra.Command {
 				return enc.Encode(rows)
 			}
 			if len(rows) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no datasets yet — create one with `observer eval dataset create-from-traces <name>`")
+				fmt.Fprintln(cmd.OutOrStdout(), "no datasets yet - create one with `observer eval dataset create-from-traces <name>`")
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
@@ -184,7 +184,7 @@ func newEvalScorersCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			names := obsEvalScorerNames()
 			if len(names) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "(none — this binary was built without observability)")
+				fmt.Fprintln(cmd.OutOrStdout(), "(none - this binary was built without observability)")
 				return nil
 			}
 			for _, n := range names {

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_integration_mcp_server
+
 package main
 
 import (
@@ -101,8 +103,8 @@ func newContractCmd() *cobra.Command {
 			"tool with its published tier (stable / conditional / experimental)\n" +
 			"and every adapter's public capability row. Pass --json for the\n" +
 			"machine-readable artifact, which carries a contract_version an\n" +
-			"integrator can pin. The prose contract — what each tier actually\n" +
-			"promises — lives in docs/mcp-contract.md; this command and that doc\n" +
+			"integrator can pin. The prose contract - what each tier actually\n" +
+			"promises - lives in docs/mcp-contract.md; this command and that doc\n" +
 			"read the same Go table, so they cannot drift.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -207,5 +209,5 @@ func renderContract(w io.Writer, doc contractDoc) {
 	fmt.Fprintf(w, "%d adapter capability rows (see `observer adapters` for the full matrix).\n", len(doc.Adapters))
 	fmt.Fprintln(w, "\nWhat each tier promises: docs/mcp-contract.md")
 	fmt.Fprintln(w, "Machine-readable artifact: `observer contract --json`")
-	fmt.Fprintln(w, "The dashboard HTTP API is NOT part of this contract — integrate over MCP.")
+	fmt.Fprintln(w, "The dashboard HTTP API is NOT part of this contract - integrate over MCP.")
 }

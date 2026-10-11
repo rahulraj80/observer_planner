@@ -1,0 +1,37 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "groups": "VerifiedOfficial",
+    "groups[]": "VerifiedOfficial",
+    "groups[].createdAt": "VerifiedOfficial",
+    "groups[].creatorId": "VerifiedOfficial",
+    "groups[].description": "VerifiedOfficial",
+    "groups[].displayName": "VerifiedOfficial",
+    "groups[].id": "VerifiedOfficial",
+    "groups[].isManaged": "VerifiedOfficial",
+    "groups[].memberCount": "VerifiedOfficial",
+    "groups[].organizationId": "VerifiedOfficial",
+    "groups[].source": "VerifiedOfficial",
+    "groups[].updatedAt": "VerifiedOfficial",
+    "maxResults": "VerifiedOfficial",
+    "nextToken": "VerifiedOfficial"
+  },
+  "fixture_sha256": "4beef016434cfeacac3568d691e1a3a7ada0270c22caa0fcb47d36d7f5588f58",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/{organization_id}/groups",
+    "query": {
+      "maxResults": "100"
+    },
+    "status": 200
+  },
+  "notes": "The documented 'List groups' response example, verbatim.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Qoder Teams OpenAPI Group APIs (groups.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "46514112b32fba48cbc5c94733ae3833e5cfc6f99c297469a875b86fe2d94cb3",
+  "source_url": "https://docs.qoder.com/account/teams/openapi/groups.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "qoder.oapi.groups"
+}

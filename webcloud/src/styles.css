@@ -513,53 +513,10 @@ a {
 }
 
 /* ============================================================
-   Sign-in / consent: the AuthShell recipe (components/AuthShell.tsx).
-   One backdrop for both screens: the shared Aurora, a Blueprint wash and
-   the illustrations' 10px dot grid (shared/styles/illustrations.css draws
-   the same grid inside each EmptyIllustration), here as a CSS background
-   at twice the pitch, faded out towards the edges. Tokens only.
+   Sign-in / consent: the backdrop, lockup and card are the shared
+   AuthShell (shared/components/auth/AuthShell.tsx); only the portal's
+   flow strip under the card is styled here.
    ============================================================ */
-.auth-backdrop {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.auth-wash {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    46rem 28rem at 50% 38%,
-    var(--brand-blueprint-soft),
-    transparent 70%
-  );
-}
-
-.auth-grid {
-  --auth-dot: color-mix(in srgb, var(--brand-blueprint) 30%, transparent);
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle, var(--auth-dot) 1px, transparent 1.4px);
-  background-size: 20px 20px;
-  background-position: center;
-  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 42%, #000 20%, transparent 78%);
-  mask-image: radial-gradient(ellipse 75% 65% at 50% 42%, #000 20%, transparent 78%);
-}
-
-:root[data-theme="light"] .auth-grid {
-  --auth-dot: color-mix(in srgb, var(--brand-blueprint) 20%, transparent);
-}
-
-/* The badge's soft Blueprint halo (the kit's brand-badge shadow). */
-.auth-badge {
-  display: inline-flex;
-  border-radius: 22%;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--brand-blueprint) 45%, transparent),
-    0 6px 24px -8px color-mix(in srgb, var(--brand-blueprint) 70%, transparent);
-}
-
 /* device -> preview -> portal: a three-column strip; each step is an icon
    tile plus a label and one line. The current step takes the accent. */
 .auth-steps {

@@ -5,28 +5,43 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+// NonTestFiles parses every non-test .go file in dir (build tags ignored)
+// and returns them keyed by path. It is the replacement for the deprecated
+// parser.ParseDir that source-scanning tests share.
+func NonTestFiles(dir string) (map[string]*ast.File, error) {
+	return parsePkg(dir)
+}
 
 // parsePkg parses the non-test Go files in dir. Test files are excluded on
 // purpose: a conformance test must read the SHIPPING classifier, never a
 // fixture that happens to sit beside it.
 func parsePkg(dir string) (map[string]*ast.File, error) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	// Every non-test .go file regardless of build tags, the set the
+	// deprecated parser.ParseDir used to return.
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("conformast.parsePkg(%s): %w", dir, err)
 	}
 	files := make(map[string]*ast.File)
-	for _, p := range pkgs {
-		for name, f := range p.Files {
-			files[name] = f
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
 		}
+		path := filepath.Join(dir, name)
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return nil, fmt.Errorf("conformast.parsePkg(%s): %w", dir, err)
+		}
+		files[path] = f
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("conformast.parsePkg(%s): no non-test Go files", dir)

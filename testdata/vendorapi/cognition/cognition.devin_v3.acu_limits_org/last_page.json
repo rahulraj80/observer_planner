@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "cycle_acu_limit": 1500,
+      "scope": "org",
+      "org_id": "org_synth02",
+      "user_id": null
+    }
+  ],
+  "has_next_page": false,
+  "end_cursor": null,
+  "total": 3
+}

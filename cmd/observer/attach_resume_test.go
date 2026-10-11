@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !sbo_omit_terminals
 
 package main
 
@@ -634,7 +634,7 @@ func TestAttachHubCorrelationDelivery(t *testing.T) {
 	// (which the producer fires from EndRunByHandle) clears the live view.
 	feed.Publish(termfeed.Event{Kind: exitKind, RunID: "R1", At: time.Now()})
 	if !hub.sessionLive("sess-real") {
-		t.Fatal("a feed-published term:exit must NOT clear liveness — correctness rides NotifyExit, not the feed")
+		t.Fatal("a feed-published term:exit must NOT clear liveness - correctness rides NotifyExit, not the feed")
 	}
 	hub.NotifyExit("R1")
 	if hub.sessionLive("sess-real") {
@@ -1064,7 +1064,7 @@ func TestAttachHubYoungTombstoneSurvivesFloodBeforePin(t *testing.T) {
 	released := false
 	hub.releaseOnExit(run, func() { released = true })
 	if !released {
-		t.Fatal("releaseOnExit must fire immediately — the young tombstone survived the pre-pin flood")
+		t.Fatal("releaseOnExit must fire immediately - the young tombstone survived the pre-pin flood")
 	}
 	hub.unpinTombstone(run)
 	if hub.sessionLive(sid) {

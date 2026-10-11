@@ -60,6 +60,12 @@ func allLauncherVerbs() []struct {
 		{"droid", "droid", newDroidCmd()},
 		{"open-interpreter", "open-interpreter", newOpenInterpreterCmd()},
 		{"command-code", "command-code", newCommandCodeCmd()},
+		// The 2026-10-03 terminal-picker coverage wave (doc-assisted),
+		// wired with attach from the start — hard-enforced below.
+		{"aider", "aider", newAiderCmd()},
+		{"crush", "crush", newCrushCmd()},
+		{"junie", "junie", newJunieCmd()},
+		{"pool", "poolside", newPoolCmd()},
 	}
 }
 
@@ -84,6 +90,8 @@ func TestEveryLauncherRegistersAttachFlags(t *testing.T) {
 		// The 2026-07-29 wave was wired with attach from the start, so it
 		// joins the hard-enforced set rather than the EXPECTED-PENDING tail.
 		"droid": true, "open-interpreter": true, "command-code": true,
+		// The 2026-10-03 doc-assisted wave, likewise wired with attach.
+		"aider": true, "crush": true, "junie": true, "pool": true,
 	}
 	for _, lv := range allLauncherVerbs() {
 		lv := lv
@@ -268,7 +276,7 @@ func TestEveryLaunchCapabilityIsRegisteredOnRoot(t *testing.T) {
 		t.Run(verb, func(t *testing.T) {
 			cmd, ok := byName[verb]
 			if !ok {
-				t.Fatalf("adapter %q declares Launch.Subcommand %q, but newRootCmd() registers no command with that Name() — the AddCommand wiring or the command's Use field drifted (registered: %v)",
+				t.Fatalf("adapter %q declares Launch.Subcommand %q, but newRootCmd() registers no command with that Name() - the AddCommand wiring or the command's Use field drifted (registered: %v)",
 					capab.Tool, verb, sortedCommandNames(byName))
 			}
 			// Name() is derived from Use, so this also pins that Use's first
@@ -293,7 +301,7 @@ func TestEveryLaunchCapabilityIsRegisteredOnRoot(t *testing.T) {
 	}
 	// Guard against a vacuous pass if Capabilities() ever comes back empty.
 	if launchable < len(allLauncherVerbs()) {
-		t.Fatalf("registry reported only %d launchable adapters, but %d launcher verbs are wired — the registry lost Launch rows",
+		t.Fatalf("registry reported only %d launchable adapters, but %d launcher verbs are wired - the registry lost Launch rows",
 			launchable, len(allLauncherVerbs()))
 	}
 }

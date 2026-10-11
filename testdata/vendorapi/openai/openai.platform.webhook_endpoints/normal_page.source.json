@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].event_types": "VerifiedOfficial",
+    "data[].event_types[]": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].name": "VerifiedOfficial",
+    "data[].object": "VerifiedOfficial",
+    "data[].signing_secret_hint": "VerifiedOfficial",
+    "data[].updated_at": "VerifiedOfficial",
+    "data[].url": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "last_id": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "84ad0ef094bb29fbee4ee505d8221f0cfa386c346bc15fd724f44de43c0f9b52",
+  "http": {
+    "method": "GET",
+    "path": "/v1/webhook_endpoints",
+    "status": 200
+  },
+  "notes": "Synthesized from the declared 200 schema of operationId ListWebhookEndpoints (the reference example is not valid JSON); structure is official, values are placeholders.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.webhook_endpoints"
+}

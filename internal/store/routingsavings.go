@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // Router-savings aggregation (§R17.3) — shared by the CLI and the
@@ -46,7 +46,7 @@ const RouterSavingsNote = "realized = decision-time estimates on applied rewrite
 
 // BuildRouterSavingsReport aggregates decision rows. Pure — testable
 // without a DB.
-func BuildRouterSavingsReport(rows []RouterDecisionDetail, windowDays int, tiers *routing.TierTable) RouterSavingsReport {
+func BuildRouterSavingsReport(rows []RouterDecisionDetail, windowDays int, tiers *routingcore.TierTable) RouterSavingsReport {
 	rep := RouterSavingsReport{WindowDays: windowDays, Note: RouterSavingsNote}
 	byProject := map[string][]RouterDecisionDetail{}
 	byTool := map[string][]RouterDecisionDetail{}

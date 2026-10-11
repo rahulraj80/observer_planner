@@ -268,7 +268,7 @@ func TestTaskActionGrantsRefusedByAllCompilers(t *testing.T) {
 					msg = p.Message
 				}
 			}
-			for _, want := range []string{string(a), "A2 front", "method_name None", "R8.30.g", "default-den"} {
+			for _, want := range []string{string(a), "A2 front", "mcp.methodName", "v1.6.0", "R8.30.g", "default-den"} {
 				if !strings.Contains(msg, want) {
 					t.Fatalf("message lacks %q: %s", want, msg)
 				}
@@ -288,12 +288,15 @@ func TestTaskActionGrantsRefusedByAllCompilers(t *testing.T) {
 }
 
 // TestCELTaskObjectCarriesNoMethodDiscriminator documents WHY task grants
-// are refused: the agentgateway CEL context for a task request is
+// are refused: the activation the compilers condition a task rule on is
 // mcp.task{target,name} (crates/agentgateway/src/mcp/mod.rs
-// MCPInfo::from(&ResourceType) leaves method_name None) and every task
-// method builds the identical resource, so the activations for tasks/get,
-// tasks/update and tasks/cancel are indistinguishable and one rule matches
-// all three.
+// MCPInfo::from(&ResourceType)) and every task method builds the identical
+// resource, so for those fields tasks/get, tasks/update and tasks/cancel are
+// indistinguishable and one rule matches all three. The pinned agentgateway
+// v1.6.0 additionally sets mcp.methodName (rbac.rs
+// McpAuthorizationSet::validate, T-749); Activation does not model it
+// because no compiler emits it yet, which is exactly the gap the refusal
+// covers.
 func TestCELTaskObjectCarriesNoMethodDiscriminator(t *testing.T) {
 	get := Activation(EvalInput{VServer: "vs-gh", Action: ActionTasksGet, Name: "task-1", Server: "gh"})
 	update := Activation(EvalInput{VServer: "vs-gh", Action: ActionTasksUpdate, Name: "task-1", Server: "gh"})

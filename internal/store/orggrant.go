@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 )
 
 // Admin-controlled Plane B, the enrolment-grant store seam
@@ -68,6 +70,64 @@ type EnrolmentGrant struct {
 	// either the original enrolment grant or has never been superseded).
 	// ReplaceEnrolmentGrant is the only writer that advances it.
 	ReplacementGeneration int64
+	// InitialComponents is the grant's signed initial component set
+	// (migration 159, modular packaging P4), nil when the grant carried
+	// none. It is bound into the enrolment grant's signature, so it is
+	// written with the grant and read back for every re-verification.
+	// ReplaceEnrolmentGrant writes the replacement's set when the
+	// replacement carried one (T-707, stored with the signature that covers
+	// it) and keeps the stored set when it did not (clearing it would widen
+	// the node to its whole compiled set). A kept set is stored WITH its
+	// proof, InitialComponentsProof below, because the replacement's own
+	// signature never covered it.
+	InitialComponents *orgcontract.InitialComponentSet
+	// InitialComponentsProof is set only when InitialComponents was kept
+	// from an earlier grant: that grant's document, exactly as it was
+	// stored, whose signature covers the set (orgcontract
+	// StoredGrantDocument.InitialProof, MODPKG-17 (1)). It rides in the same
+	// column as the set. Written only by ReplaceEnrolmentGrant.
+	InitialComponentsProof *orgcontract.StoredGrantDocument
+}
+
+// encodeInitialComponents renders the nullable column value (the set plus a
+// kept set's proof, orgcontract.EncodeStoredInitialComponents).
+func encodeInitialComponents(s *orgcontract.InitialComponentSet, proof *orgcontract.StoredGrantDocument) (sql.NullString, error) {
+	raw, ok, err := orgcontract.EncodeStoredInitialComponents(s, proof)
+	if err != nil || !ok {
+		return sql.NullString{}, err
+	}
+	return sql.NullString{String: raw, Valid: true}, nil
+}
+
+// decodeInitialComponents reads the nullable column value. A corrupt value
+// decodes to an EMPTY set (core only) rather than nil: the fail-safe
+// direction for a set the organization signed is less, never the whole
+// compiled set.
+func decodeInitialComponents(v sql.NullString) (*orgcontract.InitialComponentSet, *orgcontract.StoredGrantDocument) {
+	if !v.Valid {
+		return nil, nil
+	}
+	return orgcontract.DecodeStoredInitialComponents(v.String)
+}
+
+// grantDocument is the signed document a stored grant row is, in the shape
+// orgcontract.VerifyStoredGrant re-verifies: the signed window, the stored
+// signature and the set. It is what a set-less replacement keeps as the
+// proof of the set it keeps.
+func grantDocument(g EnrolmentGrant) *orgcontract.StoredGrantDocument {
+	return &orgcontract.StoredGrantDocument{
+		OrgID:                 g.OrgID,
+		OrgServerURL:          g.OrgServerURL,
+		KeyPinSHA256:          g.KeyPinSHA256,
+		Authority:             append([]string{}, g.Authority...),
+		GrantedAt:             formatGrantTime(g.GrantedAt),
+		ExpiresAt:             formatGrantTime(g.SignedExpiresAt),
+		ConsentMode:           g.ConsentMode,
+		ConsentActor:          g.ConsentActor,
+		InitialComponents:     g.InitialComponents,
+		Signature:             g.Signature,
+		ReplacementGeneration: g.ReplacementGeneration,
+	}
 }
 
 // WriteEnrolmentGrant stores (or replaces) the grant for one enrolment
@@ -95,13 +155,19 @@ func (s *Store) WriteEnrolmentGrant(ctx context.Context, g EnrolmentGrant) error
 	if signedExpiry.IsZero() {
 		signedExpiry = g.ExpiresAt
 	}
+	// A new enrolment's grant signs its own set: no proof is ever written
+	// here.
+	initial, err := encodeInitialComponents(g.InitialComponents, nil)
+	if err != nil {
+		return fmt.Errorf("store.WriteEnrolmentGrant: %w", err)
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO org_enrolment_grant
 		  (org_key, generation, org_id, org_name, org_server_url, key_pin_sha256,
 		   authority_json, consent_mode, consent_actor, granted_at, expires_at,
 		   signed_expires_at, last_renewed_at, signature, receipt_hash,
-		   replacement_generation)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   replacement_generation, initial_components_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(org_key) DO UPDATE SET
 		   generation     = excluded.generation,
 		   org_id         = excluded.org_id,
@@ -124,12 +190,14 @@ func (s *Store) WriteEnrolmentGrant(ctx context.Context, g EnrolmentGrant) error
 		   -- A whole new enrolment (this path, not ReplaceEnrolmentGrant)
 		   -- resets the replacement counter too: it is a fresh epoch's
 		   -- grant, with no replacements yet accepted against it.
-		   replacement_generation = excluded.replacement_generation`,
+		   replacement_generation = excluded.replacement_generation,
+		   -- A new enrolment's grant carries its own set (or none).
+		   initial_components_json = excluded.initial_components_json`,
 		g.OrgKey, g.Generation, g.OrgID, g.OrgName, g.OrgServerURL, g.KeyPinSHA256,
 		string(raw), g.ConsentMode, g.ConsentActor,
 		formatGrantTime(g.GrantedAt), formatGrantTime(g.ExpiresAt),
 		formatGrantTime(signedExpiry), formatGrantTime(g.LastRenewedAt),
-		g.Signature, g.ReceiptHash, g.ReplacementGeneration)
+		g.Signature, g.ReceiptHash, g.ReplacementGeneration, initial)
 	if err != nil {
 		return fmt.Errorf("store.WriteEnrolmentGrant: %w", err)
 	}
@@ -148,18 +216,20 @@ func loadEnrolmentGrant(ctx context.Context, q querier, orgKey string) (Enrolmen
 		authority                    string
 		grantedAt, expiry            string
 		signedExpiry, lastRenewedRaw string
+		initial                      sql.NullString
 	)
 	g.OrgKey = orgKey
 	err := q.QueryRowContext(ctx, `
 		SELECT generation, org_id, org_name, org_server_url, key_pin_sha256,
 		       authority_json, consent_mode, consent_actor, granted_at, expires_at,
 		       signed_expires_at, last_renewed_at, signature, receipt_hash,
-		       replacement_generation
+		       replacement_generation, initial_components_json
 		  FROM org_enrolment_grant WHERE org_key = ?`, orgKey).
 		Scan(&g.Generation, &g.OrgID, &g.OrgName, &g.OrgServerURL, &g.KeyPinSHA256,
 			&authority, &g.ConsentMode, &g.ConsentActor, &grantedAt, &expiry,
 			&signedExpiry, &lastRenewedRaw, &g.Signature, &g.ReceiptHash,
-			&g.ReplacementGeneration)
+			&g.ReplacementGeneration, &initial)
+	g.InitialComponents, g.InitialComponentsProof = decodeInitialComponents(initial)
 	if errors.Is(err, sql.ErrNoRows) {
 		return EnrolmentGrant{}, false, nil
 	}
@@ -274,13 +344,39 @@ func (s *Store) ReplaceEnrolmentGrant(ctx context.Context, g EnrolmentGrant) (ap
 	if signedExpiry.IsZero() {
 		signedExpiry = g.ExpiresAt
 	}
+	// The set this row will hold, and its proof (MODPKG-17 (1), REVIEW-4
+	// P4-10). A replacement that carries its own set stores it under the
+	// signature that covers it: no proof. A set-less replacement keeps the
+	// stored set (clearing it would widen the node to its whole compiled
+	// set), and because its own signature never covered that set, it keeps
+	// the earlier grant document that did: the stored row itself when its
+	// signature covers the set, or that row's own proof when its set was
+	// already kept. Read inside this transaction so the set and its proof are
+	// the ones being superseded, never a concurrent writer's.
+	set, proof := g.InitialComponents, (*orgcontract.StoredGrantDocument)(nil)
+	if set == nil {
+		existing, ok, lerr := loadEnrolmentGrant(ctx, tx, g.OrgKey)
+		if lerr != nil {
+			return false, fmt.Errorf("store.ReplaceEnrolmentGrant: read kept set: %w", lerr)
+		}
+		if ok && existing.InitialComponents != nil {
+			set, proof = existing.InitialComponents, existing.InitialComponentsProof
+			if proof == nil {
+				proof = grantDocument(existing)
+			}
+		}
+	}
+	initial, err := encodeInitialComponents(set, proof)
+	if err != nil {
+		return false, fmt.Errorf("store.ReplaceEnrolmentGrant: %w", err)
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO org_enrolment_grant
 		  (org_key, generation, org_id, org_name, org_server_url, key_pin_sha256,
 		   authority_json, consent_mode, consent_actor, granted_at, expires_at,
 		   signed_expires_at, last_renewed_at, signature, receipt_hash,
-		   replacement_generation)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   replacement_generation, initial_components_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(org_key) DO UPDATE SET
 		   -- generation (the P0-5 enrolment-identity fence) is intentionally
 		   -- absent from this SET list: a replacement supersedes authority
@@ -299,12 +395,15 @@ func (s *Store) ReplaceEnrolmentGrant(ctx context.Context, g EnrolmentGrant) (ap
 		   last_renewed_at        = excluded.last_renewed_at,
 		   signature              = excluded.signature,
 		   receipt_hash           = excluded.receipt_hash,
-		   replacement_generation = excluded.replacement_generation`,
+		   replacement_generation = excluded.replacement_generation,
+		   -- The replacement's own signed set (T-707), or the kept set with
+		   -- its proof, both resolved above inside this transaction.
+		   initial_components_json = excluded.initial_components_json`,
 		g.OrgKey, g.Generation, g.OrgID, g.OrgName, g.OrgServerURL, g.KeyPinSHA256,
 		string(raw), g.ConsentMode, g.ConsentActor,
 		formatGrantTime(g.GrantedAt), formatGrantTime(g.ExpiresAt),
 		formatGrantTime(signedExpiry), formatGrantTime(g.LastRenewedAt),
-		g.Signature, g.ReceiptHash, g.ReplacementGeneration)
+		g.Signature, g.ReceiptHash, g.ReplacementGeneration, initial)
 	if err != nil {
 		return false, fmt.Errorf("store.ReplaceEnrolmentGrant: %w", err)
 	}

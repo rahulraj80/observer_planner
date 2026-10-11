@@ -44,11 +44,11 @@ func newGrokCmd() *cobra.Command {
 		Use:   "grok [-- grok-args...]",
 		Short: "Launch Grok Build; with --continue-from, seed a handover as grok's positional prompt",
 		Long: "Wraps xAI's Grok Build terminal agent (`grok`). NON-PROXIED BY\n" +
-			"DEFAULT — token capture happens via observer's local grok adapter\n" +
+			"DEFAULT - token capture happens via observer's local grok adapter\n" +
 			"(session bundles + the sid-correlated unified.jsonl token log), not\n" +
 			"the proxy. Pass --proxy to opt in: this injects\n" +
 			"GROK_CLI_CHAT_PROXY_BASE_URL pointed at the observer proxy's\n" +
-			"/up/grok upstream (a live, verified route — api_turns id 23025) so\n" +
+			"/up/grok upstream (a live, verified route - api_turns id 23025) so\n" +
 			"grok's traffic to cli-chat-proxy.grok.com is captured + compressed.\n\n" +
 			"grok supports a top-level `--model` flag to select which model\n" +
 			"the session uses (pass it after `--` with your other grok args).\n\n" +
@@ -143,6 +143,11 @@ func newGrokCmd() *cobra.Command {
 			cfg, cErr := config.Load(config.LoadOptions{GlobalPath: configPath})
 			if cErr != nil {
 				return fmt.Errorf("load config: %w", cErr)
+			}
+			// The /up/<id> lane the registry row declares must resolve, or
+			// every request would be refused (Sol A5-02).
+			if err := requireRouteLane(cfg, "grok", "grok", "launch without --proxy"); err != nil {
+				return err
 			}
 			resolved := resolveProxyURL(cfg.Proxy.Port, "")
 			return runEnvLauncher(envLauncherSpec{

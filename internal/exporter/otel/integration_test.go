@@ -185,3 +185,47 @@ func names(spans []*tracepb.Span) []string {
 	}
 	return out
 }
+
+// TestNewTracerProvider_PathlessEndpointURLPostsToV1Traces pins the T-688
+// otel v1.45.0 upgrade: since v1.45.0 otlptracehttp.WithEndpointURL sends a
+// URL with no path to "/" instead of the default "/v1/traces". Observer's
+// configured endpoints ("http://collector:4318", the self-observability
+// gateway URL) have always meant the default signal path, so a path-less URL
+// must still POST to /v1/traces, while an explicit path is kept as written.
+func TestNewTracerProvider_PathlessEndpointURLPostsToV1Traces(t *testing.T) {
+	for _, c := range []struct {
+		suffix, want string
+	}{
+		{"", "/v1/traces"},
+		{"/custom/v1/traces", "/custom/v1/traces"},
+	} {
+		var mu sync.Mutex
+		var paths []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			paths = append(paths, r.URL.Path)
+			mu.Unlock()
+			out, _ := proto.Marshal(&coltracepb.ExportTraceServiceResponse{})
+			w.Header().Set("Content-Type", "application/x-protobuf")
+			_, _ = w.Write(out)
+		}))
+		tp, err := NewTracerProvider(Config{Endpoint: srv.URL + c.suffix, ServiceName: "t"})
+		if err != nil {
+			srv.Close()
+			t.Fatalf("NewTracerProvider: %v", err)
+		}
+		_, span := tp.Tracer("t").Start(context.Background(), "s")
+		span.End()
+		if err := tp.ForceFlush(context.Background()); err != nil {
+			t.Errorf("endpoint %q: flush: %v", srv.URL+c.suffix, err)
+		}
+		_ = tp.Shutdown(context.Background())
+		srv.Close()
+		mu.Lock()
+		got := append([]string(nil), paths...)
+		mu.Unlock()
+		if len(got) == 0 || got[0] != c.want {
+			t.Errorf("endpoint suffix %q: POSTed to %v, want %s", c.suffix, got, c.want)
+		}
+	}
+}

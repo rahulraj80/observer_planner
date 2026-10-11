@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/marmutapp/superbased-observer/internal/integration"
 )
 
 // HermesMCPServerName is the key we write under config.yaml's
@@ -31,6 +33,15 @@ const HermesMCPServerName = "superbased-observer"
 // existing list, no-op when the entry is already present. Creates
 // the `plugins:` and `plugins.enabled:` keys when absent.
 func RegisterHermesPluginEnabled(opts HermesOptions) (string, error) {
+	path, err := registerHermesPluginEnabled(opts)
+	if hooksShareCredentialFile("hermes") {
+		err = credentialSafeError("hermes", path, err)
+	}
+	return path, err
+}
+
+// registerHermesPluginEnabled is RegisterHermesPluginEnabled's body.
+func registerHermesPluginEnabled(opts HermesOptions) (string, error) {
 	configPath, err := hermesConfigPath(opts)
 	if err != nil {
 		return "", err
@@ -58,7 +69,7 @@ func RegisterHermesPluginEnabled(opts HermesOptions) (string, error) {
 	if opts.DryRun {
 		return configPath, nil
 	}
-	if err := writeYAMLMap(configPath, doc); err != nil {
+	if err := writeHermesPluginsYAML(configPath, doc); err != nil {
 		return configPath, fmt.Errorf("hook.RegisterHermesPluginEnabled: write: %w", err)
 	}
 	return configPath, nil
@@ -70,6 +81,15 @@ func RegisterHermesPluginEnabled(opts HermesOptions) (string, error) {
 // would otherwise be empty; removes the `plugins` key when IT would
 // otherwise be empty.
 func UnregisterHermesPluginEnabled(opts HermesOptions) (string, error) {
+	path, err := unregisterHermesPluginEnabled(opts)
+	if hooksShareCredentialFile("hermes") {
+		err = credentialSafeError("hermes", path, err)
+	}
+	return path, err
+}
+
+// unregisterHermesPluginEnabled is UnregisterHermesPluginEnabled's body.
+func unregisterHermesPluginEnabled(opts HermesOptions) (string, error) {
 	configPath, err := hermesConfigPath(opts)
 	if err != nil {
 		return "", err
@@ -113,7 +133,7 @@ func UnregisterHermesPluginEnabled(opts HermesOptions) (string, error) {
 	if opts.DryRun {
 		return configPath, nil
 	}
-	if err := writeYAMLMap(configPath, doc); err != nil {
+	if err := writeHermesPluginsYAML(configPath, doc); err != nil {
 		return configPath, fmt.Errorf("hook.UnregisterHermesPluginEnabled: write: %w", err)
 	}
 	return configPath, nil
@@ -126,16 +146,19 @@ func UnregisterHermesPluginEnabled(opts HermesOptions) (string, error) {
 // top-level keys (inference, plugins, gateway, …) and other
 // mcp_servers.* siblings are preserved verbatim.
 //
-// Important: yaml.v3's unmarshal-into-map round-trip DOES lose
-// comments and the original key order. Most Hermes operators don't
-// hand-edit comments into config.yaml (the file is mostly generated
-// from `hermes config set` and `hermes setup`), but operators with
-// extensively-commented configs will lose that polish. Upgrade path:
-// switch to yaml.Node for preservation in a follow-up. Tracked in
-// docs/plans/hermes-adapter-implementation-plan-2026-06-05.md.
+// config.yaml holds provider keys, so the write edits only the
+// mcp_servers node (writeHermesMCPYAML, the credential-file rules):
+// comments, key order and every other value survive, and no backup copy
+// of the file is made (review T-384).
 //
 // Returns the path of the config file written and any error.
 func RegisterHermesMCP(opts HermesOptions) (string, error) {
+	path, err := registerHermesMCP(opts)
+	return path, credentialSafeError("hermes MCP", path, err)
+}
+
+// registerHermesMCP is RegisterHermesMCP's body.
+func registerHermesMCP(opts HermesOptions) (string, error) {
 	configPath, err := hermesConfigPath(opts)
 	if err != nil {
 		return "", err
@@ -164,7 +187,7 @@ func RegisterHermesMCP(opts HermesOptions) (string, error) {
 	if opts.DryRun {
 		return configPath, nil
 	}
-	if err := writeYAMLMap(configPath, doc); err != nil {
+	if err := writeHermesMCPYAML(configPath, doc); err != nil {
 		return configPath, fmt.Errorf("hook.RegisterHermesMCP: write: %w", err)
 	}
 	return configPath, nil
@@ -178,6 +201,12 @@ func RegisterHermesMCP(opts HermesOptions) (string, error) {
 // Other mcp_servers.* siblings are left untouched; the `mcp_servers`
 // key is removed entirely only when it would otherwise be empty.
 func UnregisterHermesMCP(opts HermesOptions) (string, error) {
+	path, err := unregisterHermesMCP(opts)
+	return path, credentialSafeError("hermes MCP", path, err)
+}
+
+// unregisterHermesMCP is UnregisterHermesMCP's body.
+func unregisterHermesMCP(opts HermesOptions) (string, error) {
 	configPath, err := hermesConfigPath(opts)
 	if err != nil {
 		return "", err
@@ -210,7 +239,7 @@ func UnregisterHermesMCP(opts HermesOptions) (string, error) {
 	if opts.DryRun {
 		return configPath, nil
 	}
-	if err := writeYAMLMap(configPath, doc); err != nil {
+	if err := writeHermesMCPYAML(configPath, doc); err != nil {
 		return configPath, fmt.Errorf("hook.UnregisterHermesMCP: write: %w", err)
 	}
 	return configPath, nil
@@ -283,7 +312,7 @@ func backupYAMLConfig(path string) (os.FileMode, error) {
 	if err != nil {
 		return mode, fmt.Errorf("backupYAMLConfig: read: %w", err)
 	}
-	if err := os.WriteFile(path+".bak", data, mode); err != nil {
+	if err := os.WriteFile(path+".bak", data, mode); err != nil { //nolint:gosec // G703: the operator's own hermes config path
 		return mode, fmt.Errorf("backupYAMLConfig: write backup: %w", err)
 	}
 	return mode, nil
@@ -315,4 +344,30 @@ func writeYAMLMap(path string, m map[string]any) error {
 		return err
 	}
 	return os.WriteFile(path, out, mode)
+}
+
+// writeHermesPluginsYAML is the plugins.enabled write. Hermes keeps that
+// list in config.yaml beside provider keys, so under the D-268
+// credential-file exception only the top-level "plugins" node is edited
+// (writeCredentialYAMLKey: comments and every other key kept, mode kept, no
+// backup); without the exception it is writeYAMLMap.
+func writeHermesPluginsYAML(path string, doc map[string]any) error {
+	if !hooksShareCredentialFile("hermes") {
+		return writeYAMLMap(path, doc)
+	}
+	return writeCredentialYAMLKey(pinWriteTarget(path), "plugins", doc)
+}
+
+// writeHermesMCPYAML is the mcp_servers write. config.yaml holds provider
+// keys, so the MCP writer follows the same credential-file rules as the
+// plugins write (review T-384): only a row declaring the file
+// (integration.MCPTarget.SharesCredentialFile) may write it, only the
+// top-level "mcp_servers" node changes (comments, key order and every
+// other value kept), the mode is kept, and no backup copy of the file is
+// made.
+func writeHermesMCPYAML(path string, doc map[string]any) error {
+	if !integration.MCPSharesCredentialFile("hermes") {
+		return safeErrorf("hook.RegisterHermesMCP: the registry row does not declare %s for MCP; nothing was written", path)
+	}
+	return writeCredentialYAMLKey(pinWriteTarget(path), "mcp_servers", doc)
 }

@@ -1,0 +1,40 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "Resources": "Inferred",
+    "Resources[]": "VerifiedOfficial",
+    "Resources[].active": "VerifiedOfficial",
+    "Resources[].displayName": "VerifiedOfficial",
+    "Resources[].emails": "VerifiedOfficial",
+    "Resources[].emails[]": "VerifiedOfficial",
+    "Resources[].emails[].primary": "VerifiedOfficial",
+    "Resources[].emails[].type": "VerifiedOfficial",
+    "Resources[].emails[].value": "VerifiedOfficial",
+    "Resources[].id": "VerifiedOfficial",
+    "Resources[].schemas": "VerifiedOfficial",
+    "Resources[].userName": "VerifiedOfficial",
+    "itemsPerPage": "VerifiedOfficial",
+    "schemas": "VerifiedOfficial",
+    "startIndex": "VerifiedOfficial",
+    "totalResults": "VerifiedOfficial"
+  },
+  "fixture_sha256": "fd79e11e7dd9ca2f2bc3935b653a39a5af6fdeeaedb97da91f48958520e7b1ff",
+  "http": {
+    "method": "GET",
+    "path": "/api/rest/scim2/Users",
+    "query": {
+      "startIndex": "3",
+      "count": "100"
+    },
+    "status": 200
+  },
+  "notes": "The last page of the same ListResponse (startIndex 3, the third user), synthesized.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "RFC 7644 (SCIM 2.0 protocol) sections 3.4.2 and 3.12, with RFC 7643 section 8.2 user attributes",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b9078e016c98b86934a23c80926b74fc8b59885ab2943729ec2493c17488a09b",
+  "source_url": "https://www.rfc-editor.org/rfc/rfc7644.txt",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "jetbrains.hub.scim2"
+}

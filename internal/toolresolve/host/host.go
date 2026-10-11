@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
-	"github.com/marmutapp/superbased-observer/internal/shellwrap"
+	"github.com/marmutapp/superbased-observer/internal/shimguard"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve"
 )
 
@@ -102,8 +102,8 @@ func NewEnv(opts Options) toolresolve.Env {
 		// binary: a shim named `claude` runs `observer claude`, so resolving
 		// to it would recurse. The default dir is skipped outright; the
 		// marker catches a shim anywhere else (a custom [shell_wrap].shim_dir).
-		ExcludeDirs:   []string{shellwrap.DefaultShimDir(shellwrap.Host{GOOS: runtime.GOOS, Home: home})},
-		ExcludeMarker: shellwrap.ShimMarker,
+		ExcludeDirs:   shimExcludeDirs(runtime.GOOS, home, foreign),
+		ExcludeMarker: shimguard.ShimMarker,
 	}
 
 	// A Windows daemon has no POSIX login shell to consult; leave LoginPath nil.
@@ -124,6 +124,18 @@ func NewEnv(opts Options) toolresolve.Env {
 	env.NpmPrefix = func() (string, error) { return npmOnce() }
 
 	return env
+}
+
+// shimExcludeDirs is every command-wrapping shim dir a resolution must skip:
+// the native one, and on a WSL daemon each Windows home's own (the WSL bridge
+// target writes <windows home>\.observer\shims, reached here over the drive
+// mount). The marker check catches a shim anywhere else.
+func shimExcludeDirs(goos, home string, foreignWindowsHomes []string) []string {
+	out := []string{shimguard.DefaultShimDir(goos, home)}
+	for _, fh := range foreignWindowsHomes {
+		out = append(out, filepath.Join(fh, ".observer", "shims"))
+	}
+	return out
 }
 
 // readHead reads the first n bytes of path — the bounded reader behind

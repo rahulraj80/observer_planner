@@ -73,7 +73,7 @@ func TestAdvertisedCapabilityVetoesUnadvertisedRows(t *testing.T) {
 				"extensionSupported":  extensionSupported(c.Tool),
 			} {
 				if got {
-					t.Errorf("%s(%q) = true for lifecycle %q — an unadvertised product must never be an "+
+					t.Errorf("%s(%q) = true for lifecycle %q - an unadvertised product must never be an "+
 						"`observer init` target", name, c.Tool, c.Lifecycle.String())
 				}
 			}

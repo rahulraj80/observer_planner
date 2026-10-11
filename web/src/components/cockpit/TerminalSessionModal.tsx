@@ -114,7 +114,7 @@ export default function TerminalSessionModal({
           liveHero
           // This modal is not route state: it opens over WHATEVER page the
           // operator is on, by terminal token, and four of those pages keep their
-          // own (closed) SessionDetailPanel mounted with a `?tab=` cleanup effect.
+          // own (closed) SessionDetailPanel mounted with a `?dtab=` cleanup effect.
           // Sharing the URL slot with them made every tab click here snap back to
           // Overview one commit later. Local tab state instead — see the prop doc.
           urlTabState={false}

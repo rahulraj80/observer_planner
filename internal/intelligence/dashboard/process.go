@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -107,15 +107,15 @@ type ProcessNode struct {
 	// (Linux eBPF backend only; Windows still needs ETW, deferred); the
 	// differentiated, availability-gated network series is what
 	// /api/session/<id>/metrics (handleSessionMetrics) derives from it.
-	CPUMs           int64                     `json:"cpu_ms,omitempty"`
-	WorkingSetBytes int64                     `json:"working_set_bytes,omitempty"`
-	PeakRSSBytes    int64                     `json:"peak_rss_bytes,omitempty"`
-	ReadBytes       int64                     `json:"read_bytes,omitempty"`
-	WriteBytes      int64                     `json:"write_bytes,omitempty"`
-	ThreadCount     int32                     `json:"thread_count,omitempty"`
-	HandleCount     int32                     `json:"handle_count,omitempty"`
-	MetricSamples   []processobs.MetricSample `json:"metric_samples,omitempty"`
-	NetworkCount    int                       `json:"network_count,omitempty"`
+	CPUMs           int64                    `json:"cpu_ms,omitempty"`
+	WorkingSetBytes int64                    `json:"working_set_bytes,omitempty"`
+	PeakRSSBytes    int64                    `json:"peak_rss_bytes,omitempty"`
+	ReadBytes       int64                    `json:"read_bytes,omitempty"`
+	WriteBytes      int64                    `json:"write_bytes,omitempty"`
+	ThreadCount     int32                    `json:"thread_count,omitempty"`
+	HandleCount     int32                    `json:"handle_count,omitempty"`
+	MetricSamples   []procmodel.MetricSample `json:"metric_samples,omitempty"`
+	NetworkCount    int                      `json:"network_count,omitempty"`
 
 	Children []ProcessNode `json:"children"`
 }
@@ -269,7 +269,7 @@ func buildProcessDiagnostics(cfg config.Config, configWritable bool, processRows
 // --- Session resource metrics (GET /api/session/<id>/metrics) --------------
 //
 // The per-process ring buffer on process_runs.metric_samples_json is the raw
-// substrate (processobs.MetricSample). It is NOT directly plottable:
+// substrate (procmodel.MetricSample). It is NOT directly plottable:
 //
 //   - cpu_ms / rb / wb are CUMULATIVE MONOTONIC counters — plotted raw they
 //     are a straight ramp, never a "CPU %" or a "B/s". They must be
@@ -402,7 +402,7 @@ type metricSpec struct {
 	// capture backend does not measure it", which propagates to
 	// MetricSeriesAvailability as false so the client omits the chart instead
 	// of drawing a misleading flat zero.
-	Read func(processobs.MetricSample) (int64, bool)
+	Read func(procmodel.MetricSample) (int64, bool)
 	// Scale converts the per-millisecond rate into the reported unit:
 	// 100 → percent of one core (ms of CPU per ms of wall), 1000 → per second.
 	// Ignored for gauges.
@@ -421,16 +421,16 @@ const (
 // metricSpecs is the table. Order is irrelevant (every row is independent);
 // only the ID/Kind/Read/Scale tuple matters.
 var metricSpecs = []metricSpec{
-	{ID: metricIDCPU, Kind: metricCounter, Scale: 100, Read: func(s processobs.MetricSample) (int64, bool) { return s.CPUMs, true }},
-	{ID: metricIDRead, Kind: metricCounter, Scale: 1000, Read: func(s processobs.MetricSample) (int64, bool) { return s.ReadBytes, true }},
-	{ID: metricIDWrite, Kind: metricCounter, Scale: 1000, Read: func(s processobs.MetricSample) (int64, bool) { return s.WriteBytes, true }},
+	{ID: metricIDCPU, Kind: metricCounter, Scale: 100, Read: func(s procmodel.MetricSample) (int64, bool) { return s.CPUMs, true }},
+	{ID: metricIDRead, Kind: metricCounter, Scale: 1000, Read: func(s procmodel.MetricSample) (int64, bool) { return s.ReadBytes, true }},
+	{ID: metricIDWrite, Kind: metricCounter, Scale: 1000, Read: func(s procmodel.MetricSample) (int64, bool) { return s.WriteBytes, true }},
 	{ID: metricIDNetRx, Kind: metricCounter, Scale: 1000, Read: sampleNetworkRx},
 	{ID: metricIDNetTx, Kind: metricCounter, Scale: 1000, Read: sampleNetworkTx},
-	{ID: metricIDRSS, Kind: metricGauge, Read: func(s processobs.MetricSample) (int64, bool) { return s.WorkingSet, true }},
+	{ID: metricIDRSS, Kind: metricGauge, Read: func(s procmodel.MetricSample) (int64, bool) { return s.WorkingSet, true }},
 }
 
 // sampleNetworkRx reads a per-process cumulative received-bytes counter off a
-// metric sample, gated on NetMeasured: processobs.MetricSample.NetRxBytes is
+// metric sample, gated on NetMeasured: procmodel.MetricSample.NetRxBytes is
 // only meaningful when NetMeasured is true (live eBPF socket accounting
 // attached), so an unmeasured sample reports ok=false — never an inferred
 // zero — exactly like every other Read in metricSpecs. That keeps the general
@@ -450,10 +450,10 @@ var metricSpecs = []metricSpec{
 // measured span still differentiate normally. No extra handling was needed
 // here: the counter-vs-gauge table was already built to make per-sample
 // availability changes safe.
-func sampleNetworkRx(s processobs.MetricSample) (int64, bool) { return s.NetRxBytes, s.NetMeasured }
+func sampleNetworkRx(s procmodel.MetricSample) (int64, bool) { return s.NetRxBytes, s.NetMeasured }
 
 // sampleNetworkTx is the transmitted-bytes counterpart of sampleNetworkRx.
-func sampleNetworkTx(s processobs.MetricSample) (int64, bool) { return s.NetTxBytes, s.NetMeasured }
+func sampleNetworkTx(s procmodel.MetricSample) (int64, bool) { return s.NetTxBytes, s.NetMeasured }
 
 // procMetricSeries is one process's sample ring plus the lifecycle facts the
 // aggregator needs. It is a plain value — the aggregation below touches no
@@ -462,7 +462,7 @@ type procMetricSeries struct {
 	Key       string
 	StartedAt time.Time
 	Exited    bool
-	Samples   []processobs.MetricSample
+	Samples   []procmodel.MetricSample
 }
 
 const (
@@ -792,7 +792,7 @@ func accumulateGauges(s procMetricSeries, bucket time.Duration, floorIdx int64, 
 	}
 }
 
-func anySampleNonZero(samples []processobs.MetricSample, read func(processobs.MetricSample) (int64, bool)) bool {
+func anySampleNonZero(samples []procmodel.MetricSample, read func(procmodel.MetricSample) (int64, bool)) bool {
 	for _, s := range samples {
 		if v, ok := read(s); ok && v != 0 {
 			return true
@@ -1087,7 +1087,7 @@ func metricSeriesFromRuns(runs []store.ProcessRunRow) []procMetricSeries {
 			out = append(out, procMetricSeries{Key: r.ProcessKey, StartedAt: r.StartedAt, Exited: r.Exited})
 			continue
 		}
-		samples := make([]processobs.MetricSample, len(r.MetricSamples))
+		samples := make([]procmodel.MetricSample, len(r.MetricSamples))
 		copy(samples, r.MetricSamples)
 		sort.SliceStable(samples, func(i, j int) bool { return samples[i].T.Before(samples[j].T) })
 		out = append(out, procMetricSeries{

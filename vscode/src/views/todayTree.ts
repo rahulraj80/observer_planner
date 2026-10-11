@@ -75,7 +75,7 @@ export class TodayTreeProvider implements vscode.TreeDataProvider<vscode.TreeIte
         return [makePlaceholder('Loading…')];
       case 'error':
         return [
-          makePlaceholder('Failed to load — check Output channel', {
+          makePlaceholder('Failed to load - check Output channel', {
             tooltip: this.status.message,
             command: { command: 'observer.showOutput', title: 'Show Output' },
           }),

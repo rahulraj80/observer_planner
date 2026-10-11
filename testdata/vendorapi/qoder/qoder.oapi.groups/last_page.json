@@ -1,0 +1,25 @@
+{
+  "groups": [
+    {
+      "id": "7d0e5a1c-2f3b-4c8d-9e6f-0a1b2c3d4e5f",
+      "organizationId": "org_xxx",
+      "displayName": "Engineering",
+      "source": "scim",
+      "externalId": "okta-group-00a1",
+      "syncType": "scim",
+      "isManaged": true,
+      "createdAt": "2026-08-02T09:00:00Z",
+      "updatedAt": "2026-08-05T10:00:00Z",
+      "memberCount": 14
+    },
+    {
+      "id": "3a4b5c6d-7e8f-4091-a2b3-c4d5e6f70812",
+      "organizationId": "org_xxx",
+      "displayName": "Design",
+      "source": "manual",
+      "isManaged": false,
+      "memberCount": 0
+    }
+  ],
+  "maxResults": 100
+}

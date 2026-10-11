@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "failedCount": "VerifiedOfficial",
+    "requestedCount": "VerifiedOfficial",
+    "results": "VerifiedOfficial",
+    "results[]": "VerifiedOfficial",
+    "results[].error": "VerifiedOfficial",
+    "results[].status": "VerifiedOfficial",
+    "results[].userEmail": "VerifiedOfficial",
+    "unchangedCount": "VerifiedOfficial",
+    "updatedCount": "VerifiedOfficial"
+  },
+  "fixture_sha256": "8f72179eac33c33238a3180878723061fe30b2434a21384d6225e34ac962a36b",
+  "http": {
+    "method": "POST",
+    "path": "/teams/user-spend-limits",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Set User Spend Limits in Bulk (Preview)\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Admin API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "d6cf7e1dd3314a1b28f4ac1f699c255c0fd0b6acbff5c0d03cfb7b0837325cd3",
+  "source_url": "https://cursor.com/docs/account/teams/admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.user_spend_limits_bulk"
+}

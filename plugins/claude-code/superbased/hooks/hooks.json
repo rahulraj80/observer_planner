@@ -209,6 +209,28 @@
         ]
       }
     ],
+    "TaskCompleted": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "observer hook claude-code task-completed"
+          }
+        ]
+      }
+    ],
+    "TaskCreated": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "observer hook claude-code task-created"
+          }
+        ]
+      }
+    ],
     "UserPromptExpansion": [
       {
         "matcher": "*",

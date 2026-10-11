@@ -174,17 +174,14 @@ func TestParseJSONL(t *testing.T) {
 			}
 		}
 	}
-	// Two TokenEvents: original gemini message + message_update.
-	if len(res.TokenEvents) != 2 {
-		t.Fatalf("TokenEvents = %d, want 2 (initial + update)", len(res.TokenEvents))
+	// ONE TokenEvent per call (T-543): the message_update restates the
+	// original gemini message's usage under the same event id, so the parse
+	// carries the call once, with the update's refreshed counts.
+	if len(res.TokenEvents) != 1 {
+		t.Fatalf("TokenEvents = %d, want 1 (the update supersedes the initial row)", len(res.TokenEvents))
 	}
-	// Both should share the same MessageID; the update has refreshed counts.
-	first, second := res.TokenEvents[0], res.TokenEvents[1]
-	if first.MessageID != second.MessageID {
-		t.Fatalf("token MessageIDs diverge: %q vs %q", first.MessageID, second.MessageID)
-	}
-	if second.OutputTokens != 11 || second.ReasoningTokens != 3 {
-		t.Fatalf("update tokens not picked up: %+v", second)
+	if tk := res.TokenEvents[0]; tk.OutputTokens != 11 || tk.ReasoningTokens != 3 {
+		t.Fatalf("update tokens not picked up: %+v", tk)
 	}
 }
 

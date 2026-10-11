@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -97,11 +99,11 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 	grant, err := gw.ResolveStandingGrant(ctx, cloudcontract.PurposeCohortBenchmarking)
 	if err != nil {
 		if errors.Is(err, cloudgateway.ErrNoLiveGrant) || errors.Is(err, cloudgateway.ErrNoConsentSource) {
-			fmt.Fprintln(w, "Community: skipped — no standing grant, so nothing was computed or sent.")
+			fmt.Fprintln(w, "Community: skipped - no standing grant, so nothing was computed or sent.")
 			fmt.Fprintln(w, "  Grant one with `observer cloud consent grant --purpose community_cohort_benchmarking`.")
 			return
 		}
-		fmt.Fprintf(w, "Community: skipped — could not resolve the standing grant: %v\n", err)
+		fmt.Fprintf(w, "Community: skipped - could not resolve the standing grant: %v\n", err)
 		return
 	}
 
@@ -110,7 +112,7 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 		// retired rule/dictionary is NOT live for this rail. Nothing is
 		// computed or sent; the developer re-grants against the truthful
 		// disclosure, which raises the consent generation.
-		fmt.Fprintf(w, "Community: NEEDS RECONFIRMATION — the standing grant was recorded under earlier terms (%v).\n", terr)
+		fmt.Fprintf(w, "Community: NEEDS RECONFIRMATION - the standing grant was recorded under earlier terms (%v).\n", terr)
 		fmt.Fprintf(w, "  Nothing was computed or sent. Re-grant with `observer cloud consent grant --purpose %s`\n",
 			cloudcontract.PurposeCohortBenchmarking)
 		fmt.Fprintln(w, "  to read and confirm the current disclosure.")
@@ -122,7 +124,7 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 		// would fold sessions from before consent existed into the scalar. This
 		// is not a partial-month feature; it is a hard skip until the calendar
 		// rolls over into the first month that starts after the grant.
-		fmt.Fprintf(w, "Community: skipped — the grant month (%s) is not eligible; the first eligible month begins after it.\n",
+		fmt.Fprintf(w, "Community: skipped - the grant month (%s) is not eligible; the first eligible month begins after it.\n",
 			grant.CreatedAt.UTC().Format("2006-01"))
 		return
 	}
@@ -133,7 +135,7 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 		fmt.Fprintf(w, "Community: computation incomplete: %v\n", cerr)
 	}
 	if len(values) == 0 {
-		fmt.Fprintf(w, "Community: no sessions this month (%s) yet — nothing to contribute.\n", window)
+		fmt.Fprintf(w, "Community: no sessions this month (%s) yet - nothing to contribute.\n", window)
 		return
 	}
 
@@ -159,7 +161,7 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 			return fmt.Errorf("community: re-checking the standing grant: %w", rerr)
 		}
 		if cur.ReceiptID != receiptID {
-			return fmt.Errorf("community: the standing grant changed since this sync started (was receipt %s, now %s) — its terms are stale, resend on the next sync",
+			return fmt.Errorf("community: the standing grant changed since this sync started (was receipt %s, now %s) - its terms are stale, resend on the next sync",
 				receiptID, cur.ReceiptID)
 		}
 		return nil
@@ -181,13 +183,13 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 				Value:         v,
 			})
 			if berr != nil {
-				fmt.Fprintf(w, "  %s: not sent — %v\n", id, berr)
+				fmt.Fprintf(w, "  %s: not sent - %v\n", id, berr)
 				failed++
 				continue
 			}
 			payload, digest, serr := cloudevidence.SerializeCommunity(contribution)
 			if serr != nil {
-				fmt.Fprintf(w, "  %s: not sent — %v\n", id, serr)
+				fmt.Fprintf(w, "  %s: not sent - %v\n", id, serr)
 				failed++
 				continue
 			}
@@ -219,7 +221,7 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 	})
 	if err != nil {
 		if errors.Is(err, cloudgateway.ErrNoLiveGrant) || errors.Is(err, cloudgateway.ErrGrantRevoked) {
-			fmt.Fprintln(w, "Community: not sent — no live consent grant; nothing left this machine.")
+			fmt.Fprintln(w, "Community: not sent - no live consent grant; nothing left this machine.")
 			return
 		}
 		fmt.Fprintf(w, "Community: send incomplete: %v\n", err)
@@ -236,7 +238,7 @@ func cloudSyncCommunity(ctx context.Context, st *store.Store, gw *cloudgateway.G
 func cloudCommunityReportSendError(w io.Writer, metricID, window string, err error) {
 	detail, ok := cloudgateway.HTTPError(err)
 	if !ok || detail.StatusCode != http.StatusConflict || detail.Code != "cross_device_conflict" {
-		fmt.Fprintf(w, "  %s: not sent — %v\n", metricID, err)
+		fmt.Fprintf(w, "  %s: not sent - %v\n", metricID, err)
 		return
 	}
 	owner := detail.Extra["owner_device_hint"]
@@ -247,7 +249,7 @@ func cloudCommunityReportSendError(w io.Writer, metricID, window string, err err
 	if next == "" {
 		next = "the month after " + window
 	}
-	fmt.Fprintf(w, "  %s: not sent — window %s was already synced from a different device on this account (device %s).\n",
+	fmt.Fprintf(w, "  %s: not sent - window %s was already synced from a different device on this account (device %s).\n",
 		metricID, window, owner)
 	fmt.Fprintf(w, "    The first device to sync a window owns it for that window: sync from that device to update %s,\n", window)
 	fmt.Fprintf(w, "    or wait for the next window (%s), which this device can sync first. Nothing was overwritten.\n", next)

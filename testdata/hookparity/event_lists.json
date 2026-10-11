@@ -1,0 +1,292 @@
+{
+  "claudeCodeEvents": [
+    "SessionStart",
+    "SessionEnd",
+    "Setup",
+    "UserPromptSubmit",
+    "UserPromptExpansion",
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PostToolBatch",
+    "PermissionRequest",
+    "PermissionDenied",
+    "Stop",
+    "StopFailure",
+    "PreCompact",
+    "PostCompact",
+    "SubagentStart",
+    "SubagentStop",
+    "Notification",
+    "CwdChanged",
+    "InstructionsLoaded",
+    "ConfigChange",
+    "WorktreeRemove",
+    "TaskCreated",
+    "TaskCompleted"
+  ],
+  "codexEvents": [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "Stop",
+    "SessionEnd",
+    "SubagentStart",
+    "SubagentStop"
+  ],
+  "cursorEvents": [
+    "beforeSubmitPrompt",
+    "beforeShellExecution",
+    "afterFileEdit",
+    "beforeMCPExecution",
+    "stop",
+    "beforeReadFile",
+    "postToolUseFailure",
+    "sessionStart",
+    "sessionEnd",
+    "subagentStart",
+    "subagentStop",
+    "preCompact",
+    "preToolUse",
+    "postToolUse",
+    "afterShellExecution",
+    "afterMCPExecution",
+    "afterAgentThought",
+    "afterAgentResponse"
+  ],
+  "registered:antigravity-cli": [
+    "PreInvocation",
+    "PreToolUse"
+  ],
+  "registered:claude-code": [
+    "ConfigChange",
+    "CwdChanged",
+    "InstructionsLoaded",
+    "Notification",
+    "PermissionDenied",
+    "PermissionRequest",
+    "PostCompact",
+    "PostToolBatch",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PreCompact",
+    "PreToolUse",
+    "SessionEnd",
+    "SessionStart",
+    "Setup",
+    "Stop",
+    "StopFailure",
+    "SubagentStart",
+    "SubagentStop",
+    "TaskCompleted",
+    "TaskCreated",
+    "UserPromptExpansion",
+    "UserPromptSubmit",
+    "WorktreeRemove"
+  ],
+  "registered:claude-code-windows": [
+    "ConfigChange",
+    "CwdChanged",
+    "InstructionsLoaded",
+    "Notification",
+    "PermissionDenied",
+    "PermissionRequest",
+    "PostCompact",
+    "PostToolBatch",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PreCompact",
+    "PreToolUse",
+    "SessionEnd",
+    "SessionStart",
+    "Setup",
+    "Stop",
+    "StopFailure",
+    "SubagentStart",
+    "SubagentStop",
+    "TaskCompleted",
+    "TaskCreated",
+    "UserPromptExpansion",
+    "UserPromptSubmit",
+    "WorktreeRemove"
+  ],
+  "registered:cline-cli": [
+    "PreToolUse"
+  ],
+  "registered:codex": [
+    "PermissionRequest",
+    "PostToolUse",
+    "PreToolUse",
+    "SessionEnd",
+    "SessionStart",
+    "Stop",
+    "SubagentStart",
+    "SubagentStop",
+    "UserPromptSubmit"
+  ],
+  "registered:codex-windows": [
+    "PermissionRequest",
+    "PostToolUse",
+    "PreToolUse",
+    "SessionEnd",
+    "SessionStart",
+    "Stop",
+    "SubagentStart",
+    "SubagentStop",
+    "UserPromptSubmit"
+  ],
+  "registered:command-code": [
+    "beforeToolCall",
+    "transformInput"
+  ],
+  "registered:command-code-windows": [
+    "beforeToolCall",
+    "transformInput"
+  ],
+  "registered:copilot-cli": [
+    "preToolUse"
+  ],
+  "registered:crush": [
+    "PreToolUse"
+  ],
+  "registered:cursor": [
+    "afterAgentResponse",
+    "afterAgentThought",
+    "afterFileEdit",
+    "afterMCPExecution",
+    "afterShellExecution",
+    "beforeMCPExecution",
+    "beforeReadFile",
+    "beforeShellExecution",
+    "beforeSubmitPrompt",
+    "postToolUse",
+    "postToolUseFailure",
+    "preCompact",
+    "preToolUse",
+    "sessionEnd",
+    "sessionStart",
+    "stop",
+    "subagentStart",
+    "subagentStop"
+  ],
+  "registered:cursor-windows": [
+    "afterAgentResponse",
+    "afterAgentThought",
+    "afterFileEdit",
+    "afterMCPExecution",
+    "afterShellExecution",
+    "beforeMCPExecution",
+    "beforeReadFile",
+    "beforeShellExecution",
+    "beforeSubmitPrompt",
+    "postToolUse",
+    "postToolUseFailure",
+    "preCompact",
+    "preToolUse",
+    "sessionEnd",
+    "sessionStart",
+    "stop",
+    "subagentStart",
+    "subagentStop"
+  ],
+  "registered:devin": [
+    "PreToolUse",
+    "pre_mcp_tool_use",
+    "pre_read_code",
+    "pre_run_command",
+    "pre_user_prompt",
+    "pre_write_code"
+  ],
+  "registered:droid": [
+    "PreToolUse",
+    "UserPromptSubmit"
+  ],
+  "registered:droid-windows": [
+    "PreToolUse",
+    "UserPromptSubmit"
+  ],
+  "registered:gemini-cli": [
+    "BeforeAgent",
+    "BeforeTool"
+  ],
+  "registered:gemini-cli-windows": [
+    "BeforeAgent",
+    "BeforeTool"
+  ],
+  "registered:goose": [
+    "PreToolUse"
+  ],
+  "registered:grok": [
+    "PreToolUse"
+  ],
+  "registered:junie": [
+    "PreToolUse"
+  ],
+  "registered:kilo-code-cli": [
+    "chat.message",
+    "tool.execute.before"
+  ],
+  "registered:kimi-code": [
+    "PreToolUse",
+    "UserPromptSubmit"
+  ],
+  "registered:mistral-code": [
+    "pre_tool"
+  ],
+  "registered:muse": [
+    "PreToolUse",
+    "UserPromptSubmit"
+  ],
+  "registered:open-interpreter": [
+    "PreToolUse"
+  ],
+  "registered:opencode": [
+    "chat.message",
+    "tool.execute.before"
+  ],
+  "registered:pi": [
+    "tool_call"
+  ],
+  "registered:poolside": [
+    "PreToolUse",
+    "UserPromptSubmit"
+  ],
+  "registered:poolside-windows": [
+    "PreToolUse",
+    "UserPromptSubmit"
+  ],
+  "registered:qoder": [
+    "PreToolUse",
+    "SessionEnd",
+    "SessionStart",
+    "Stop",
+    "SubagentStart",
+    "SubagentStop",
+    "UserPromptSubmit"
+  ],
+  "registered:qoder-windows": [
+    "PreToolUse",
+    "SessionEnd",
+    "SessionStart",
+    "Stop",
+    "SubagentStart",
+    "SubagentStop",
+    "UserPromptSubmit"
+  ],
+  "registered:qwen-code": [
+    "PreToolUse",
+    "SessionStart",
+    "UserPromptSubmit"
+  ],
+  "registered:qwen-code-windows": [
+    "PreToolUse",
+    "SessionStart",
+    "UserPromptSubmit"
+  ],
+  "registered:zcode": [
+    "PreToolUse",
+    "UserPromptSubmit"
+  ]
+}

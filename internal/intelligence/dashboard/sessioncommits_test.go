@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/commitlog"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/loc"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/projectroi"
@@ -162,7 +163,7 @@ func TestAPISessionCommits(t *testing.T) {
 // on the session endpoint, never a silently partial list.
 func TestAPISessionCommitsTruncation(t *testing.T) {
 	s, _ := seedCoOwnedFixture(t)
-	withCap(t, &promptLinkCap, 1)
+	withCap(t, &dashapi.PromptLinkCap, 1)
 	code, got := getSessionCommits(t, s, "sBig")
 	if code != http.StatusOK {
 		t.Fatalf("status %d", code)

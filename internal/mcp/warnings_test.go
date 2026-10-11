@@ -21,6 +21,10 @@ func TestKnownWarnings_AreStable(t *testing.T) {
 		// "missing" and "one rehydrate away" lead an agent to different
 		// next actions.
 		"project_archived": true,
+		// D-307: code intelligence is off by choice (the default). Rides
+		// WITH index_unavailable, so an agent that only knows the older
+		// tag still degrades correctly.
+		"codeintel_disabled": true,
 	}
 	got := allKnownWarnings()
 	if len(got) != len(want) {

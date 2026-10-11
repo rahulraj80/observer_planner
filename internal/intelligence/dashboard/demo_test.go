@@ -110,7 +110,7 @@ func TestDemoMode(t *testing.T) {
 		t.Fatalf("start = %d active=%v, want 200 true", code, active)
 	}
 	if n := demoStatusSessions(t, server); n != 1 {
-		t.Fatalf("demo-mode sessions = %d, want 1 (the marker row — data endpoints must serve the demo DB)", n)
+		t.Fatalf("demo-mode sessions = %d, want 1 (the marker row - data endpoints must serve the demo DB)", n)
 	}
 
 	// Idempotent: a second start neither reseeds nor errors.

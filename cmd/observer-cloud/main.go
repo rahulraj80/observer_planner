@@ -252,7 +252,7 @@ func chooseCredentials(log *slog.Logger) jobs.CredentialSource {
 	if k := strings.TrimSpace(os.Getenv("SBCI_FOUNDRY_API_KEY")); k != "" {
 		return jobs.StaticCredentials{Key: k}
 	}
-	log.Warn("observer-cloud: SBCI_FOUNDRY_API_KEY unset — provider credential ABSENT (pre-approval boundary); jobs park provider_policy_unverified")
+	log.Warn("observer-cloud: SBCI_FOUNDRY_API_KEY unset - provider credential ABSENT (pre-approval boundary); jobs park provider_policy_unverified")
 	return jobs.AbsentCredentials{}
 }
 
@@ -283,7 +283,7 @@ func chooseAttestor(s *store.Store, log *slog.Logger) jobs.ProviderAttestor {
 	attested := strings.TrimSpace(os.Getenv("SBCI_CONTENT_LOGGING_ATTESTED_RESOURCE"))
 	switch {
 	case disclosed != "" && attested != "":
-		log.Error("observer-cloud: BOTH SBCI_PROVIDER_RETENTION_DISCLOSED_RESOURCE and SBCI_CONTENT_LOGGING_ATTESTED_RESOURCE are set — conflicting attestation modes; every job parks provider_policy_unverified until one is removed")
+		log.Error("observer-cloud: BOTH SBCI_PROVIDER_RETENTION_DISCLOSED_RESOURCE and SBCI_CONTENT_LOGGING_ATTESTED_RESOURCE are set - conflicting attestation modes; every job parks provider_policy_unverified until one is removed")
 		// Returned WITHOUT the caching gate: a healthy record persisted before
 		// the conflict was introduced must not authorize jobs for up to the
 		// gate's max-age (review finding 2026-09-15).
@@ -295,7 +295,7 @@ func chooseAttestor(s *store.Store, log *slog.Logger) jobs.ProviderAttestor {
 			AttestedBy:         strings.TrimSpace(os.Getenv("SBCI_PROVIDER_RETENTION_DISCLOSED_BY")),
 		}
 		if d.PolicyVersion == "" {
-			log.Error("observer-cloud: SBCI_PROVIDER_RETENTION_DISCLOSED_RESOURCE is set but SBCI_PROVIDER_RETENTION_POLICY_VERSION is empty — the disclosed mode fails closed until a policy version is named")
+			log.Error("observer-cloud: SBCI_PROVIDER_RETENTION_DISCLOSED_RESOURCE is set but SBCI_PROVIDER_RETENTION_POLICY_VERSION is empty - the disclosed mode fails closed until a policy version is named")
 		} else {
 			log.Info("observer-cloud: attestation mode " + attest.ModeProviderRetentionDisclosed + " (provider flagged-sample retention disclosed; privacy policy v" + d.PolicyVersion + ")")
 		}
@@ -318,7 +318,7 @@ func chooseAttestor(s *store.Store, log *slog.Logger) jobs.ProviderAttestor {
 
 func chooseVerifier(log *slog.Logger) identity.Verifier {
 	if os.Getenv("SBCI_DEV_AUTH") == "1" {
-		log.Warn("observer-cloud: SBCI_DEV_AUTH=1 — using the dev-auth identity stub (NEVER in production)")
+		log.Warn("observer-cloud: SBCI_DEV_AUTH=1 - using the dev-auth identity stub (NEVER in production)")
 		return identity.NewDevAuth()
 	}
 	// Production: validate WorkOS access tokens against the WorkOS JWKS. The
@@ -328,12 +328,12 @@ func chooseVerifier(log *slog.Logger) identity.Verifier {
 	// deployment can never silently accept tokens.
 	clientID := strings.TrimSpace(os.Getenv("WORKOS_CLIENT_ID"))
 	if clientID == "" {
-		log.Warn("observer-cloud: WORKOS_CLIENT_ID unset — using the fail-closed WorkOS placeholder (set it, or SBCI_DEV_AUTH=1 for local)")
+		log.Warn("observer-cloud: WORKOS_CLIENT_ID unset - using the fail-closed WorkOS placeholder (set it, or SBCI_DEV_AUTH=1 for local)")
 		return identity.NewWorkOSPlaceholder()
 	}
 	v, err := identity.NewWorkOSVerifier(clientID)
 	if err != nil {
-		log.Warn("observer-cloud: WorkOS verifier init failed — falling back to fail-closed placeholder", "err", err)
+		log.Warn("observer-cloud: WorkOS verifier init failed - falling back to fail-closed placeholder", "err", err)
 		return identity.NewWorkOSPlaceholder()
 	}
 	log.Info("observer-cloud: WorkOS access-token verifier active", "client_id", clientID, "jwks", "https://api.workos.com/sso/jwks/"+clientID)
@@ -355,7 +355,7 @@ func portalWorkOSEnabled(log *slog.Logger) bool {
 		log.Warn("observer-cloud: SBCI_PORTAL_WORKOS is set but WORKOS_CLIENT_ID/WORKOS_API_KEY are incomplete — /portal/auth/workos/* will keep answering 501")
 	}
 	if os.Getenv("SBCI_DEV_AUTH") == "1" {
-		log.Warn("observer-cloud: SBCI_PORTAL_WORKOS is set but SBCI_DEV_AUTH=1 — the dev-auth stub wins and the WorkOS browser leg stays inactive")
+		log.Warn("observer-cloud: SBCI_PORTAL_WORKOS is set but SBCI_DEV_AUTH=1 - the dev-auth stub wins and the WorkOS browser leg stays inactive")
 	}
 	log.Info("observer-cloud: portal WorkOS browser sign-in leg ACTIVE (/portal/auth/workos/*)")
 	return true
@@ -717,7 +717,7 @@ func newServeCmd() *cobra.Command {
 			} else {
 				for _, c := range coverage {
 					if !c.HasDefault {
-						log.Error("observer-cloud: feature has no eligible default route (every route is plan_pinned or inactive) — ResolveRoute will 503 for accounts not pinned to one", "feature", c.Feature)
+						log.Error("observer-cloud: feature has no eligible default route (every route is plan_pinned or inactive) - ResolveRoute will 503 for accounts not pinned to one", "feature", c.Feature)
 					}
 				}
 			}
@@ -740,6 +740,17 @@ func newServeCmd() *cobra.Command {
 					}
 					if !ok {
 						return fmt.Errorf("observer-cloud: a Paddle price maps to %s v%d, which is not a published plan", plan.Name, plan.Version)
+					}
+					// A price pinned to a SUPERSEDED version sells the old
+					// allowance to every NEW subscriber (existing ones are
+					// floored at their current version by the activation
+					// path). Not fatal - a deploy may roll the image before
+					// the env - but loud, because after 0041 a plus_beta v2
+					// price sells LESS than the free plan (D-299).
+					newer, nerr := s.PlanExists(ctx, plan.Name, plan.Version+1)
+					if nerr == nil && newer {
+						log.Warn("observer-cloud: a Paddle price maps to a superseded plan version - new subscribers get the old allowance; update SBCI_PADDLE_PRICES",
+							"plan", plan.Name, "mapped_version", plan.Version)
 					}
 				}
 				log.Info("observer-cloud: Paddle price map wired", "prices", len(pm))
@@ -785,13 +796,13 @@ func newServeCmd() *cobra.Command {
 			portalHost := strings.TrimSpace(os.Getenv("SBCI_PORTAL_HOST"))
 			apiHost := strings.TrimSpace(os.Getenv("SBCI_API_HOST"))
 			if portalHost == "" && apiHost == "" {
-				log.Info("observer-cloud: canonical-host enforcement OFF (SBCI_PORTAL_HOST/SBCI_API_HOST unset) — every Host is accepted")
+				log.Info("observer-cloud: canonical-host enforcement OFF (SBCI_PORTAL_HOST/SBCI_API_HOST unset) - every Host is accepted")
 			} else {
 				log.Info("observer-cloud: canonical-host enforcement",
 					"portal_host", portalHost, "api_host", apiHost)
 			}
 			if strings.TrimSpace(os.Getenv("WORKOS_WEBHOOK_SECRET")) == "" {
-				log.Warn("observer-cloud: WORKOS_WEBHOOK_SECRET unset — POST /portal/webhooks/workos answers 501 (fail closed); WorkOS lifecycle revocation will NOT propagate")
+				log.Warn("observer-cloud: WORKOS_WEBHOOK_SECRET unset - POST /portal/webhooks/workos answers 501 (fail closed); WorkOS lifecycle revocation will NOT propagate")
 			}
 			workosBrowserLeg := portalWorkOSEnabled(log)
 			// C1 (gap 2.3): the dev-auth stub must be provably impossible to reach

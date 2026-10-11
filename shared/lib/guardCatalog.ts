@@ -183,7 +183,17 @@ export type GuardRuleCatalogEntry = {
   observe: Decision;
   enforce: Decision;
   doc: string;
+  // coverageNote, when set, is an honest per-rule caveat about WHERE the rule
+  // can act - rendered under the rule wherever an admin authors or previews
+  // it. Data on the row, never a UI branch on the rule id. Set today on the
+  // two prompt rules: they act before send only on tools with a prompt-submit
+  // hook or an Observer proxy route (prompt-guard coverage audit 2026-10-02).
+  coverageNote?: string;
 };
+
+// PROMPT_RULE_COVERAGE_NOTE is the shared caveat for the prompt rules.
+const PROMPT_RULE_COVERAGE_NOTE =
+  "On a developer's prompt this rule can stop or warn before send only where the tool has a prompt-submit hook or routes through the Observer proxy. On tools with neither (Security > Control coverage lists them, e.g. Antigravity CLI) it can only flag the prompt after it was sent, from the captured transcript. With Enforce off the rule only warns on a prompt (flag): the developer is never asked to confirm or blocked. With Enforce on, an ask is a resend-to-confirm and a deny blocks, where the tool's seam allows it.";
 
 // GUARD_RULE_CATALOG — transcribed from internal/policy/rules_*.go
 // (policy.Catalog()). Where a rule id appears as multiple table rows (e.g. a
@@ -194,7 +204,7 @@ export type GuardRuleCatalogEntry = {
 export const GUARD_RULE_CATALOG: GuardRuleCatalogEntry[] = [
   // Destructive — internal/policy/rules_destructive.go
   { id: "R-101", category: "destructive", severity: "critical", observe: "flag", enforce: "deny", doc: "Recursive delete targeting a filesystem root, the home directory, a root-depth wildcard, or a path outside the project." },
-  { id: "R-102", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Recursive delete inside the project targeting the VCS directory or the project root itself." },
+  { id: "R-102", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Recursive delete inside the project targeting the VCS directory or the project root itself; also asks before a recursive delete after a directory change in the same command that the guard cannot resolve, or that leaves the project only if an earlier directory change fails." },
   { id: "R-103", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Mass-deletion chain (find -delete / xargs rm)." },
   { id: "R-104", category: "destructive", severity: "high", observe: "flag", enforce: "ask", doc: "Git command that discards uncommitted work (reset --hard / checkout -- / clean -f)." },
   { id: "R-110", category: "destructive", severity: "critical", observe: "flag", enforce: "deny", doc: "Force push to a protected branch." },
@@ -218,8 +228,9 @@ export const GUARD_RULE_CATALOG: GuardRuleCatalogEntry[] = [
   // Exfil — internal/policy/rules_exfil.go
   { id: "R-170", category: "exfil", severity: "critical", observe: "flag", enforce: "deny", doc: "Remote content piped into an interpreter (curl|sh-class remote-code execution)." },
   { id: "R-171", category: "exfil", severity: "high", observe: "flag", enforce: "ask", doc: "Shell command uploading file contents to a remote destination." },
-  { id: "R-172", category: "exfil", severity: "critical", observe: "flag", enforce: "deny", doc: "Secret-shaped value in a network command or outbound LLM API request." },
+  { id: "R-172", category: "exfil", severity: "critical", observe: "flag", enforce: "deny", doc: "Secret-shaped value in a network command, an outbound LLM API request, or the developer's own prompt.", coverageNote: PROMPT_RULE_COVERAGE_NOTE },
   { id: "R-173", category: "exfil", severity: "warn", observe: "flag", enforce: "flag", doc: "DNS lookup of an encoded-looking subdomain (DNS-tunnel exfil shape)." },
+  { id: "R-190", category: "pii", severity: "warn", observe: "flag", enforce: "deny", doc: "Deterministic PII (credit card, SSN, IBAN, ...) in the developer's own prompt text.", coverageNote: PROMPT_RULE_COVERAGE_NOTE },
   // Injection — internal/policy/rules_inject.go
   { id: "R-180", category: "injection", severity: "high", observe: "flag", enforce: "flag", doc: "Inbound tool-result/web content carries injection-shaped instruction patterns." },
   // Posture — internal/policy/rules_posture.go
@@ -535,11 +546,11 @@ export function guardRuleRowProblems(r: GuardRuleRow): string[] {
   if (!r.id.trim()) problems.push("Rule id is required.");
   if (!r.category.trim()) problems.push("Category is required.");
   if (!guardRuleRowHasMatcher(r)) {
-    problems.push(`This rule has no ${r.scope === "command" ? "command" : "event"} matchers — it would never fire.`);
+    problems.push(`This rule has no ${r.scope === "command" ? "command" : "event"} matchers - it would never fire.`);
   }
   if (guardRuleRowIsPureCondition(r) && r.applies_to.length === 0 && r.event.event_kind.length === 0) {
     problems.push(
-      "A pure-condition rule (taint_source / session_cost_usd_gt / repeat_count_gt) implies no event kind — set Applies to explicitly.",
+      "A pure-condition rule (taint_source / session_cost_usd_gt / repeat_count_gt) implies no event kind - set Applies to explicitly.",
     );
   }
   return problems;

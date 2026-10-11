@@ -42,9 +42,9 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
-// CrushTokenCorrectionReport summarises the correcting pass of
-// --crush-rescan.
-type CrushTokenCorrectionReport struct {
+// TokenCorrectionReport summarises one adapter's token-row correcting pass
+// (--crush-rescan, --qwen-code-rescan).
+type TokenCorrectionReport struct {
 	// FilesChecked is the number of crush.db files re-parsed.
 	FilesChecked int `json:"files_checked"`
 	// FilesMissing were referenced by stored rows but are gone from disk;
@@ -56,17 +56,30 @@ type CrushTokenCorrectionReport struct {
 	store.TokenCorrection
 }
 
-// crushParseFunc re-parses one crush.db from watermark 0. Injected so the
+// CrushTokenCorrectionReport is the --crush-rescan report (the JSON shape
+// is unchanged: it is the generic report).
+type CrushTokenCorrectionReport = TokenCorrectionReport
+
+// crushParseFunc re-parses one source file from its start. Injected so the
 // pass is testable without the adapter's filesystem discovery.
 type crushParseFunc func(ctx context.Context, path string) (adapter.ParseResult, error)
 
 // runCrushTokenCorrection runs the correcting pass over every crush.db
 // that already has token_usage rows.
 func runCrushTokenCorrection(ctx context.Context, st *store.Store, parse crushParseFunc) (CrushTokenCorrectionReport, error) {
-	var rep CrushTokenCorrectionReport
-	files, err := st.TokenSourceFiles(ctx, models.ToolCrush)
+	return runTokenCorrection(ctx, st, models.ToolCrush, parse)
+}
+
+// runTokenCorrection runs the correcting pass over every source file of
+// one tool that already has token_usage rows: each is re-parsed and the
+// stored rows of the sessions the parse observed are made equal to it
+// (store.CorrectTokenEvents). The pass a parser fix needs when the fix
+// LOWERS a count, which the MAX-monotone upsert never does on its own.
+func runTokenCorrection(ctx context.Context, st *store.Store, tool string, parse crushParseFunc) (TokenCorrectionReport, error) {
+	var rep TokenCorrectionReport
+	files, err := st.TokenSourceFiles(ctx, tool)
 	if err != nil {
-		return rep, fmt.Errorf("crush token correction: %w", err)
+		return rep, fmt.Errorf("%s token correction: %w", tool, err)
 	}
 	for _, f := range files {
 		if _, err := os.Stat(f); err != nil {
@@ -79,7 +92,7 @@ func runCrushTokenCorrection(ctx context.Context, st *store.Store, parse crushPa
 			continue
 		}
 		rep.FilesChecked++
-		c, err := st.CorrectTokenEvents(ctx, models.ToolCrush, f, observedSessions(res), res.TokenEvents)
+		c, err := st.CorrectTokenEvents(ctx, tool, f, observedSessions(res), res.TokenEvents)
 		if err != nil {
 			rep.Errors++
 			continue

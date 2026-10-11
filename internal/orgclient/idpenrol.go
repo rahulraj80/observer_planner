@@ -64,7 +64,7 @@ const (
 //
 // The honest CLI message is one sentence covering all of it, plus the rail
 // that always works: ask an admin for an enrolment code.
-var ErrIdPEnrolUnavailable = errors.New("this organisation server does not offer IdP enrolment (not enabled, or the server is older than the feature)")
+var ErrIdPEnrolUnavailable = errors.New("this organization server does not offer IdP enrolment (not enabled, or the server is older than the feature)")
 
 // IdPEnrolStart is the POST /api/agent/idp-enrol/start answer.
 type IdPEnrolStart struct {

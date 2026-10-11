@@ -5,7 +5,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/policyfam/admission"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/egress"
-	"github.com/marmutapp/superbased-observer/internal/policyfam/mcpaccess"
+	"github.com/marmutapp/superbased-observer/internal/policyfam/nodecomponents"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/nodefeatures"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/nodegov"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/planebadmission"
@@ -57,7 +57,14 @@ const (
 // SupportedFamilies is the v1 closed enum, in a stable order. New families
 // are appended last so an index into this slice stays stable across
 // releases for any caller that persisted one.
-var SupportedFamilies = []string{FamilyAdmissionInput, FamilyEgressGuardrail, FamilyGatewayProviders, FamilyNodeGovernance, FamilyNodeFeatures, FamilyPlaneBAdmission, FamilyMCPAccess}
+var SupportedFamilies = []string{FamilyAdmissionInput, FamilyEgressGuardrail, FamilyGatewayProviders, FamilyNodeGovernance, FamilyNodeFeatures, FamilyPlaneBAdmission, FamilyMCPAccess, FamilyNodeComponents}
+
+// FamilyNodeComponents is the managed component-set family `node.components`
+// (modular packaging plan 6.2, lane MP-GOV): which components an
+// org-managed node may run (allow / require / typed deny / unlisted inert).
+// It applies only under a live managed grant carrying components.govern; see
+// internal/policyfam/nodecomponents.
+const FamilyNodeComponents = nodecomponents.Family
 
 // FamilyPlaneBAdmission is the Plane-B judged-admission body (design §4.6,
 // gap register G1-JUDGED-ADM): the inner admission spec + the gateway judge
@@ -69,7 +76,10 @@ const FamilyPlaneBAdmission = planebadmission.Family
 // D10): the registry view + grant rows that internal/mcpaccess compiles
 // into the agentgateway mcpAuthorization CEL, the node decision table, the
 // AuthZEN function and the PDP fast path. See internal/policyfam/mcpaccess.
-const FamilyMCPAccess = mcpaccess.Family
+// Its compiler is an optional component's (Agent Access), so it is linked
+// through the seam in linked.go (family_mcpaccess.go) rather than imported
+// here; the literal equals mcpaccess.Family, which the pair registers under.
+const FamilyMCPAccess = "tools.mcp_access"
 
 // IsSupportedFamily reports whether family is one of the v1 closed set.
 func IsSupportedFamily(family string) bool {
@@ -109,7 +119,12 @@ func CompileFamilyBody(family string, raw []byte, maxBytes int64) (spec any, can
 		}
 		return s, canon, nil
 	case FamilyNodeGovernance:
-		s, canon, cerr := nodegov.CompileBody(raw, maxBytes)
+		// LENIENT on this, the agent accept path: a section id this build
+		// does not know is dropped with a note (PolicySpec.IgnoredIDs)
+		// rather than failing the body, so a newer org server naming a newer
+		// page cannot stop every other directive reaching this node. The
+		// publish lint compiles strictly (nodegov.CompileBody).
+		s, canon, cerr := nodegov.CompileBodyLenient(raw, maxBytes)
 		if cerr != nil {
 			return nil, nil, cerr
 		}
@@ -127,7 +142,17 @@ func CompileFamilyBody(family string, raw []byte, maxBytes int64) (spec any, can
 		}
 		return s, canon, nil
 	case FamilyMCPAccess:
-		s, canon, cerr := mcpaccess.CompileBody(raw, maxBytes)
+		// Linked through the seam (linked.go): ErrFamilyNotLinked in a
+		// build without Agent Access.
+		return compileLinked(family, raw, maxBytes)
+	case FamilyNodeComponents:
+		// LENIENT on this, the agent accept path (the node.governance
+		// precedent): an exact component id this build does not know is
+		// dropped into PolicySpec.IgnoredIDs, so a newer org server naming a
+		// newer component cannot stop every other directive reaching an
+		// older node. The publish path compiles strictly
+		// (nodecomponents.CompileBody).
+		s, canon, cerr := nodecomponents.CompileBodyLenient(raw, maxBytes)
 		if cerr != nil {
 			return nil, nil, cerr
 		}
@@ -135,6 +160,46 @@ func CompileFamilyBody(family string, raw []byte, maxBytes int64) (spec any, can
 	default:
 		return nil, nil, fmt.Errorf("policyfam.CompileFamilyBody: unsupported family %q", family)
 	}
+}
+
+// IgnoredDirectives returns the directives the agent's lenient compile
+// dropped from a body because this build does not know them (as
+// "<list>:<id>"), for the accept path to log. Empty for every family that
+// compiles strictly.
+func IgnoredDirectives(family string, spec any) []string {
+	switch family {
+	case FamilyNodeGovernance:
+		if s, ok := spec.(nodegov.PolicySpec); ok {
+			return s.IgnoredIDs
+		}
+	case FamilyNodeComponents:
+		if s, ok := spec.(nodecomponents.PolicySpec); ok {
+			return s.IgnoredIDs
+		}
+	}
+	return nil
+}
+
+// IsServeTimeProjection reports whether held (the body a node holds at a
+// version) is the server's vocabulary projection of served (a body delivered
+// at the SAME version). That is the one equal-version, different-bytes
+// delivery that is not a replay: the server stripped ids an older build did
+// not know, the node upgraded and advertised the newer vocabulary, and is now
+// served the full body. Only node.governance projects; every other family
+// answers false, so its replay rule is unchanged.
+func IsServeTimeProjection(family string, served, held []byte, maxBytes int64) bool {
+	if family != FamilyNodeGovernance {
+		return false
+	}
+	full, err := nodegov.DecodeBody(served, maxBytes)
+	if err != nil {
+		return false
+	}
+	prior, err := nodegov.DecodeBody(held, maxBytes)
+	if err != nil {
+		return false
+	}
+	return nodegov.IsVocabProjection(full, prior)
 }
 
 // SpecRequestsEnforceMode reports whether a compiled family spec (as
@@ -181,7 +246,15 @@ func SpecRequestsEnforceMode(family string, spec any) bool {
 	case FamilyPlaneBAdmission:
 		return planebadmission.Enforces(spec.(planebadmission.PolicySpec)) //nolint:forcetypeassert // caller contract: spec came from CompileFamilyBody(family, ...)
 	case FamilyMCPAccess:
-		return mcpaccess.Enforces(spec.(mcpaccess.PolicySpec)) //nolint:forcetypeassert // caller contract: spec came from CompileFamilyBody(family, ...)
+		return linkedEnforces(family, spec)
+	case FamilyNodeComponents:
+		// node.components has no mode field: blocking or requiring a
+		// component changes what the node runs the moment it resolves, so
+		// it needs the node's preauthorize_enforce consent exactly like
+		// node.features (a managed enrolment holding components.govern
+		// writes both lists).
+		_ = spec.(nodecomponents.PolicySpec) //nolint:forcetypeassert // caller contract: spec came from CompileFamilyBody(family, ...)
+		return true
 	default:
 		panic(fmt.Sprintf("policyfam.SpecRequestsEnforceMode: unsupported family %q", family))
 	}

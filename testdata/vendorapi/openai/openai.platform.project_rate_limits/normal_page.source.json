@@ -1,0 +1,32 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].max_images_per_1_minute": "VerifiedOfficial",
+    "data[].max_requests_per_1_minute": "VerifiedOfficial",
+    "data[].max_tokens_per_1_minute": "VerifiedOfficial",
+    "data[].model": "VerifiedOfficial",
+    "data[].object": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "Inferred",
+    "last_id": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "3ad8267d69a12e7a707e0933d192267fbf00e075337ae9b5465d0ffbf1970950",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/projects/{project_id}/rate_limits",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId list-project-rate-limits. The official example is itself a terminal page, so this first page is that example with the paging flag set to \"more\" (has_more graded Inferred); last_page is the verbatim example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.project_rate_limits"
+}

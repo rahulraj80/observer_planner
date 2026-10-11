@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/policyfam/nodegov"
 )
 
 // P0-10 Phase B agent-side targeting tests
@@ -241,7 +242,11 @@ func TestFetchAndAcceptPolicyResource_TargetingCorroboration(t *testing.T) {
 // R2 mixed-fleet compatibility marker at the URL-composition seam.
 func TestPolicyResourceFetchURL_AdvertisesSelectorCapability(t *testing.T) {
 	got := policyResourceFetchURL("https://org.example/", "admission.input")
-	want := "https://org.example/api/agent/policy/admission.input?policy_caps=selectors"
+	want := "https://org.example/api/agent/policy/admission.input?policy_caps=selectors" +
+		"&policy_caps=" + nodegov.VocabCapabilityToken(nodegov.CurrentVocabLevel) +
+		"&policy_caps=" + nodegov.SchemaCapabilityToken(nodegov.MaxSchema) +
+		"&policy_caps=" + nodegov.KeysCapabilityToken(nodegov.CurrentKeyGen) +
+		"&policy_caps=" + orgcontract.PolicyBindingCapability
 	if got != want {
 		t.Fatalf("policyResourceFetchURL = %q, want %q", got, want)
 	}

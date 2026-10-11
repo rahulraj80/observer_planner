@@ -50,7 +50,19 @@ type rawRecord struct {
 
 // sessionStartPayload is `session_start` — the trajectory's first record.
 type sessionStartPayload struct {
-	WorkingDirectories []string `json:"working_directories"`
+	WorkingDirectories []string            `json:"working_directories"`
+	ClientMetadata     *clientMetadataInfo `json:"client_metadata"`
+}
+
+// clientMetadataInfo is session_start.client_metadata, grounded on the
+// standalone Linux `pool` 1.0.16 TUI (demo node 1, 2026-10-08):
+// {"version":"1.0.16","host":"acp:pool","environment":"production"}. The
+// TUI drives the agent over ACP itself, so its host names the ACP client
+// "pool". Only `host` is read (for the capture surface); the field is
+// absent from the Windows JetBrains ACP capture this adapter was first
+// built against.
+type clientMetadataInfo struct {
+	Host string `json:"host"`
 }
 
 // sessionInputPayload is `session_input` — one user turn.

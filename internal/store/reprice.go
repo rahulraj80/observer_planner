@@ -112,13 +112,14 @@ const RepriceClaimLease = time.Hour
 // A source missing from this table is treated as source-reported: a figure
 // whose provenance cannot be classified is kept, never replaced.
 var apiTurnSourceReported = map[string]bool{
-	"":              false,
-	SourceProxy:     false,
-	SourceProxyTurn: false,
-	SourceCCOTel:    true,
-	SourceJSONL:     true,
-	SourceObsSDK:    true,
-	SourceObsOTLP:   true,
+	"":               false,
+	SourceProxy:      false,
+	SourceProxyTurn:  false,
+	SourceCCOTel:     true,
+	SourceNativeOTel: true,
+	SourceJSONL:      true,
+	SourceObsSDK:     true,
+	SourceObsOTLP:    true,
 }
 
 // apiTurnCostIsSourceReported resolves one api_turns.source through

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_ingest_otlp
+
 package main
 
 import (

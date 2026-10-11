@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // W2.2b session-scoped network events (org-parity plan §4 W2.2b,
@@ -167,7 +167,7 @@ func (s *Store) selectSessionNetworkEventsBounded(ctx context.Context, maxBytes 
 		LEFT JOIN process_network_bodies pnb ON pnb.process_event_id = r.id
 		WHERE r.rn <= ?
 		ORDER BY r.session_id, r.timestamp DESC`,
-		string(processobs.EventNetworkConnect), timestamp(since), sessionNetworkEventCap)
+		string(procmodel.EventNetworkConnect), timestamp(since), sessionNetworkEventCap)
 	if err != nil {
 		return nil, false, fmt.Errorf("store.SelectSessionNetworkEvents: %w", err)
 	}

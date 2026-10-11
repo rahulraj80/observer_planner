@@ -1,3 +1,5 @@
+//go:build !sbo_omit_demo
+
 package main
 
 import (
@@ -9,10 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
 	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/demo"
+	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -27,7 +29,13 @@ import (
 // pattern).
 func demoSeeder(logger *slog.Logger) func(ctx context.Context) (*sql.DB, func() error, error) {
 	return func(ctx context.Context) (*sql.DB, func() error, error) {
-		events, tokens, err := demo.Events(ctx, time.Now().UTC())
+		// The fixtures are Claude Code transcripts, parsed through the
+		// adapter set (a build without adapter.claude-code refuses here).
+		cc, err := adapterForBackfill(models.ToolClaudeCode, "demo mode")
+		if err != nil {
+			return nil, nil, err
+		}
+		events, tokens, err := demo.Events(ctx, time.Now().UTC(), cc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -47,7 +55,7 @@ func demoSeeder(logger *slog.Logger) func(ctx context.Context) (*sql.DB, func() 
 		}
 		st := store.New(database)
 		if _, err := st.Ingest(ctx, events, tokens, store.IngestOptions{
-			IsNativeTool:   claudecode.IsNativeTool,
+			IsNativeTool:   nativeToolOf(cc),
 			RecordFailures: true,
 			Indexer:        indexing.New(database, 0), // 0 → DefaultMaxExcerptBytes
 		}); err != nil {

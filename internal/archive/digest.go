@@ -129,7 +129,7 @@ func Verify(hot, cold ProjectDigest) error {
 // mutation produces.
 func VerifyTables(hot, cold []NamedTable) error {
 	if len(hot) != len(cold) {
-		return fmt.Errorf("%w: compared %d tables against %d — the two digests describe different units",
+		return fmt.Errorf("%w: compared %d tables against %d - the two digests describe different units",
 			ErrDigestMismatch, len(hot), len(cold))
 	}
 	for i := range hot {

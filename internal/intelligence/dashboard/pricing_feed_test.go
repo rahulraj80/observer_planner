@@ -82,7 +82,7 @@ func TestConfigPricingReportsFeedSource(t *testing.T) {
 		FeedVersion int64 `json:"feed_version"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rr.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rr.Body.String())
 	}
 	if resp.FeedVersion != 12 {
 		t.Errorf("feed_version = %d, want 12", resp.FeedVersion)
@@ -147,7 +147,7 @@ func TestConfigPricingIncludesPeakVariant(t *testing.T) {
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rr.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rr.Body.String())
 	}
 
 	m, ok := resp.Models[model]

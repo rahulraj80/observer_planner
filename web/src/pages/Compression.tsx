@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   ChartShell,
+  EmptyState,
   HeroStat,
   Icon,
   ModelId,
@@ -14,7 +15,13 @@ import {
   Tooltip,
   Stagger,
   SuccessCheck,
+  TabPanel,
+  TabStrip,
+  useTabVisited,
 } from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { COMPRESSION_TABS, defaultTab, type CompressionTab } from "@/lib/nodePageTabs";
 import { HelpInd, TitleWithHelp } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
 import {
@@ -29,14 +36,20 @@ import { useFilters, useGranularity, windowParams } from "@/lib/filters";
 import { GranControl } from "@/components/GranControl";
 import { asGranularity, granularityUnit, perBucketTitle } from "@shared/lib/granularity";
 import { useApi } from "@/lib/useApi";
+import { localConfirmHeaders } from "@/lib/api";
 import {
+  costChoice,
+  costLabel,
+  dollarsShown,
   fmtBytes,
   fmtCompact,
+  fmtCost,
   fmtDateTime,
   fmtInt,
   fmtPct,
   fmtShortId,
   fmtUSD,
+  withoutDollars,
 } from "@/lib/format";
 import type {
   CompactionEventsResponse,
@@ -64,7 +77,7 @@ const EVICTED_USD_TOOLTIP =
   "Not a dollar saving. Evicted content has no compressed form to price - showing a $ figure here would present lossy eviction as compression savings.";
 
 export function CompressionPage() {
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   // Three endpoints below are capped at a year of history server-side;
   // windowParams clamps the span to match (day/hours/custom all).
@@ -73,44 +86,65 @@ export function CompressionPage() {
   const gran = useGranularity();
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
 
-  const [unit, setUnit] = useState<SavingsUnit>("usd");
+  const [pickedUnit, setUnit] = useState<SavingsUnit>("usd");
+  // The org's token-usage view offers no "$" unit (format.ts cost
+  // affordances): the charts open in tokens there.
+  const unit = costChoice<SavingsUnit>(pickedUnit, ["usd"], "tokens");
   const [page, setPage] = useState(1);
+  // Page tabs (platform tabs plan §2.2): lazy per tab, kept mounted. The
+  // strip's timeseries and the Savings tab's per-model read stay page level
+  // (Savings is the default tab); Events and Advanced load on first open.
+  const pageTabs = usePageTabs("compression", COMPRESSION_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const eventsVisited = useTabVisited<CompressionTab>("events", tab);
+  const advancedVisited = useTabVisited<CompressionTab>("advanced", tab);
 
   const setupClaude = useApi<SetupClaude>("/api/setup/claude");
   const setupCodex = useApi<SetupCodex>("/api/setup/codex");
   const timeseries = useApi<CompressionTimeseries>(
     "/api/compression/timeseries",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   const tsGran = asGranularity(timeseries.data?.bucket ?? gran.expected);
   const hasCompression = hasNonZero(timeseries.data?.series, ["total_count"]);
   const events = useApi<CompressionEventsResponse>(
-    "/api/compression/events",
-    { ...winParams, page, limit: EVENTS_LIMIT, tool: toolParam, project: projectParam },
-    [win, customRange, page, tool, project],
+    eventsVisited ? "/api/compression/events" : null,
+    { ...winParams, page, limit: EVENTS_LIMIT, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, page, tool, model, project],
   );
   const retrieval = useApi<CompressionRetrieval>(
-    "/api/compression/retrieval",
-    { ...cappedParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    advancedVisited ? "/api/compression/retrieval" : null,
+    { ...cappedParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const compaction = useApi<CompactionEventsResponse>(
-    "/api/compaction/events",
-    { ...cappedParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    advancedVisited ? "/api/compaction/events" : null,
+    { ...cappedParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const rolling = useApi<CompressionRollingCost>(
-    "/api/compression/rolling-cost",
-    { ...cappedParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    advancedVisited ? "/api/compression/rolling-cost" : null,
+    { ...cappedParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const byModel = useApi<CompressionByModelResponse>(
     "/api/compression/by-model",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
+
+  const savingsAllEmpty =
+    !!timeseries.data && !hasCompression && !!byModel.data && byModel.data.rows.length === 0;
+  const advancedAllEmpty =
+    !!retrieval.data &&
+    retrieval.data.total_stashes === 0 &&
+    !!compaction.data &&
+    compaction.data.count === 0 &&
+    !!rolling.data &&
+    rolling.data.summary_calls === 0;
 
   const totals = useMemo(
     () => deriveTotals(timeseries.data),
@@ -122,11 +156,12 @@ export function CompressionPage() {
   const tokensEst = totals.bytes === undefined ? undefined : totals.bytes / 4;
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
+      <div className="mb-4 space-y-6">
       <PageHeader
         icon={navIcon("compression")}
         title="Compression"
-        sub="How many tokens, dollars, and bytes the proxy saved by trimming conversation context before forwarding upstream. KPIs, daily savings trajectory, savings-by-mechanism donut, recent events, and beta surfaces (SROD retrieve rate, compaction events, rolling-summarisation net delta)."
+        sub="How many tokens, dollars, and bytes the proxy saved by trimming conversation context before forwarding upstream. Savings over time and per model, recent events, profile experiments, and the advanced beta surfaces (SROD retrieve rate, compaction events, rolling-summarisation net delta)."
         helpId="tab.compression"
       />
       <SetupBanner
@@ -143,12 +178,24 @@ export function CompressionPage() {
           The hero's sub-line carries the events + bytes + token
           breakdown so the four right-side tiles can keep their
           narrower focus. */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.4fr_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      {/* The summary strip: two columns on a phone (the hero spans both),
+          one row from xl. */}
+      {/* In the org's token-usage view (format.ts cost affordances) the hero
+          reads in tokens, so the Tokens tile would repeat it and the Dollars
+          tile has nothing to show: the strip is hero + Bytes + Turns. */}
+      <div
+        className={
+          dollarsShown()
+            ? "grid grid-cols-2 gap-3 xl:grid-cols-[1.4fr_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]"
+            : "grid grid-cols-2 gap-3 xl:grid-cols-[1.4fr_minmax(0,1fr)_minmax(0,1fr)]"
+        }
+      >
         <HeroStat
+          className="col-span-2 xl:col-span-1"
           label="Total compression savings"
           icon={<MetricIcon metric="compressionSavings" />}
           loading={timeseries.loading}
-          value={fmtUSD(totals.usd)}
+          value={fmtCost(totals.usd, tokensEst)}
           sub={
             <>
               across {fmtInt(totals.events)} compression events ·{" "}
@@ -170,28 +217,32 @@ export function CompressionPage() {
               )}
             </>
           }
-          spark={totals.sparkUsd}
+          spark={dollarsShown() ? totals.sparkUsd : totals.sparkBytes}
           sparkColor="var(--success)"
           variant="accent"
         />
-        <StatCard
-          label="Tokens saved"
-          icon={<MetricIcon metric="tokens" />}
-          loading={timeseries.loading}
-          value={fmtCompact(tokensEst)}
-          sub="≈ bytes ÷ 4 (Claude tokenizer)"
-          spark={totals.sparkBytes}
-          sparkColor="var(--tok-net)"
-        />
-        <StatCard
-          label="Dollars saved"
-          icon={<MetricIcon metric="savings" />}
-          loading={timeseries.loading}
-          value={fmtUSD(totals.usd)}
-          sub="priced at row's model input rate"
-          spark={totals.sparkUsd}
-          sparkColor="var(--success)"
-        />
+        {dollarsShown() && (
+          <>
+            <StatCard
+              label="Tokens saved"
+              icon={<MetricIcon metric="tokens" />}
+              loading={timeseries.loading}
+              value={fmtCompact(tokensEst)}
+              sub="≈ bytes ÷ 4 (Claude tokenizer)"
+              spark={totals.sparkBytes}
+              sparkColor="var(--tok-net)"
+            />
+            <StatCard
+              label="Dollars saved"
+              icon={<MetricIcon metric="savings" />}
+              loading={timeseries.loading}
+              value={fmtUSD(totals.usd)}
+              sub="priced at row's model input rate"
+              spark={totals.sparkUsd}
+              sparkColor="var(--success)"
+            />
+          </>
+        )}
         <StatCard
           label="Bytes saved"
           icon={<MetricIcon metric="bytes" />}
@@ -215,11 +266,39 @@ export function CompressionPage() {
           sparkColor="var(--accent)"
         />
       </div>
+      </div>
 
-      {/* Profile experiments (P6.4) — productized A/B over Track-R
-          profiles; reports recompute arms from the session hash. */}
-      <ExperimentsCard />
+      <TabStrip
+        tabs={pageTabs.ids.map((id) => ({
+          id,
+          label: COMPRESSION_TABS.labels[id],
+          // The strip's own event total (already loaded), never a tab read.
+          count: id === "events" ? (totals.events ?? null) : null,
+        }))}
+        value={tab}
+        onChange={setTab}
+        idPrefix="compression"
+        ariaLabel="Compression sections"
+        className="mb-4"
+      />
 
+      <TabPanel id="experiments" active={tab} idPrefix="compression" className="space-y-6">
+        {/* Profile experiments (P6.4) — productized A/B over Track-R
+            profiles; reports recompute arms from the session hash. */}
+        <ExperimentsCard />
+      </TabPanel>
+
+      <TabPanel id="savings" active={tab} idPrefix="compression" className="space-y-6">
+      {savingsAllEmpty ? (
+        // Every Savings section loaded and empty: one teaching state
+        // (plan §1.5) instead of three full-height empty charts.
+        <EmptyState
+          illustration="chart"
+          title="No compression savings in this window"
+          body="The proxy compresses request bodies on the way out, so savings appear once an AI client is routed through it. Use the Proxy banner above to route Claude Code or Codex, then savings per day, by mechanism and per model show here."
+        />
+      ) : (
+      <>
       {/* Savings: per-bucket stack + by-mechanism donut, side-by-side */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">
         <ChartShell
@@ -229,11 +308,14 @@ export function CompressionPage() {
             <div className="flex flex-wrap items-center gap-2">
               <GranControl served={timeseries.data} />
               <SegmentedControl<SavingsUnit>
-                options={[
-                  { value: "usd", label: "$" },
-                  { value: "tokens", label: "Tokens" },
-                  { value: "bytes", label: "Bytes" },
-                ]}
+                options={withoutDollars<{ value: SavingsUnit; label: string }>(
+                  [
+                    { value: "usd", label: "$" },
+                    { value: "tokens", label: "Tokens" },
+                    { value: "bytes", label: "Bytes" },
+                  ],
+                  (o) => o.value === "usd",
+                )}
                 value={unit}
                 onChange={setUnit}
               />
@@ -285,7 +367,10 @@ export function CompressionPage() {
       {/* Per-model breakdown */}
       <ChartShell
         title={<TitleWithHelp text="Per-model breakdown" helpId="chart.compression.by_model" />}
-        sub="Compression savings rolled up per model × mechanism. $ is estimated by pricing saved bytes at the model's input rate (4 bytes/token)."
+        sub={costLabel(
+          "Compression savings rolled up per model × mechanism. $ is estimated by pricing saved bytes at the model's input rate (4 bytes/token).",
+          "Compression savings rolled up per model × mechanism.",
+        )}
       >
         <ChartState
           loading={byModel.loading && !byModel.data}
@@ -299,7 +384,11 @@ export function CompressionPage() {
           {byModel.data && <CompressionByModelTable rows={byModel.data.rows} />}
         </ChartState>
       </ChartShell>
+      </>
+      )}
+      </TabPanel>
 
+      <TabPanel id="events" active={tab} idPrefix="compression" className="space-y-6">
       {/* Recent events table */}
       <ChartShell
         title="Recent compression events"
@@ -326,7 +415,19 @@ export function CompressionPage() {
           />
         )}
       </ChartShell>
+      </TabPanel>
 
+      <TabPanel id="advanced" active={tab} idPrefix="compression" className="space-y-6">
+      {/* All three beta surfaces loaded and empty: ONE teaching empty state
+          (plan §1.5) instead of three full-height empty cards. */}
+      {advancedAllEmpty ? (
+        <EmptyState
+          illustration="chart"
+          title="No advanced compression activity in this window"
+          body="Three beta mechanisms report here once they run: stash and retrieve on demand (large tool outputs offloaded and pulled back when needed), compaction recovery (ghost-file snapshots injected after Claude Code's /compact), and rolling summarisation (Haiku summary calls against the cache savings they unlock). All three need the client routed through the proxy."
+        />
+      ) : (
+      <>
       {/* SROD — Stash & Retrieve on Demand */}
       <ChartShell
         title={
@@ -395,6 +496,9 @@ export function CompressionPage() {
           {rolling.data && <RollingPanel data={rolling.data} />}
         </ChartState>
       </ChartShell>
+      </>
+      )}
+      </TabPanel>
     </div>
   );
 }
@@ -573,7 +677,7 @@ function SetupBanner({
             conflictError={claude.would_register_error}
             configPath={claude.settings_path || "~/.claude/settings.json"}
             writeSummary={`Writes "env": { "ANTHROPIC_BASE_URL": "${claude.proxy_url}" } into the file below. Claude Code picks it up on its next session - every session then routes through the proxy (exact tokens, compression, cache tracking) with no wrapper command.`}
-            routedNote="New Claude Code sessions route through this observer. Undo: remove the env entry from settings.json, or run `observer uninstall --claude-code`."
+            routedNote="New Claude Code sessions route through this observer. Remove the route below to undo it."
             onChanged={onChanged}
           />
         </>
@@ -614,7 +718,7 @@ function SetupBanner({
             conflictError={codex.would_register_error}
             configPath={codex.config_path || "~/.codex/config.toml"}
             writeSummary={`Adds an "${codex.desired_model_provider}" model provider with base_url ${codex.desired_base_url} to the file below and points codex at it. Codex picks it up on its next run - sessions route through the proxy with no wrapper command.`}
-            routedNote="Codex routes through this observer. Undo: remove the provider from config.toml, or run `observer uninstall --codex`."
+            routedNote="Codex routes through this observer. Remove the route below to undo it; Codex gets its previous provider back."
             onChanged={onChanged}
           />
         </>
@@ -690,10 +794,13 @@ function RouteAction({
   return (
     <div className="border-t border-line-1 px-4 py-3 text-[11.5px]">
       {routed ? (
-        <p className="m-0 text-fg-3">
-          <span className="font-semibold text-success">Routed.</span>{" "}
-          {routedNote}
-        </p>
+        <>
+          <p className="m-0 text-fg-3">
+            <span className="font-semibold text-success">Routed.</span>{" "}
+            {routedNote}
+          </p>
+          <RouteUndo endpoint={endpoint} onChanged={onChanged} />
+        </>
       ) : (
         <div className="space-y-2">
           {phase === "idle" && (
@@ -750,6 +857,105 @@ function RouteAction({
             </div>
           )}
           {phase === "working" && <span className="text-fg-3">Writing…</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type RouteUndoResponse = {
+  tool: string;
+  config_path: string;
+  base_url?: string;
+  removed: boolean;
+  dry_run: boolean;
+  error?: string;
+};
+
+// RouteUndo removes the durable route this install wrote (backlog item 6,
+// sweep row 18): POST {"undo": true} runs the proxyroute removal `observer
+// uninstall` uses. Same consent model as the write: the first click fetches a
+// dry-run preview naming the file and the value, only "Remove it" writes.
+// Only this install's own route is removed; Codex gets its previous provider
+// back.
+function RouteUndo({ endpoint, onChanged }: { endpoint: string; onChanged: () => void }) {
+  const [preview, setPreview] = useState<RouteUndoResponse | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  async function post(dryRun: boolean): Promise<RouteUndoResponse> {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: await localConfirmHeaders(),
+      body: JSON.stringify({ undo: true, dry_run: dryRun }),
+    });
+    const out = (await res.json().catch(() => null)) as RouteUndoResponse | null;
+    if (!res.ok || !out) throw new Error(out?.error || `HTTP ${res.status}`);
+    return out;
+  }
+
+  async function step(dryRun: boolean) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const out = await post(dryRun);
+      if (dryRun) {
+        if (out.removed) setPreview(out);
+        else setDone("Nothing of this install's to remove.");
+        return;
+      }
+      setPreview(null);
+      setDone(out.removed ? "Route removed. New sessions talk to the provider directly." : "Nothing left to remove.");
+      onChanged();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-2">
+      {!preview && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void step(true)}
+            className="rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-fg-2 hover:bg-bg-3 disabled:opacity-50"
+          >
+            Remove the route…
+          </button>
+          {done && <SuccessCheck label={done} />}
+          {err && <span className="text-danger">{err}</span>}
+        </div>
+      )}
+      {preview && (
+        <div className="rounded-2 border border-line-2 bg-bg-2 p-3">
+          <p className="m-0 text-fg-2">
+            Removes the route to {preview.base_url} from the file below. Other settings in the file stay as they are.
+            Sessions already running keep the proxy until they restart.
+          </p>
+          <p className="m-0 mt-1 break-all font-mono text-fg-3">{preview.config_path}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void step(false)}
+              className="rounded-2 bg-warn px-2.5 py-1 font-semibold text-bg-0 transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {busy ? "Removing…" : "Remove it"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreview(null)}
+              className="rounded-2 border border-line-2 bg-bg-2 px-2.5 py-1 text-fg-2 hover:bg-bg-3"
+            >
+              Cancel
+            </button>
+          </div>
+          {err && <p className="m-0 mt-2 text-danger">{err}</p>}
         </div>
       )}
     </div>
@@ -1042,7 +1248,7 @@ function CompressionEventsTable({
   return (
     <DataTable<CompressionEventRow>
       data={rows}
-      columns={COMPRESSION_EVENT_COLUMNS}
+      columns={withoutDollars(COMPRESSION_EVENT_COLUMNS, (c) => c.id === "saved_usd")}
       rowKey={(r) => String(r.id)}
       minWidth={1080}
       zebra
@@ -1250,34 +1456,42 @@ function CompactionPanel({ data }: { data: CompactionEventsResponse }) {
 
 function RollingPanel({ data }: { data: CompressionRollingCost }) {
   const positive = data.net_delta_usd > 0;
+  // In the org's token-usage view (format.ts cost affordances) the summary's
+  // cost repeats the Summary calls tokens and the net delta is a dollar
+  // difference with no token form: both drop, and the savings read in tokens.
+  const dollars = dollarsShown();
   return (
-    <Stagger className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <Stagger className={dollars ? "grid grid-cols-2 gap-3 md:grid-cols-4" : "grid grid-cols-2 gap-3"}>
       <StatCard
         label="Summary calls"
         icon={<MetricIcon metric="summaryCalls" />}
         value={fmtInt(data.summary_calls)}
         sub={`${fmtCompact(data.summary_input_tokens)} in · ${fmtCompact(data.summary_output_tokens)} out`}
       />
-      <StatCard
-        label="Summary cost"
-        icon={<MetricIcon metric="summaryCost" />}
-        value={fmtUSD(data.summary_cost_usd)}
-        sub="Haiku spend"
-      />
+      {dollars && (
+        <StatCard
+          label="Summary cost"
+          icon={<MetricIcon metric="summaryCost" />}
+          value={fmtUSD(data.summary_cost_usd)}
+          sub="Haiku spend"
+        />
+      )}
       <StatCard
         label="Savings unlocked"
         icon={<MetricIcon metric="savingsUnlocked" />}
-        value={fmtUSD(data.rolling_savings_cost_usd_est)}
+        value={fmtCost(data.rolling_savings_cost_usd_est, data.rolling_savings_tokens_est)}
         sub={`${fmtCompact(data.rolling_savings_tokens_est)} cache_creation tokens`}
       />
-      <StatCard
-        label="Net delta"
-        icon={<MetricIcon metric="netDelta" />}
-        value={fmtUSD(data.net_delta_usd)}
-        accent={positive}
-        warn={!positive}
-        sub={positive ? "paying off" : "losing money"}
-      />
+      {dollars && (
+        <StatCard
+          label="Net delta"
+          icon={<MetricIcon metric="netDelta" />}
+          value={fmtUSD(data.net_delta_usd)}
+          accent={positive}
+          warn={!positive}
+          sub={positive ? "paying off" : "losing money"}
+        />
+      )}
     </Stagger>
   );
 }
@@ -1394,7 +1608,7 @@ function CompressionByModelTable({
     <div className="overflow-hidden rounded-2 border border-line-1">
       <DataTable<KeyedByModelRow>
         data={keyed}
-        columns={BY_MODEL_COLUMNS}
+        columns={withoutDollars(BY_MODEL_COLUMNS, (c) => c.id === "saved_usd")}
         rowKey={(r) => r.rowKey}
         minWidth={820}
         zebra

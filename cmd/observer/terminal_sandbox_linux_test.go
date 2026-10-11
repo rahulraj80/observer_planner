@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !sbo_omit_terminals_sandbox && !sbo_omit_terminals
 
 package main
 
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/sandbox"
 	"github.com/marmutapp/superbased-observer/internal/termsvc"
 )
@@ -29,13 +29,13 @@ func bwrapUsableForTest(t *testing.T) string {
 	t.Helper()
 	path, err := exec.LookPath("bwrap")
 	if err != nil {
-		t.Skip("bwrap not on PATH — skipping sandbox integration test")
+		t.Skip("bwrap not on PATH - skipping sandbox integration test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(ctx, path,
 		"--ro-bind", "/", "/", "--tmpfs", "/tmp", "--die-with-parent", "--", "true").Run(); err != nil {
-		t.Skipf("bwrap user-namespace canary failed (%v) — skipping sandbox integration test", err)
+		t.Skipf("bwrap user-namespace canary failed (%v) - skipping sandbox integration test", err)
 	}
 	return path
 }
@@ -123,7 +123,7 @@ func prepLiveWrapArgvCfg(t *testing.T, cfg config.TerminalSandboxConfig, proxyPo
 func TestBwrapIntegrationBoundary(t *testing.T) {
 	bwrapUsableForTest(t)
 	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not on PATH (needed for /dev/tcp) — skipping")
+		t.Skip("bash not on PATH (needed for /dev/tcp) - skipping")
 	}
 
 	wrap, home, workspace, observerDir := prepLiveWrapArgv(t)
@@ -196,7 +196,7 @@ echo BOUNDARY_OK
 func TestBwrapIntegrationTeardown(t *testing.T) {
 	bwrapUsableForTest(t)
 	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not on PATH — skipping")
+		t.Skip("bash not on PATH - skipping")
 	}
 
 	wrap, home, _, _ := prepLiveWrapArgv(t)
@@ -313,9 +313,9 @@ func TestSandboxHolderHotReloadsEnableSwitch(t *testing.T) {
 	h := newTestSandboxHolder(t, cfgPath, observerDir)
 
 	av := h.ProbeSandbox(context.Background())
-	if av.Available || av.Verdict != dashboard.VerdictDisabledByConfig {
+	if av.Available || av.Verdict != dashapi.VerdictDisabledByConfig {
 		t.Fatalf("with enabled=false: verdict = %q (available=%v), want %q",
-			av.Verdict, av.Available, dashboard.VerdictDisabledByConfig)
+			av.Verdict, av.Available, dashapi.VerdictDisabledByConfig)
 	}
 	// Fail-closed while off: Prepare must refuse with the SAME error a nil
 	// Sandboxer produces, so wiring the holder unconditionally never widens
@@ -331,9 +331,9 @@ func TestSandboxHolderHotReloadsEnableSwitch(t *testing.T) {
 
 	av = h.ProbeSandbox(context.Background())
 	switch av.Verdict {
-	case dashboard.VerdictDisabledByConfig:
-		t.Fatalf("after enabling: verdict is still %q — the seam did not hot-reload", av.Verdict)
-	case dashboard.VerdictRuntimeInitFailed:
+	case dashapi.VerdictDisabledByConfig:
+		t.Fatalf("after enabling: verdict is still %q - the seam did not hot-reload", av.Verdict)
+	case dashapi.VerdictRuntimeInitFailed:
 		t.Fatalf("after enabling: runtime failed to initialize: %s", av.Reason)
 	}
 	// Whatever the host can do, the verdict must now be probe-DERIVED: on a
@@ -350,8 +350,8 @@ func TestSandboxHolderHotReloadsEnableSwitch(t *testing.T) {
 
 	// And back off again: disabling is not a failure, it clears the runtime.
 	writeSandboxConfig(t, cfgPath, "[terminal.sandbox]\nenabled = false\n")
-	if av = h.ProbeSandbox(context.Background()); av.Verdict != dashboard.VerdictDisabledByConfig {
-		t.Fatalf("after disabling: verdict = %q, want %q", av.Verdict, dashboard.VerdictDisabledByConfig)
+	if av = h.ProbeSandbox(context.Background()); av.Verdict != dashapi.VerdictDisabledByConfig {
+		t.Fatalf("after disabling: verdict = %q, want %q", av.Verdict, dashapi.VerdictDisabledByConfig)
 	}
 }
 
@@ -377,8 +377,8 @@ func TestSandboxHolderReportsRuntimeInitFailure(t *testing.T) {
 	if av.Available {
 		t.Fatalf("available = true, want false")
 	}
-	if av.Verdict != dashboard.VerdictRuntimeInitFailed {
-		t.Fatalf("verdict = %q (reason %q), want %q", av.Verdict, av.Reason, dashboard.VerdictRuntimeInitFailed)
+	if av.Verdict != dashapi.VerdictRuntimeInitFailed {
+		t.Fatalf("verdict = %q (reason %q), want %q", av.Verdict, av.Reason, dashapi.VerdictRuntimeInitFailed)
 	}
 	if !strings.Contains(av.Reason, "workspaces dir") {
 		t.Fatalf("reason = %q, want the construction error verbatim", av.Reason)

@@ -28,6 +28,7 @@ import { TagPill } from "@/components/TagPill";
 import { useCompanionRegistry } from "@/components/primitives/companion";
 import { AnchoredPopover } from "@/components/primitives/AnchoredPopover";
 import { Icon, Tooltip } from "@/components/primitives";
+import { STABLE_SCROLL_Y } from "@shared/lib/scroll";
 
 // TagEditor — the popover that adds/removes a session's tags, plus the
 // favorite star that shares its POST endpoint.
@@ -752,7 +753,7 @@ export function TagEditor({
               search input above stays outside this scroll region, so it
               never scrolls out of view.
             */}
-            <div className="max-h-[60vh] min-h-0 flex-1 overflow-y-auto py-1">
+            <div className={`max-h-[60vh] min-h-0 flex-1 py-1 ${STABLE_SCROLL_Y}`}>
               {suggestionModel.total === 0 ? (
                 <p className="px-3 py-2 text-[11px] text-fg-3">
                   {previewError !== null

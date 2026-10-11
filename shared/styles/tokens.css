@@ -253,6 +253,25 @@
   --term-chrome: #14141a;
   --term-banner: #101017;
   --term-pop: #1b1b23;
+
+  /* Mascot (Obs, "Prompt in a cape", 2026-10-02; shared/lib/mascot.ts).
+     Dark theme: amber body, periwinkle cape - the website's dark accent is
+     amber, and the cape is a lighter blue than Blueprint so it still clears
+     the dark page. Lost = each colour mixed ~74/26 toward grey: puzzled,
+     not drained. Character-internal colours, never text. */
+  --mascot-body: #ffb000;
+  --mascot-body-shade: #c98700;
+  --mascot-screen: #11163a;
+  --mascot-glyph: #ffc23d;
+  --mascot-badge: #1b2470;
+  --mascot-blush: #ff8fb8;
+  --mascot-cape: #7c98ff;
+  --mascot-cape-lining: #3e5ad0;
+  --mascot-burst: #7c9eff;
+  --mascot-lost-body: #e1a82a;
+  --mascot-lost-body-shade: #b68a31;
+  --mascot-lost-cape: #8096e7;
+  --mascot-lost-cape-lining: #556ac2;
 }
 
 :root[data-theme="light"],
@@ -388,6 +407,22 @@
   --term-chrome: #eef0f5;
   --term-banner: #f4f5f9;
   --term-pop: #ffffff;
+
+  /* Mascot, light theme: Blueprint body (the website's light accent),
+     amber cape + glyphs. */
+  --mascot-body: #2647e8;
+  --mascot-body-shade: #1631b4;
+  --mascot-screen: #11163a;
+  --mascot-glyph: #ffc23d;
+  --mascot-badge: #ffffff;
+  --mascot-blush: #ff8fb8;
+  --mascot-cape: #ffb000;
+  --mascot-cape-lining: #c98200;
+  --mascot-burst: #ffb000;
+  --mascot-lost-body: #4760db;
+  --mascot-lost-body-shade: #4055b5;
+  --mascot-lost-cape: #e7ae30;
+  --mascot-lost-cape-lining: #be8e37;
 }
 
 /* Density (2026-09-29) - the per-browser "comfortable / compact" preference

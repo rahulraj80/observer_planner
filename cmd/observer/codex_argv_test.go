@@ -226,7 +226,7 @@ func TestCodexArgvUserBaseURLOverrideSkipsWrapperInjection(t *testing.T) {
 	// branch instead of prepending its own override.
 	strippedProxyHost := strings.TrimPrefix(strings.TrimPrefix(proxyURL, "http://"), "https://")
 	if argvContainsSubstring(got, strippedProxyHost) {
-		t.Fatalf("recorded argv %v unexpectedly contains the proxy host %q — wrapper injected despite user override", got, strippedProxyHost)
+		t.Fatalf("recorded argv %v unexpectedly contains the proxy host %q - wrapper injected despite user override", got, strippedProxyHost)
 	}
 	// Exactly one "-c" flag: the user's, not a second wrapper-injected one.
 	count := 0

@@ -58,7 +58,7 @@ func writeBytesAtomic(path string, data []byte) error {
 		// a byte-for-byte copy of that file, so it must carry the same
 		// owner-only mode; a world-readable .bak beside an owner-only original
 		// is a credential disclosure to every local account.
-		if err := os.WriteFile(path+".bak", existing, 0o600); err != nil {
+		if err := os.WriteFile(path+".bak", existing, 0o600); err != nil { //nolint:gosec // G703: the operator's own config path
 			return fmt.Errorf("write .bak: %w", err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {

@@ -539,5 +539,8 @@ func (st *parseState) workDirFromState() string {
 	if json.Unmarshal(b, &s) != nil {
 		return ""
 	}
-	return strings.TrimSpace(s.WorkDir)
+	if wd := strings.TrimSpace(s.WorkDir); wd != "" {
+		return wd
+	}
+	return strings.TrimSpace(s.Cwd)
 }

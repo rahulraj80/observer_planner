@@ -26,6 +26,8 @@ import { Button } from "@shared/primitives/Button";
 import { SuccessCheck } from "@shared/primitives/SuccessCheck";
 import { Card } from "@shared/primitives/Card";
 import { Input } from "@shared/primitives/Input";
+import { EntityMultiPicker, type EntityMultiPickerOption } from "@shared/primitives/EntityMultiPicker";
+import { STANDARD_TAGS, TAG_CATEGORIES } from "../lib/tagTaxonomy";
 import { Textarea } from "@shared/primitives/Textarea";
 import { ToolBadge } from "@shared/primitives/ToolBadge";
 import { IntelResultCard } from "@shared/components/sessiondetail/IntelResultCard";
@@ -42,6 +44,34 @@ import { routeIcon } from "../lib/nav";
 // Save is the latest explicit act, which R6 says wins, so re-applying their
 // values on the fresh tag is correct rather than a blind clobber. A correction
 // NEVER overwrites the AI original; it appends a revision.
+
+// TAXONOMY_OPTIONS: the curated vocabulary grouped Activity / Area / Outcome,
+// each tag's definition as its sublabel.
+const TAXONOMY_OPTIONS: EntityMultiPickerOption[] = TAG_CATEGORIES.flatMap((c) =>
+  STANDARD_TAGS.filter((t) => t.category === c.key).map((t) => ({
+    id: t.slug,
+    label: t.label,
+    sublabel: t.definition,
+    group: c.label,
+  })),
+);
+
+function tagOptions(tags: string[]): EntityMultiPickerOption[] {
+  return tags.map((t) => ({ id: t, label: t }));
+}
+
+// withKept keeps a tag already on the session visible even when the list does
+// not carry it (an older non-standard taxonomy tag).
+function withKept(options: EntityMultiPickerOption[], value: string[]): EntityMultiPickerOption[] {
+  const have = new Set(options.map((o) => o.id));
+  const extra = value.filter((v) => !have.has(v)).map((v) => ({ id: v, label: v, group: "On this session" }));
+  return extra.length ? [...options, ...extra] : options;
+}
+
+// cleanTags trims and drops empty tags, keeping order.
+function cleanTags(tags: string[]): string[] {
+  return splitTags(tags.join(","));
+}
 
 function splitTags(raw: string): string[] {
   return raw
@@ -168,8 +198,12 @@ function EditForm({
   // conflict-reload updates the `result` prop but keeps the user's typed edits.
   const [title, setTitle] = useState(eff.title);
   const [description, setDescription] = useState(eff.description);
-  const [taxonomy, setTaxonomy] = useState(eff.taxonomy.join(", "));
-  const [suggested, setSuggested] = useState(eff.suggested.join(", "));
+  // D-571: taxonomy tags are picked from the curated vocabulary (the closed
+  // set the enrichment emits); suggested tags stay free-form, with the ones
+  // the session already carried offered back.
+  const [taxonomy, setTaxonomy] = useState<string[]>(eff.taxonomy);
+  const [suggested, setSuggested] = useState<string[]>(eff.suggested);
+  const suggestedOptions = useMemo(() => tagOptions(eff.suggested), [eff.suggested]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflictNote, setConflictNote] = useState<string | null>(null);
@@ -186,8 +220,8 @@ function EditForm({
     const correction: ResultCorrection = {
       title: t,
       description: description,
-      taxonomy_tags: splitTags(taxonomy),
-      suggested_tags: splitTags(suggested),
+      taxonomy_tags: cleanTags(taxonomy),
+      suggested_tags: cleanTags(suggested),
     };
     // One Save is one intent: the same idempotency key is reused across the
     // auto-retry so a benign network replay is idempotent.
@@ -247,21 +281,23 @@ function EditForm({
         rows={3}
         placeholder="A short description (optional)"
       />
-      <label htmlFor="edit-tax" className="field-label">Taxonomy tags</label>
-      <Input
-        id="edit-tax"
-        type="text"
+      <span className="field-label">Taxonomy tags</span>
+      <EntityMultiPicker
+        options={withKept(TAXONOMY_OPTIONS, taxonomy)}
         value={taxonomy}
-        onChange={(e) => setTaxonomy(e.target.value)}
-        placeholder="comma, separated, tags"
+        onChange={setTaxonomy}
+        placeholder="Pick tags…"
+        ariaLabel="Taxonomy tags"
       />
-      <label htmlFor="edit-sug" className="field-label">Suggested tags</label>
-      <Input
-        id="edit-sug"
-        type="text"
+      <span className="field-label">Suggested tags</span>
+      <EntityMultiPicker
+        options={withKept(suggestedOptions, suggested)}
         value={suggested}
-        onChange={(e) => setSuggested(e.target.value)}
-        placeholder="comma, separated, tags"
+        onChange={setSuggested}
+        allowFreeId
+        freeIdLabel="Add tag"
+        placeholder="Type a tag and press Enter…"
+        ariaLabel="Suggested tags"
       />
       <div className="edit-actions">
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving}>

@@ -107,11 +107,22 @@ func expandHome(p, home string) string {
 	return home + "/" + rest
 }
 
+// homePrefixes are the home-directory spellings a path may start with:
+// the POSIX shells' ~, $HOME and ${HOME} (quoting is already stripped by
+// the lexer, so "${HOME}" arrives as ${HOME}), cmd's %USERPROFILE% and
+// PowerShell's $env:USERPROFILE / ${env:USERPROFILE} (PowerShell's own
+// $HOME is the same spelling as the POSIX one). Matching is
+// case-insensitive (hasFoldPrefix).
+var homePrefixes = [...]string{
+	"~", "${HOME}", "$HOME", "%USERPROFILE%",
+	"${env:USERPROFILE}", "$env:USERPROFILE",
+}
+
 // splitHomePrefix strips a recognized home-reference prefix from p and
 // returns the remainder (without its leading separator). ok is false
 // when p carries no home prefix.
 func splitHomePrefix(p string) (rest string, ok bool) {
-	for _, pre := range [...]string{"~", "$HOME", "%USERPROFILE%", "%userprofile%"} {
+	for _, pre := range homePrefixes {
 		if !hasFoldPrefix(p, pre) {
 			continue
 		}
@@ -124,6 +135,109 @@ func splitHomePrefix(p string) (rest string, ok bool) {
 		}
 	}
 	return "", false
+}
+
+// shellExpansions returns the [start, end) byte spans of the expansions
+// in word that the shell performs and this pure package cannot: POSIX and
+// PowerShell `$NAME`, `${...}` (PowerShell scope form `$env:NAME` too),
+// positional `$1`; cmd `%NAME%`. A leading home spelling (homePrefixes) is
+// resolved, not unresolved, and a character in lit (read from a
+// single-quoted or escaped region, Command.ArgvLiterals) is literal text.
+// Command substitutions never reach here: the parser strips them before
+// lexing, which already reads them as empty.
+func shellExpansions(word string, lit []int, d Dialect) [][2]int {
+	start := 0
+	if rest, ok := splitHomePrefix(word); ok {
+		start = len(word) - len(rest)
+	}
+	isLit := func(i int) bool {
+		for _, o := range lit {
+			if o == i {
+				return true
+			}
+		}
+		return false
+	}
+	var spans [][2]int
+	for i := start; i < len(word); i++ {
+		if isLit(i) {
+			continue
+		}
+		end := 0
+		switch {
+		case d == DialectCmd && word[i] == '%':
+			if j := strings.IndexByte(word[i+1:], '%'); j > 0 && isEnvName(word[i+1:i+1+j]) {
+				end = i + j + 2
+			}
+		case d != DialectCmd && word[i] == '$':
+			end = dollarExpansionEnd(word, i, d)
+		}
+		if end > i {
+			spans = append(spans, [2]int{i, end})
+			i = end - 1
+		}
+	}
+	return spans
+}
+
+// dollarExpansionEnd returns the end of the `$` expansion starting at i,
+// or 0 when the `$` starts none.
+func dollarExpansionEnd(word string, i int, d Dialect) int {
+	if i+1 >= len(word) {
+		return 0
+	}
+	c := word[i+1]
+	switch {
+	case c == '{':
+		if j := strings.IndexByte(word[i+2:], '}'); j >= 0 {
+			return i + 2 + j + 1
+		}
+		return len(word)
+	case c >= '0' && c <= '9':
+		return i + 2
+	case c == '_' || isASCIILetter(c):
+		j := i + 1
+		for j < len(word) && isNameByte(word[j]) {
+			j++
+		}
+		// PowerShell scope-qualified variable: $env:NAME, $global:x.
+		if d == DialectPowerShell && j+1 < len(word) && word[j] == ':' && isNameByte(word[j+1]) {
+			j++
+			for j < len(word) && isNameByte(word[j]) {
+				j++
+			}
+		}
+		return j
+	}
+	return 0
+}
+
+func isNameByte(c byte) bool {
+	return c == '_' || isASCIILetter(c) || (c >= '0' && c <= '9')
+}
+
+// withoutSpans returns word with every span removed: what the shell
+// produces when each unresolved expansion is empty.
+func withoutSpans(word string, spans [][2]int) string {
+	var b strings.Builder
+	prev := 0
+	for _, sp := range spans {
+		b.WriteString(word[prev:sp[0]])
+		prev = sp[1]
+	}
+	b.WriteString(word[prev:])
+	return b.String()
+}
+
+// isEnvName reports whether s is a plausible environment variable name.
+func isEnvName(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '_' && !isASCIILetter(c) && (c < '0' || c > '9' || i == 0) {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // hasFoldPrefix is a case-insensitive strings.HasPrefix (ASCII fold —
@@ -341,8 +455,7 @@ func looksPathish(tok string) bool {
 	if strings.ContainsAny(tok, `/\`) {
 		return true
 	}
-	if strings.HasPrefix(tok, "~") || strings.HasPrefix(tok, "$HOME") ||
-		hasFoldPrefix(tok, "%USERPROFILE%") {
+	if _, ok := splitHomePrefix(tok); ok || strings.HasPrefix(tok, "~") {
 		return true
 	}
 	return tok == "." || tok == ".." || strings.HasPrefix(tok, "./") || strings.HasPrefix(tok, "../")

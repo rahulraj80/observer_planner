@@ -30,19 +30,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>SuperBased</title>
     <script>
-      // Pre-paint: read theme preference (light / dark / system) and
-      // set data-theme on <html> before any CSS evaluates, avoiding
-      // a dark-to-light flash on light-mode users. Mirrors lib/theme.tsx.
+      // theme-prepaint:begin web: generated from shared/lib/theme.ts THEME_APPS by themePrepaintScript; do not edit by hand.
+      // Pre-paint: stamp data-theme on <html> before any CSS evaluates, so there is no
+      // flash of the wrong palette before the bundle applies the same preference.
       (function () {
+        var key = "superbased.theme";
+        var modes = ["light","dark","system"];
+        var fallback = "system";
         try {
-          var m = localStorage.getItem("superbased.theme") || "system";
-          var sysDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-          var eff = m === "system" ? (sysDark ? "dark" : "light") : m;
-          document.documentElement.setAttribute("data-theme", eff);
+          var m = null;
+          if (m === null) {
+            try {
+              var s = localStorage.getItem(key);
+              m = modes.indexOf(s) >= 0 ? s : fallback;
+            } catch (_) {
+              m = fallback;
+            }
+          }
+          var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.setAttribute("data-theme", m === "system" ? (dark ? "dark" : "light") : m);
         } catch (_) {
           document.documentElement.setAttribute("data-theme", "dark");
         }
       })();
+      // theme-prepaint:end
       // Pre-paint: stamp the density preference (comfortable / compact) the
       // same way, so a compact viewer never sees a comfortable first paint.
       // Mirrors shared/lib/density.ts (key superbased.density); anything unknown leaves the

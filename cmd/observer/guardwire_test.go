@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -59,7 +61,7 @@ func TestAcquireProcessGuard_SharedPerDBPath(t *testing.T) {
 	}
 	g2 := acquireProcessGuard(ctx, cfgFor(pathA), stWatcher, logger)
 	if g1 != g2 {
-		t.Fatal("two acquires over the same observer.db returned distinct Guards — taint state would split between proxy and watcher")
+		t.Fatal("two acquires over the same observer.db returned distinct Guards - taint state would split between proxy and watcher")
 	}
 
 	pathB := filepath.Join(t.TempDir(), "observer.db")
@@ -171,7 +173,7 @@ func TestBuildGuardForStore_PromptLaneEndToEnd(t *testing.T) {
 	// would still come back prompt_deny if item 1 regressed.
 	res2 := adapter.ScanRequest(ctx, models.ProviderAnthropic, body, "s1")
 	if res2.Action == "prompt_deny" {
-		t.Fatalf("identical resend still denied — the reconsider store is not persisting through the real *store.Store: %+v", res2)
+		t.Fatalf("identical resend still denied - the reconsider store is not persisting through the real *store.Store: %+v", res2)
 	}
 }
 

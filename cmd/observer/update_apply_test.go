@@ -1,3 +1,5 @@
+//go:build !sbo_omit_org_update
+
 package main
 
 import (
@@ -482,7 +484,7 @@ func TestDrainTimeoutAbortsTheApplyAndRestoresAdmission(t *testing.T) {
 		t.Errorf("detail does not state that admission was restored: %q", out.Detail)
 	}
 	if f.gate.Draining() {
-		t.Fatal("the proxy is still refusing traffic after an abandoned apply — R13 violated")
+		t.Fatal("the proxy is still refusing traffic after an abandoned apply - R13 violated")
 	}
 	if !f.gate.Enter() {
 		t.Fatal("admission was not restored")

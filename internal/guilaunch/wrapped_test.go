@@ -120,6 +120,9 @@ func TestComposeHandoffLauncherIsNotWrapped(t *testing.T) {
 				if !strings.Contains(plan.WrapNote, "hand-off client") {
 					t.Errorf("WrapNote = %q, want the hand-off reason", plan.WrapNote)
 				}
+				if plan.WrapReason != WrapReasonHandoffLauncher {
+					t.Errorf("WrapReason = %q, want %q", plan.WrapReason, WrapReasonHandoffLauncher)
+				}
 			}
 		})
 	}

@@ -127,6 +127,76 @@ func TestResponsesStoreFalseForcedAndPersistenceRejected(t *testing.T) {
 	}
 }
 
+// TestFinishReasonNormalized pins the truncation signal on both dialects: an
+// answer cut at MaxOutputTokens reports FinishLength, so the executor can name
+// the cause in the attempt ledger (D-313, T-414). The cut content is returned
+// as-is; rejecting it is the caller's job (it is incomplete JSON).
+func TestFinishReasonNormalized(t *testing.T) {
+	cases := []struct {
+		name      string
+		dialect   Dialect
+		body      string
+		wantFin   string
+		truncated bool
+	}{
+		{
+			name:      "chat cut at the cap",
+			dialect:   DialectChatCompletions,
+			body:      `{"choices":[{"message":{"content":"{\"title\":"},"finish_reason":"length"}],"usage":{"prompt_tokens":5,"completion_tokens":512}}`,
+			wantFin:   FinishLength,
+			truncated: true,
+		},
+		{
+			name:    "chat normal stop",
+			dialect: DialectChatCompletions,
+			body:    `{"choices":[{"message":{"content":"{}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`,
+			wantFin: "stop",
+		},
+		{
+			name:    "chat no finish reason",
+			dialect: DialectChatCompletions,
+			body:    `{"choices":[{"message":{"content":"{}"}}]}`,
+			wantFin: "",
+		},
+		{
+			name:      "responses incomplete at the cap",
+			dialect:   DialectResponsesStoreFalse,
+			body:      `{"store":false,"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output_text":"{\"ti"}`,
+			wantFin:   FinishLength,
+			truncated: true,
+		},
+		{
+			name:    "responses incomplete for another reason",
+			dialect: DialectResponsesStoreFalse,
+			body:    `{"store":false,"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output_text":""}`,
+			wantFin: "incomplete",
+		},
+		{
+			name:    "responses completed",
+			dialect: DialectResponsesStoreFalse,
+			body:    `{"store":false,"status":"completed","output_text":"{}"}`,
+			wantFin: "completed",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer srv.Close()
+			req := baseReq(srv.URL)
+			req.Dialect = c.dialect
+			res, err := (&AzureClient{}).Complete(context.Background(), req)
+			if err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			if res.FinishReason != c.wantFin || res.Truncated() != c.truncated {
+				t.Fatalf("finish = %q truncated = %v, want %q / %v", res.FinishReason, res.Truncated(), c.wantFin, c.truncated)
+			}
+		})
+	}
+}
+
 func TestResponsesStoreFalseSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"store":false,"output_text":"{\"title\":\"ok\"}","usage":{"input_tokens":3,"output_tokens":2}}`))

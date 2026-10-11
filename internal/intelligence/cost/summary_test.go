@@ -1947,3 +1947,41 @@ func TestEngine_TurnRows_AppliesNoiseFilterAndCopilotShadowCollapse(t *testing.T
 		t.Errorf("copilot session turns = %d, want 1 (the output-only shadow must collapse into the full-usage row)", copilotSessionTurns)
 	}
 }
+
+// TestSummary_SummaryCallsHonourTool (Sol A3-06): a summary_calls row is
+// tagged tool = SummaryCallTool, so a tool filter naming any other tool must
+// exclude it, exactly as it excludes another tool's proxy or JSONL row. The
+// model picker (/api/models) is this summary narrowed by the selected tool
+// (D-071): before, a model seen only in an out-of-tool summary call was
+// offered under tool=codex.
+func TestSummary_SummaryCallsHonourTool(t *testing.T) {
+	database := openTestDB(t)
+	now := time.Now().UTC()
+	insertSummaryCall(t, database, "sess-D20", now, "claude-haiku-4-5", 1000, 100, 0.001)
+	f := seedSession(t, database, "/repo/r", "sess-codex", "codex")
+	insertAPITurn(t, database, f, now, "claude-sonnet-4-20250514", 100_000, 50_000)
+
+	keys := func(tool string) map[string]bool {
+		t.Helper()
+		got, err := NewEngine(config.IntelligenceConfig{}).Summary(context.Background(), database, Options{
+			GroupBy: GroupByModel, Source: SourceAuto, Days: 1, Tool: tool,
+		})
+		if err != nil {
+			t.Fatalf("Summary(tool=%q): %v", tool, err)
+		}
+		out := map[string]bool{}
+		for _, row := range got.Rows {
+			out[row.Key] = true
+		}
+		return out
+	}
+	if got := keys("codex"); got["claude-haiku-4-5"] || !got["claude-sonnet-4-20250514"] {
+		t.Errorf("tool=codex models = %v, want the codex session's sonnet only (no summarizer haiku)", got)
+	}
+	if got := keys(SummaryCallTool); !got["claude-haiku-4-5"] || got["claude-sonnet-4-20250514"] {
+		t.Errorf("tool=%s models = %v, want the summarizer's haiku only", SummaryCallTool, got)
+	}
+	if got := keys(""); !got["claude-haiku-4-5"] || !got["claude-sonnet-4-20250514"] {
+		t.Errorf("unfiltered models = %v, want both", got)
+	}
+}

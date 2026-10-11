@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -74,13 +76,13 @@ func newProcessStatusCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "process observability: enabled=%v backend=%s retention=%dd\n", pc.Enabled, pc.Backend, pc.RetentionDays)
 			if !pc.Enabled {
-				fmt.Fprintln(out, "  (opt-in — set [observer.process] enabled = true and restart to capture)")
+				fmt.Fprintln(out, "  (opt-in - set [observer.process] enabled = true and restart to capture)")
 			}
 			if ebpfRelevant {
 				if ebpfAvail {
-					fmt.Fprintln(out, "  eBPF capture: available — real-time fork/exec/exit (probed in this process)")
+					fmt.Fprintln(out, "  eBPF capture: available - real-time fork/exec/exit (probed in this process)")
 				} else {
-					fmt.Fprintln(out, "  eBPF capture: unavailable here — using poll (misses sub-poll-interval commands).")
+					fmt.Fprintln(out, "  eBPF capture: unavailable here - using poll (misses sub-poll-interval commands).")
 					fmt.Fprintln(out, "    Grant the daemon CAP_BPF+CAP_PERFMON to enable real-time capture:")
 					fmt.Fprintln(out, "      sudo setcap cap_bpf,cap_perfmon,cap_sys_resource+ep <observer-binary>   (binary must be on ext4, not DrvFs/9p)")
 				}
@@ -215,7 +217,7 @@ func newProcessFindingsCmd() *cobra.Command {
 		Long: "Derives the §14 observe-only findings from the captured process\n" +
 			"envelope: privilege elevations (effective root from a non-root uid) and\n" +
 			"executables run from scratch locations (tmp/cache/downloads). Findings\n" +
-			"never block — they are audit evidence for the operator. With --session\n" +
+			"never block - they are audit evidence for the operator. With --session\n" +
 			"they cover one session; without it, a recent cross-session rollup.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
@@ -453,7 +455,7 @@ func renderProcessTree(w io.Writer, sessionID string, runs []store.ProcessRunRow
 		childrenOf[k] = ch
 	}
 
-	fmt.Fprintf(w, "session %s — %d process runs\n", sessionID, len(runs))
+	fmt.Fprintf(w, "session %s - %d process runs\n", sessionID, len(runs))
 	for i, root := range roots {
 		renderNode(w, root, "", i == len(roots)-1, byKey, childrenOf, cmds)
 	}

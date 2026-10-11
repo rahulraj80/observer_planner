@@ -1,6 +1,8 @@
 package scrub
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"math"
 	"regexp"
 	"sort"
@@ -193,9 +195,10 @@ var typedDetectors = []typedDetector{
 		name: "private_key_block", certain: true, class: classSecret,
 		// Lazy dotall body up to the END marker (or end of input for a
 		// truncated paste) so masking removes the key material, not
-		// just the header. Typed-path only — deliberately NOT added to
-		// the storage defaultPatterns in this commit, so stored-excerpt
-		// behavior is unchanged (additive rule §17.6).
+		// just the header. The storage table carries a STRICTER sibling
+		// (scrub.go pemKeyBlockRE, audit P5) that needs real key
+		// material after the header, so stored code that only names the
+		// header is never rewritten.
 		re:    regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)`),
 		gates: []string{"private key-----"},
 	},
@@ -267,20 +270,23 @@ var typedDetectors = []typedDetector{
 		gates: []string{"aiza"},
 	},
 	{
-		// Slack bot/user/app/config tokens (xoxb-/xoxo-/xoxa-/xoxp-/
-		// xoxr-/xoxs-) plus the newer xapp- Socket Mode app tokens.
+		// Slack tokens: every xox<letter>- family in slackTokenPrefixes
+		// plus the xapp- Socket Mode app tokens (slackTokenRE, the one
+		// definition the storage table shares).
 		name: "slack_token", certain: true, class: classSecret,
-		re:    regexp.MustCompile(`xox[baprs]-[0-9A-Za-z-]{10,}|xapp-[0-9A-Za-z-]{10,}`),
+		re:    slackTokenRE,
 		gates: []string{"xox", "xapp-"},
 	},
 	{
-		// A bare three-segment JWT. Deliberately narrower than the
-		// generic base64 entropy heuristic: requires BOTH segments to
-		// start with the `eyJ` JSON-object-base64 signature (header and
-		// payload are always JSON objects), never a bare base64 run.
+		// A three-segment JWT/JWS, detected STRUCTURALLY (Sol A2-05): the
+		// header must base64url-decode to a JSON object naming an "alg"
+		// (an eyJ-headed token is accepted as-is). The regex only finds
+		// candidates (jwtCandidateRE, shared with the storage table and
+		// ReplaceJWTs); jwtValidate decides.
 		name: "jwt", certain: true, class: classSecret,
-		re:    regexp.MustCompile(`eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`),
-		gates: []string{"eyj"},
+		re:       jwtCandidateRE,
+		gates:    jwtGates,
+		validate: jwtValidate,
 	},
 	{
 		// AWS secret access keys have no distinguishing shape of their
@@ -476,6 +482,89 @@ func DetectorNames() []string {
 	}
 	names = append(names, "entropy")
 	return names
+}
+
+// slackTokenPrefixes is the ONE list of Slack xox<letter>- token families
+// (Sol A2-05): bot (b), user (p), app-level/legacy (a), legacy workspace
+// (o), refresh/rotation (e, also the xoxe.xoxp- form), config (r, s).
+const slackTokenPrefixes = "abeoprs"
+
+// slackTokenRE matches a Slack token. Shared by the typed detector and the
+// storage scrub table so a value one flags is a value the other redacts.
+var slackTokenRE = regexp.MustCompile(`xox[` + slackTokenPrefixes + `]-[0-9A-Za-z-]{10,}|xapp-[0-9A-Za-z-]{10,}`)
+
+// jwtCandidateRE finds JWT/JWS candidates: three base64url segments whose
+// first starts the way a base64url JSON object header can start ('{'
+// followed by '"', a space, a tab, a newline or a carriage return: eyJ,
+// eyI, eyA, ewo, ewk, ew0). The payload may be anything base64url and the
+// signature may be empty (an unsecured `alg: none` token). jwtValidate
+// confirms; the pattern alone is never a finding. Before Sol A2-05 only
+// eyJ.eyJ was matched, so a token whose JSON had whitespace after the
+// opening brace was missed. It is the ONE JWT detector: the typed table,
+// the storage table and ReplaceJWTs (the Agent Access support bundle) all
+// use it.
+var jwtCandidateRE = regexp.MustCompile(`(?:eyJ|eyI|eyA|ewo|ewk|ew0)[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*`)
+
+// jwtGates are jwtCandidateRE's header prefixes, lowercased (gates match
+// the lowercased body).
+var jwtGates = []string{"eyj", "eyi", "eya", "ewo", "ewk", "ew0"}
+
+// legacyJWTRE is the union of the eyJ-headed shapes the detectors matched
+// before Sol A2-05 (the storage/typed eyJ.eyJ row and the Agent Access
+// support bundle's eyJ{4,}.{4,}.* row), anchored. jwtValidate keeps
+// accepting it without decoding, so unifying the detectors never narrows
+// what either already redacted (a truncated eyJ token is still treated as
+// a secret).
+var legacyJWTRE = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*$`)
+
+// ReplaceJWTs replaces every JWT/JWS in s with repl, using the shared
+// detector (jwtCandidateRE + jwtValidate). Callers outside this package
+// that keep their own redaction markers route JWTs through it instead of
+// a private regex.
+func ReplaceJWTs(s, repl string) string {
+	return jwtCandidateRE.ReplaceAllStringFunc(s, func(m string) string {
+		if jwtValidate(m) {
+			return repl
+		}
+		return m
+	})
+}
+
+// jwtValidate decides a jwtCandidateRE match: a legacy eyJ-headed shape,
+// or any other candidate that is structurally a JWS (jwtStructurallyValid).
+func jwtValidate(v string) bool {
+	return legacyJWTRE.MatchString(v) || jwtStructurallyValid(v)
+}
+
+// jwtStructurallyValid reports whether v is a compact JWS: three segments,
+// the header a base64url JSON object carrying "alg". The payload is not
+// required to be JSON (a JWS may sign any bytes); the "alg"-bearing JSON
+// header is what makes a dotted base64url run a token.
+func jwtStructurallyValid(v string) bool {
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	header, ok := decodeJSONObjectSegment(parts[0])
+	if !ok {
+		return false
+	}
+	_, ok = header["alg"]
+	return ok
+}
+
+// decodeJSONObjectSegment base64url-decodes one JWT segment (padding
+// optional) into a JSON object.
+func decodeJSONObjectSegment(seg string) (map[string]json.RawMessage, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(seg, "="))
+	if err != nil {
+		return nil, false
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return nil, false
+	}
+	return obj, true
 }
 
 // DetectSecrets runs the typed detector table plus the

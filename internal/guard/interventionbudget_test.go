@@ -183,14 +183,15 @@ func TestInterventionBudgetBindingIsSealedWithEngineSnapshot(t *testing.T) {
 		return BudgetSnapshot{DailyUSD: 1}, true
 	})
 
-	oldBudget := config.GuardBudgetConfig{DailyUSD: 1, Hard: true}
+	// FailClosed: a torn identity refuses only under the org's opt-in (D-502).
+	oldBudget := config.GuardBudgetConfig{DailyUSD: 1, Hard: true, FailClosed: true}
 	if err := g.ApplyOrgBudget(oldBudget, nil, false,
 		policy.BudgetProtection{DailyUSD: true}, "member-one"); err != nil {
 		t.Fatal(err)
 	}
 	oldSnapshot := g.set.Load()
 
-	newBudget := config.GuardBudgetConfig{DailyUSD: 2, Hard: true}
+	newBudget := config.GuardBudgetConfig{DailyUSD: 2, Hard: true, FailClosed: true}
 	if err := g.ApplyOrgBudget(newBudget, nil, false,
 		policy.BudgetProtection{DailyUSD: true}, "member-two"); err != nil {
 		t.Fatal(err)
@@ -218,7 +219,7 @@ func TestInterventionBudgetBindingMismatchPrecedesExplicitNone(t *testing.T) {
 	cfg := guardCfg()
 	cfg.Mode = "enforce"
 	g := newTestGuard(t, cfg, nil)
-	if err := g.ApplyOrgBudget(config.GuardBudgetConfig{}, nil, false,
+	if err := g.ApplyOrgBudget(config.GuardBudgetConfig{FailClosed: true}, nil, false,
 		policy.BudgetProtection{}, "member-one"); err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +229,27 @@ func TestInterventionBudgetBindingMismatchPrecedesExplicitNone(t *testing.T) {
 	})
 	if !got.Available || !got.Required || !got.Deny || got.RuleID != "B-625" {
 		t.Fatalf("stale explicit-none snapshot admitted current member: %+v", got)
+	}
+}
+
+// TestInterventionBudgetBindingMismatchFailsOpenByDefault is the D-502
+// default for the same torn identity: nothing is stopped until the current
+// member's budget is composed, unless the org opted into fail_closed.
+func TestInterventionBudgetBindingMismatchFailsOpenByDefault(t *testing.T) {
+	t.Parallel()
+	cfg := guardCfg()
+	cfg.Mode = "enforce"
+	g := newTestGuard(t, cfg, nil)
+	if err := g.ApplyOrgBudget(config.GuardBudgetConfig{}, nil, false,
+		policy.BudgetProtection{}, "member-one"); err != nil {
+		t.Fatal(err)
+	}
+	got := g.CheckInterventionBudget(InterventionBudgetInput{
+		BudgetBinding: "member-two", SourceReady: true,
+		Now: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
+	})
+	if got.Deny {
+		t.Fatalf("torn identity stopped a process without the fail_closed opt-in: %+v", got)
 	}
 }
 

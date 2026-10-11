@@ -94,7 +94,7 @@ func newProveCmd() *cobra.Command {
 
 			apiKey := strings.TrimSpace(os.Getenv(envProveFoundryAPIKey))
 			if apiKey == "" {
-				return fmt.Errorf("%s is unset — the proving lane refuses to run.\n"+
+				return fmt.Errorf("%s is unset - the proving lane refuses to run.\n"+
 					"Set it to a NON-PRODUCTION Foundry key provisioned for this lane. It is deliberately a\n"+
 					"different variable from the worker's: the lane never reads the worker's key, and running\n"+
 					"without one must fail rather than silently fall back", envProveFoundryAPIKey)
@@ -104,7 +104,7 @@ func newProveCmd() *cobra.Command {
 				routeID = strings.TrimSpace(os.Getenv(envProveRoute))
 			}
 			if routeID == "" {
-				return fmt.Errorf("no route selected — set %s or pass --route (the lane never guesses a route)", envProveRoute)
+				return fmt.Errorf("no route selected - set %s or pass --route (the lane never guesses a route)", envProveRoute)
 			}
 
 			ctx := cmd.Context()
@@ -139,7 +139,7 @@ func newProveCmd() *cobra.Command {
 			}
 			rep.Print(out)
 			if !rep.Passed() {
-				return fmt.Errorf("proving run FAILED — see the per-step report above")
+				return fmt.Errorf("proving run FAILED - see the per-step report above")
 			}
 			return nil
 		},

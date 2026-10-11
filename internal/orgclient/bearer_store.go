@@ -74,6 +74,19 @@ type BearerStore interface {
 // keyring-daemon), keychainUsable() returns true on the next probe, we
 // remove the sentinel, and the WARN can fire again on a future downgrade.
 func OpenBearerStore(service, fallbackDir string, logger *slog.Logger) BearerStore {
+	return openBearerStore(service, fallbackDir, logger, true)
+}
+
+// OpenBearerStoreQuiet is OpenBearerStore without the downgrade warning and
+// without arming its sentinel, for a caller on a node that is not enrolled
+// (T-735, D-547): `observer proxy start` on a never-enrolled node warned
+// about the org bearer keychain it would never use. The warning stays armed
+// for the first enrolment, which opens the store with OpenBearerStore.
+func OpenBearerStoreQuiet(service, fallbackDir string) BearerStore {
+	return openBearerStore(service, fallbackDir, nil, false)
+}
+
+func openBearerStore(service, fallbackDir string, logger *slog.Logger, warn bool) BearerStore {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -84,6 +97,9 @@ func OpenBearerStore(service, fallbackDir string, logger *slog.Logger) BearerSto
 		// future downgrade warns again.
 		_ = os.Remove(sentinel)
 		return &keychainStore{service: service, fallbackDir: fallbackDir}
+	}
+	if !warn {
+		return &fileStore{dir: storeDir, service: service, fallbackDir: fallbackDir}
 	}
 	if _, err := os.Stat(sentinel); err != nil {
 		logger.Warn(

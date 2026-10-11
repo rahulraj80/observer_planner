@@ -27,6 +27,7 @@ import {
 } from "@/components/primitives";
 import { HelpInd, TitleWithHelp } from "@/components/HelpInd";
 import { OnboardingCard } from "@/components/OnboardingCard";
+import { ComponentsSetupCard } from "@/components/ComponentsSetupCard";
 import { MilestonesCard } from "@/components/MilestonesCard";
 import { CommunityCard } from "@/components/CommunityCard";
 import {
@@ -36,6 +37,8 @@ import {
   useGranularity,
 } from "@/lib/filters";
 import { useApi } from "@/lib/useApi";
+import { useTileVisible } from "@/lib/useComponents";
+import type { TileOwner } from "@/lib/componentState";
 import { useNowTick } from "@/lib/useNowTick";
 import { modelSeriesColors } from "@/lib/models";
 import {
@@ -48,11 +51,16 @@ import {
   type OverviewSectionId,
 } from "@/lib/overviewLayout";
 import {
+  costChoice,
+  costLabel,
+  dollarsShown,
   fmtCompact,
   fmtDateTime,
   fmtDuration,
   fmtInt,
+  fmtCost,
   fmtUSD,
+  withoutDollars,
 } from "@/lib/format";
 import type {
   ActionsTimeseries,
@@ -93,7 +101,10 @@ const SECTION_ICONS = {
 } satisfies Record<string, LucideIcon>;
 
 export function OverviewPage() {
-  const [costMode, setCostMode] = useState<CostAreaMode>(loadCostMode);
+  const [storedCostMode, setCostMode] = useState<CostAreaMode>(loadCostMode);
+  // In the org's token-usage view the chart has no dollar series to offer:
+  // a stored "cost" choice reads as tokens (format.ts cost affordances).
+  const costMode = costChoice(storedCostMode, ["cost"] as CostAreaMode[], "tokens");
   const pickCostMode = (m: CostAreaMode) => {
     setCostMode(m);
     try {
@@ -107,13 +118,14 @@ export function OverviewPage() {
     setLayout(next);
     saveOverviewLayout(next);
   };
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   // Chart bucket: the shared granularity rule + the viewer's `gran=` choice
   // (lib/filters.tsx useGranularity), never an inline span threshold.
   const gran = useGranularity();
   const winLbl = windowLabel(win, customRange);
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const projectParam = project === "all" ? undefined : project;
 
   // /api/status is shared with the TopBar + Sidebar pollers through the
@@ -126,35 +138,35 @@ export function OverviewPage() {
   });
   const scoped = useApi<StatusScoped>(
     "/api/status/scoped",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const costTs = useApi<CostTimeseries>(
     "/api/timeseries/cost",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   const actionsTs = useApi<ActionsTimeseries>(
     "/api/timeseries/actions",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   const costGran = asGranularity(costTs.data?.bucket ?? gran.expected);
   const actionsGran = asGranularity(actionsTs.data?.bucket ?? gran.expected);
   const models = useApi<CostSummary>(
     "/api/models",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const tools = useApi<ToolsResponse>(
     "/api/tools",
-    { ...winParams, project: projectParam },
-    [win, customRange, project],
+    { ...winParams, project: projectParam, model: modelParam },
+    [win, customRange, project, model],
   );
   const sessions = useApi<SessionsResponse>(
     "/api/sessions",
-    { limit: 6, page: 1, tool: toolParam, project: projectParam },
-    [tool, project],
+    { limit: 6, page: 1, tool: toolParam, project: projectParam, model: modelParam },
+    [tool, model, project],
   );
   // Discover is only used for the stale-reads KPI tile; pull a thin
   // slice with no pagination payload, and only the stale-read pass
@@ -168,16 +180,23 @@ export function OverviewPage() {
       stale_limit: 1,
       repeated_limit: 1,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
     },
-    [win, customRange, tool, project],
+    [win, customRange, tool, model, project],
   );
   // Cache overview (C14) drives the Cache efficiency KPI tile.
   // Pulls the global rollup + top causes; the worst_sessions list
   // is loaded but only used by the linkTo page once we ship a
   // standalone cache overview page.
-  const cache = useApi<CacheOverviewResponse>("/api/cache/overview");
+  // It follows the bar like every other Overview card.
+  const cache = useApi<CacheOverviewResponse>(
+    "/api/cache/overview",
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
+  );
 
+  const showTile = useTileVisible();
   const kpis = deriveKpis(costTs.data, actionsTs.data);
   const staleCount = discover.data?.summary.stale_read_count;
   const apiTurns = scoped.data?.api_turns;
@@ -189,14 +208,14 @@ export function OverviewPage() {
          band cascades in on page entry (sb-stagger) and numbers count up. */
       <Stagger className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <HeroStat
-          label={`Spend · ${winLbl}`}
-          icon={<MetricIcon metric="spend" />}
+          label={costLabel(`Spend · ${winLbl}`, `Token usage · ${winLbl}`)}
+          icon={<MetricIcon metric={dollarsShown() ? "spend" : "tokens"} />}
           helpId="chart.cost_over_time"
           aurora
           className="col-span-2 md:col-span-3 xl:col-span-2 xl:row-span-2"
           loading={costTs.loading}
           stale={costTs.isStale}
-          value={costTs.data ? fmtUSD(kpis.cost) : "-"}
+          value={costTs.data ? fmtCost(kpis.cost, kpis.tokens) : "-"}
           sub={
             costTs.data
               ? `${fmtInt(kpis.turns)} priced turns · ${fmtCompact(kpis.tokens)} tokens`
@@ -204,7 +223,7 @@ export function OverviewPage() {
                 ? "spend unavailable"
                 : "-"
           }
-          spark={kpis.costSpark}
+          spark={dollarsShown() ? kpis.costSpark : kpis.tokenSpark}
           sparkMode="wide"
         />
         <StatCard
@@ -257,6 +276,7 @@ export function OverviewPage() {
           spark={kpis.actionsSpark}
           sparkColor="var(--accent)"
         />
+        {showTile(OVERVIEW_TILE_OWNERS.apiTurns) && (
         <StatCard
           label="API Turns (proxy)"
           helpId="tile.api_turns"
@@ -276,6 +296,7 @@ export function OverviewPage() {
           spark={kpis.turnsSpark}
           sparkColor="var(--tok-net)"
         />
+        )}
         <StatCard
           label="Token Rows (jsonl)"
           helpId="tile.token_rows"
@@ -288,6 +309,7 @@ export function OverviewPage() {
           sparkColor="var(--tok-read)"
           sub="plentiful but unreliable · de-duped at cost time"
         />
+        {showTile(OVERVIEW_TILE_OWNERS.staleRereads) && (
         <StatCard
           label="Stale re-reads"
           helpId="metric.stale_count"
@@ -312,13 +334,16 @@ export function OverviewPage() {
                 : "from Discovery tab"
           }
         />
-        <CacheEfficiencyTile data={cache.data} loading={cache.loading} />
+        )}
+        {showTile(OVERVIEW_TILE_OWNERS.cacheEfficiency) && (
+          <CacheEfficiencyTile data={cache.data} loading={cache.loading} />
+        )}
       </Stagger>
     ),
     trends: (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartShell
-          title={<TitleWithHelp text="Cost over time" helpId="chart.cost_over_time" />}
+          title={<TitleWithHelp text={costLabel("Cost over time", "Token usage over time")} helpId="chart.cost_over_time" />}
           icon={SECTION_ICONS.costOverTime}
           stale={costTs.isStale}
           sub={
@@ -329,15 +354,17 @@ export function OverviewPage() {
           right={
             <div className="flex flex-wrap items-center gap-2">
               <GranControl served={costTs.data} />
-              <SegmentedControl<CostAreaMode>
-                options={[
-                  { value: "tokens", label: "Tokens" },
-                  { value: "cost", label: "Cost $" },
-                ]}
-                value={costMode}
-                onChange={pickCostMode}
-                size="sm"
-              />
+              {dollarsShown() && (
+                <SegmentedControl<CostAreaMode>
+                  options={[
+                    { value: "tokens", label: "Tokens" },
+                    { value: "cost", label: "Cost $" },
+                  ]}
+                  value={costMode}
+                  onChange={pickCostMode}
+                  size="sm"
+                />
+              )}
             </div>
           }
         >
@@ -445,7 +472,7 @@ export function OverviewPage() {
           deniedPermission={sessions.deniedPermission}
           onRetry={sessions.reload}
           empty={!sessions.data?.rows?.length}
-          emptyHint="No sessions yet. With the daemon running, a session appears here the moment you use an AI tool - route Claude Code / Codex through the proxy from the Compression page's Proxy banner, or wire hooks + MCP with `observer init`."
+          emptyHint="No sessions yet. With the daemon running, a session appears here the moment you use an AI tool - route Claude Code / Codex through the proxy from the Compression page's Proxy banner, or wire hooks + MCP from Settings > Connected tools (each tool's Set up)."
         >
           {sessions.data && <RecentSessions rows={sessions.data.rows} />}
         </ChartState>
@@ -463,7 +490,7 @@ export function OverviewPage() {
       <PageHeader
         icon={navIcon("overview")}
         title="Overview"
-        sub="High-level snapshot - KPI tiles, daily cost and activity, plus top-N models and tools across the selected window."
+        sub={`High-level snapshot - KPI tiles, ${costLabel("daily cost", "daily token usage")} and activity, plus top-N models and tools across the selected window.`}
         helpId="tab.overview"
         right={<CustomizeOverview layout={layout} onChange={updateLayout} />}
       />
@@ -473,6 +500,9 @@ export function OverviewPage() {
       {/* Milestones (P5.6/D-4): once-each, max one visible,
           dismissable; existing installs retire crossed ones silently. */}
       <MilestonesCard sessions={status.data?.sessions ?? null} />
+      {/* Modular packaging 7.1: until a component selection is recorded,
+          one dismissible pointer to Settings > Components. */}
+      <ComponentsSetupCard />
       {/* Sections in the operator's chosen order; each rises in on page
           entry (sb-stagger on the wrapper). */}
       <Stagger className="space-y-6">
@@ -615,6 +645,17 @@ function CustomizeOverview({
 
 // --------------------------------------------------------------- helpers
 
+// OVERVIEW_TILE_OWNERS names what each optional KPI tile needs (T-670): a
+// tile whose data route belongs to an inactive component, or whose numbers
+// come from a component that is not active, is hidden instead of rendering a
+// dead "-" (lib/componentState tileVisible). Core tiles have no row.
+const OVERVIEW_TILE_OWNERS = {
+  // Proxy turns ride on /api/status; the proxy component produces them.
+  apiTurns: { component: "capture.proxy" },
+  staleRereads: { route: "/api/discover" },
+  cacheEfficiency: { route: "/api/cache/overview" },
+} as const satisfies Record<string, TileOwner>;
+
 // CacheEfficiencyTile is the main-dashboard tile fed by
 // /api/cache/overview (the C14 backend). Shows the global R/W
 // ratio as the headline number + event/session counts as the sub
@@ -662,7 +703,7 @@ function CacheEfficiencyTile({
   const subLine =
     eventCount > 0
       ? `${fmtInt(eventCount)} events · ${fmtInt(sessionCount)} sessions · read ${fmtCompact(efficiency?.read_tokens ?? 0)}`
-      : "no cache events yet · enable [cachetrack] or `observer backfill --cache-rescan`";
+      : "no cache events yet · enable [cachetrack] or run Settings > Backfill > cache-rescan";
 
   const cornerPill =
     dominantCause && dominantCause.count > 0 ? (
@@ -783,7 +824,8 @@ function TopModelsBars({ rows }: { rows: CostSummary["rows"] }) {
             <div className="flex items-baseline justify-between gap-2">
               <ModelId model={r.key} className="min-w-0 text-[11px]" />
               <span className="shrink-0 text-[11px] text-fg-3 tabular-nums">
-                {fmtCompact(total)} · {fmtUSD(r.cost_usd)}
+                {fmtCompact(total)}
+                {dollarsShown() && <> · {fmtUSD(r.cost_usd)}</>}
               </span>
             </div>
             <div className="h-2 w-full overflow-hidden rounded-pill bg-bg-3">
@@ -874,7 +916,9 @@ function RecentSessions({ rows }: { rows: SessionsResponse["rows"] }) {
   return (
     <DataTable<RecentSessionRow>
       data={rows.slice(0, 6)}
-      columns={RECENT_SESSION_COLUMNS}
+      // The Cost column is dollars only; the Tokens column beside it already
+      // carries the usage in the org's token-usage view.
+      columns={withoutDollars(RECENT_SESSION_COLUMNS, (c) => c.id === "cost")}
       rowKey={(s) => s.id}
       minWidth={540}
     />

@@ -121,14 +121,14 @@ func PlanReclaim(in ReclaimInput) ReclaimPlan {
 	switch {
 	case in.DaemonLive:
 		plan.Decision = ReclaimDaemonLive
-		plan.Reason = "the observer daemon is running — a reclaim rewrites the database file and then replaces it, " +
+		plan.Reason = "the observer daemon is running - a reclaim rewrites the database file and then replaces it, " +
 			"which a live daemon's open handles cannot survive. Stop it first " +
 			"(docs/daemon-restart-runbook.md: route OFF → stop → reclaim → relaunch → route ON)"
 
 	case plan.ReclaimableBytes < MinReclaimBytes && !in.Force:
 		plan.Decision = ReclaimNothingToReclaim
 		plan.Reason = fmt.Sprintf(
-			"only %d bytes are on the freelist — below the %d-byte floor. A reclaim rewrites the whole file, "+
+			"only %d bytes are on the freelist - below the %d-byte floor. A reclaim rewrites the whole file, "+
 				"so there is nothing here worth the I/O. Let archival and retention free more pages first, or pass --force",
 			plan.ReclaimableBytes, int64(MinReclaimBytes),
 		)

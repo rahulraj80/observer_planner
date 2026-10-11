@@ -182,7 +182,7 @@ func TestHandleSessionTasks_HTTPRoundTrip(t *testing.T) {
 	}
 	var resp taskreport.SessionTaskReport
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 	if !resp.HasTasks || len(resp.Items) != 2 {
 		t.Fatalf("resp = %+v", resp)
@@ -234,7 +234,7 @@ func TestHandleTaskRollup_HTTPRoundTrip(t *testing.T) {
 	}
 	var resp taskreport.TaskRollup
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 	if resp.SessionsWithTasks != 1 {
 		t.Fatalf("resp = %+v", resp)
@@ -310,7 +310,7 @@ func TestHandleSessionTasks_AppliesConcurrentAttributionFromOptions(t *testing.T
 	}
 	var resp taskreport.SessionTaskReport
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 	if resp.ConcurrentAttribution != "none" {
 		t.Errorf("concurrent_attribution echo = %q, want %q", resp.ConcurrentAttribution, "none")
@@ -319,7 +319,7 @@ func TestHandleSessionTasks_AppliesConcurrentAttributionFromOptions(t *testing.T
 		t.Errorf("shared.tokens.input_tokens = %d, want 0 (concurrent_attribution=none)", resp.Shared.Tokens.InputTokens)
 	}
 	if resp.BetweenTasks.Tokens.InputTokens != 1000 {
-		t.Errorf("between_tasks.tokens.input_tokens = %d, want 1000 (concurrent_attribution=none) — the option did not reach the report", resp.BetweenTasks.Tokens.InputTokens)
+		t.Errorf("between_tasks.tokens.input_tokens = %d, want 1000 (concurrent_attribution=none) - the option did not reach the report", resp.BetweenTasks.Tokens.InputTokens)
 	}
 }
 

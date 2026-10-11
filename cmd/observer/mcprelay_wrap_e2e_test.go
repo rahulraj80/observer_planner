@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 import (
@@ -376,13 +378,25 @@ func TestMCPRelay_CoverageAndACKFollowVerifiedApplied(t *testing.T) {
 		t.Fatal("ACK does not see the landed projection")
 	}
 
-	// 3. The operator edits the config after the projection: the live ACK
-	//    probe (the SAME predicate) stops claiming it.
+	// 3. An edit OUTSIDE the relay-owned entries does not un-apply it (only
+	//    the owned part is verified, T-397); an edit to the wrapped entry
+	//    itself does, and the live ACK probe (the SAME predicate) stops
+	//    claiming it.
 	b, _ := os.ReadFile(f.cursorPath)
 	if err := os.WriteFile(f.cursorPath, append(b, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if !ackApplied() || !mcpRelayAppliedState(ctx, rs).StdioApplied("cursor") {
+		t.Fatal("whitespace outside the relay-owned entries un-applied the projection")
+	}
+	edited := strings.Replace(string(b), `"wrap"`, `"wrap", "--edited"`, 1)
+	if edited == string(b) {
+		t.Fatalf("fixture edit did not apply:\n%s", b)
+	}
+	if err := os.WriteFile(f.cursorPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if ackApplied() || mcpRelayAppliedState(ctx, rs).Any() {
-		t.Fatal("an edited config is still claimed as applied")
+		t.Fatal("an edited relay-owned entry is still claimed as applied")
 	}
 }

@@ -363,10 +363,10 @@ func TestTagCommandsRegistered(t *testing.T) {
 		}
 	}
 	if a, b := newTagCmd(), newTagCmd(); a == b {
-		t.Error("newTagCmd returned the same instance twice — constructors must return fresh commands")
+		t.Error("newTagCmd returned the same instance twice - constructors must return fresh commands")
 	}
 	if a, b := newTagsCmd(), newTagsCmd(); a == b {
-		t.Error("newTagsCmd returned the same instance twice — constructors must return fresh commands")
+		t.Error("newTagsCmd returned the same instance twice - constructors must return fresh commands")
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // Advise-shadow report (§R18.2): advise mode is a permanent shadow A/B
@@ -47,7 +47,7 @@ type AdviseShadowReport struct {
 // AdviseShadowNote is the structural caveat on every shadow report.
 const AdviseShadowNote = "shadow savings are decision-time estimates over the UNROUTED reality (§R18.2); " +
 	"quality flags count proposed moves lacking Model Value parity evidence (§R18.1); " +
-	"the §R22 promotion gate is a 30-day shadow with savings and zero flags — operator-run, operator-judged."
+	"the §R22 promotion gate is a 30-day shadow with savings and zero flags - operator-run, operator-judged."
 
 // shadowMinDecisions is the evidence floor before ReadyToPromote can
 // report true — mirrors the §R7.2 default sample threshold.
@@ -55,7 +55,7 @@ const shadowMinDecisions = 50
 
 // BuildAdviseShadowReport aggregates advise-mode decisions against the
 // Model Value evidence map. Pure.
-func BuildAdviseShadowReport(rows []RouterDecisionDetail, evidence map[routing.EvidenceKey]string, tiers *routing.TierTable, windowDays int) AdviseShadowReport {
+func BuildAdviseShadowReport(rows []RouterDecisionDetail, evidence map[routingcore.EvidenceKey]string, tiers *routingcore.TierTable, windowDays int) AdviseShadowReport {
 	rep := AdviseShadowReport{
 		WindowDays:    windowDays,
 		QualityByKind: map[string]int{},
@@ -78,12 +78,12 @@ func BuildAdviseShadowReport(rows []RouterDecisionDetail, evidence map[routing.E
 		rep.WouldSaveUSD += d.EstSavingsUSD
 		rep.CacheForfeitUSD += d.CacheForfeitUSD
 
-		targetTier := routing.TierUnclassified
+		targetTier := routingcore.TierUnclassified
 		if tiers != nil {
 			targetTier, _ = tiers.Lookup(d.SelectedModel)
 		}
-		key := routing.EvidenceKey{Kind: routing.TurnKind(d.TurnKind), Tier: targetTier}
-		if v := evidence[key]; v == routing.EvidenceParity || v == routing.EvidenceCandidateBetter {
+		key := routingcore.EvidenceKey{Kind: routingcore.TurnKind(d.TurnKind), Tier: targetTier}
+		if v := evidence[key]; v == routingcore.EvidenceParity || v == routingcore.EvidenceCandidateBetter {
 			rep.EvidenceBackedMoves++
 		} else {
 			rep.QualityFlags++
@@ -102,7 +102,7 @@ func BuildAdviseShadowReport(rows []RouterDecisionDetail, evidence map[routing.E
 // early-out skips the expensive modelvalue load on nodes with no
 // advise history in the window (the common case until routing is
 // adopted). price may be nil (facts fall back to stored row costs).
-func (s *Store) AdviseShadowSignal(ctx context.Context, windowDays int, price routing.PriceFn) (AdviseShadowReport, error) {
+func (s *Store) AdviseShadowSignal(ctx context.Context, windowDays int, price routingcore.PriceFn) (AdviseShadowReport, error) {
 	since := time.Now().AddDate(0, 0, -windowDays)
 	var n int
 	if err := s.db.QueryRowContext(ctx,
@@ -110,7 +110,7 @@ func (s *Store) AdviseShadowSignal(ctx context.Context, windowDays int, price ro
 		timestamp(since)).Scan(&n); err != nil {
 		return AdviseShadowReport{}, fmt.Errorf("store.AdviseShadowSignal: count: %w", err)
 	}
-	tiers := routing.NewTierResolver().Table()
+	tiers := routingcore.NewTierResolver().Table()
 	if n == 0 {
 		return BuildAdviseShadowReport(nil, nil, tiers, windowDays), nil
 	}

@@ -141,10 +141,13 @@ cross-OS shell).
     command-code, muse, prime-agent, zcode, mistral-code**.
     See the per-adapter seed-contract table below for the exact
     flag/positional each uses.
-  - **DocAssisted** (three): **hermes**, **kimi-code**, and **freebuff** —
-    their TUIs take no initial-prompt seed (upstream gaps), so the launcher
-    writes the handover doc and opens the TUI for you to reference/paste
-    (details below).
+  - **DocAssisted** (seven): **hermes**, **kimi-code**, **freebuff**, and
+    (since 2026-10-03) **aider** (`observer aider`), **crush**
+    (`observer crush`), **junie** (`observer junie`) and **poolside**
+    (`observer pool`, alias `observer poolside`). Their TUIs take no
+    initial-prompt seed, or (junie `--prompt`, pool `-q`) document one that
+    is not live-verified yet, so the launcher writes the handover doc and
+    opens the TUI for you to reference/paste (details below).
 
   `kilo-code-cli` (`observer kilo`), `cursor` (`observer cursor`),
   `openclaw` (`observer openclaw --continue-from`), `antigravity-cli`
@@ -216,7 +219,17 @@ cross-OS shell).
   install seen from a WSL daemon) or `not_found`, the New Terminal dialog
   shows a verified install command and an **"Install in terminal"** button
   that runs it in a visible, Ctrl-C-able PTY (`POST /api/terminal/install`,
-  gated by `[terminal.launch].allow_install`, default on). Cross-OS launch —
+  gated by `[terminal.launch].allow_install`, default on). Since 2026-10-03
+  the installer PTY (like every setup PTY) starts in the operator's home
+  directory, never the daemon's inherited cwd (a daemon started from `/`
+  broke vendor scripts that download into the current directory, e.g.
+  goose's `download_cli.sh`), and the install is checked against the hint's
+  grounded host prerequisites (`InstallHint.Requires`: `curl`, `tar`,
+  `unzip`, `bzip2`, ... read from each vendor script) BEFORE it runs: a
+  missing one withholds the Install button and the route answers 409 with
+  the package-manager command for the detected host family (for example
+  `sudo apt-get install -y unzip`), which Observer never runs itself.
+  Cross-OS launch —
   actually running a Windows-only binary from a WSL daemon — is explicitly
   out of scope; the guided fix is always a native install. Custom project
   paths typed as `C:\Users\…` are translated to the `/mnt/c/Users/…`
@@ -526,6 +539,12 @@ observer vibe --continue-from <session-id>
 
 # freebuff has no seed lane → doc-assisted, like hermes/kimi-code
 observer freebuff --continue-from <session-id>
+
+# 2026-10-03: aider, crush, junie and pool are doc-assisted too
+observer aider --continue-from <session-id>
+observer crush --continue-from <session-id>
+observer junie --continue-from <session-id>
+observer pool --continue-from <session-id>
 ```
 
 Under the hood `--continue-from` runs the exact same handoff as
@@ -576,6 +595,10 @@ command's own flags, not just the top-level help.
 | zcode | `zcode` | `--prompt`/`-p "<h>"` — zcode's own docs describe this as the interactive seed lane (`zcode --help`); the bare command with no prompt opens the TUI unseeded; **launched non-proxied** (Z.AI OAuth, no base-URL knob) | flag value (`--prompt`, conflicts with `-p`/`--print`) | — |
 | mistral-code | `vibe` | trailing positional `vibe "<h>"` (bare `[PROMPT]`) opens a seeded interactive session; **launched non-proxied** (API-key auth, `vibe_base_url`/`api_base` lane unprobed) | trailing positional | `-p`/`--prompt` |
 | freebuff | `freebuff` | **none** — `freebuff --help` (2026-08-18) exposes only `login` and `--continue`, no positional prompt or one-shot flag → **DocAssisted** (write doc + open the TUI); **launched non-proxied** (CodebuffAI backend, no base-URL knob) | n/a (doc-assisted) | — |
+| aider | `aider` | **none** — `--message`/`-m` and `--message-file`/`-f` process one reply then EXIT; `--read FILE` / `--load FILE` keep the REPL open (aider.chat options page, 2026-10-03) but are not wired as a seed (not live-verified) → **DocAssisted**; routed by the injected `OPENAI_API_BASE` | n/a (doc-assisted) | `--message "<h>"` |
+| crush | `crush` | **none** — the root command ignores positional args (upstream issue charmbracelet/crush#1791, open) → **DocAssisted**; routed by the crush.json `providers.openai.base_url` write | n/a (doc-assisted) | `crush run "<h>"` |
+| junie | `junie` | documented `--prompt "<h>"` ("Start interactive mode with an initial prompt already submitted", junie.jetbrains.com/docs/parameters.html) but **not live-verified** → **DocAssisted** for now; a bare positional or `--task` runs HEADLESS; **launched non-proxied** | n/a (doc-assisted) | `junie "<h>"`, `--task "<h>"` |
+| poolside | `pool` (alias `poolside`) | documented `-q`/`--prompt-queue "<h>"` (docs.poolside.ai/cli/cli-reference.md) but **not live-verified** → **DocAssisted** for now; **launched non-proxied** | n/a (doc-assisted) | `pool exec -p "<h>"` |
 
 **Absent by convention:** this table lists ONLY tools with a grounded
 `Handoff.Launch` row, so an adapter appears here the moment (and only when) its

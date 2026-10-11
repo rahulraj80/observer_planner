@@ -1,0 +1,39 @@
+{
+  "data": [
+    {
+      "user_id": "user_01HPMQ7NXKHM7Y7PR3TTZY3JZS",
+      "user_email": "developer@company.com",
+      "date": "2026-01-15",
+      "tool_calls": 1250,
+      "billable_tokens": 450000,
+      "primary_model": "claude-sonnet-4-5-20250929",
+      "primary_model_tier": "standard",
+      "files_created": 12,
+      "files_edited": 85,
+      "git_commits": 8,
+      "git_prs_created": 2,
+      "mcp_calls": 45,
+      "skill_calls": 8,
+      "slash_commands": 22,
+      "hooks": 120,
+      "sessions": 15,
+      "messages": 310,
+      "user_messages": 62,
+      "assistant_messages": 118,
+      "autonomy_ratio": 9.2,
+      "delegation_level": "auto-high",
+      "languages": [
+        "TypeScript",
+        "Python",
+        "Go"
+      ]
+    }
+  ],
+  "meta": {
+    "org_id": "org_01HPMQ6ABCDE",
+    "start_date": "2026-01-15",
+    "end_date": "2026-01-15",
+    "has_more": true,
+    "next_cursor": "user_01HPMQ8ABCDE7Y7PR3TTZY4KLM"
+  }
+}

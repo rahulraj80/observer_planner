@@ -26,6 +26,7 @@ type intelServer struct {
 	body     orgcontract.IntelResultsResponse
 	raw      string // when non-empty, served verbatim instead of body (malformed tests)
 	gotSince string
+	gotAfter string // the tombstone cursor header (review C156-28)
 	hits     int
 }
 
@@ -39,6 +40,7 @@ func newIntelServer(t *testing.T) *intelServer {
 		}
 		is.hits++
 		is.gotSince = r.URL.Query().Get("since")
+		is.gotAfter = r.Header.Get(orgcontract.HeaderIntelTombstonesAfter)
 		if is.status != http.StatusOK {
 			w.WriteHeader(is.status)
 			return

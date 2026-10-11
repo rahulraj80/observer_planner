@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -6,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -145,6 +148,7 @@ func seedOrgPricingDocument(t *testing.T, ctx context.Context, dbPath string) {
 
 // TestAssembly_OrgRateReachesTheProxiedTurnCost is criterion 4a.
 func TestAssembly_OrgRateReachesTheProxiedTurnCost(t *testing.T) {
+	requireAdapter(t, "codex")
 	ctx := context.Background()
 
 	// A fake Anthropic upstream returning a turn with round token counts, so
@@ -176,7 +180,8 @@ func TestAssembly_OrgRateReachesTheProxiedTurnCost(t *testing.T) {
 	seedOrgPricingDocument(t, ctx, dbPath)
 
 	// THE REAL COMPOSITION.
-	p, cleanup, _, _, _, _, _, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1", nil)
+	pwire, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1", nil)
+	p, cleanup := pwire.Proxy, pwire.Cleanup
 	if err != nil {
 		t.Fatalf("buildProxy: %v", err)
 	}
@@ -200,6 +205,12 @@ func TestAssembly_OrgRateReachesTheProxiedTurnCost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("proxy request: %v", err)
 	}
+	// Read the whole stream the way a real client does. Closing the body
+	// unread hangs the connection up, and the proxy's tee stops at the
+	// client's cancellation (internal/proxy/streaming.go), so the
+	// usage-bearing message_delta was sometimes never captured and the
+	// zero-usage turn was dropped by design (audit item B2): a 1-in-5 flake.
+	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 
 	// The proxy inserts the turn on a DETACHED context, so poll rather than
@@ -226,7 +237,7 @@ func TestAssembly_OrgRateReachesTheProxiedTurnCost(t *testing.T) {
 		t.Fatal("no api_turns row was captured through the real proxy assembly")
 	}
 	if diff := gotUSD - wantUSD; diff > 0.0001 || diff < -0.0001 {
-		t.Fatalf("api_turns.cost_usd = %v, want %v (the ORG rate) — the proxy is pricing from a different table than the one the org document composed into",
+		t.Fatalf("api_turns.cost_usd = %v, want %v (the ORG rate) - the proxy is pricing from a different table than the one the org document composed into",
 			gotUSD, wantUSD)
 	}
 }
@@ -278,7 +289,7 @@ VALUES('assembly-s1', ?, 'claude-code', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 'jsonl', '
 	// THE REAL COMPOSITION: buildOrgBundle is what installs the push pricer.
 	bundle, err := buildOrgBundle(ctx, configPath)
 	if err != nil {
-		t.Skipf("buildOrgBundle unavailable in this environment (%v) — the 4b path needs the org bundle's own handles", err)
+		t.Skipf("buildOrgBundle unavailable in this environment (%v) - the 4b path needs the org bundle's own handles", err)
 	}
 
 	batch, err := bundle.store.SelectUnpushedSince(ctx, store.PushCursor{}, 1<<20,
@@ -298,7 +309,7 @@ VALUES('assembly-s1', ?, 'claude-code', ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 'jsonl', '
 	}
 	wantUSD := float64(inputTokens)*assemblyOrgInput/1e6 + float64(outputTokens)*assemblyOrgOutput/1e6
 	if diff := gotUSD - wantUSD; diff > 0.0001 || diff < -0.0001 {
-		t.Fatalf("token_usage.estimated_cost_usd on the wire = %v, want %v (the ORG rate) — the push-time pricer is on a different table than the proxy",
+		t.Fatalf("token_usage.estimated_cost_usd on the wire = %v, want %v (the ORG rate) - the push-time pricer is on a different table than the proxy",
 			gotUSD, wantUSD)
 	}
 }
@@ -313,7 +324,8 @@ func TestAssembly_ProxyAndPushPricerShareOneEngine(t *testing.T) {
 	configPath := writeAssemblyConfig(t, dbPath, "http://127.0.0.1:1")
 	seedOrgPricingDocument(t, ctx, dbPath)
 
-	_, cleanup, _, _, _, _, _, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1", nil)
+	pwire, err := buildProxy(ctx, configPath, "", 0, "127.0.0.1", nil)
+	cleanup := pwire.Cleanup
 	if err != nil {
 		t.Fatalf("buildProxy: %v", err)
 	}
@@ -328,7 +340,7 @@ func TestAssembly_ProxyAndPushPricerShareOneEngine(t *testing.T) {
 	}
 	second := lookupProcessCostEngine(dbPath)
 	if first != second {
-		t.Fatal("the org bundle built its own cost engine — the proxy and the push pricer would then price from two tables")
+		t.Fatal("the org bundle built its own cost engine - the proxy and the push pricer would then price from two tables")
 	}
 	if first.OrgPricingVersion() != 12 {
 		t.Errorf("shared engine org version = %d, want the seeded 12", first.OrgPricingVersion())

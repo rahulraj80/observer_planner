@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,6 +43,9 @@ type budgetServer struct {
 	// header, so a test can pin that this node says which of its machines is
 	// polling — the server cannot infer it from a bearer that names a member.
 	gotMachine atomic.Value // string
+	// gotCaps records every ?policy_caps value of the last request, so a
+	// test can pin what this node told the org it understands (T-625).
+	gotCaps atomic.Value // []string
 }
 
 func newBudgetServer(t *testing.T) *budgetServer {
@@ -57,6 +61,7 @@ func newBudgetServer(t *testing.T) *budgetServer {
 		}
 		bs.gotINM.Store(r.Header.Get("If-None-Match"))
 		bs.gotMachine.Store(r.Header.Get(orgcontract.HeaderMachineIdentity))
+		bs.gotCaps.Store(r.URL.Query()["policy_caps"])
 		if st := bs.status.Load(); st != 0 {
 			w.WriteHeader(int(st))
 			return
@@ -243,35 +248,47 @@ func TestFetchBudgetPolicyStatusMap(t *testing.T) {
 	}
 }
 
-// TestFetchBudgetPolicy404DropsTheCachedCap: an admin who DELETED the budget
-// must not keep enforcing it through this node's memory.
-func TestFetchBudgetPolicy404DropsTheCachedCap(t *testing.T) {
+// TestFetchBudgetPolicy404KeepsTheCachedCap (Sol A5-01, D-016): an unsigned
+// 404 must never clear a verified cap. A proxy error, a route mismatch or a
+// downgraded server can all answer 404; only the org's SIGNED explicit none
+// may withdraw a budget (TestFetchBudgetPolicySignedExplicitNoneIsAVerifiedUncappedBody).
+func TestFetchBudgetPolicy404KeepsTheCachedCap(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	bs := newBudgetServer(t)
 	c, s, _ := enrolledClient(t, bs.srv.URL)
 	pinRoutingKey(t, s, encodeStdKey(pub))
 	doc, _ := orgcontract.SignBudgetPolicy(priv, "org-1", "scim-42", budgetBody(41, 40_000_000))
 	bs.doc.Store(&doc)
+	bs.etag.Store(`"bp-41"`)
 	if _, err := c.FetchBudgetPolicy(context.Background()); err != nil {
 		t.Fatalf("seed fetch: %v", err)
 	}
 
 	bs.status.Store(int32(http.StatusNotFound))
-	out, err := c.FetchBudgetPolicy(context.Background())
+	out, _ := c.FetchBudgetPolicy(context.Background())
+	if !out.HaveBody || out.Body.CapTokens != 40_000_000 {
+		t.Fatalf("outcome = %+v, want the verified 40M cap still in force after an unsigned 404", out)
+	}
+	if out.State == orgcontract.BudgetFetchNoBudget || out.State == orgcontract.BudgetFetchOK {
+		t.Errorf("state = %q; a 404 is neither a verified answer nor an explicit none", out.State)
+	}
+	// The durable copy survives too: a restart must not lose the cap a 404
+	// could not withdraw.
+	restarted := newTestClient(t, s, &memBearerStore{bearer: "bearer-xyz"})
+	persisted, err := restarted.LoadPersistedBudget(context.Background())
 	if err != nil {
-		t.Fatalf("404 fetch: %v", err)
+		t.Fatalf("LoadPersistedBudget: %v", err)
 	}
-	if out.State != orgcontract.BudgetFetchNoBudget || out.HaveBody {
-		t.Fatalf("outcome = %+v, want no_budget with NO body", out)
+	if !persisted.HaveBody || persisted.Body.CapTokens != 40_000_000 {
+		t.Fatalf("a 404 deleted the persisted budget: %+v", persisted)
 	}
-	// The next cycle must be unconditional again: a stale If-None-Match after
-	// a 404 could revive the deleted cap through a 304.
+	// The cache is intact, so the next cycle stays conditional.
 	bs.status.Store(0)
 	if _, err := c.FetchBudgetPolicy(context.Background()); err != nil {
 		t.Fatalf("post-404 fetch: %v", err)
 	}
-	if got, _ := bs.gotINM.Load().(string); got != "" {
-		t.Errorf("If-None-Match after a 404 = %q, want empty", got)
+	if got, _ := bs.gotINM.Load().(string); got != `"bp-41"` {
+		t.Errorf("If-None-Match after a 404 = %q, want the cached ETag", got)
 	}
 }
 
@@ -558,11 +575,12 @@ func TestBudgetPolicyRestartKeepsTheReplayFloor(t *testing.T) {
 	}
 }
 
-// TestBudgetPolicyUnsignedWithdrawalClearsTheStoredBody: the two signals that
-// legitimately mean "this node holds no org budget" — an explicit not-found
-// and an unenrol — must clear the PERSISTED copy too, or a restart would
-// revive a budget the admin deleted.
-func TestBudgetPolicyUnsignedWithdrawalClearsTheStoredBody(t *testing.T) {
+// TestBudgetPolicySignedWithdrawalClearsTheStoredBody: the signal that
+// legitimately means "this node holds no org budget" - the org's SIGNED
+// explicit none - must replace the PERSISTED copy too, or a restart would
+// revive a budget the admin deleted. (An unsigned 404 is not such a signal;
+// see TestFetchBudgetPolicy404KeepsTheCachedCap.)
+func TestBudgetPolicySignedWithdrawalClearsTheStoredBody(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	bs := newBudgetServer(t)
 	c, s, _ := enrolledClient(t, bs.srv.URL)
@@ -573,16 +591,20 @@ func TestBudgetPolicyUnsignedWithdrawalClearsTheStoredBody(t *testing.T) {
 		t.Fatalf("seed fetch: %v", err)
 	}
 
-	bs.status.Store(int32(http.StatusNotFound))
+	none, err := orgcontract.SignBudgetPolicy(priv, "org-1", "scim-42", orgcontract.EmptyBudgetPolicyBody(42))
+	if err != nil {
+		t.Fatalf("SignBudgetPolicy(none): %v", err)
+	}
+	bs.doc.Store(&none)
 	if _, err := c.FetchBudgetPolicy(context.Background()); err != nil {
-		t.Fatalf("404 fetch: %v", err)
+		t.Fatalf("none fetch: %v", err)
 	}
 	restarted := newTestClient(t, s, &memBearerStore{bearer: "bearer-xyz"})
 	out, err := restarted.LoadPersistedBudget(context.Background())
 	if err != nil {
 		t.Fatalf("LoadPersistedBudget: %v", err)
 	}
-	if out.HaveBody {
+	if out.HaveBody && !out.Body.Empty() {
 		t.Fatalf("a deleted budget survived the restart: %+v", out.Body)
 	}
 }
@@ -771,6 +793,50 @@ func TestFetchBudgetPolicySendsTheMachineHeader(t *testing.T) {
 				orgcontract.HeaderMachineIdentity, got)
 		}
 	})
+}
+
+// TestFetchBudgetPolicyAdvertisesTheGrantCapability pins T-625's node half:
+// every budget fetch tells the org this binary understands the request-grant
+// fields (orgcontract.BudgetGrantCapability in ?policy_caps), which is what
+// the org now gates budget_id on instead of a version compare that withheld
+// it from every 1.35.0 release candidate. The id the org then sends reaches
+// the request picker (RequestableBudgets), the list the banner's request link
+// is named from.
+func TestFetchBudgetPolicyAdvertisesTheGrantCapability(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	bs := newBudgetServer(t)
+	c, s, _ := enrolledClient(t, bs.srv.URL)
+	pinRoutingKey(t, s, encodeStdKey(pub))
+	body := budgetBody(7, 1_000)
+	body.ResolvedScope = orgcontract.BudgetGrantableScopePrefix + "scim-42"
+	body.Caps[0].ResolvedScope = body.ResolvedScope
+	body.Caps[0].BudgetID = "b-dev"
+	doc, err := orgcontract.SignBudgetPolicy(priv, "org-1", "scim-42", body)
+	if err != nil {
+		t.Fatalf("SignBudgetPolicy: %v", err)
+	}
+	bs.doc.Store(&doc)
+
+	if _, err := c.FetchBudgetPolicy(context.Background()); err != nil {
+		t.Fatalf("FetchBudgetPolicy: %v", err)
+	}
+	caps, _ := bs.gotCaps.Load().([]string)
+	advertised := false
+	for _, v := range caps {
+		for _, tok := range strings.Split(v, ",") {
+			advertised = advertised || strings.TrimSpace(tok) == orgcontract.BudgetGrantCapability
+		}
+	}
+	if !advertised {
+		t.Fatalf("policy_caps = %q, want %q so the org sends budget ids", caps, orgcontract.BudgetGrantCapability)
+	}
+	got := c.RequestableBudgets()
+	if len(got) != 1 || got[0].BudgetID != "b-dev" || !got[0].Grantable || got[0].CapTokens != 1_000 {
+		t.Fatalf("RequestableBudgets = %+v, want the rail's b-dev, grantable", got)
+	}
 }
 
 // promoteToManaged rewrites the singleton enrolment row as MANAGED tenancy,

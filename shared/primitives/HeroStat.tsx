@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Sparkline } from "./Sparkline";
+import { Sparkline, hasSparkline } from "./Sparkline";
 import { StatDelta, type StatDeltaValue } from "./StatDelta";
 import { useHelpSlot } from "./helpSlot";
 import { AnimatedValue, Aurora, staleClass } from "./Motion";
@@ -15,6 +15,31 @@ import { AnimatedValue, Aurora, staleClass } from "./Motion";
 // regular StatCards in the same row.
 
 export type HeroStatVariant = "accent" | "danger" | "warn";
+
+/** The hero value's size whenever it fits (and for a node value). */
+export const HERO_VALUE_PX = 44;
+// Average advance of a bold glyph (digits are the widest) in em, so a value
+// of n characters is about n * HERO_GLYPH_EM * font-size wide.
+const HERO_GLYPH_EM = 0.62;
+
+/**
+ * heroValueFontSize sizes the value to its TILE rather than a fixed 44 px:
+ * `min(44px, <k>cqw)`, where cqw is 1% of the value row's width (the row is
+ * an inline-size container) and k makes `len` characters fill it. A 2-column
+ * StatStrip at 375 gives a tile about 130 px of content, where a fixed 44 px
+ * clipped even a 7-letter word ("observe"); a full-width hero keeps 44 px.
+ * A trailing `unit` reserves about two more characters. Returns undefined
+ * for a value with no text length (a node, e.g. web2's <Money>), which keeps
+ * the 44 px class. A browser without container units drops the declaration
+ * and falls back to that class too.
+ */
+export function heroValueFontSize(value: ReactNode, hasUnit = false): string | undefined {
+  const len = typeof value === "string" || typeof value === "number" ? String(value).length : 0;
+  if (len === 0) return undefined;
+  const chars = len + (hasUnit ? 2 : 0);
+  const cqw = Math.floor((100 / (chars * HERO_GLYPH_EM)) * 100) / 100;
+  return `min(${HERO_VALUE_PX}px, ${cqw}cqw)`;
+}
 
 export type HeroStatProps = {
   label: string;
@@ -111,6 +136,10 @@ export function HeroStat({
     className,
   );
   const hasDelta = delta != null || deltaPrior != null;
+  const drawsSpark = spark != null && hasSparkline(spark);
+  // The sub / delta row keeps clear of the CORNER sparkline only when one is
+  // actually drawn; a tile without one gives its sub the full width.
+  const reserveCorner = drawsSpark && sparkMode === "corner";
   const inner = (
     <>
       {aurora && <Aurora />}
@@ -140,12 +169,15 @@ export function HeroStat({
           </div>
           {cornerPill && <div className="shrink-0">{cornerPill}</div>}
         </div>
-        <div className="mt-2 flex items-baseline gap-2">
+        {/* An inline-size container, so the value can size to the tile
+            (heroValueFontSize) instead of clipping in a narrow one. */}
+        <div className="mt-2 flex min-w-0 items-baseline gap-2" style={{ containerType: "inline-size" }}>
           <span
             className={clsx(
-              "text-[44px] font-bold leading-[1.02] tracking-[-0.03em]",
+              "min-w-0 text-[44px] font-bold leading-[1.02] tracking-[-0.03em]",
               valueColor,
             )}
+            style={{ fontSize: heroValueFontSize(value, unit != null) }}
           >
             <AnimatedValue value={value} />
           </span>
@@ -158,7 +190,7 @@ export function HeroStat({
           <div
             className={clsx(
               "mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] leading-snug text-fg-3",
-              sparkMode === "corner" && "pr-[100px]",
+              reserveCorner && "pr-[100px]",
             )}
           >
             <StatDelta delta={delta} deltaLabel={deltaLabel} deltaPrior={deltaPrior} />
@@ -169,7 +201,7 @@ export function HeroStat({
             <div
               className={clsx(
                 "mt-2 text-[12px] leading-snug text-fg-3",
-                sparkMode === "corner" && "pr-[100px]",
+                reserveCorner && "pr-[100px]",
               )}
             >
               {sub}
@@ -177,7 +209,7 @@ export function HeroStat({
           )
         )}
       </div>
-      {spark && spark.length >= 2 && sparkMode === "wide" && (
+      {spark && drawsSpark && sparkMode === "wide" && (
         <div aria-hidden className="pointer-events-none relative -mx-5 -mb-4 mt-auto pt-4">
           <Sparkline
             data={spark}
@@ -190,7 +222,7 @@ export function HeroStat({
           />
         </div>
       )}
-      {spark && spark.length >= 2 && sparkMode === "corner" && (
+      {spark && reserveCorner && (
         <div
           aria-hidden
           className="pointer-events-none absolute bottom-3 right-4 opacity-[0.85]"

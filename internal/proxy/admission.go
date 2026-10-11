@@ -212,7 +212,7 @@ func (p *Proxy) admit(ctx context.Context, provider string, body []byte, userID,
 		// call, so this cannot change gating behavior.
 		if types := nonTextBlockTypes(provider, body); len(types) > 0 {
 			p.logger.Info(
-				"proxy: admission skipped — non-text user content present, not judged",
+				"proxy: admission skipped - non-text user content present, not judged",
 				"provider", provider,
 				"request_id", requestID,
 				"session_id", sessionIDForProvider(provider, body),

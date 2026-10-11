@@ -52,7 +52,7 @@ export default function CloudEvidenceSettingsEditor({ value, excerpts, disabled,
             disabled={disabled || ("needsExcerpts" in field && !excerpts)}
             onChange={(event) => onChange({ ...effective, [field.key]: Number(event.target.value) })}
             label={field.label}
-            help={`${field.min}–${field.max}. ${field.help}`}
+            help={`${field.min}-${field.max}. ${field.help}`}
           />
         ))}
       </div>

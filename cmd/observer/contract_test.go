@@ -1,3 +1,5 @@
+//go:build !sbo_omit_integration_mcp_server
+
 package main
 
 import (
@@ -43,7 +45,7 @@ func TestContractCmdRegistered(t *testing.T) {
 		t.Error("`observer contract` is not registered in observerSubcommandsWith")
 	}
 	if a, b := newContractCmd(), newContractCmd(); a == b {
-		t.Error("newContractCmd returned the same instance twice — constructors must return fresh commands")
+		t.Error("newContractCmd returned the same instance twice - constructors must return fresh commands")
 	}
 }
 
@@ -80,7 +82,7 @@ func TestContractJSONToolsMatchTable(t *testing.T) {
 	}
 	for i, got := range doc.MCP.Tools {
 		if got != want[i] {
-			t.Errorf("tool[%d] = %+v, want %+v — the emitter must read internal/mcp's table, not a copy", i, got, want[i])
+			t.Errorf("tool[%d] = %+v, want %+v - the emitter must read internal/mcp's table, not a copy", i, got, want[i])
 		}
 	}
 	names := make([]string, len(doc.MCP.Tools))

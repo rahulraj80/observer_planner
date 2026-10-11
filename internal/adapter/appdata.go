@@ -32,6 +32,15 @@ const (
 
 	// ShapeXDGConfig is <home>/.config/<Name>, the XDG convention.
 	ShapeXDGConfig
+
+	// ShapeXDGState is <home>/.local/state/<Name>, the XDG state-home
+	// convention ($XDG_STATE_HOME, default ~/.local/state). Linux homes
+	// only. On a NATIVE Linux home of a process running on Linux, an
+	// absolute $XDG_STATE_HOME is added first, the same native-only rule
+	// nativeWindowsEnvDir applies to %APPDATA%. Grounded first for the
+	// standalone Poolside `pool` CLI (demo node 1, 2026-10-08), which
+	// writes its trajectories under ~/.local/state/poolside.
+	ShapeXDGState
 )
 
 // AppDataSpec declares how ONE tool spells its per-user
@@ -54,8 +63,8 @@ type AppDataSpec struct {
 	// documented as such at the call site, believed — to follow. Only
 	// the shapes belonging to a home's OS are emitted for that home:
 	// ShapeWindowsRoaming/ShapeWindowsLocal for a Windows home,
-	// ShapeDarwinAppSupport for a darwin home, ShapeXDGConfig for a
-	// linux home.
+	// ShapeDarwinAppSupport for a darwin home, ShapeXDGConfig and
+	// ShapeXDGState for a linux home.
 	//
 	// Declaring a shape the tool does not use costs one inert watch
 	// root on the matching OS; OMITTING one it does use costs silent
@@ -86,7 +95,7 @@ type AppDataSpec struct {
 // logical OS.
 //
 // Results are Clean-ed and de-duplicated within the call, in a stable
-// order (Roaming, Local, Application Support, .config). A home with an
+// order (Roaming, Local, Application Support, .config, .local/state). A home with an
 // empty path, an OS this ladder does not model, or a spec with an
 // empty Name yields nil. Callers get a fresh slice.
 //
@@ -147,8 +156,31 @@ func AppDataRoots(h crossmount.HomeRoot, spec AppDataSpec) []string {
 		if spec.Shapes&ShapeXDGConfig != 0 {
 			add(filepath.Join(h.Path, ".config", spec.Name))
 		}
+		if spec.Shapes&ShapeXDGState != 0 {
+			if env := nativeLinuxStateHome(h); env != "" {
+				add(filepath.Join(env, spec.Name))
+			}
+			add(filepath.Join(h.Path, ".local", "state", spec.Name))
+		}
 	}
 	return out
+}
+
+// nativeLinuxStateHome returns $XDG_STATE_HOME, but ONLY for the native
+// home of a process that is itself running on Linux, and only when the
+// value is absolute (the XDG spec says a relative value is invalid and
+// must be ignored). A foreign Linux home reached over \\wsl.localhost
+// belongs to a different environment, so this process's variable says
+// nothing about it.
+func nativeLinuxStateHome(h crossmount.HomeRoot) string {
+	if h.Origin != "native" || runtime.GOOS != "linux" {
+		return ""
+	}
+	v := strings.TrimSpace(os.Getenv("XDG_STATE_HOME"))
+	if v == "" || !filepath.IsAbs(v) {
+		return ""
+	}
+	return v
 }
 
 // nativeWindowsEnvDir returns the value of a Windows application-data

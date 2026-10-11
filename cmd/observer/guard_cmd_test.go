@@ -88,7 +88,7 @@ func TestGuardTestCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("guard test benign: %v", err)
 	}
-	if !strings.Contains(out, "allow — no rule matched") {
+	if !strings.Contains(out, "allow - no rule matched") {
 		t.Errorf("benign dry-run output: %s", out)
 	}
 
@@ -165,7 +165,7 @@ func TestGuardVerifyAuditCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify-audit clean: %v (%s)", err, out)
 	}
-	if !strings.Contains(out, "audit chain OK — 2 row(s)") {
+	if !strings.Contains(out, "audit chain OK - 2 row(s)") {
 		t.Errorf("clean output: %s", out)
 	}
 

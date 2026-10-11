@@ -121,7 +121,7 @@ func TestTerminalLaunchRejectsSandboxWhenSeamNil(t *testing.T) {
 		t.Fatalf("status = %d, want 501 (body=%s)", rec.Code, rec.Body.String())
 	}
 	if lm.createFreshCalls != 0 {
-		t.Fatalf("createFreshCalls = %d, want 0 — CreateFresh must not be called when the sandbox seam is nil", lm.createFreshCalls)
+		t.Fatalf("createFreshCalls = %d, want 0 - CreateFresh must not be called when the sandbox seam is nil", lm.createFreshCalls)
 	}
 }
 

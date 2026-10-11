@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -28,10 +30,10 @@ func printProcessBridgeTaskPlan(out io.Writer, plan setup.Plan) {
 		}
 		return
 	case setup.OutcomePresent:
-		fmt.Fprintf(out, "\nprocess capture (ETW): Scheduled Task %q is already registered — left untouched.\n", setup.TaskName)
+		fmt.Fprintf(out, "\nprocess capture (ETW): Scheduled Task %q is already registered - left untouched.\n", setup.TaskName)
 		return
 	case setup.OutcomeBlocked:
-		fmt.Fprintf(out, "\nprocess capture (ETW): the elevated Scheduled Task cannot be set up yet — %s.\n", plan.Reason)
+		fmt.Fprintf(out, "\nprocess capture (ETW): the elevated Scheduled Task cannot be set up yet - %s.\n", plan.Reason)
 		fmt.Fprintln(out, "  nothing was registered; process capture continues unchanged without the ETW feed.")
 		return
 	case setup.OutcomeManual, setup.OutcomeUnknown:
@@ -39,17 +41,17 @@ func printProcessBridgeTaskPlan(out io.Writer, plan setup.Plan) {
 
 	fmt.Fprintf(out, "\nprocess capture (ETW): Scheduled Task %q is not registered.\n", setup.TaskName)
 	if plan.Outcome == setup.OutcomeUnknown {
-		fmt.Fprintf(out, "  (in fact schtasks could not tell us either way: %s — treat the command below as\n"+
+		fmt.Fprintf(out, "  (in fact schtasks could not tell us either way: %s - treat the command below as\n"+
 			"  \"run it if the task is absent\"; without /F schtasks refuses to overwrite an existing task.)\n", plan.Reason)
 	}
 	fmt.Fprintln(out, "  observer cannot create it: ETW session control always requires elevation, and a WSL")
-	fmt.Fprintln(out, "  process cannot self-grant it — `schtasks /Create /SC ONLOGON` is refused with")
+	fmt.Fprintln(out, "  process cannot self-grant it - `schtasks /Create /SC ONLOGON` is refused with")
 	fmt.Fprintln(out, "  \"Access is denied\" from here (measured). Run this ONCE yourself, in an ELEVATED")
 	if plan.CmdShellOnly {
-		fmt.Fprintln(out, "  Windows COMMAND PROMPT — not PowerShell: your token path contains a space, which")
+		fmt.Fprintln(out, "  Windows COMMAND PROMPT - not PowerShell: your token path contains a space, which")
 		fmt.Fprintln(out, "  forces the \\\" escaping that PowerShell rejects (right-click → Run as administrator):")
 	} else {
-		fmt.Fprintln(out, "  Windows shell — either Command Prompt or PowerShell (right-click → Run as")
+		fmt.Fprintln(out, "  Windows shell - either Command Prompt or PowerShell (right-click → Run as")
 		fmt.Fprintln(out, "  administrator). The single quotes are load-bearing: schtasks normalizes them to")
 		fmt.Fprintln(out, "  the correct quoted action, and the \\\" form PowerShell rejects. Paste it as-is:")
 	}

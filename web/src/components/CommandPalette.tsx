@@ -1,16 +1,13 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
-import { History, Play, Search, Zap, type LucideIcon } from "lucide-react";
+import { History, Play, Zap, type LucideIcon } from "lucide-react";
 import { NAV_ITEMS } from "@/lib/nav";
+import { NODE_TAB_ROUTES, nodeTabJumps } from "@/lib/pageTabRoutes";
+import { useGovernanceVisibility } from "@/lib/governance";
+import { hiddenNavIds, withoutHiddenPaths } from "@/lib/visibility";
+import { useInactiveNavIds } from "@/lib/useComponents";
+import { hiddenTabIds, withoutHiddenTabPaths } from "@/lib/tabVisibility";
 import { useTour } from "@/components/tour/TourProvider";
 import { useFilters } from "@/lib/filters";
 import { toolMeta } from "@/lib/tools";
@@ -22,12 +19,13 @@ import type {
   SessionsResponse,
 } from "./../lib/types";
 import { Icon, InlineLoading, ToolDot, TruncatedPath } from "./primitives";
+import { CommandPaletteShell, type PaletteSection } from "@shared/components/palette/CommandPalette";
 
-// CommandPalette — ⌘K / Ctrl-K modal palette. Three sections:
-// Jump (pages), Sessions (recent N), Actions (recent N). Filters by
-// the same `useFilters().query` global so existing per-page filters
-// (Sessions table) stay live as the user types. Arrow keys traverse
-// a flat list; Enter activates; Esc / backdrop / ⌘K closes.
+// CommandPalette: the node's Cmd-K / Ctrl-K sources over the shared palette
+// shell (shared/components/palette/CommandPalette.tsx owns the chrome and
+// the keyboard). Sections: Commands, Jump (pages and page tabs), recent
+// Sessions, recent Actions. Filters by the same `useFilters().query` global
+// so existing per-page filters (Sessions table) stay live as the user types.
 
 type JumpItem = {
   kind: "page";
@@ -35,6 +33,11 @@ type JumpItem = {
   label: string;
   hint: string;
   path: string;
+  /** Old names a search also finds this jump by (a retired page). */
+  aliases?: readonly string[];
+  /** A page-tab jump: listed only once the viewer types, so the bare
+   *  palette stays one row per page. */
+  tab?: boolean;
   // The page's own nav glyph (lib/nav.ts is the one owner), so every Jump
   // row reads like its sidebar entry instead of one generic page icon.
   icon: LucideIcon;
@@ -83,6 +86,29 @@ const KIND_ICON: Record<Exclude<Item["kind"], "page">, { icon: LucideIcon; tone:
 
 const RECENT_LIMIT = 8;
 
+// Every page tab is a jump too ("Security › Prompt guard"), generated from
+// lib/pageTabRoutes.ts (built on nodePageTabs.ts, the ids and labels the
+// pages read), never hand-listed here. The page glyph comes from the nav
+// table like every other Jump row.
+const NAV_BY_ID = new Map(NAV_ITEMS.map((n) => [n.id, n]));
+const TAB_PAGES: JumpItem[] = nodeTabJumps().flatMap((j) => {
+  const nav = NAV_BY_ID.get(j.navId);
+  if (!nav) return [];
+  const label = `${nav.label} › ${j.tabLabel}`;
+  return [
+    {
+      kind: "page" as const,
+      key: `page:${j.to}`,
+      label,
+      hint: `Jump to ${label}`,
+      path: j.to,
+      icon: nav.icon,
+      aliases: j.aliases,
+      tab: true,
+    },
+  ];
+});
+
 export function CommandPalette({
   open,
   onClose,
@@ -96,8 +122,6 @@ export function CommandPalette({
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [actions, setActions] = useState<ActionListRow[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [activeIdx, setActiveIdx] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Lazy-load recent sessions + actions the first time the palette
   // opens. Cache for the session — re-opening doesn't re-fetch.
@@ -127,31 +151,14 @@ export function CommandPalette({
     };
   }, [open, sessions, actions]);
 
-  // Focus search on open + reset cursor.
-  useEffect(() => {
-    if (!open) return;
-    setActiveIdx(0);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    });
-  }, [open]);
-
-  // Esc closes; arrows scroll cursor through flat item list. Live for
-  // both the modal backdrop and the input (input handles its own key
-  // events; we also listen at document so arrows work even if focus
-  // leaves the input).
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // Pages (and page tabs) hidden on this machine are not offered as jumps.
+  // Fails closed until the posture is known (Sol A4-05).
+  const gov = useGovernanceVisibility();
+  // A page hidden by governance or owned by an inactive component is not
+  // offered (modular packaging plan 7.3).
+  const inactiveNav = useInactiveNavIds();
+  const hiddenPages = useMemo(() => [...hiddenNavIds(gov.gov), ...inactiveNav], [gov.gov, inactiveNav]);
+  const hiddenTabs = hiddenTabIds(gov.gov);
 
   const items = useMemo<Item[]>(() => {
     const q = query.trim().toLowerCase();
@@ -164,7 +171,7 @@ export function CommandPalette({
         run: startTour,
       },
     ];
-    const pages: JumpItem[] = NAV_ITEMS.map((n) => ({
+    const pages: JumpItem[] = withoutHiddenPaths(NAV_ITEMS, (n) => n.path, hiddenPages, NAV_ITEMS).map((n) => ({
       kind: "page",
       key: `page:${n.path}`,
       label: n.label,
@@ -190,10 +197,18 @@ export function CommandPalette({
       timestamp: r.timestamp,
     }));
     if (!q) return [...commands, ...pages, ...sessRows, ...actRows];
+    const tabPages = withoutHiddenTabPaths(
+      withoutHiddenPaths(TAB_PAGES, (j) => j.path, hiddenPages, NAV_ITEMS),
+      (j) => j.path,
+      hiddenTabs,
+      NODE_TAB_ROUTES,
+    );
     const matchCmd = (i: CommandItem) =>
       i.label.toLowerCase().includes(q) || i.hint.toLowerCase().includes(q);
     const matchPage = (i: JumpItem) =>
-      i.label.toLowerCase().includes(q) || i.path.includes(q);
+      i.label.toLowerCase().includes(q) ||
+      i.path.includes(q) ||
+      (i.aliases ?? []).some((a) => a.toLowerCase().includes(q));
     const matchSess = (i: SessionItem) =>
       i.id.toLowerCase().includes(q) ||
       i.project.toLowerCase().includes(q) ||
@@ -205,15 +220,11 @@ export function CommandPalette({
     return [
       ...commands.filter(matchCmd),
       ...pages.filter(matchPage),
+      ...tabPages.filter(matchPage),
       ...sessRows.filter(matchSess),
       ...actRows.filter(matchAct),
     ];
-  }, [query, sessions, actions, startTour]);
-
-  // Keep cursor in range as the items list narrows.
-  useEffect(() => {
-    if (activeIdx >= items.length) setActiveIdx(Math.max(0, items.length - 1));
-  }, [items.length, activeIdx]);
+  }, [query, sessions, actions, startTour, hiddenPages, hiddenTabs]);
 
   function activate(it: Item) {
     if (it.kind === "command") {
@@ -235,176 +246,46 @@ export function CommandPalette({
     onClose();
   }
 
-  function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveIdx((i) => Math.min(items.length - 1, i + 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveIdx((i) => Math.max(0, i - 1));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const it = items[activeIdx];
-      if (it) activate(it);
-    }
-  }
+  // Split the flat items list into the shell's sections (order kept).
+  const sections = useMemo<PaletteSection[]>(() => {
+    const by: Record<Item["kind"], Item[]> = { command: [], page: [], session: [], action: [] };
+    for (const it of items) by[it.kind].push(it);
+    const toRows = (list: Item[]) =>
+      list.map((it) => ({
+        key: it.key,
+        body: renderRow(it),
+        title: it.kind === "session" ? it.id : undefined,
+        onActivate: () => activate(it),
+      }));
+    return [
+      { title: "Commands", rows: toRows(by.command) },
+      { title: "Jump to", rows: toRows(by.page) },
+      { title: "Recent sessions", rows: toRows(by.session) },
+      { title: "Recent actions", rows: toRows(by.action) },
+    ];
+    // activate closes over navigate / setQuery / onClose, all stable per open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
-  // Split the flat items list back into sections for rendering — but
-  // keep the original index so the keyboard cursor works against the
-  // same flat array.
-  const sections: { title: string; rows: { item: Item; idx: number }[] }[] =
-    useMemo(() => {
-      const cmds: { item: Item; idx: number }[] = [];
-      const pages: { item: Item; idx: number }[] = [];
-      const sess: { item: Item; idx: number }[] = [];
-      const acts: { item: Item; idx: number }[] = [];
-      items.forEach((it, idx) => {
-        if (it.kind === "command") cmds.push({ item: it, idx });
-        else if (it.kind === "page") pages.push({ item: it, idx });
-        else if (it.kind === "session") sess.push({ item: it, idx });
-        else acts.push({ item: it, idx });
-      });
-      const out: { title: string; rows: { item: Item; idx: number }[] }[] = [];
-      if (cmds.length) out.push({ title: "Commands", rows: cmds });
-      if (pages.length) out.push({ title: "Jump to", rows: pages });
-      if (sess.length) out.push({ title: "Recent sessions", rows: sess });
-      if (acts.length) out.push({ title: "Recent actions", rows: acts });
-      return out;
-    }, [items]);
-
-  const body = (
-    <AnimatePresence>
-      {open && (
-        <>
-          <motion.div
-            key="palette-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.12, ease: "easeOut" }}
-            onClick={onClose}
-            className="fixed inset-0 z-[80] bg-black/55 backdrop-blur-sm"
-          />
-          <motion.div
-            key="palette-panel"
-            initial={{ opacity: 0, scale: 0.97, y: -8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: -8 }}
-            transition={{ duration: 0.14, ease: "easeOut" }}
-            role="dialog"
-            aria-label="Command palette"
-            className="fixed inset-0 z-[90] grid place-items-start justify-center pt-[12vh]"
-            onClick={(e) => {
-              // Clicking the wrapper (not the inner card) closes.
-              if (e.target === e.currentTarget) onClose();
-            }}
-          >
-            <div className="w-[min(560px,92vw)] overflow-hidden rounded-3 border border-line-2 bg-bg-1 shadow-drawer">
-              <div className="flex items-center gap-2 border-b border-line-1 bg-bg-2/70 px-3 py-2.5">
-                <Icon icon={Search} size={14} className="shrink-0 text-fg-3" />
-                <input
-                  ref={inputRef}
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={onKeyDown}
-                  placeholder="Search pages, sessions, actions…"
-                  className="h-7 flex-1 appearance-none bg-transparent text-[12.5px] text-fg-0 placeholder:text-fg-4 focus:outline-none"
-                />
-                <kbd className="rounded-1 border border-line-3 bg-bg-3 px-1.5 py-0.5 font-mono text-[9.5px] text-fg-3">
-                  Esc
-                </kbd>
-              </div>
-              <div
-                className="max-h-[50vh] overflow-y-auto py-1"
-                onKeyDown={onKeyDown}
-                tabIndex={-1}
-              >
-                {loadErr && (
-                  <p className="px-3 py-3 text-[11px] text-danger">
-                    Failed to load recents: {loadErr}
-                  </p>
-                )}
-                {sections.length === 0 ? (
-                  <p className="px-3 py-6 text-center text-[11.5px] text-fg-3">
-                    {sessions == null
-                      ? <InlineLoading label="Loading recents" />
-                      : query.trim()
-                        ? `No matches for "${query.trim()}".`
-                        : "No recent data."}
-                  </p>
-                ) : (
-                  sections.map((sec) => (
-                    <section key={sec.title}>
-                      <header className="sticky top-0 z-10 bg-bg-1/95 px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-3">
-                        {sec.title}
-                      </header>
-                      {sec.rows.map(({ item, idx }) => (
-                        <Row
-                          key={item.key}
-                          item={item}
-                          active={idx === activeIdx}
-                          onHover={() => setActiveIdx(idx)}
-                          onActivate={() => activate(item)}
-                        />
-                      ))}
-                    </section>
-                  ))
-                )}
-              </div>
-              <footer className="flex items-center justify-between gap-3 border-t border-line-1 bg-bg-2/40 px-3 py-1.5 text-[10px] text-fg-3">
-                <span className="flex items-center gap-1.5">
-                  <Kbd>↑</Kbd>
-                  <Kbd>↓</Kbd>
-                  to navigate
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Kbd>Enter</Kbd>
-                  to open
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Kbd>⌘K</Kbd>
-                  to toggle
-                </span>
-              </footer>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-  );
-
-  // Portal to <body> so the palette overlays the entire app shell
-  // (sidebar + topbar + page content) without interference from any
-  // ancestor stacking context.
-  if (typeof document === "undefined") return null;
-  return createPortal(body, document.body);
-}
-
-function Row({
-  item,
-  active,
-  onHover,
-  onActivate,
-}: {
-  item: Item;
-  active: boolean;
-  onHover: () => void;
-  onActivate: () => void;
-}) {
   return (
-    <button
-      type="button"
-      onMouseEnter={onHover}
-      onClick={onActivate}
-      title={item.kind === "session" ? item.id : undefined}
-      className={clsx(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors",
-        active ? "bg-accent-soft text-fg-0" : "bg-transparent text-fg-1",
-      )}
-    >
-      {renderRow(item)}
-    </button>
+    <CommandPaletteShell
+      open={open}
+      onClose={onClose}
+      query={query}
+      onQueryChange={setQuery}
+      sections={sections}
+      placeholder="Search pages, sessions, actions…"
+      error={loadErr ? `Failed to load recents: ${loadErr}` : null}
+      empty={
+        sessions == null ? (
+          <InlineLoading label="Loading recents" />
+        ) : query.trim() ? (
+          `No matches for "${query.trim()}".`
+        ) : (
+          "No recent data."
+        )
+      }
+    />
   );
 }
 
@@ -460,14 +341,6 @@ function renderRow(item: Item): ReactNode {
         #{item.id}
       </span>
     </>
-  );
-}
-
-function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="rounded-1 border border-line-3 bg-bg-3 px-1 py-px font-mono text-[9.5px] text-fg-2">
-      {children}
-    </kbd>
   );
 }
 

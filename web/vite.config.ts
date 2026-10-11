@@ -1,5 +1,6 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import fs from "node:fs";
 import path from "node:path";
 import type { ClientRequest, IncomingMessage } from "node:http";
 
@@ -20,12 +21,66 @@ function rewriteDevOrigin(proxyReq: ClientRequest, req: IncomingMessage) {
   }
 }
 
+// sboDistroProof is the per-distro module-graph proof (modular packaging plan
+// 5.1 rev N5, lane MP-REL2). Off unless SBO_DISTRO_PROOF names the JSON that
+// `go run ./web/compgen -distro <d> -proof <file>` wrote (scripts/
+// build-distro.sh --web does both). It records every emitted chunk's module
+// ids, relative to web/, beside that file (<file>.modules.json, the input to a
+// per-distro frontend SBOM), and FAILS the build when a source module or npm
+// package of a component the distro does not compile is in any chunk. A
+// regenerated route table alone is not proof: any other import of a
+// component's module pulls its chunks straight back in, which is how the
+// minimal bundle kept three xterm chunks through the always-loaded dock.
+type DistroProof = { distro: string; forbidden_sources: string[]; forbidden_packages: string[] };
+
+function sboDistroProof(): Plugin | null {
+  const file = process.env.SBO_DISTRO_PROOF;
+  if (!file) return null;
+  const spec = JSON.parse(fs.readFileSync(file, "utf8")) as DistroProof;
+  const rel = (id: string) => path.relative(__dirname, id).split(path.sep).join("/");
+  const why = (id: string): string | null => {
+    const r = rel(id).replace(/\?.*$/, "");
+    for (const pkg of spec.forbidden_packages) {
+      if (r.includes(`node_modules/${pkg}/`)) return `package ${pkg}`;
+    }
+    const stem = r.replace(/\.(tsx|ts|jsx|js)$/, "").replace(/\/index$/, "");
+    for (const src of spec.forbidden_sources) {
+      if (stem === src) return `source ${src}`;
+    }
+    return null;
+  };
+  return {
+    name: "sbo-distro-proof",
+    apply: "build",
+    generateBundle(_opts, bundle) {
+      const chunks: Record<string, string[]> = {};
+      const hits: string[] = [];
+      for (const [name, out] of Object.entries(bundle)) {
+        if (out.type !== "chunk") continue;
+        const ids = out.moduleIds.filter((id) => !id.startsWith("\0"));
+        chunks[name] = ids.map(rel).sort();
+        for (const id of ids) {
+          const w = why(id);
+          if (w) hits.push(`${name}: ${w} (${rel(id)})`);
+        }
+      }
+      fs.writeFileSync(
+        file.replace(/\.json$/, "") + ".modules.json",
+        JSON.stringify({ distro: spec.distro, chunks }, null, 2) + "\n",
+      );
+      if (hits.length > 0) {
+        this.error(`distro ${spec.distro}: the bundle carries modules of components it does not compile:\n  ${hits.join("\n  ")}`);
+      }
+    },
+  };
+}
+
 export default defineConfig({
   // Phase 8 cutover: dashboard now mounts at root. Phase 1–7 ran
   // the app under /v2/ as a coexistence path while the legacy
   // static SPA stayed at /. Both are now served from /.
   base: "/",
-  plugins: [react()],
+  plugins: [react(), sboDistroProof()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

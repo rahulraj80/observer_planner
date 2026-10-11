@@ -31,6 +31,10 @@ type PolicySpec struct {
 	ReadOnlySections []string
 	HiddenSettings   []string
 	ReadOnlySettings []string
+	// VisibleSections / VisibleSettings are the schema-3 EXPOSE lists (see
+	// SectionsV1.Visible): ids shown on a managed node despite the default.
+	VisibleSections []string
+	VisibleSettings []string
 	// Pinned is the settings.pin directive class after compilation: dotted
 	// config path → NORMALIZED Go value (bool / string / int64 / []string).
 	// It carries the `pinned` block ONLY — the feature block's expansion
@@ -51,6 +55,11 @@ type PolicySpec struct {
 	FeaturePinned map[string]any
 	Notice        Notice
 	Hash          string
+	// IgnoredIDs lists the section ids CompileBodyLenient dropped because
+	// this build's vocabulary does not know them, as "<list>:<id>". Always
+	// empty from the strict Compile. Not part of Hash: the spec this node
+	// applies is exactly the one without them.
+	IgnoredIDs []string
 }
 
 // Notice is the honesty copy an org publishes alongside its directives so a
@@ -70,6 +79,8 @@ type PolicyInput struct {
 	ReadOnlySections []string
 	HiddenSettings   []string
 	ReadOnlySettings []string
+	VisibleSections  []string
+	VisibleSettings  []string
 	// Pinned / Share / Features are the schema-2 directive classes, still in
 	// their raw decoded (any-valued) shape — Compile is what type-checks and
 	// normalizes them.
@@ -96,8 +107,9 @@ type sectionList struct {
 func sectionLists() []sectionList {
 	return []sectionList{
 		{
+			// The one list a page TAB ("<page>/<tab>", vocab.go) may appear in.
 			name: "sections.hidden", values: func(in PolicyInput) []string { return in.HiddenSections },
-			known: IsNavSection, unhideable: IsUnhideableNavSection, vocabLabel: "nav section",
+			known: IsNavSectionOrTab, unhideable: isUnhideableNavID, vocabLabel: "nav section or page tab",
 			assignSpec: func(s *PolicySpec, v []string) { s.HiddenSections = v }, conflictKey: "nav",
 		},
 		{
@@ -115,6 +127,16 @@ func sectionLists() []sectionList {
 			known: IsSettingsSection, unhideable: IsUnhideableSettingsSection, vocabLabel: "settings section",
 			assignSpec: func(s *PolicySpec, v []string) { s.ReadOnlySettings = v }, conflictKey: "settings",
 		},
+		{
+			name: "sections.visible", values: func(in PolicyInput) []string { return in.VisibleSections },
+			known: IsNavSection, unhideable: IsUnhideableNavSection, vocabLabel: "nav section",
+			assignSpec: func(s *PolicySpec, v []string) { s.VisibleSections = v }, conflictKey: "nav",
+		},
+		{
+			name: "sections.settings_visible", values: func(in PolicyInput) []string { return in.VisibleSettings },
+			known: IsSettingsSection, unhideable: IsUnhideableSettingsSection, vocabLabel: "settings section",
+			assignSpec: func(s *PolicySpec, v []string) { s.VisibleSettings = v }, conflictKey: "settings",
+		},
 	}
 }
 
@@ -123,7 +145,10 @@ func sectionLists() []sectionList {
 //
 //   - every id must be in its closed vocabulary (an unknown id is a HARD
 //     error, never a silent skip: an admin must never believe a page is
-//     hidden when it is not);
+//     hidden when it is not). This is the publish lint's rule; the agent
+//     accept path compiles through CompileBodyLenient instead, which drops
+//     an id its build does not have (a page it cannot show, hide or lock)
+//     rather than lose the whole body (vocablevel.go);
 //   - no id may appear twice within one list, nor in both the hidden and
 //     the read_only list of the same vocabulary (hide-and-lock is
 //     ambiguous about which the node applied);
@@ -199,6 +224,9 @@ func compilePinned(raw map[string]any) (map[string]any, error) {
 		}
 		if row.Direction == DirRestrictiveOnly && !valuesEqual(norm, row.Safe) {
 			return nil, fmt.Errorf("nodegov.Compile: pinned.%s may only be set to %v (this key is restrictive-only: the organization may force the safer value, never the riskier one)", key, row.Safe)
+		}
+		if n, isInt := norm.(int64); isInt && (row.Min != 0 || row.Max != 0) && (n < row.Min || n > row.Max) {
+			return nil, fmt.Errorf("nodegov.Compile: pinned.%s = %d is outside the permitted range %d..%d", key, n, row.Min, row.Max)
 		}
 		out[key] = norm
 	}
@@ -414,6 +442,9 @@ func compileSectionList(l sectionList, in PolicyInput, claimed map[string]string
 			return nil, fmt.Errorf("nodegov.Compile: %s contains an empty id", l.name)
 		}
 		if !l.known(id) {
+			if IsNavTab(id) {
+				return nil, fmt.Errorf("nodegov.Compile: %s names page tab %q: a tab can only be hidden (sections.hidden); lock or expose its page instead", l.name, id)
+			}
 			return nil, fmt.Errorf("nodegov.Compile: %s names %q, which is not a known %s", l.name, id, l.vocabLabel)
 		}
 		if l.unhideable(id) {
@@ -424,7 +455,7 @@ func compileSectionList(l sectionList, in PolicyInput, claimed map[string]string
 		}
 		key := l.conflictKey + "\x00" + id
 		if other, dup := claimed[key]; dup {
-			return nil, fmt.Errorf("nodegov.Compile: %s names %q, which %s already names — an id may be hidden or read-only, never both", l.name, id, other)
+			return nil, fmt.Errorf("nodegov.Compile: %s names %q, which %s already names — an id takes exactly one of hidden, read-only or visible", l.name, id, other)
 		}
 		claimed[key] = l.name
 		seen[id] = true
@@ -486,6 +517,8 @@ func hashSpec(s PolicySpec) string {
 		{"read_only", s.ReadOnlySections},
 		{"settings_hidden", s.HiddenSettings},
 		{"settings_read_only", s.ReadOnlySettings},
+		{"visible", s.VisibleSections},
+		{"settings_visible", s.VisibleSettings},
 	} {
 		for _, id := range pair.ids {
 			write(pair.label, id)

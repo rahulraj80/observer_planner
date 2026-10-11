@@ -1,0 +1,30 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "meta": "VerifiedOfficial",
+    "meta.end_date": "VerifiedOfficial",
+    "meta.org_id": "VerifiedOfficial",
+    "meta.start_date": "VerifiedOfficial"
+  },
+  "fixture_sha256": "b22d833cc98c96590311b0be10c633bd726b774d0f91af0c507e402c3e6268ae",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/analytics/tokens",
+    "query": {
+      "startDate": "2026-01-15",
+      "endDate": "2026-01-15",
+      "group_by": "model"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized empty range.",
+  "scenario": "empty_page",
+  "sdk_or_spec_version_or_commit": "Factory Analytics API reference (analytics.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "fa4729614fa5faadaedb2e0514cc8d9969bb76f15924387dcadd77cea8f1ee4b",
+  "source_url": "https://docs.factory.com/api-reference/analytics.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.analytics.tokens"
+}

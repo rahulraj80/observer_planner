@@ -252,7 +252,7 @@ func TestAttachExitLingerStaysRemoteSensitive(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if _, live := svc.RunIDForHandle(handle); live {
-		t.Fatal("EndRunByHandle never fired — the live-run map is still present")
+		t.Fatal("EndRunByHandle never fired - the live-run map is still present")
 	}
 
 	// The handle is still in the Manager (lingering, exited).
@@ -307,7 +307,7 @@ func TestAttachExitLingerStaysRemoteSensitive(t *testing.T) {
 	defer func() { _ = c.CloseNow() }()
 	_, _, rerr := c.Read(ctx)
 	if rerr == nil {
-		t.Fatal("F1: remote WS read succeeded for a lingering attach handle — it must be refused")
+		t.Fatal("F1: remote WS read succeeded for a lingering attach handle - it must be refused")
 	}
 	if cs := websocket.CloseStatus(rerr); cs != websocket.StatusPolicyViolation {
 		t.Fatalf("F1: remote WS close status = %v, want policy-violation (1008)", cs)

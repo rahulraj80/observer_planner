@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -10,9 +12,9 @@ import (
 	"strings"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/guilaunch"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/termrun"
 	"github.com/marmutapp/superbased-observer/internal/termsvc"
@@ -47,7 +49,37 @@ type guiLauncher struct {
 	// a GUI preflight and a GUI launch resolve against exactly the same view of
 	// the machine.
 	resolveEnv func() toolresolve.Env
-	logger     *slog.Logger
+	// isWSL reports whether this daemon runs inside WSL with Windows interop
+	// (the precondition for the foreign_only -> interop escape). nil means
+	// crossmount.IsWSL; tests inject it so the interop rung is reachable on
+	// any host.
+	isWSL  func() bool
+	logger *slog.Logger
+}
+
+// wsl is the interop-boundary predicate resolveGUIBin consults.
+func (g *guiLauncher) wsl() bool {
+	if g.isWSL != nil {
+		return g.isWSL()
+	}
+	return crossmount.IsWSL()
+}
+
+// routingVerdict dry-runs this launcher's own composition (composeLaunch ->
+// guilaunch.Compose, the ONE place the wrap is decided) for a bare launch of
+// the row and reports whether the proxy route would reach the app, plus the
+// structured reason when it would not. Nothing is spawned. nil when the row
+// has no launch mechanism on this machine (Compose refuses), because then
+// there is no launch whose routing could be described. The preflight uses it
+// so the dialog's routing sentence and the launch's wrap_applied can never
+// disagree.
+func (g *guiLauncher) routingVerdict(id string, spec integration.GUILaunchSpec) (*bool, string) {
+	composed, err := g.composeLaunch(id, spec, "", resolveProxyURL(g.proxyPort, ""), nil)
+	if err != nil {
+		return nil, ""
+	}
+	reaches := composed.plan.WrapApplied
+	return &reaches, string(composed.plan.WrapReason)
 }
 
 // SpawnGUI resolves the row's binary, composes the launch, spawns it detached,
@@ -103,22 +135,10 @@ func (g *guiLauncher) SpawnGUI(req termsvc.GUISpawnRequest) (termsvc.GUISpawnRes
 		PID:         proc.Pid,
 		WrapApplied: plan.WrapApplied,
 		WrapNote:    plan.WrapNote,
+		WrapReason:  string(plan.WrapReason),
 		Notes:       append(notes, plan.Notes...),
 		Bin:         bin,
 	}, nil
-}
-
-// guiBudgetEvidence is the managed-budget admission evidence for a GUI launch:
-// the route stays unknown (a GUI routing hint does not prove which provider an
-// IDE's extensions select) and the surface class is the registry's declared
-// class for the row. Shared by the dashboard spawn and `observer ide` so both
-// admit a GUI launch identically.
-func guiBudgetEvidence(id string) budgetLaunchEvidence {
-	evidence := budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
-	if class, ok := integration.GUILaunchSurfaceClass(id); ok {
-		evidence.SurfaceClass = class
-	}
-	return evidence
 }
 
 // guiComposedLaunch is a resolved, composed, not-yet-spawned GUI launch.
@@ -198,7 +218,7 @@ func (g *guiLauncher) resolveGUIBin(id string, spec integration.GUILaunchSpec) (
 	// install can still exec it — the launch works, the environment does not
 	// cross. ViaInterop makes guilaunch record that honestly instead of
 	// claiming a wrap that silently did nothing.
-	if path, ok := toolresolve.ForeignInteropLaunchable(res); ok && crossmount.IsWSL() {
+	if path, ok := toolresolve.ForeignInteropLaunchable(res); ok && g.wsl() {
 		return path, true, []string{
 			"launched through WSL interop: the app is a Windows install, so routing environment does not propagate",
 		}
@@ -286,7 +306,7 @@ func (g *guiLauncher) auditSpawn(req termsvc.GUISpawnRequest, pid int, plan guil
 		"dir_set", req.ProjectRoot != "")
 }
 
-// --- dashboard.LaunchManager GUI half ---
+// --- dashapi.LaunchManager GUI half ---
 
 // CreateGUI spawns a DETACHED IDE / desktop application through the terminal
 // application service, which enforces the SAME [terminal.launch] opt-in as
@@ -294,32 +314,33 @@ func (g *guiLauncher) auditSpawn(req termsvc.GUISpawnRequest, pid int, plan guil
 // project root is translated for a cross-mount daemon exactly as CreateFresh
 // does, so a Windows-spelled path from a browser on the Windows side resolves
 // for a WSL daemon.
-func (a *launchManagerAdapter) CreateGUI(spec dashboard.GUILaunchSpec) (dashboard.GUILaunchResult, error) {
+func (a *launchManagerAdapter) CreateGUI(spec dashapi.GUILaunchSpec) (dashapi.GUILaunchResult, error) {
 	res, err := a.svc.LaunchGUI(context.Background(), termsvc.GUIRequest{
 		ID:          spec.ID,
 		ProjectRoot: crossmount.TranslateForeignPath(spec.ProjectRoot),
 	})
 	if err != nil {
-		return dashboard.GUILaunchResult{}, mapGUIErr(err)
+		return dashapi.GUILaunchResult{}, mapGUIErr(err)
 	}
-	return dashboard.GUILaunchResult{
+	return dashapi.GUILaunchResult{
 		RunID:       res.RunID,
 		PID:         res.PID,
 		ID:          res.ID,
 		Label:       res.Label,
 		WrapApplied: res.WrapApplied,
 		WrapNote:    res.WrapNote,
+		WrapReason:  res.WrapReason,
 		Notes:       res.Notes,
 	}, nil
 }
 
 // GUIRuns projects the service's in-memory GUI run list onto the dashboard wire
 // shape. A pure projection — this adapter adds no policy of its own.
-func (a *launchManagerAdapter) GUIRuns() []dashboard.GUIRunInfo {
+func (a *launchManagerAdapter) GUIRuns() []dashapi.GUIRunInfo {
 	runs := a.svc.GUIRuns()
-	out := make([]dashboard.GUIRunInfo, 0, len(runs))
+	out := make([]dashapi.GUIRunInfo, 0, len(runs))
 	for _, r := range runs {
-		out = append(out, dashboard.GUIRunInfo{
+		out = append(out, dashapi.GUIRunInfo{
 			RunID:       r.RunID,
 			ID:          r.ID,
 			Label:       r.Label,
@@ -344,9 +365,9 @@ func (a *launchManagerAdapter) GUIRuns() []dashboard.GUIRunInfo {
 func mapGUIErr(err error) error {
 	switch {
 	case errors.Is(err, termsvc.ErrGUIUnsupported):
-		return fmt.Errorf("%w: %w", dashboard.ErrLaunchGUIUnsupported, err)
+		return fmt.Errorf("%w: %w", dashapi.ErrLaunchGUIUnsupported, err)
 	case errors.Is(err, termsvc.ErrGUINotLaunchable):
-		return fmt.Errorf("%w: %w", dashboard.ErrLaunchGUINotLaunchable, err)
+		return fmt.Errorf("%w: %w", dashapi.ErrLaunchGUINotLaunchable, err)
 	default:
 		return mapFreshErr(err)
 	}
@@ -365,4 +386,46 @@ func (r termRunRecorder) RecordGUISpawn(ctx context.Context, run termrun.Run) er
 		return nil
 	}
 	return r.st.StampTerminalRunSpawn(ctx, run.RunID, *run.PID, run.WrapApplied, run.WrapNote)
+}
+
+// guiPreflight is the GUI rung of toolPreflightSeam: it resolves an ADVERTISED
+// GUI launch row through toolresolve.ResolveGUI and composes the SAME
+// install-plan / install-note surface a terminal tool gets, so the dialog
+// renders one shape for both kinds.
+//
+// Two GUI-specific honesty rules:
+//
+//   - A foreign_only verdict on a WSL daemon is reported as "ok_off_path", not
+//     as the terminal path's dead end: the daemon CAN exec a Windows .exe
+//     through interop, so the app is launchable - with the note that the
+//     routing environment will not cross the boundary. The verdict is derived
+//     through toolresolve.ForeignInteropLaunchable, the same read the launcher
+//     itself makes, so preflight and launch can never disagree.
+//   - A Windows packaged app resolves to verdict "ok" with an EMPTY Bin (the
+//     AUMID launch). The pure resolver cannot verify the AppX registration
+//     without touching the registry, and the cmd side deliberately does not add
+//     a probe here either - so the note says it was not probed rather than
+//     asserting the app is installed.
+func guiPreflight(id, configPath string, allowInstall func() bool) (dashapi.ToolPreflight, bool) {
+	pf, ok := guiPreflightVerdict(id, configPath, allowInstall)
+	if !ok {
+		return pf, false
+	}
+	// A verdict that already says the app cannot be launched has no routing
+	// to report; for every launchable verdict the routing fact is the
+	// launcher's own, dry-run (see guiLauncher.routingVerdict).
+	if guiPreflightLaunchable[toolresolve.Verdict(pf.Verdict)] {
+		g, _ := integration.GUILaunchFor(id)
+		port := 0
+		if cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath}); err == nil {
+			port = cfg.Proxy.Port
+		}
+		launcher := &guiLauncher{
+			proxyPort:  port,
+			configPath: func() string { return configPath },
+			resolveEnv: dashResolveEnv,
+		}
+		pf.RoutingReachesApp, pf.RoutingReason = launcher.routingVerdict(id, g.Spec)
+	}
+	return pf, true
 }

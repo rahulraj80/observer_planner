@@ -62,7 +62,8 @@ func (s *Server) handleTaskRollup(w http.ResponseWriter, r *http.Request) {
 	tool := r.URL.Query().Get("tool")
 
 	st := store.New(s.opts.DB)
-	rollup, err := taskreport.LoadTaskRollup(r.Context(), st, s.opts.CostEngine, since, until, projectID, projectRoot, tool, s.taskflowOptions())
+	rollup, err := taskreport.LoadTaskRollupScoped(r.Context(), st, s.opts.CostEngine, since, until,
+		store.TaskScope{ProjectID: projectID, ProjectRoot: projectRoot, Tool: tool, Model: modelParam(r)}, s.taskflowOptions())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load task rollup: %v", err), http.StatusInternalServerError)
 		return

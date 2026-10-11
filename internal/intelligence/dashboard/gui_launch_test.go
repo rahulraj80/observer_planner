@@ -97,17 +97,21 @@ func TestGUILaunchSucceeds(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	for key, want := range map[string]any{
-		"kind":         "gui",
-		"run_id":       "RUN-1",
-		"pid":          float64(777),
-		"tool":         id,
-		"label":        "The IDE",
-		"wrap_applied": true,
-		"wrap_note":    "cold-start only",
+		"kind":                "gui",
+		"run_id":              "RUN-1",
+		"pid":                 float64(777),
+		"tool":                id,
+		"label":               "The IDE",
+		"wrap_applied":        true,
+		"wrap_note":           "cold-start only",
+		"routing_reaches_app": true,
 	} {
 		if out[key] != want {
 			t.Errorf("%s = %v, want %v", key, out[key], want)
 		}
+	}
+	if _, ok := out["routing_reason"]; ok {
+		t.Errorf("routing_reason present on an applied wrap: %v", out["routing_reason"])
 	}
 	if lm.lastGUISpec.ID != id {
 		t.Errorf("gui spec = %+v, want id %s", lm.lastGUISpec, id)
@@ -115,6 +119,34 @@ func TestGUILaunchSucceeds(t *testing.T) {
 	// A GUI response must never carry a terminal token: there is no PTY to dock.
 	if _, ok := out["token"]; ok {
 		t.Errorf("gui response carried a token: %v", out)
+	}
+}
+
+// TestGUILaunchReportsStructuredRoutingReason pins that an unapplied wrap
+// reaches the client as routing_reaches_app=false plus the structured reason
+// (the WSL-interop case), so the dialog never has to parse wrap_note.
+func TestGUILaunchReportsStructuredRoutingReason(t *testing.T) {
+	id := anyAdvertisedGUIID(t)
+	lm := &fakeLaunchManager{guiResult: GUILaunchResult{
+		RunID: "RUN-2", PID: 778, ID: id, Label: "The IDE",
+		WrapApplied: false, WrapReason: "interop_env_not_propagated",
+		WrapNote: "interop launch: environment is not propagated across the WSL boundary (WSLENV not set)",
+	}}
+	s := newLaunchTestServer(t, lm)
+	rec := postGUILaunch(t, s.Handler(), terminalLaunchRequest{Kind: "gui", Tool: id})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["routing_reaches_app"] != false || out["routing_reason"] != "interop_env_not_propagated" {
+		t.Errorf("routing = (%v, %v), want (false, interop_env_not_propagated)",
+			out["routing_reaches_app"], out["routing_reason"])
+	}
+	if out["wrap_applied"] != false {
+		t.Errorf("wrap_applied = %v, want false (the two must agree)", out["wrap_applied"])
 	}
 }
 

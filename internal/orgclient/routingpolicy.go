@@ -198,6 +198,13 @@ func (c *Client) fetchRoutingPolicy(ctx context.Context) (bool, routingFetchSign
 	if err != nil {
 		return false, routingFetchSignal{stage: rfStagePreWire}, fmt.Errorf("orgclient.FetchRoutingPolicy: bearer: %w", err)
 	}
+	// A rail that keeps answering 404 ("none published") is re-asked on a
+	// doubling interval instead of every cycle (railbackoff.go). A skipped
+	// cycle emits NO outcome (rfStageSkip), so the P0-6 reporter keeps the
+	// last real one rather than inventing a verdict.
+	if c.routingNotFound.Skip(time.Now()) {
+		return false, routingFetchSignal{stage: rfStageSkip}, nil
+	}
 	url := strings.TrimRight(enr.OrgServerURL, "/") + "/api/agent/routing-policy"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -215,12 +222,14 @@ func (c *Client) fetchRoutingPolicy(ctx context.Context) (bool, routingFetchSign
 		return false, routingFetchSignal{stage: rfStageTransport}, fmt.Errorf("orgclient.FetchRoutingPolicy: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return false, routingFetchSignal{stage: rfStageHTTPStatus, status: resp.StatusCode}, nil // no policy published — fine
+	status := c.railStatus(routingPolicyRail, resp) // an older server's page answers as 404 (railreply.go)
+	c.routingNotFound.Observe(status == http.StatusNotFound, time.Now(), c.pushInterval())
+	if status == http.StatusNotFound {
+		return false, routingFetchSignal{stage: rfStageHTTPStatus, status: status}, nil // no policy published — fine
 	}
-	if resp.StatusCode != http.StatusOK {
-		return false, routingFetchSignal{stage: rfStageHTTPStatus, status: resp.StatusCode},
-			fmt.Errorf("orgclient.FetchRoutingPolicy: server returned %d", resp.StatusCode)
+	if status != http.StatusOK {
+		return false, routingFetchSignal{stage: rfStageHTTPStatus, status: status},
+			fmt.Errorf("orgclient.FetchRoutingPolicy: server returned %d", status)
 	}
 	var doc orgcontract.RoutingPolicyDoc
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
@@ -250,28 +259,6 @@ func (c *Client) fetchRoutingPolicy(ctx context.Context) (bool, routingFetchSign
 		if !repinned {
 			pinned = cached.ServerPubkey
 		}
-		if doc.Version < cached.Version {
-			// INDEPENDENT of which signature rail the document rides:
-			// a genuine org server's version is monotonic, so a LOWER
-			// version means either a rollback the admin performed
-			// out-of-band or a replay of an older document. Neither is
-			// silently ignorable, and until now the monotonic
-			// short-circuit below swallowed both without a word. This
-			// WARN is deliberately not an error — the short-circuit
-			// still correctly keeps the newer cached policy — but it
-			// makes the regression VISIBLE in the routing logs
-			// (docs/security.md ROUTING-SIG-1, the mitigation that
-			// holds even for a pre-v2 server).
-			c.logger.Warn("org routing policy version REGRESSION — server served an OLDER version than the node has cached; keeping the cached policy",
-				"served_version", doc.Version, "cached_version", cached.Version)
-		}
-		if cached.Version >= doc.Version && !(repinned && doc.Version >= cached.Version) {
-			// SF7: fire the reload on the already-current arm too — a boot that
-			// rejected the cache then gets an already-current poll must still
-			// converge the live router (the reload no-ops when already running).
-			c.fireRoutingReload(ctx)
-			return false, routingFetchSignal{stage: rfStageAccepted, version: cached.Version}, nil // already current
-		}
 	}
 	// ONE org distribution identity across rails (orgpin.go). Symmetric
 	// with FetchOrgAnnouncement on purpose: this rail's first fetch on a
@@ -279,11 +266,11 @@ func (c *Client) fetchRoutingPolicy(ctx context.Context) (bool, routingFetchSign
 	// not merely some key. Cheap (one single-row read of a table this
 	// package already owns) and non-breaking (the org server signs both
 	// rails with the same key, so the pins can only disagree when the
-	// key genuinely changed — which this rail already refuses once it
+	// key genuinely changed - which this rail already refuses once it
 	// has a pin of its own).
 	if err := c.checkOrgKeyIdentity(ctx, routingPolicyRail, doc.PublicKey); err != nil {
 		// A pin-STORE read failure is a LOCAL error (Indeterminate), NOT a pin
-		// mismatch (Reject) — the typed sentinel is the only honest
+		// mismatch (Reject) - the typed sentinel is the only honest
 		// discriminator (R5-B6).
 		if errors.Is(err, errPinStoreRead) {
 			return false, routingFetchSignal{stage: rfStagePinStoreLocal}, fmt.Errorf("orgclient.FetchRoutingPolicy: %w", err)
@@ -295,15 +282,45 @@ func (c *Client) fetchRoutingPolicy(ctx context.Context) (bool, routingFetchSign
 	// VERSION-BOUND message and is NEVER re-tried on the v1 rail if that
 	// fails. Falling back would restore exactly the replay v2 refuses (a
 	// genuinely signed old body re-presented under an inflated version) by
-	// letting an attacker strip nothing at all — just serve a broken v2.
+	// letting an attacker strip nothing at all - just serve a broken v2.
 	// The v1 leg remains only for a pre-078 org server, whose documents
 	// carry no v2 signature at all (docs/security.md ROUTING-SIG-1).
+	//
+	// T-655 (the T-390 shape): the signature is verified BEFORE the version
+	// compare below, so a tampered or unsigned document at or below the
+	// cached version is refused (sig_invalid) instead of being read as
+	// "already current", and the regression WARN names only verified
+	// documents.
 	verify := orgcontract.VerifyRoutingPolicy
 	if doc.SignatureV2 != "" {
 		verify = orgcontract.VerifyRoutingPolicyV2
 	}
 	if err := verify(doc, pinned); err != nil {
 		return false, routingFetchSignal{stage: rfStageSigInvalid, version: doc.Version}, fmt.Errorf("orgclient.FetchRoutingPolicy: %w", err)
+	}
+	if hasCached {
+		if doc.Version < cached.Version {
+			// INDEPENDENT of which signature rail the document rides:
+			// a genuine org server's version is monotonic, so a LOWER
+			// version means either a rollback the admin performed
+			// out-of-band or a replay of an older document. Neither is
+			// silently ignorable, and until now the monotonic
+			// short-circuit below swallowed both without a word. This
+			// WARN is deliberately not an error - the short-circuit
+			// still correctly keeps the newer cached policy - but it
+			// makes the regression VISIBLE in the routing logs
+			// (docs/security.md ROUTING-SIG-1, the mitigation that
+			// holds even for a pre-v2 server).
+			c.logger.Warn("org routing policy version REGRESSION - server served an OLDER version than the node has cached; keeping the cached policy",
+				"served_version", doc.Version, "cached_version", cached.Version)
+		}
+		if cached.Version >= doc.Version && !(repinned && doc.Version >= cached.Version) {
+			// SF7: fire the reload on the already-current arm too - a boot that
+			// rejected the cache then gets an already-current poll must still
+			// converge the live router (the reload no-ops when already running).
+			c.fireRoutingReload(ctx)
+			return false, routingFetchSignal{stage: rfStageAccepted, version: cached.Version}, nil // already current
+		}
 	}
 	if err := c.store.UpsertOrgRoutingPolicy(ctx, store.OrgRoutingPolicyRow{
 		Version: doc.Version, Body: doc.Body, BodyHash: doc.BodyHash,

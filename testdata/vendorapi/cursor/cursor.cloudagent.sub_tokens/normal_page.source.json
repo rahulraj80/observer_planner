@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "accessToken": "VerifiedOfficial",
+    "expiresAt": "VerifiedOfficial",
+    "teamId": "VerifiedOfficial",
+    "userId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "c2d550ea84f3bb21ff3f071514fbe9e7766a4f8bfd05d91175e87e1797caf2ce",
+  "http": {
+    "method": "POST",
+    "path": "/v1/sub-tokens",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Create A User-Scoped Worker Token\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Cloud Agents API endpoints page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "606bb636970ab8de2e8d87bfff9c13ae972ebe4817cc88ced9a60882aab124ef",
+  "source_url": "https://cursor.com/docs/cloud-agent/api/endpoints.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.cloudagent.sub_tokens"
+}

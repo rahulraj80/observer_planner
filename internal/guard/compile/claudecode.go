@@ -35,7 +35,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-102", Fidelity: FidelityApprox,
-			Note: "same native surface as R-101 — the dialect cannot distinguish in-project VCS-dir deletes from any other recursive delete; the shared entries dedup at compile time",
+			Note: "same native surface as R-101 - the dialect cannot distinguish in-project VCS-dir deletes from any other recursive delete; the shared entries dedup at compile time",
 			Entries: []Entry{
 				{Action: ActionAsk, Value: "Bash(rm -rf:*)"},
 				{Action: ActionAsk, Value: "Bash(rm -fr:*)"},
@@ -113,7 +113,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-151", Fidelity: FidelityNone,
-			Note: "cross-project bleed detection needs the observed-projects root set — daemon knowledge no static config carries",
+			Note: "cross-project bleed detection needs the observed-projects root set - daemon knowledge no static config carries",
 		},
 		{
 			RuleID: "R-152", Fidelity: FidelityApprox,
@@ -138,7 +138,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-153", Fidelity: FidelityApprox,
-			Note: "Read-tool arm only — interpreter/shell reads (python -c open('.env')) stay hook-enforced (the documented F1 caveat applies on both planes)",
+			Note: "Read-tool arm only - interpreter/shell reads (python -c open('.env')) stay hook-enforced (the documented F1 caveat applies on both planes)",
 			Entries: []Entry{
 				{Action: ActionAsk, Value: "Read(**/.env*)"},
 				{Action: ActionAsk, Value: "Read(**/*.pem)"},
@@ -190,7 +190,7 @@ func claudeCodeRows() []Translation {
 		},
 		{
 			RuleID: "R-160", Fidelity: FidelityApprox,
-			Note: "observer config dir plus Claude Code's own settings files (user + project — the **/ form covers both); other clients' hook configs are their own dialects' concern; shell-command arms stay hook-enforced",
+			Note: "observer config dir plus Claude Code's own settings files (user + project - the **/ form covers both); other clients' hook configs are their own dialects' concern; shell-command arms stay hook-enforced",
 			Entries: []Entry{
 				{Action: ActionDeny, Value: "Edit(~/.observer/**)"},
 				{Action: ActionDeny, Value: "Write(~/.observer/**)"},

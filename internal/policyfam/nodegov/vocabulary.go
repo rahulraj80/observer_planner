@@ -17,6 +17,13 @@ type VocabSection struct {
 	ID         string `json:"id"`
 	Label      string `json:"label"`
 	Unhideable bool   `json:"unhideable"`
+	// ManagedDefault is the level a MANAGED developer machine applies when
+	// the org publishes nothing for this id (ManagedNavDefaults /
+	// ManagedSettingsDefaults); ManagedWhy is that row's reason. The org's
+	// Developer dashboards card marks the default from these two fields, so
+	// the admin console cannot disagree with what nodes actually apply.
+	ManagedDefault Visibility `json:"managed_default"`
+	ManagedWhy     string     `json:"managed_why,omitempty"`
 }
 
 // VocabPinnableKey is the wire shape of one PinnableKeys row.
@@ -26,7 +33,10 @@ type VocabPinnableKey struct {
 	Enum      []any  `json:"enum,omitempty"`
 	Direction string `json:"direction"`
 	Safe      any    `json:"safe,omitempty"`
-	Label     string `json:"label"`
+	// Min / Max are an int row's inclusive bounds (omitted when unbounded).
+	Min   int64  `json:"min,omitempty"`
+	Max   int64  `json:"max,omitempty"`
+	Label string `json:"label"`
 }
 
 // VocabShareKey is the wire shape of one ShareKeys row. Direction is always
@@ -58,11 +68,23 @@ type VocabAuthority struct {
 	Retired    bool     `json:"retired,omitempty"`
 }
 
+// VocabTab is one page tab (per-tab visibility, T-132). ID is the value an org
+// body names in sections.hidden ("security/prompt-guard"); Page and Tab are its
+// two halves, so a form renders the tab under its page without parsing the id.
+// A tab can only be hidden; it has no managed default (it follows its page).
+type VocabTab struct {
+	ID    string `json:"id"`
+	Page  string `json:"page"`
+	Tab   string `json:"tab"`
+	Label string `json:"label"`
+}
+
 // Vocab is the whole payload.
 type Vocab struct {
 	Family           string             `json:"family"`
 	Schema           int                `json:"schema"`
 	NavSections      []VocabSection     `json:"nav_sections"`
+	NavTabs          []VocabTab         `json:"nav_tabs"`
 	SettingsSections []VocabSection     `json:"settings_sections"`
 	PinnableKeys     []VocabPinnableKey `json:"pinnable_keys"`
 	ShareKeys        []VocabShareKey    `json:"share_keys"`
@@ -89,17 +111,24 @@ func Vocabulary() Vocab {
 	for _, id := range NavSectionIDs {
 		v.NavSections = append(v.NavSections, VocabSection{
 			ID: id, Label: SectionLabel(id), Unhideable: IsUnhideableNavSection(id),
+			ManagedDefault: ManagedNavDefault(id), ManagedWhy: managedDefaultWhy(managedNavIndex, id),
 		})
+	}
+	for _, p := range NavTabs {
+		for _, t := range p.Tabs {
+			v.NavTabs = append(v.NavTabs, VocabTab{ID: NavTabID(p.Page, t.ID), Page: p.Page, Tab: t.ID, Label: t.Label})
+		}
 	}
 	for _, id := range SettingsSectionIDs {
 		v.SettingsSections = append(v.SettingsSections, VocabSection{
 			ID: id, Label: SectionLabel(id), Unhideable: IsUnhideableSettingsSection(id),
+			ManagedDefault: ManagedSettingsDefault(id), ManagedWhy: managedDefaultWhy(managedSettingsIndex, id),
 		})
 	}
 	for _, k := range PinnableKeys {
 		v.PinnableKeys = append(v.PinnableKeys, VocabPinnableKey{
 			Key: k.Key, Kind: k.Kind, Enum: k.Enum,
-			Direction: string(k.Direction), Safe: k.Safe, Label: k.Label,
+			Direction: string(k.Direction), Safe: k.Safe, Min: k.Min, Max: k.Max, Label: k.Label,
 		})
 	}
 	for _, k := range ShareKeys {
@@ -130,6 +159,9 @@ func Vocabulary() Vocab {
 // single words or snake_case; the label is the id title-cased, with the
 // handful of ids whose natural label differs spelled out.
 func SectionLabel(id string) string {
+	if page, _, ok := SplitNavTab(id); ok {
+		return SectionLabel(page) + " › " + navTabLabel[id]
+	}
 	if l, ok := sectionLabels[id]; ok {
 		return l
 	}
@@ -141,9 +173,10 @@ var sectionLabels = map[string]string{
 	"mcp":           "MCP",
 	"cachetrack":    "Cache tracking",
 	"codeintel":     "Code intelligence",
-	"org":           "Organisation",
+	"org":           "Organization",
 	"enrolment":     "Enrolment",
 	"observability": "Observability",
+	"agent-config":  "AI tool settings",
 }
 
 func titleCase(id string) string {

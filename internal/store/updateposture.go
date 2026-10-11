@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
-	"github.com/marmutapp/superbased-observer/internal/update"
+	"github.com/marmutapp/superbased-observer/internal/updatespec"
 )
 
 // updateposture.go is the org-wire seam for enterprise update management
@@ -45,7 +45,7 @@ type UpdatePostureEnv struct {
 	// OS and Arch are the coarse platform, already inferable from the
 	// adapter mix and needed to pick an artifact.
 	OS, Arch string
-	// InstallMethod is update.Method as a string. It tells the admin why a
+	// InstallMethod is updatespec.Method as a string. It tells the admin why a
 	// node reports blocked and which nodes a `refuse` skew policy would
 	// strand with no automatic remediation (§6 O5).
 	InstallMethod string
@@ -124,8 +124,8 @@ func (s *Store) SelectUpdatePosture(ctx context.Context) (*orgcontract.UpdatePos
 		channel = strings.TrimSpace(string(st.Channel))
 	}
 	state := st.State
-	if !update.KnownState(state) {
-		state = update.StateIdle
+	if !updatespec.KnownState(state) {
+		state = updatespec.StateIdle
 	}
 	row := &orgcontract.UpdatePostureRow{
 		Version:          strings.TrimSpace(env.Version),

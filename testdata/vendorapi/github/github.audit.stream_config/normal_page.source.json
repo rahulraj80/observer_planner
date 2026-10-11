@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].created_at": "VerifiedOfficial",
+    "[].enabled": "VerifiedOfficial",
+    "[].id": "VerifiedOfficial",
+    "[].paused_at": "VerifiedOfficial",
+    "[].stream_details": "VerifiedOfficial",
+    "[].stream_type": "VerifiedOfficial",
+    "[].updated_at": "VerifiedOfficial"
+  },
+  "fixture_sha256": "c84e9eed24589acbff352787f769fc39f8a0396f977e9b8d2147a9b4e6cd9c59",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/audit-log/streams",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/audit-log/streams (operationId enterprise-admin/get-audit-log-streams).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.audit.stream_config"
+}

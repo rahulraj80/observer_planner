@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { CopyOnClick, Pill, SuccessCheck } from "@/components/primitives";
 import { Summary } from "@/components/Summary";
-import {
-  LaunchTerminal,
-  type Status as LaunchTerminalStatus,
-} from "@/components/LaunchTerminal";
+import type { Status as LaunchTerminalStatus } from "@/lib/launchStatus";
+// Settings is in every distro; the terminal is not (lib/components.gen.ts).
+import { LAUNCH_TERMINAL as LaunchTerminal } from "@/lib/components.gen";
 import { fetchJSON } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { useApi } from "@/lib/useApi";
 import { markRestartPending } from "@/lib/restartPending";
 
@@ -195,15 +195,7 @@ export function ETWCapturerCard() {
     setErr(null);
     setEnableMsg(null);
     try {
-      const res = await fetchJSON<{ restart_required?: boolean }>(
-        "/api/config/section/process",
-        undefined,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ Enabled: true, ETW: { Enabled: true } }),
-        },
-      );
+      const res = await saveConfigSection("process", { Enabled: true, ETW: { Enabled: true } });
       if (res.restart_required) markRestartPending("process");
       setEnableMsg(
         res.restart_required
@@ -443,14 +435,23 @@ export function ETWCapturerCard() {
             does not share this console.
           </p>
           <div className="h-[240px] overflow-hidden rounded-2 border border-line-2">
-            <LaunchTerminal
-              token={handle}
-              tool="etw task registration"
-              expanded
-              onStatus={onTerminalStatus}
-              onClose={() => void cancel()}
-              onMinimize={() => void cancel()}
-            />
+            {LaunchTerminal ? (
+              <Suspense fallback={null}>
+                <LaunchTerminal
+                  token={handle}
+                  tool="etw task registration"
+                  expanded
+                  onStatus={onTerminalStatus}
+                  onClose={() => void cancel()}
+                  onMinimize={() => void cancel()}
+                />
+              </Suspense>
+            ) : (
+              <p className="p-3 text-[12px] text-fg-3">
+                This build does not include dashboard terminals, so the elevated step cannot run
+                here. Use the command below in an elevated Windows shell instead.
+              </p>
+            )}
           </div>
         </div>
       )}

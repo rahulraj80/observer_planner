@@ -1,3 +1,5 @@
+import type { DoctorRemediation } from "./remediation";
+import type { RequestClassSplitWire } from "./requestClassSplit";
 import type { ContextGaugeWire } from "./sessionContextGauge";
 // TypeScript shapes for the Go dashboard's /api/* responses.
 // Field names mirror the Go JSON tags exactly so renaming on the
@@ -59,6 +61,10 @@ export type StatusSnapshot = {
   // key bar labels its modifier keys from it (lib/keyPlatform).
   // Optional on the wire: an older daemon omits it entirely.
   host_os?: string;
+  // host_name is the DAEMON's own hostname (T-425): the top bar names the
+  // machine when this dashboard is a remote one opened through the instance
+  // switcher. Optional: an older daemon omits it.
+  host_name?: string;
   // integrity is the persisted verdict of the daemon's background
   // `PRAGMA quick_check` (RES-3, codebase audit 2026-09-16). Absent
   // means the probe has NOT run on this database yet (a fresh install,
@@ -105,6 +111,9 @@ export type WatcherHealth = {
   behind_total_bytes: number;
   orphan_count: number;
   suspected_misrouted_count: number;
+  // True when this daemon runs the file watcher (`observer start`); false
+  // for a standalone dashboard. Absent on an older daemon.
+  watcher_running?: boolean;
   checked_at: string;
 };
 
@@ -262,7 +271,9 @@ export type ProjectRow = {
 export type ProjectAuthoredSplit =
   import("@shared/primitives/CodeCommentSplit").AuthoredSplit;
 
-export type ProjectsResponse = { rows: ProjectRow[] };
+// window is present when the request carried the global window: the
+// spend / code / commit fields (named *_30d for compatibility) then cover it.
+export type ProjectsResponse = { rows: ProjectRow[]; window?: { since: string; until?: string } };
 
 // ---------- /api/project/<id> (Projects ROI + commit-alignment detail) ----------
 // §3.4 of the plan above. Everything under here is `secProjects` (detail
@@ -988,7 +999,15 @@ export type SessionRow = {
   // AI-suggested title. Both omitempty — absent on non-enriched sessions.
   cloud_enriched?: boolean;
   cloud_enrichment?: CloudEnrichmentProgress;
+  // enrich_plane is "org" when the session was captured while enrolled (its
+  // data-authority stamp is org), so its Enrich button opens the org plane
+  // (Cloud Intelligence parity ruling Q3). Absent = the personal plane.
+  enrich_plane?: "org";
   cloud_title?: string;
+  // The newest org-plane AI title this node pulled back (parity phase 3):
+  // the third title source after title and cloud_title. omitempty, and
+  // withheld while the organization hides the `intel` Settings section.
+  org_title?: string;
   // Capture surface (node migration 107): `surface` is the closed kind
   // vocabulary (cli / ide / desktop / sdk / web), `surface_host` the
   // free-form host token ("vscode", "claude-desktop", "jetbrains-idea").
@@ -1583,6 +1602,10 @@ export type SessionDetail = {
   favorite?: boolean;
   note?: string;
   rating?: number;
+  /** The session's counted proxy turns by client-declared request class
+   *  (internal/requestclass.Split). Absent on an older daemon or a session
+   *  with no counted proxy turn. */
+  request_class_split?: RequestClassSplitWire;
 };
 
 // ---------- session classification: tags / favorites / notes ----------
@@ -3211,6 +3234,10 @@ export type ConfigResponse = {
 export type ToolProbe = {
   registered: boolean;
   partial?: boolean;
+  /** Hooks only (T-400): no hook surface Observer registers; detail says why. */
+  no_hooks?: boolean;
+  /** Hooks only (T-400): a hook surface this panel does not dry-run; detail says why. */
+  unprobed?: boolean;
   detail?: string;
 };
 
@@ -3224,6 +3251,21 @@ export type ToolStatusRow = {
   hooks?: ToolProbe;
   mcp?: ToolProbe;
   proxy?: ToolProbe;
+  /** The setup / removal actions the dashboard offers (absent: none). */
+  wiring?: ToolWiring;
+};
+
+/** One integration's actions for a tool (GET /api/tools/status wiring). */
+export type ToolWiringPart = { register: boolean; remove: boolean; note?: string };
+
+/** T-421: which wizard steps a tool has, from the same predicates the CLI uses. */
+export type ToolWiring = {
+  hooks: ToolWiringPart;
+  mcp: ToolWiringPart;
+  route: ToolWiringPart;
+  route_endpoint?: string;
+  /** T-537: point the tool's own OTLP exporter at this node (opt-in). */
+  telemetry?: ToolWiringPart;
 };
 
 export type ToolsStatusResponse = {
@@ -3287,7 +3329,7 @@ export type ToolLaunchResponse = {
 // internal/shellwrap.Status and internal/shellwrapsvc.Outcome (Go embeds the
 // candidate / on-disk fields, so they arrive flattened). Go nil slices
 // arrive as null - read every array with `?? []`.
-export type ShellWrapHonesty = "routed" | "proof_owed" | "launch_only";
+export type ShellWrapHonesty = "routed" | "proof_owed" | "launch_only" | "conditional";
 export type ShellWrapShell = "bash" | "zsh" | "fish" | "powershell";
 export type ShellWrapTool = {
   id: string;
@@ -3299,10 +3341,29 @@ export type ShellWrapTool = {
   traffic_proven: boolean;
   honesty: ShellWrapHonesty;
   honesty_text: string;
+  // Where the real program runs: the target OS ("host") or, on the Windows
+  // target of a WSL daemon, inside the distro ("wsl"). `where` explains a
+  // bridge row; absent on a native target.
+  side?: "host" | "wsl";
+  where?: string;
+  bridge_env?: string[] | null;
   selected: boolean;
   installed?: boolean;
   active: string[] | null;
   stale?: string[] | null;
+};
+// A target the card can manage: the daemon's own shells, or (inside WSL) the
+// Windows shells of the same machine (T-419). Mirrors shellwrapsvc.TargetInfo.
+export type ShellWrapTargetId = "" | "windows";
+export type ShellWrapTarget = {
+  id: ShellWrapTargetId;
+  label: string;
+  goos: string;
+  available: boolean;
+  reason?: string;
+  home?: string;
+  distro?: string;
+  enabled: boolean;
 };
 export type ShellWrapRCFile = {
   path: string;
@@ -3315,6 +3376,7 @@ export type ShellWrapRCFile = {
 };
 export type ShellWrapStatus = {
   goos: string;
+  bridge?: { distro: string } | null;
   enabled: boolean;
   shim_dir: string;
   observer_path: string;
@@ -3327,8 +3389,23 @@ export type ShellWrapStatus = {
   rc: ShellWrapRCFile[] | null;
   orphans: { file_name: string; path: string; tool_id: string; command: string }[] | null;
   warnings: string[] | null;
+  // unavailable lists the advertised rows with no command to wrap on this
+  // target, each with its reason (shellwrap.Unavailable, T-492).
+  unavailable?: ShellWrapUnavailable[] | null;
 };
-export type ShellWrapStatusResponse = { confirm_token: string; status: ShellWrapStatus };
+export type ShellWrapUnavailable = {
+  id: string;
+  label: string;
+  kind: "terminal" | "gui";
+  reason: string;
+  hint?: string;
+};
+export type ShellWrapStatusResponse = {
+  confirm_token: string;
+  status: ShellWrapStatus;
+  target?: ShellWrapTargetId;
+  targets?: ShellWrapTarget[] | null;
+};
 export type ShellWrapChange = {
   path: string;
   target?: string;
@@ -3358,6 +3435,9 @@ export type DoctorReport = {
     status: "ok" | "warn" | "fail";
     message: string;
     details?: string[];
+    // T-421: the check's structured fixes, each with the command the CLI
+    // text quotes and the in-app control the Health page links to.
+    remediations?: DoctorRemediation[];
   }[];
   ok: number;
   warn: number;
@@ -3411,15 +3491,33 @@ export type CodexHookTrust = {
     | "no_hooks"
     | "config_missing"
     | "needs_trust"
+    | "needs_register"
     | "all_trusted"
     | "feature_disabled";
   hooks_file?: string;
   config_file?: string;
   registered_events?: string[];
   trusted_events?: string[];
+  // Every present entry codex will not run (untrusted, modified, disabled).
   untrusted_events?: string[];
+  modified_events?: string[];
+  disabled_events?: string[];
+  missing_events?: string[];
+  // Per-event state table (internal/codextrust): one row per event
+  // Observer registers, plus any stale Observer entry.
+  entries?: CodexHookTrustEntry[];
+  // False when no recorded trust hash reproduces (a codex release that
+  // hashes differently): a changed entry then reads as trusted.
+  hash_verified: boolean;
   feature_flag_enabled: boolean;
   instruction?: string;
+};
+
+export type CodexHookTrustEntry = {
+  event: string;
+  key?: string;
+  state: "trusted" | "untrusted" | "modified" | "disabled" | "missing";
+  expected: boolean;
 };
 
 // GET /api/config/profiles/<name> — one profile resolved against the
@@ -3429,6 +3527,8 @@ export type ProfileShowResponse = {
   builtin: boolean;
   editable: boolean;
   raw: string;
+  /** `observer profile show`'s body: TOML with the config's own key names. */
+  resolved_toml?: string;
   resolved: {
     Conversation?: {
       Mode?: string;
@@ -3587,6 +3687,8 @@ export type EnrolmentStatus = {
   enrolled: boolean;
   org_id?: string;
   org_name?: string;
+  /** Display name (never an id); see orgDisplayLabel in lib/orgName.ts. */
+  org_display?: string;
   org_server_url?: string;
   user_email?: string;
   enrolled_at?: string;
@@ -3914,6 +4016,142 @@ export type ToolPreflight = {
    * vocabulary and every other field are unchanged either way.
    */
   kind?: "gui";
+  // --- Structured facts behind `notes` (all optional; an older daemon omits
+  // them). The dialog phrases its own copy from these and does not render
+  // `notes`, which stay on the wire for observer adapters / doctor. ---
+  /**
+   * GUI rows only: whether a launch would deliver the SuperBased proxy route
+   * to the app — the launcher's own wrap verdict, dry-run. Absent = unknown.
+   */
+  routing_reaches_app?: boolean;
+  /** The closed reason when routing_reaches_app is false (guilaunch.WrapReason). */
+  routing_reason?: string;
+  /** "used" / "missing" when [launch.tools.<tool>].path is set. */
+  config_override?: "used" | "missing" | string;
+  /** The `#!/usr/bin/env` interpreter the binary needs and nothing provides. */
+  missing_interpreter?: string;
+  /** The program the install command runs, when it is not installed. */
+  install_needs_program?: string;
+  /** Host programs the vendor installer needs that are missing ("a|b" = either). Forces can_install false. */
+  install_missing_prereqs?: string[];
+  /** Plain-language fix for install_missing_prereqs, with this host's package-manager command. */
+  install_prereq_remedy?: string;
+  /** The launch target (a Windows packaged app) was not probed. */
+  install_unverified?: boolean;
+  /** Plain-language install-gap sentence from the registry, when no guided install exists. */
+  user_install_hint?: string;
+  /**
+   * The tool's latest guided install from THIS dashboard (node-local
+   * tool_installs). Absent when the dashboard never installed it — which is
+   * exactly when no Uninstall may be offered.
+   */
+  dashboard_install?: ToolInstallRecord;
+  /**
+   * The tool's grounded minimum host runtime checked against the interpreter
+   * the installed shim would run on. status "too_old" means the launch would
+   * crash at startup; the launcher refuses it with `remedy`. Absent when
+   * nothing applies (or on an older daemon).
+   */
+  launch_runtime?: PreflightRuntime;
+  /**
+   * The same requirement checked for the guided install, when its channel
+   * runs the tool on the host runtime (npm). "too_old" forces can_install
+   * false; the install route refuses with `remedy` before installing.
+   */
+  install_runtime?: PreflightRuntime;
+  /**
+   * T-685: set when the org's managed hard budget will refuse this launch on
+   * a cause that does not depend on the launch's route (Guard not enforcing,
+   * no Observer proxy route, or a route that can never be proven). Reason and
+   * remedy are server sentences; the launcher still decides.
+   */
+  budget_launch?: PreflightBudgetLaunch;
+  /**
+   * T-685: the next step when the tool's proxy route lives in its own config
+   * file and that file is not on this machine yet (the launch starts
+   * unproxied). A server sentence.
+   */
+  route_setup?: string;
+};
+
+// PreflightBudgetLaunch mirrors dashboard.PreflightBudgetLaunch.
+export type PreflightBudgetLaunch = {
+  reason: string;
+  remedy: string;
+};
+
+// PreflightRuntime mirrors dashboard.PreflightRuntime (one minimum-runtime
+// check). Only status "too_old" blocks.
+export type PreflightRuntime = {
+  runtime: string;
+  display: string;
+  product?: string;
+  min: string;
+  have?: string;
+  path?: string;
+  /** "outside_range" is advisory only: above the floor, outside the declared range (never blocks). */
+  status: "ok" | "too_old" | "outside_range" | "unknown" | "missing" | string;
+  /** The whole fix as plain text, one part per line (CLI / doctor form). */
+  remedy?: string;
+  /** Short too_old sentence: what the tool needs, what this machine has. */
+  summary?: string;
+  /** The grounded command that installs a newer runtime on this host. */
+  fix_command?: string;
+  /** One-line context for fix_command, or the whole advice without one. */
+  fix_note?: string;
+  /** Where `min` came from: "installed" (the package's own engines) or "registry". */
+  floor_from?: "installed" | "registry" | string;
+  /** The vendor's whole declared range, for an outside_range status. */
+  range?: string;
+};
+
+// ToolInstallRecord mirrors dashboard.ToolInstallRecord: one guided install
+// the local dashboard ran, and whether/how it can be uninstalled from here.
+export type ToolInstallRecord = {
+  id: number;
+  tool: string;
+  /** The registry's closed install-channel vocabulary (npm, brew, script, ...). */
+  channel: string;
+  /** Package identity the channel installed; absent for a vendor script. */
+  package?: string;
+  /** The install command as it was shown and run. */
+  command: string;
+  /** internal/toolinstall lifecycle status. */
+  status: string;
+  exit_code?: number;
+  installed_at: string;
+  finished_at?: string;
+  resolved_bin?: string;
+  can_uninstall: boolean;
+  /** Exact uninstall command (display form) when the channel has one. */
+  uninstall_command?: string;
+  /** Honest copy when the channel has no defined uninstall. */
+  uninstall_guidance?: string;
+  can_forget: boolean;
+  uninstall_started_at?: string;
+  uninstalled_at?: string;
+  uninstall_exit_code?: number;
+  /** Live PTY an in-flight install / uninstall runs in (T-034j). */
+  terminal_handle?: string;
+  /** Still in flight after the server's wait threshold: the installer may be
+   *  sitting at a prompt in its terminal (T-034j). */
+  maybe_waiting_for_input?: boolean;
+};
+
+// ToolInstallsResponse is GET /api/terminal/installs.
+export type ToolInstallsResponse = {
+  available: boolean;
+  allow_install?: boolean;
+  installs: ToolInstallRecord[];
+};
+
+// ToolUninstallStarted is POST /api/terminal/uninstall's reply.
+export type ToolUninstallStarted = {
+  record_id: number;
+  handle: string;
+  tool: string;
+  command: string;
+  package?: string;
 };
 
 // GUILaunchable mirrors ONE element of GET /api/terminal/sessions'
@@ -3971,6 +4209,10 @@ export type GUILaunchResponse = {
   label: string;
   wrap_applied: boolean;
   wrap_note: string;
+  /** Same verdict as wrap_applied, preflight vocabulary. Absent on an older daemon. */
+  routing_reaches_app?: boolean;
+  /** Structured cause when routing_reaches_app is false. */
+  routing_reason?: string;
   notes?: string[];
 };
 
@@ -4005,6 +4247,9 @@ export type TerminalSessionsMeta = {
   shell_enabled?: boolean;
   /** IDE / desktop-app rows (T2.3). Absent ⇒ no GUI section, never an error. */
   gui_launchables?: GUILaunchable[];
+  /** Advertised products the picker cannot start, with the reason (T-494).
+   *  Absent on an older daemon (then simply not listed). */
+  unlaunchable_tools?: UnlaunchableTool[];
   /** Live/recent GUI runs this daemon spawned. Absent ⇒ nothing to list. */
   gui_runs?: GUIRun[];
 };
@@ -4056,8 +4301,9 @@ export type SandboxToolAvail = {
 // New-Terminal dialog's sandbox probe, mirroring the B5 ToolModels fail-soft
 // pattern (always 200, even when the feature is fully off). `verdict` is a
 // closed vocabulary: "available" | "unsupported_platform" | "backend_missing"
-// | "backend_too_old" | "userns_denied" | "tool_unmapped" |
-// "disabled_by_config" | "workspace_prep_failed". `reason` names the exact
+// | "backend_too_old" | "userns_denied" | "netns_denied" | "tool_unmapped" |
+// "disabled_by_config" | "runtime_init_failed" | "workspace_prep_failed" |
+// "not_in_build" (a build without terminals.sandbox, D-514). `reason` names the exact
 // gap in human terms (which sysctl is denied, which bwrap version was found,
 // …) so the dialog's disabled copy can quote it verbatim rather than being
 // generic.
@@ -4135,6 +4381,15 @@ export type InstanceInfo = {
   local_port?: number;
   url?: string;
   error?: string;
+  // T-425: what the REMOTE daemon reports about itself through a live
+  // forward (its own /api/status). Present only while connected and only
+  // when the remote answered; an older remote omits remote_host_name.
+  remote_version?: string;
+  remote_schema_version?: number;
+  remote_host_name?: string;
+  // remote_probe_error says why the remote build could not be read, naming
+  // the machine. Never blocks opening the dashboard.
+  remote_probe_error?: string;
 };
 
 // InstancesResponse is the reply from GET /api/instances. Fail-soft like
@@ -4556,4 +4811,13 @@ export type UpdateStatusResponse = {
   auto_apply_reason?: string;
   window?: string;
   org_refusal?: UpdateOrgRefusal;
+};
+
+// UnlaunchableTool mirrors Go dashboard.UnlaunchableTool (T-494): an
+// advertised product the New Terminal picker lists as not launchable here.
+export type UnlaunchableTool = {
+  tool: string;
+  kind: "browser" | "hosted" | "desktop" | "no_cli";
+  host?: string;
+  note: string;
 };

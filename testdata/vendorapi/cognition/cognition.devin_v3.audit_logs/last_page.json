@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "audit_log_id": "audit_synth_0003",
+      "action": "update_org_settings",
+      "created_at": 1791198000,
+      "org_id": "org_synth01",
+      "user_id": "user_synth0002",
+      "user_email": "dev@example.com",
+      "service_user_id": null,
+      "service_user_name": null,
+      "data": {}
+    }
+  ],
+  "has_next_page": false,
+  "end_cursor": null
+}

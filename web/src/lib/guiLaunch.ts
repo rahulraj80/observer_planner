@@ -7,6 +7,7 @@ import {
 } from "@/lib/remoteTerminal";
 import { preflightStripCopy, toolNotAllowedReason } from "@/lib/toolInstall";
 import type { GUILaunchable, ToolPreflight } from "@/lib/types";
+import { guiNotGroundedReason } from "@/lib/guiLaunchCopy";
 
 // Pure copy + decision helpers for the New-Terminal dialog's IDE/desktop-app
 // (GUI) launch half (T2.3, docs/plans/ide-desktop-launch-plan-2026-09-03.md
@@ -35,32 +36,6 @@ export function isGUISelection(tool: string, guiRows: GUILaunchable[]): boolean 
 }
 
 // ---------------------------------------------------------------------------
-// Wrap-kind honesty copy (plan §2.2 WrapKind vocabulary).
-// ---------------------------------------------------------------------------
-
-// wrapSummary renders the ONE sentence explaining whether/how this GUI
-// launch's routing gets wrapped, per the row's closed `wrap_kind`
-// vocabulary. This is the value proposition of a wrapped launch (plan §0.2)
-// — the dialog shows it under the picker for every GUI row, not just the
-// blocked ones, so "no wrap" is never silently omitted.
-export function wrapSummary(row: GUILaunchable): string {
-  switch (row.wrap_kind) {
-    case "none":
-      return `No routing wrap: ${row.wrap_reason}`;
-    case "child_env":
-      return "Routing wrap: the proxy base URL is exported into the app's environment (cold start only)";
-    case "config_write":
-      return `Routing is written by the ${row.adapter || row.id} config writer (\`observer init\`), not at launch`;
-    default:
-      // An unrecognised wrap_kind from a newer daemon: fall back to the
-      // server's own reason rather than inventing wording for a value this
-      // build has never seen (the same "don't fabricate" rule as an
-      // unrecognised preflight verdict in toolInstall.ts).
-      return row.wrap_reason || `Routing wrap: ${row.wrap_kind || "unknown"}.`;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Launch gating — mirrors the terminal path's launchBlockedFor /
 // launchBlockedReason (toolInstall.ts), reusing the SAME allow-list and
 // preflight-verdict copy so the two surfaces can never say different things
@@ -71,7 +46,9 @@ export function wrapSummary(row: GUILaunchable): string {
 // refused, or null when there is nothing blocking it. Precedence mirrors
 // launchBlockedReason: the LAUNCH allow-list first (it names the exact
 // config key + the fact that installing doesn't need it), then "no grounded
-// executable at all" (the row's own honest zero — plan §2.4's `Grounded`),
+// executable at all" (the row's own honest zero — plan §2.4's `Grounded`,
+// stated as plain user copy by guiNotGroundedReason, never the registry's
+// provenance `note`),
 // then a preflight verdict that means the daemon can't resolve a runnable
 // binary (not_found / foreign_only) — reusing preflightStripCopy so this
 // sentence is identical to the availability strip shown just below the
@@ -83,11 +60,12 @@ export function guiLaunchDisabledReason(
 ): string | null {
   if (!allowed) return toolNotAllowedReason(row.id);
   if (!row.grounded) {
-    return row.note || `${row.label} has no grounded install on this daemon — see the vendor's docs.`;
+    return guiNotGroundedReason(row);
   }
   const verdict = preflight?.verdict ?? "";
   if (verdict === "not_found" || verdict === "foreign_only") {
-    const strip = preflightStripCopy(row.id, preflight);
+    // Named by the row's label, never its launch id (T-333).
+    const strip = preflightStripCopy(row.label || row.id, preflight);
     return strip?.headline ?? `${row.label} is not installed.`;
   }
   return null;
@@ -101,7 +79,7 @@ export function guiLaunchDisabledReason(
 // this daemon runs without the terminal/PTY stack the GUI spawn+record path
 // (termsvc.LaunchGUI) depends on for its allowed_tools/run-bookkeeping seam.
 export const GUI_LAUNCH_UNSUPPORTED_MSG =
-  "This daemon cannot launch GUI apps — it runs without the terminal stack (needs ConPTY on Windows 10 1809+ / a PTY backend).";
+  "This daemon cannot launch GUI apps - it runs without the terminal stack (needs ConPTY on Windows 10 1809+ / a PTY backend).";
 
 // guiLaunchErrorMessage turns a thrown POST /api/terminal/launch { kind:
 // "gui" } failure into actionable copy. The 403/400 gates a GUI launch can

@@ -181,6 +181,14 @@ func TestPushOnce_IndividualMCPActivityShipsAggregateOnly(t *testing.T) {
 	if r, err := New(managed, s, bs, "test-version", http.DefaultClient, quietLogger()).PushOnce(ctx); err != nil || r.Empty {
 		t.Fatalf("managed PushOnce: res=%+v err=%v", r, err)
 	}
+	if !relayInBuild {
+		// A build without agentaccess.relay composes no relay rows
+		// (store/mcprelay_omit.go): nothing ships in either posture (D-535).
+		if len(env.MCPRelayEvents) != 0 || len(env.MCPRelayActivity) != 0 {
+			t.Fatalf("relay compiled out, yet the push carried %d events / %d activity rows", len(env.MCPRelayEvents), len(env.MCPRelayActivity))
+		}
+		return
+	}
 	if len(env.MCPRelayEvents) != 2 {
 		t.Fatalf("managed node shipped %d relay events, want decision + completion", len(env.MCPRelayEvents))
 	}

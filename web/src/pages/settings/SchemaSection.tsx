@@ -16,15 +16,18 @@ import {
 } from "@/components/primitives";
 import type { ConfigResponse } from "@/lib/types";
 import { markRestartPending } from "@/lib/restartPending";
+import { ConfigSavePreview } from "@/components/ConfigSavePreview";
 import {
   firstSentence,
   getByFieldPath,
   groupByTable,
   isScalarKind,
   leavesForSection,
+  patchFingerprint,
   restartChip,
   sameValue,
   type ConfigKeyPatch,
+  type ConfigKeysDryRun,
   type ConfigKeysError,
   type ConfigKeysResponse,
   type ConfigSchemaDescriptor,
@@ -34,6 +37,7 @@ import {
 import {
   ChevronDown,
   ChevronRight,
+  Eye,
   RefreshCw,
   type LucideIcon,
 } from "lucide-react";
@@ -110,6 +114,10 @@ export function SchemaSection({
   const [keyErrors, setKeyErrors] = useState<Record<string, string>>({});
   const [conflict, setConflict] = useState<string[] | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  // The dry-run preview (adapter-config plan section 5.5): Save is enabled
+  // only for the exact batch the server last checked and diffed.
+  const [preview, setPreview] = useState<{ fp: string; data: ConfigKeysDryRun } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   // Tier-B (list/map) saves re-serialize config.toml, so the first one of a
   // session asks for a second click. The acknowledgement is remembered for
   // the session, exactly as the old native prompt did.
@@ -127,6 +135,7 @@ export function SchemaSection({
     setDraft({});
     setConflict(null);
     setKeyErrors({});
+    setPreview(null);
   }, [config?.config_etag]);
 
   const current = (leaf: ConfigSchemaLeaf): unknown =>
@@ -141,6 +150,13 @@ export function SchemaSection({
   // list / map / table leaves: saving one re-serializes the whole file.
   const tierBDirty = dirtyLeaves.filter((l) => !isScalarKind(l.kind));
   const needsRewriteConfirm = tierBDirty.length > 0 && !tierBWarned;
+  const draftPatches: ConfigKeyPatch[] = dirtyLeaves.map((l) => ({
+    key: l.path,
+    value: draft[l.path],
+    was: current(l),
+  }));
+  const fp = patchFingerprint(config?.config_etag ?? "", draftPatches);
+  const previewFresh = preview !== null && preview.fp === fp;
 
   function setValue(leaf: ConfigSchemaLeaf, v: unknown) {
     setDraft((d) => ({ ...d, [leaf.path]: v }));
@@ -159,6 +175,63 @@ export function SchemaSection({
     setKeyErrors({});
     setConflict(null);
     setSavedMsg(null);
+    setPreview(null);
+  }
+
+  // putKeys sends one PUT /api/config/keys and returns the parsed body, or
+  // records the failure (conflict / per-key errors) and returns null.
+  async function putKeys<T>(patches: ConfigKeyPatch[], dryRun: boolean): Promise<T | null> {
+    if (!config) return null;
+    const res = await fetch("/api/config/keys", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        ...(config.confirm_token ? { "X-Observer-Confirm": config.confirm_token } : {}),
+      },
+      body: JSON.stringify({ base_etag: config.config_etag ?? "", patches, ...(dryRun ? { dry_run: true } : {}) }),
+    });
+    const text = await res.text();
+    let body: unknown = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+    if (!res.ok) {
+      const e = (body ?? {}) as ConfigKeysError;
+      if (res.status === 409 && e.error === "config_changed") {
+        setConflict(e.diverged_keys ?? []);
+        setErr(e.message ?? "config.toml changed outside this page");
+        return null;
+      }
+      if (e.key_errors && e.key_errors.length > 0) {
+        const ke: Record<string, string> = {};
+        for (const k of e.key_errors) ke[k.key] = k.message;
+        setKeyErrors(ke);
+      }
+      throw new Error(e.message || text || `HTTP ${res.status}`);
+    }
+    return body as T;
+  }
+
+  // runPreview is the dry run every save starts with: the server checks the
+  // batch and returns the masked diff of what it would write.
+  async function runPreview() {
+    if (!config || !dirty) return;
+    setPreviewing(true);
+    setErr(null);
+    setKeyErrors({});
+    setConflict(null);
+    setSavedMsg(null);
+    try {
+      const out = await putKeys<ConfigKeysDryRun>(draftPatches, true);
+      setPreview(out ? { fp, data: out } : null);
+    } catch (e: unknown) {
+      setPreview(null);
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPreviewing(false);
+    }
   }
 
   async function save() {
@@ -175,42 +248,10 @@ export function SchemaSection({
     setKeyErrors({});
     setConflict(null);
     setSavedMsg(null);
-    const patches: ConfigKeyPatch[] = dirtyLeaves.map((l) => ({
-      key: l.path,
-      value: draft[l.path],
-      was: current(l),
-    }));
     try {
-      const res = await fetch("/api/config/keys", {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          ...(config.confirm_token ? { "X-Observer-Confirm": config.confirm_token } : {}),
-        },
-        body: JSON.stringify({ base_etag: config.config_etag ?? "", patches }),
-      });
-      const text = await res.text();
-      let body: unknown = null;
-      try {
-        body = text ? JSON.parse(text) : null;
-      } catch {
-        body = null;
-      }
-      if (!res.ok) {
-        const e = (body ?? {}) as ConfigKeysError;
-        if (res.status === 409 && e.error === "config_changed") {
-          setConflict(e.diverged_keys ?? []);
-          setErr(e.message ?? "config.toml changed outside this page");
-          return;
-        }
-        if (e.key_errors && e.key_errors.length > 0) {
-          const ke: Record<string, string> = {};
-          for (const k of e.key_errors) ke[k.key] = k.message;
-          setKeyErrors(ke);
-        }
-        throw new Error(e.message || text || `HTTP ${res.status}`);
-      }
-      const out = body as ConfigKeysResponse;
+      const out = await putKeys<ConfigKeysResponse>(draftPatches, false);
+      if (!out) return;
+      setPreview(null);
       const parts: string[] = [];
       if (out.applied_live_keys.length > 0) parts.push(`${out.applied_live_keys.length} applied now`);
       if (out.next_spawn_keys.length > 0) parts.push(`${out.next_spawn_keys.length} apply to new sessions`);
@@ -275,6 +316,14 @@ export function SchemaSection({
       ))}
       {(leaves.length > 0 || compact) && (
         <div className="flex flex-wrap items-center gap-3 border-t border-line-1 pt-3">
+          <Button
+            iconLeft={Eye}
+            onClick={() => void runPreview()}
+            disabled={!dirty || busy || previewing || readOnly || !config}
+            loading={previewing}
+          >
+            Check and preview
+          </Button>
           <ConfirmButton
             onConfirm={save}
             requireConfirm={needsRewriteConfirm}
@@ -293,7 +342,7 @@ export function SchemaSection({
             variant="primary"
             armedVariant="danger"
             timeoutMs={8000}
-            disabled={!dirty || busy || readOnly || !config}
+            disabled={!dirty || busy || readOnly || !config || !previewFresh}
             loading={busy}
             title={readOnly ? "Managed by your organization" : undefined}
           >
@@ -316,6 +365,10 @@ export function SchemaSection({
           {err && !conflict && <span className="text-[11.5px] text-danger">{err}</span>}
         </div>
       )}
+      {dirty && !previewFresh && !readOnly && (
+        <p className="text-[11px] text-fg-4">Check and preview first: Save applies exactly the change the preview shows.</p>
+      )}
+      {previewFresh && preview && <ConfigSavePreview data={preview.data} />}
       {conflict && (
         <div className="rounded-2 border border-warn/40 bg-warn-soft px-3 py-2 text-[11.5px] text-fg-2">
           <div className="font-semibold text-warn">config.toml changed outside this page</div>

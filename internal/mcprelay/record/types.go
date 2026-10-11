@@ -280,19 +280,21 @@ type LaunchSpec struct {
 	// ConfigGeneration is the CAS target: a concurrent rewrite bumps it, and
 	// PutLaunchSpec refuses a stale expectation with ErrConflict.
 	ConfigGeneration int64
-	// BackupPath / BackupSHA256 name the owner-only durable backup file
-	// holding the VERBATIM original config bytes and its digest (R8.28.i).
+	// BackupPath / BackupSHA256 are LEGACY columns: an older build named an
+	// owner-only verbatim backup of the client config and its digest here.
+	// Since T-397 (D-268 / D-270: a client MCP config can hold credentials)
+	// nothing writes them; the projector clears them on its next pass and
+	// the node journal removes the file once no row names it.
 	BackupPath   string
 	BackupSHA256 string
 	AppliedAt    int64 // unix seconds
-	// AppliedSHA256 is the SHA-256 of the config bytes the relay WROTE when
-	// it applied this row (node migration 132, Sol P3+P4 finding 7 / R8.18
-	// CAS). "" = NULL = a pre-132 row whose post-rewrite digest is unknown.
-	// Every whole-file restore compares the config's CURRENT bytes against
-	// it: a mismatch means the operator or the client edited the file after
-	// the rewrite, and a whole-file restore would silently clobber that edit
-	// - the restore then refuses and falls back to the format-aware reversal
-	// of only the relay-owned entry.
+	// AppliedSHA256 is the OWNED digest of the entry the relay wrote for
+	// this row (project.OwnedStdioDigest / OwnedRemoteDigest: the wrapper
+	// launch or the relay remote entry only, never the whole config; node
+	// migration 132 added the column). "" = NULL = a pre-132 row. A row
+	// counts as applied only while its entry's current owned digest equals
+	// it; an older build stored a whole-file digest here, which never
+	// matches and is replaced at the next projection.
 	AppliedSHA256 string
 	// VServer / RegistryServerID are the approved tools.mcp_access binding
 	// (compiled node table vserver ID + registry server id) a stdio-wrap
@@ -415,15 +417,16 @@ func (r Record) Validate() error {
 	return nil
 }
 
-// Validate mirrors the launch-spec NOT NULL constraints.
+// Validate mirrors the launch-spec NOT NULL constraints. backup_path and
+// backup_sha256 are legacy columns (T-397: no copy of a client config is
+// kept): they stay NOT NULL in the schema and hold ” for every row written
+// since, so they are not required here.
 func (l LaunchSpec) Validate() error {
 	for _, f := range []struct{ name, v string }{
 		{"client", l.Client},
 		{"config_path", l.ConfigPath},
 		{"entry_key", l.EntryKey},
 		{"orig_command", l.OrigCommand},
-		{"backup_path", l.BackupPath},
-		{"backup_sha256", l.BackupSHA256},
 	} {
 		if f.v == "" {
 			return fmt.Errorf("%w: launch spec requires %s", ErrInvalid, f.name)

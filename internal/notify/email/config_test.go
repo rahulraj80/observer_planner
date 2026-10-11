@@ -82,13 +82,13 @@ func TestConfigRedactionNeverLeaks(t *testing.T) {
 }
 
 func TestPortDefaults(t *testing.T) {
-	if p := (Config{TLSMode: "tls"}).port(); p != 465 {
+	if p := (Config{TLSMode: "tls"}).EffectivePort(); p != 465 {
 		t.Fatalf("implicit tls default port = %d, want 465", p)
 	}
-	if p := (Config{}).port(); p != 587 {
+	if p := (Config{}).EffectivePort(); p != 587 {
 		t.Fatalf("starttls default port = %d, want 587", p)
 	}
-	if p := (Config{Port: 2525}).port(); p != 2525 {
+	if p := (Config{Port: 2525}).EffectivePort(); p != 2525 {
 		t.Fatalf("explicit port = %d, want 2525", p)
 	}
 }

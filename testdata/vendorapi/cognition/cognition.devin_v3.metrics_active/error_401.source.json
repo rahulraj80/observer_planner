@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "detail": "VerifiedOfficial",
+    "status": "VerifiedOfficial",
+    "title": "VerifiedOfficial",
+    "type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "0712407a87713c306bbba1077bb41809f84c7168713301784a5e4416eda1eb27",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/metrics/dau",
+    "status": 401
+  },
+  "notes": "The ProblemDetail error schema of the 401 response; message values are synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.metrics_active"
+}

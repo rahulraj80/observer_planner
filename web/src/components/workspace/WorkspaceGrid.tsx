@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLaunchDock } from "@/components/LaunchDock";
 import { isRemoteView } from "@/lib/remote";
-import { isLiveStatus, type Status } from "@/components/LaunchTerminal";
+import { isLiveStatus, type Status } from "@/lib/launchStatus";
 import { fmtShortId } from "@/lib/format";
 import {
   ConfirmButton,

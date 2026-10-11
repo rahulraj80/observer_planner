@@ -440,7 +440,10 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	// outputs). ReadString grows its return string dynamically when a
 	// line spans buffers, so there's no maxLine cap — at the cost of
 	// larger transient allocations on giant lines.
-	reader := bufio.NewReaderSize(f, 64*1024)
+	// A watcher catching up on an over-cap tail bounds this parse to one
+	// window (adapter.LimitTail, T-413); a line cut by the window is
+	// deferred exactly like a partial trailing line.
+	reader := bufio.NewReaderSize(adapter.LimitTail(ctx, f), 64*1024)
 
 	bytesRead := fromOffset
 	lineNum := 0
@@ -1913,3 +1916,7 @@ func recoverConcatenatedJSONLines(raw []byte) [][]byte {
 	}
 	return out
 }
+
+// IsNativeTool implements adapter.NativeToolClassifier (the package-level
+// IsNativeTool).
+func (*Adapter) IsNativeTool(name string) bool { return IsNativeTool(name) }

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_proxy
+
 package main
 
 import (
@@ -72,7 +74,7 @@ func applyOrgRouteBootstrap(p *proxy.Proxy, cfg config.Config, logger *slog.Logg
 		return
 	}
 	if err := p.SetOrgGatewayRouteWithFallback(r.Mode, r.Primary, r.Fallbacks, r.TerminalPolicy, r.DirectFallbackCustodyAck); err != nil {
-		logger.Warn("proxy: [proxy.org_route] bootstrap rejected — org route stays inert",
+		logger.Warn("proxy: [proxy.org_route] bootstrap rejected - org route stays inert",
 			"mode", r.Mode, "primary", r.Primary, "err", err)
 		return
 	}

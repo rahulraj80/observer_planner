@@ -38,10 +38,10 @@ func newTasksCmd() *cobra.Command {
 		Short: "Session-level task/todo/plan tracking: per-task tokens, cost, elapsed, and status",
 		Long: "Reports what a session's todo/plan tool calls (claude-code TaskCreate/\n" +
 			"TaskUpdate/TodoWrite, codex update_plan, kiro-cli todo_list, …) actually\n" +
-			"cost — per task tokens/cost/elapsed/action-count, plus the between_tasks\n" +
+			"cost - per task tokens/cost/elapsed/action-count, plus the between_tasks\n" +
 			"and shared buckets §R2.3.2 requires as first-class rows (only ~52% of a\n" +
 			"session's tokens are attributable to one specific task on average). A\n" +
-			"pure re-read of already-captured actions/token_usage rows — no new\n" +
+			"pure re-read of already-captured actions/token_usage rows - no new\n" +
 			"capture surface, gated by [tasks].enabled. Use --rollup for a project/\n" +
 			"tool/window aggregate across every session instead of one session's detail.",
 		Args: cobra.MaximumNArgs(1),
@@ -119,12 +119,12 @@ func newTasksCmd() *cobra.Command {
 func printSessionTaskReport(cmd *cobra.Command, rep taskreport.SessionTaskReport) {
 	w := cmd.OutOrStdout()
 	if !rep.HasTasks {
-		fmt.Fprintf(w, "session %s never used a task/todo/plan tool — nothing to report.\n", rep.SessionID)
-		fmt.Fprintln(w, "(most sessions don't — this is the normal case, not an error.)")
+		fmt.Fprintf(w, "session %s never used a task/todo/plan tool - nothing to report.\n", rep.SessionID)
+		fmt.Fprintln(w, "(most sessions don't - this is the normal case, not an error.)")
 		return
 	}
 
-	fmt.Fprintf(w, "Task tracking — session %s (match_mode=%s, concurrent_attribution=%s)\n\n",
+	fmt.Fprintf(w, "Task tracking - session %s (match_mode=%s, concurrent_attribution=%s)\n\n",
 		rep.SessionID, taskOrDefault(rep.MatchMode, "exact"), taskOrDefault(rep.ConcurrentAttribution, "shared"))
 
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
@@ -144,12 +144,12 @@ func printSessionTaskReport(cmd *cobra.Command, rep taskreport.SessionTaskReport
 		rep.Shared.ActionsCount, fmtTokens(rep.Shared.Tokens.InputTokens), fmtTokens(rep.Shared.Tokens.OutputTokens),
 		fmtCostCell(rep.Shared.CostUSD, rep.Shared.Unpriced))
 	if rep.Sidechain != nil {
-		fmt.Fprintf(w, "sidechain:      %d actions, %s/%s tok, %s (sub-agent usage, reported separately — include_sidechains=false)\n",
+		fmt.Fprintf(w, "sidechain:      %d actions, %s/%s tok, %s (sub-agent usage, reported separately - include_sidechains=false)\n",
 			rep.Sidechain.ActionsCount, fmtTokens(rep.Sidechain.Tokens.InputTokens), fmtTokens(rep.Sidechain.Tokens.OutputTokens),
 			fmtCostCell(rep.Sidechain.CostUSD, rep.Sidechain.Unpriced))
 	}
 	if rep.UnmatchedCount > 0 && !rep.AllKeysNative {
-		fmt.Fprintf(w, "\n%d item(s) could not be matched across updates (content changed between snapshots) — see 'unmatched' above.\n", rep.UnmatchedCount)
+		fmt.Fprintf(w, "\n%d item(s) could not be matched across updates (content changed between snapshots) - see 'unmatched' above.\n", rep.UnmatchedCount)
 	}
 	if rep.CostNote != "" {
 		fmt.Fprintf(w, "\n%s\n", rep.CostNote)
@@ -166,7 +166,7 @@ func printTaskRollup(cmd *cobra.Command, rep taskreport.TaskRollup, days int) {
 	if days > 0 {
 		windowLabel = fmt.Sprintf("last %d days", days)
 	}
-	fmt.Fprintf(w, "Task tracking rollup — %s, %d session(s) with tasks\n\n", windowLabel, rep.SessionsWithTasks)
+	fmt.Fprintf(w, "Task tracking rollup - %s, %d session(s) with tasks\n\n", windowLabel, rep.SessionsWithTasks)
 
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "TOOL\tSESSIONS\tTASKS\tCOST")

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ChartShell, PageHeader, Pill, Table } from "@/components/primitives";
 import { TitleWithHelp } from "@/components/HelpInd";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
 import { fmtBytes, fmtDateTime, fmtInt } from "@/lib/format";
@@ -16,6 +17,9 @@ import {
 import { VocabPill } from "@shared/lib/vocabPill";
 import type { ConfigResponse } from "@/lib/types";
 import { navIcon } from "@/lib/nav";
+import { PageVisibilityCard } from "@/components/PageVisibilityCard";
+import { orgDisplayLabelSentence } from "@/lib/orgName";
+import { pricingFeedFromConfig } from "@/lib/pricingFeed";
 
 // Privacy center (P6.5): one page answering "what does the observer
 // capture, what never leaves this machine, and how do I verify it?".
@@ -29,6 +33,10 @@ export function PrivacyPage() {
     ?.Observer?.Secrets;
   const retention = (cfg.data?.config as Record<string, any> | undefined)
     ?.Observer?.Retention;
+  // T-470 / D-007: an organization-managed machine ships full content by its
+  // enrolment grant, so the individual "node-side opt-in" sentence is false
+  // there.
+  const managed = !!useGovernance().data?.managed;
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -63,12 +71,21 @@ export function PrivacyPage() {
             <ul className="list-disc space-y-1 pl-4 text-fg-2">
               <li>The observer and watcher make no network calls - everything is local</li>
               <li>The proxy only forwards your AI tool's own traffic to its provider</li>
-              <li>
-                Teams push happens only after explicit enrolment, hash-only by
-                default; raw content requires the node-side{" "}
-                <span className="font-mono text-[11px]">share.full_content</span>{" "}
-                opt-in that no server can flip remotely
-              </li>
+              {managed ? (
+                <li>
+                  This machine is managed by your organization: its pushes
+                  carry full content (raw commands, prose and paths) by the
+                  organization&apos;s enrolment grant, unless the organization
+                  has deliberately lowered it
+                </li>
+              ) : (
+                <li>
+                  Teams push happens only after explicit enrolment, hash-only by
+                  default; raw content requires the node-side{" "}
+                  <span className="font-mono text-[11px]">share.full_content</span>{" "}
+                  opt-in that no server can flip remotely
+                </li>
+              )}
             </ul>
             <p className="mt-2 font-medium text-fg-1">This install</p>
             <div className="flex flex-wrap gap-1.5 pt-1">
@@ -101,6 +118,7 @@ export function PrivacyPage() {
 
       <ScrubTesterCard scrubbingEnabled={secrets?.EnableScrubbing ?? true} />
       <SharingSourceCard config={cfg.data?.config as Record<string, any> | undefined} />
+      <PageVisibilityCard />
       <OrgPushCard />
     </div>
   );
@@ -180,7 +198,7 @@ function ScrubTesterCard({ scrubbingEnabled }: { scrubbingEnabled: boolean }) {
 // SHARE_ROWS is the sharing posture this page explains, one row per
 // [org_client.share] key, paired with the wire key the org rail names it by.
 //
-// It is a display table, not a vocabulary: the organisation's own vocabulary
+// It is a display table, not a vocabulary: the organization's own vocabulary
 // is served by the org server, and SharingSourceCard renders ANY key the
 // governance endpoint reports that is missing here rather than dropping it.
 // So a new org-side key is visible on day one, worst case without a friendly
@@ -231,11 +249,11 @@ function shareValueText(v: unknown, list?: boolean): string {
 // The direction depends on the tenancy, and this card says WHICH ONE this
 // machine is on rather than making one claim for both:
 //
-//   Individual / BYO - one-way by construction. An organisation can reduce
+//   Individual / BYO - one-way by construction. An organization can reduce
 //   what this machine shares, or lock it at the level the operator already
 //   chose. It cannot raise it: the raise no-ops without managed enrolment.
 //
-//   Managed (Enterprise-Managed Tenancy) - the organisation can also turn
+//   Managed (Enterprise-Managed Tenancy) - the organization can also turn
 //   sharing ON remotely, for the tiers it was granted at enrolment. That is
 //   the deal a managed enrolment makes, and a row it raised is labelled as
 //   its decision, not the developer's.
@@ -277,13 +295,13 @@ function SharingSourceCard({ config }: { config: Record<string, any> | undefined
       title={<TitleWithHelp text="Sharing keys and their source" helpId="card.privacy_share_source" />}
       sub={
         gov.data?.managed
-          ? "Each sharing switch, what it is set to, and who decided. This machine is managed by your organisation, so it can reduce, lock, or increase what is shared - every row it decided is marked below."
-          : "Each sharing switch, what it is set to, and who decided. An organisation can reduce or lock what this machine shares; on an unmanaged machine like this one it cannot increase it."
+          ? "Each sharing switch, what it is set to, and who decided. This machine is managed by your organization, so it can reduce, lock, or increase what is shared - every row it decided is marked below."
+          : "Each sharing switch, what it is set to, and who decided. An organization can reduce or lock what this machine shares; on an unmanaged machine like this one it cannot increase it."
       }
     >
       {enrol.data && !enrol.data.enrolled && (
         <p className="pb-2 text-[11.5px] text-fg-2">
-          This machine is not enrolled in any organisation, so nothing below is shared with anyone. The settings are
+          This machine is not enrolled in any organization, so nothing below is shared with anyone. The settings are
           what would apply if you enrolled.
         </p>
       )}
@@ -335,15 +353,19 @@ function SharingSourceCard({ config }: { config: Record<string, any> | undefined
       <p className="pt-2 text-[11px] text-fg-3">
         Change your own settings in{" "}
         <Link to="/settings?section=org" className="font-medium text-accent hover:text-accent-strong">
-          Settings &rarr; Organisation
+          Settings &rarr; Organization
         </Link>
-        . A row sourced to your organisation is applied on this machine and its control there is read-only; running{" "}
-        <span className="font-mono">observer unenroll</span> removes it.
+        . A row sourced to your organization is applied on this machine and its control there is read-only; leaving the
+        organization in{" "}
+        <Link to="/settings?section=enrolment" className="font-medium text-accent hover:text-accent-strong">
+          Settings &rarr; Enrolment
+        </Link>{" "}
+        removes it.
       </p>
       {gov.error && (
         <p
           className="pt-1 text-[11px] text-fg-3"
-          title="GET /api/governance did not answer, so any organisation directive cannot be shown."
+          title="GET /api/governance did not answer, so any organization directive cannot be shown."
         >
           The governance posture could not be read, so every row shows your own setting as the source. Reload to try
           again.
@@ -356,8 +378,8 @@ function SharingSourceCard({ config }: { config: Record<string, any> | undefined
 // PricingSourceRow says WHICH PRICE TABLE this machine is using.
 //
 // It sits on the sharing card because it answers the same question every other
-// row here answers: what did my organisation decide for this machine, and how
-// do I know? An organisation that distributes negotiated rates changes every
+// row here answers: what did my organization decide for this machine, and how
+// do I know? An organization that distributes negotiated rates changes every
 // dollar figure on every screen of this dashboard, and before this arc no
 // surface said so anywhere.
 //
@@ -370,9 +392,9 @@ function PricingSourceRow({ pricing }: { pricing: GovernancePricing | undefined 
   const feedVersion = pricing.feed_version ?? 0;
   const label =
     pricing.source === "org_authoritative"
-      ? `Your organisation's negotiated rates (v${version}) price every turn on this machine, above any rate you set yourself.`
+      ? `Your organization's negotiated rates (v${version}) price every turn on this machine, above any rate you set yourself.`
       : pricing.source === "org"
-        ? `Your organisation's negotiated rates (v${version}) price every turn on this machine, below any rate you set yourself.`
+        ? `Your organization's negotiated rates (v${version}) price every turn on this machine, below any rate you set yourself.`
         : pricing.source === "feed"
           ? `Market list prices from the Tokenomics pricing feed (v${feedVersion}) price every turn on this machine, below any rate you set yourself.`
           : "This machine prices every turn from its own table: the built-in rates plus anything you set in Settings.";
@@ -392,27 +414,39 @@ function PricingSourceRow({ pricing }: { pricing: GovernancePricing | undefined 
 
 // PricingFeedEgressRow states the public pricing feed's OUTBOUND posture
 // honestly (plan §G): off (no feed fetch), manual-only, or auto on a cadence.
-// It reads [pricing.feed] from the node's own config — this is a local egress
-// decision, never an org directive — and renders nothing when the block is
-// absent (an older build), so an absence never reads as a verdict.
+// It reads [pricing.feed] from the node's own config (a local egress decision,
+// never an org directive) and renders nothing when the block is absent (an
+// older build), so an absence never reads as a verdict.
 function PricingFeedEgressRow({
   config,
 }: {
   config: Record<string, any> | undefined;
 }) {
-  const feed = config?.pricing?.feed as
-    | { enabled?: boolean; auto?: boolean; poll_interval_hours?: number }
-    | undefined;
+  const feed = pricingFeedFromConfig(config);
   if (!feed) return null;
-  const hours = feed.poll_interval_hours ?? 24;
+  const hours = feed.pollIntervalHours;
   const posture = !feed.enabled
-    ? "off - no outbound request is made. A standalone node can still pull it on demand with `observer pricing sync`."
+    ? "off - no background request is made. A standalone node can still fetch it once with Fetch prices now."
     : feed.auto
       ? `auto - this node fetches the public pricing feed about every ${hours}h (plus on demand). Enrolled nodes never consult it.`
-      : "manual only - fetched only when you run `observer pricing sync`. No background request is made.";
+      : "manual only - fetched only when you click Fetch prices now. No background request is made.";
   return (
     <div className="pt-2 text-[11px] text-fg-3">
       <span className="font-medium text-fg-2">Pricing feed egress:</span> {posture}
+      {/* `observer pricing sync` as a dashboard job: one user-started fetch,
+          verified against the vendor key before anything is applied. The CLI
+          itself refuses on an enrolled node (prices come from the org). */}
+      <CommandJobButton
+        job="pricing-sync"
+        className="mt-1.5"
+        outputLines={3}
+        confirmLabel="Fetch now?"
+        armedNote={`Makes one outbound request to ${feed.url || "the public pricing feed"}. A body that does not verify is never applied.`}
+        runningLabel="Fetching…"
+        doneText="Done. A running daemon applies new prices on its next start or auto-sync poll."
+      >
+        Fetch prices now
+      </CommandJobButton>
     </div>
   );
 }
@@ -420,6 +454,7 @@ function PricingFeedEgressRow({
 type EnrolStatus = {
   enrolled: boolean;
   org_name?: string;
+  org_display?: string;
   org_server_url?: string;
   user_email?: string;
   last_push?: {
@@ -460,15 +495,18 @@ function OrgPushCard() {
       {!st?.enrolled ? (
         <p className="py-3 text-[12px] text-fg-2">
           Not enrolled in any org - nothing is shared, ever. Enrolment is an
-          explicit <span className="font-mono text-[11px]">observer enroll</span>{" "}
-          action; until then the observer has no outbound channel at all.
+          explicit action in{" "}
+          <Link to="/settings?section=enrolment" className="font-medium text-accent hover:text-accent-strong">
+            Settings &rarr; Enrolment
+          </Link>
+          ; until then the observer has no outbound channel at all.
         </p>
       ) : (
         <div className="space-y-2 text-[12px]">
           <div className="flex flex-wrap items-center gap-1.5">
             <Pill variant="info">enrolled</Pill>
             <span className="text-fg-2">
-              {st.org_name ?? "org"} · {st.org_server_url}
+              {orgDisplayLabelSentence(st.org_display)} · {st.org_server_url}
             </span>
             {st.last_push && (
               <span className="text-[11px] text-fg-3">

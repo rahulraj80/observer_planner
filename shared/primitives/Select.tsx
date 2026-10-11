@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import type { ReactNode, SelectHTMLAttributes } from "react";
 import { FieldShell, fieldClasses, type FieldChromeProps } from "./Input";
+import { callerSetsWidth } from "../lib/fieldWidth";
 
 export type SelectOption = {
   value: string;
@@ -34,7 +35,7 @@ export function Select({
       <select
         {...rest}
         className={clsx(
-          fieldClasses({ mono, invalid: Boolean(error) }),
+          fieldClasses({ mono, invalid: Boolean(error), ownWidth: callerSetsWidth(className) }),
           className,
         )}
       >

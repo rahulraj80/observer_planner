@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].joinedAt": "VerifiedOfficial",
+    "data[].role": "VerifiedOfficial",
+    "data[].userEmail": "VerifiedOfficial",
+    "data[].userId": "VerifiedOfficial",
+    "data[].userName": "VerifiedOfficial",
+    "limit": "VerifiedOfficial",
+    "offset": "VerifiedOfficial",
+    "status": "VerifiedOfficial",
+    "total_count": "VerifiedOfficial"
+  },
+  "fixture_sha256": "498bd31d755e0d4a96d00530309b7e7e469e1947aef9e03ae1d5ea4e00a52ce3",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/teams/{team_id}/members",
+    "query": {
+      "limit": "100",
+      "offset": "2"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized terminal page: offset 2 plus one member reaches total_count 3.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "PI API 0.1.0 (openapi.json), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "4e5d854e34e8f2a4c0319ad724fba245984b98cfbb58a48748d10ff51d31515c",
+  "source_url": "https://api.primeintellect.ai/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "prime.teams.members"
+}

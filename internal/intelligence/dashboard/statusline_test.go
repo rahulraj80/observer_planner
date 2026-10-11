@@ -90,8 +90,8 @@ func newStatuslineFixture(t *testing.T) (*store.Store, *Server) {
 func TestHandleStatuslineTile_EmptyDB(t *testing.T) {
 	_, server := newStatuslineFixture(t)
 	got := openStatusline(t, server, "")
-	if got.TodayUSD != 0 {
-		t.Errorf("today_usd: got %v want 0", got.TodayUSD)
+	if todayUSDOf(got) != 0 {
+		t.Errorf("today_usd: got %v want 0", todayUSDOf(got))
 	}
 	if got.SessionUSD != nil || got.SessionCacheReadShare != nil {
 		t.Errorf("session fields must be nil with no session_id: usd=%v share=%v",
@@ -116,8 +116,11 @@ func TestHandleStatuslineTile_TodayTotal_RecordedCost(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := openStatusline(t, server, "")
-	if !approx(got.TodayUSD, 1.23) {
-		t.Errorf("today_usd: got %v want 1.23", got.TodayUSD)
+	if !approx(todayUSDOf(got), 1.23) {
+		t.Errorf("today_usd: got %v want 1.23", todayUSDOf(got))
+	}
+	if got.TodayTokens != 60_000 {
+		t.Errorf("today_tokens: got %v want 60000", got.TodayTokens)
 	}
 }
 
@@ -145,11 +148,11 @@ func TestHandleStatuslineTile_TodayTotal_UnrecordedPricedByEngine(t *testing.T) 
 	// Sonnet 4.6 standard: input $3/M, output $15/M.
 	// 50K × $3 + 10K × $15 / 1M = 0.15 + 0.15 = 0.30
 	const want = 0.30
-	if got.TodayUSD <= 0 {
-		t.Fatalf("today_usd must be > 0 for an unrecorded-but-priceable row (WP0 correction): got %v", got.TodayUSD)
+	if todayUSDOf(got) <= 0 {
+		t.Fatalf("today_usd must be > 0 for an unrecorded-but-priceable row (WP0 correction): got %v", todayUSDOf(got))
 	}
-	if !approx(got.TodayUSD, want) {
-		t.Errorf("today_usd: got %v want %v", got.TodayUSD, want)
+	if !approx(todayUSDOf(got), want) {
+		t.Errorf("today_usd: got %v want %v", todayUSDOf(got), want)
 	}
 }
 
@@ -168,8 +171,8 @@ func TestHandleStatuslineTile_ExcludesYesterday(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := openStatusline(t, server, "")
-	if got.TodayUSD != 0 {
-		t.Errorf("today_usd must exclude a turn from >24h ago: got %v", got.TodayUSD)
+	if todayUSDOf(got) != 0 {
+		t.Errorf("today_usd must exclude a turn from >24h ago: got %v", todayUSDOf(got))
 	}
 }
 
@@ -200,8 +203,8 @@ func TestHandleStatuslineTile_TodayDedupesProxyRecordedTokenUsageRow(t *testing.
 		t.Fatal(err)
 	}
 	got := openStatusline(t, server, "")
-	if !approx(got.TodayUSD, 1.23) {
-		t.Errorf("today_usd must dedup the JSONL row already covered by the proxy turn: got %v want 1.23", got.TodayUSD)
+	if !approx(todayUSDOf(got), 1.23) {
+		t.Errorf("today_usd must dedup the JSONL row already covered by the proxy turn: got %v want 1.23", todayUSDOf(got))
 	}
 }
 
@@ -226,8 +229,8 @@ func TestHandleStatuslineTile_FastTierUnrecordedPricing(t *testing.T) {
 	got := openStatusline(t, server, "")
 	// Opus 4.8 cache_read $0.50/M × fast(2) × 100K = 0.10.
 	const want = 0.10
-	if !approx(got.TodayUSD, want) {
-		t.Errorf("today_usd (fast-tier): got %v want %v (bundle.Fast may not have been threaded through)", got.TodayUSD, want)
+	if !approx(todayUSDOf(got), want) {
+		t.Errorf("today_usd (fast-tier): got %v want %v (bundle.Fast may not have been threaded through)", todayUSDOf(got), want)
 	}
 }
 
@@ -262,9 +265,14 @@ func TestHandleStatuslineTile_SessionScoped_MatchingSession(t *testing.T) {
 	if !approx(*got.SessionCacheReadShare, wantShare) {
 		t.Errorf("session_cache_read_share: got %v want %v", *got.SessionCacheReadShare, wantShare)
 	}
+	// session_tokens is the dashboard's token figure: input + output +
+	// cache read + cache creation = 25K + 10K + 75K = 110K.
+	if got.SessionTokens == nil || *got.SessionTokens != 110_000 {
+		t.Errorf("session_tokens: got %v want 110000", got.SessionTokens)
+	}
 	// today_usd must be unaffected — the session's only turn is 72h old.
-	if got.TodayUSD != 0 {
-		t.Errorf("today_usd must stay 0 (session turn is outside today): got %v", got.TodayUSD)
+	if todayUSDOf(got) != 0 {
+		t.Errorf("today_usd must stay 0 (session turn is outside today): got %v", todayUSDOf(got))
 	}
 }
 
@@ -299,7 +307,10 @@ func TestHandleStatuslineTile_ResponseShapeStable(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	wantKeys := []string{"today_usd", "session_usd", "session_cache_read_share", "generated_at"}
+	wantKeys := []string{
+		"today_usd", "session_usd", "session_cache_read_share", "generated_at",
+		"cost_display", "today_tokens", "session_tokens",
+	}
 	if len(raw) != len(wantKeys) {
 		t.Errorf("response has %d keys, want exactly %d: %v", len(raw), len(wantKeys), raw)
 	}
@@ -313,6 +324,68 @@ func TestHandleStatuslineTile_ResponseShapeStable(t *testing.T) {
 	}
 	if v, ok := raw["session_cache_read_share"]; !ok || v != nil {
 		t.Errorf(`session_cache_read_share must serialize as JSON null when no session_id given: got %v`, v)
+	}
+	if v, ok := raw["session_tokens"]; !ok || v != nil {
+		t.Errorf(`session_tokens must serialize as JSON null when no session_id given: got %v`, v)
+	}
+	if v := raw["cost_display"]; v != "usd" {
+		t.Errorf(`cost_display on a solo install must be "usd": got %v`, v)
+	}
+}
+
+// TestHandleStatuslineTile_CostDisplay pins the developer cost display on the
+// tile, resolved per request through the same seam as GET /api/cost-display
+// (store.ResolveDeveloperCostDisplay): dollars by default, "tokens" when the
+// node is enrolled in the org whose verified document chose token usage. The
+// token figures ride along in both modes; the CLI decides what to render.
+func TestHandleStatuslineTile_CostDisplay(t *testing.T) {
+	cases := []struct {
+		name string
+		seed string // "" = no display policy cached
+		want string
+	}{
+		{"no policy: dollars", "", "usd"},
+		{"org chose dollars", "usd", "usd"},
+		{"org chose tokens", "tokens", "tokens"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, s := newAnnouncementServerWithOrgEnrolment(t, true, enrolledService())
+			if c.seed != "" {
+				if err := s.UpsertOrgDisplayPolicy(context.Background(), store.OrgDisplayPolicyRow{
+					OrgID: "org-1", Version: 1, DeveloperCostDisplay: c.seed,
+					Body: "{}", BodyHash: "h", Signature: "sig", ServerPubkey: "pk", ReceivedAt: time.Now().UTC(),
+				}); err != nil {
+					t.Fatalf("seed: %v", err)
+				}
+			}
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/statusline", nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+			}
+			var got StatuslineResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got.CostDisplay != c.want {
+				t.Errorf("cost_display = %q, want %q", got.CostDisplay, c.want)
+			}
+			// T-204: the raw JSON follows the display too. Under tokens the
+			// dollar figures are null (the token figures carry the tile);
+			// under dollars today_usd is a number.
+			var raw map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode raw: %v", err)
+			}
+			_, isNum := raw["today_usd"].(float64)
+			if wantNum := c.want == "usd"; isNum != wantNum {
+				t.Errorf("today_usd = %v under %s, want a number: %v", raw["today_usd"], c.want, wantNum)
+			}
+			if c.want == "tokens" && raw["session_usd"] != nil {
+				t.Errorf("session_usd = %v under tokens, want null", raw["session_usd"])
+			}
+		})
 	}
 }
 
@@ -354,8 +427,8 @@ func TestHandleStatuslineTile_CacheHitWithinTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := openStatusline(t, server, "")
-	if !approx(first.TodayUSD, 1.00) {
-		t.Fatalf("first call today_usd: got %v want 1.00", first.TodayUSD)
+	if !approx(todayUSDOf(first), 1.00) {
+		t.Fatalf("first call today_usd: got %v want 1.00", todayUSDOf(first))
 	}
 
 	// A second turn lands inside the same 2s TTL window. If the handler
@@ -370,8 +443,8 @@ func TestHandleStatuslineTile_CacheHitWithinTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := openStatusline(t, server, "")
-	if !approx(second.TodayUSD, first.TodayUSD) {
-		t.Errorf("cache hit within TTL: today_usd changed (got %v, want unchanged %v) — handler must have re-queried instead of serving the cached response", second.TodayUSD, first.TodayUSD)
+	if !approx(todayUSDOf(second), todayUSDOf(first)) {
+		t.Errorf("cache hit within TTL: today_usd changed (got %v, want unchanged %v) - handler must have re-queried instead of serving the cached response", todayUSDOf(second), todayUSDOf(first))
 	}
 	if second.GeneratedAt != first.GeneratedAt {
 		t.Errorf("cache hit within TTL: generated_at must stay the ORIGINAL compute time (the staleness signal), got %q want %q", second.GeneratedAt, first.GeneratedAt)
@@ -404,8 +477,8 @@ func TestHandleStatuslineTile_CacheExpiresAndRecomputes(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := openStatusline(t, server, "")
-	if !approx(first.TodayUSD, 1.00) {
-		t.Fatalf("first call today_usd: got %v want 1.00", first.TodayUSD)
+	if !approx(todayUSDOf(first), 1.00) {
+		t.Fatalf("first call today_usd: got %v want 1.00", todayUSDOf(first))
 	}
 
 	if _, err := st.InsertAPITurn(context.Background(), models.APITurn{
@@ -418,8 +491,8 @@ func TestHandleStatuslineTile_CacheExpiresAndRecomputes(t *testing.T) {
 	}
 	current = current.Add(20 * time.Millisecond) // well past the 10ms injected TTL
 	second := openStatusline(t, server, "")
-	if !approx(second.TodayUSD, 4.00) {
-		t.Errorf("after TTL expiry today_usd must reflect the new row: got %v want 4.00", second.TodayUSD)
+	if !approx(todayUSDOf(second), 4.00) {
+		t.Errorf("after TTL expiry today_usd must reflect the new row: got %v want 4.00", todayUSDOf(second))
 	}
 }
 
@@ -468,8 +541,8 @@ func TestHandleStatuslineTile_DatedPricingLadder(t *testing.T) {
 
 	got := openStatusline(t, server, "")
 	want := 9.99 + ladderOldCost
-	if !approx(got.TodayUSD, want) {
-		t.Errorf("today_usd: got %v want %v (recorded=9.99 old=%.2f)", got.TodayUSD, want, ladderOldCost)
+	if !approx(todayUSDOf(got), want) {
+		t.Errorf("today_usd: got %v want %v (recorded=9.99 old=%.2f)", todayUSDOf(got), want, ladderOldCost)
 	}
 }
 
@@ -562,4 +635,13 @@ func BenchmarkHandleStatuslineTile(b *testing.B) {
 			b.Fatalf("GET %s: %d body=%s", url, rr.Code, rr.Body.String())
 		}
 	}
+}
+
+// todayUSDOf reads the tile's today figure (nil, the token-display shape,
+// reads as 0 here; TestHandleStatuslineTile_CostDisplay pins the nil).
+func todayUSDOf(r StatuslineResponse) float64 {
+	if r.TodayUSD == nil {
+		return 0
+	}
+	return *r.TodayUSD
 }

@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { ChartShell, Pill } from "@/components/primitives";
+import { ChartShell, Pill, SinglePicker } from "@/components/primitives";
+import { keepSelected } from "@/lib/pickerOptions";
+import { useEndUserOptions } from "@/lib/usePickerSources";
+import { btnPrimary } from "./ui";
 import { fetchJSON } from "@/lib/api";
 import { decisionTone, severityTone } from "@shared/lib/guardCatalog";
 import { VocabPill } from "@shared/lib/vocabPill";
@@ -22,6 +25,8 @@ const SAMPLES = [
 export function TestTab() {
   const [text, setText] = useState(SAMPLES[0]);
   const [user, setUser] = useState("test-user");
+  // D-571: the end user is picked from users seen on verdicts (or typed).
+  const users = useEndUserOptions([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [verdict, setVerdict] = useState<Verdict | null>(null);
@@ -72,19 +77,24 @@ export function TestTab() {
           className="w-full rounded-2 border border-line-2 bg-bg-3 px-2.5 py-1.5 text-small text-fg-1 outline-none focus:border-accent"
         />
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <label className="inline-flex items-center gap-2">
+          <div className="inline-flex items-center gap-2">
             <span className="text-[10.5px] uppercase tracking-[0.05em] text-fg-3">User</span>
-            <input
+            <SinglePicker
+              className="min-w-[12rem]"
+              options={keepSelected(users.options, user ? [user] : [])}
               value={user}
-              onChange={(e) => setUser(e.target.value)}
-              className="rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-small text-fg-1 outline-none focus:border-accent"
+              onChange={setUser}
+              allowFree
+              loading={users.loading}
+              placeholder="end user"
+              ariaLabel="User"
             />
-          </label>
+          </div>
           <button
             type="button"
             disabled={busy || !text.trim()}
             onClick={run}
-            className="rounded-2 bg-accent px-3 py-1.5 text-small font-medium text-accent-on transition-opacity hover:opacity-90 disabled:opacity-50"
+            className={btnPrimary}
           >
             {busy ? "Running…" : "Run test"}
           </button>

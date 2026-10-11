@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -100,7 +101,7 @@ func (s *Server) handleCloudDigests(w http.ResponseWriter, r *http.Request) {
 			CloudProjectID: d.CloudProjectID,
 			PeriodStart:    d.PeriodStart,
 			PeriodEnd:      d.PeriodEnd,
-			ReceivedAt:     cloudRFC3339(d.ReceivedAt),
+			ReceivedAt:     dashapi.CloudRFC3339(d.ReceivedAt),
 			Result:         json.RawMessage(d.ResultJSON),
 		})
 	}

@@ -72,6 +72,68 @@ func TestConformanceMatrix(t *testing.T) {
 		models.ToolPoolside + "/hook:UserPromptSubmit":  true,
 		models.ToolZcode + "/hook:UserPromptSubmit":     true,
 		models.ToolCommandCode + "/hook:transformInput": true,
+		// Hook-parity Lane A (2026-10-03): the pre-tool gates whose deny
+		// is documented on the vendor's own config surface (audit section
+		// 4.6 sources), served by internal/hook's tool-gate table. Codex,
+		// Cursor preToolUse, Gemini and Qoder are deny-only (no CanAsk;
+		// Qoder's ask ran the command under --yolo, live); Qwen and Droid
+		// document permissionDecision ask.
+		models.ToolCodex + "/hook:PreToolUse":     true,
+		models.ToolCursor + "/hook:preToolUse":    true,
+		models.ToolGeminiCLI + "/hook:BeforeTool": true,
+		models.ToolQwenCode + "/hook:PreToolUse":  true,
+		models.ToolDroid + "/hook:PreToolUse":     true,
+		models.ToolQoder + "/hook:PreToolUse":     true,
+		// Hook-parity Lanes A4-A6 (2026-10-03): the remaining pre-tool gates
+		// whose deny is documented on the vendor surface (or grounded on the
+		// vendor binary on demo node 1).
+		models.ToolAntigravityCLI + "/hook:PreToolUse":  true,
+		models.ToolClineCLI + "/hook:PreToolUse":        true, // T-342: the CLI owns the ~/.cline/hooks gate
+		models.ToolCopilotCLI + "/hook:preToolUse":      true,
+		models.ToolCrush + "/hook:PreToolUse":           true,
+		models.ToolDevin + "/hook:pre_run_command":      true,
+		models.ToolDevin + "/hook:pre_write_code":       true,
+		models.ToolDevin + "/hook:pre_read_code":        true,
+		models.ToolDevin + "/hook:pre_mcp_tool_use":     true,
+		models.ToolGoose + "/hook:PreToolUse":           true,
+		models.ToolGrok + "/hook:PreToolUse":            true,
+		models.ToolJunie + "/hook:PreToolUse":           true,
+		models.ToolMistralCode + "/hook:pre_tool":       true,
+		models.ToolOpenInterpreter + "/hook:PreToolUse": true,
+		models.ToolPoolside + "/hook:PreToolUse":        true,
+		models.ToolZcode + "/hook:PreToolUse":           true,
+		// Hook-parity Lane D (2026-10-03): the in-process plugin hosts
+		// through the one plugin shim (throw / {block} / Hermes' block
+		// directive), and OpenCode / Kilo CLI chat.message, a modify-only
+		// seam where the shim delivers a block by replacing the message.
+		models.ToolOpenCode + "/hook:tool.execute.before":    true,
+		models.ToolOpenCode + "/hook:chat.message":           true,
+		models.ToolKiloCodeCLI + "/hook:tool.execute.before": true,
+		models.ToolKiloCodeCLI + "/hook:chat.message":        true,
+		models.ToolPi + "/hook:tool_call":                    true,
+		models.ToolHermes + "/hook:pre_tool_call":            true,
+		models.ToolCommandCode + "/hook:beforeToolCall":      true,
+		// LIVE-GROUND-2 (2026-10-06, D-363; T-581): Muse's settings.json
+		// writer (T-479) is live on muse 1.4.3: a PreToolUse
+		// permissionDecision deny reached the model and a UserPromptSubmit
+		// {"decision":"block"} cancelled the run with no model request. The
+		// prompt gate lists no ask (no developer-visible message proven), so
+		// it is block-only like devin's pre_user_prompt. The Devin CLI
+		// PreToolUse writer (T-478) speaks the Claude-shaped deny the vendor
+		// documents (hookSpecificOutput.permissionDecision, exit 2,
+		// decision:block); its firing on node 1 was not observed because the
+		// node's own budget intervention stopped devin first, so the row is
+		// doc-grounded, which Q4 accepts (documented deny semantics).
+		models.ToolMuse + "/hook:PreToolUse":       true,
+		models.ToolMuse + "/hook:UserPromptSubmit": true,
+		models.ToolDevin + "/hook:PreToolUse":      true,
+		// LIVE-GROUND-3 (T-378): Kimi Code's config.toml [[hooks]] writer.
+		// Both gates are exit-2 blocks the vendor documents (PreToolUse:
+		// stderr is the reason the model sees; UserPromptSubmit: the
+		// installed 2.1.1 source appends stderr as a <hook_result>), so Q4's
+		// documented deny semantics hold.
+		models.ToolKimiCode + "/hook:PreToolUse":       true,
+		models.ToolKimiCode + "/hook:UserPromptSubmit": true,
 	}
 	if len(blockers) != len(want) {
 		t.Errorf("block-capable channels = %v, want exactly %d documented ones", blockers, len(want))
@@ -80,6 +142,12 @@ func TestConformanceMatrix(t *testing.T) {
 		if !want[b] {
 			t.Errorf("undocumented block-capable channel %q (Q4: deny semantics must be documented before CanBlock)", b)
 		}
+	}
+
+	// The LIVE-GROUND-2 prompt gate is block-only: Muse showed no reason
+	// to the developer, so an enforced ask must degrade to a block.
+	if caps, ok := CapabilitiesFor(models.ToolMuse, "hook:UserPromptSubmit"); !ok || !caps.PreExecution || !caps.CanBlock || caps.CanAsk {
+		t.Errorf("muse hook:UserPromptSubmit = (%+v, %v), want a pre-execution block-only row", caps, ok)
 	}
 
 	// Observe-only hook channels exist for codex + hermes (they have
@@ -194,5 +262,27 @@ func TestPromptSubmitConformance_NoMessageChannelDegradesAskToBlock(t *testing.T
 	}
 	if !em.Enforced {
 		t.Errorf("Enforced = false, want true — the prompt is genuinely blocked")
+	}
+}
+
+// TestConformanceDisplayOrderHasNoStaleRows: every entry of the display
+// order table names a hook row the bindings actually generate, and every
+// generated row is distinct, so the order table can never silently pin a
+// channel that no binding produces any more.
+func TestConformanceDisplayOrderHasNoStaleRows(t *testing.T) {
+	t.Parallel()
+	generated := map[string]int{}
+	for _, e := range conformanceHookRows() {
+		generated[e.Client+" "+e.Channel]++
+	}
+	for k, n := range generated {
+		if n != 1 {
+			t.Errorf("hook row %q generated %d times", k, n)
+		}
+	}
+	for _, k := range conformanceDisplayOrder {
+		if generated[k] == 0 {
+			t.Errorf("display order lists %q but no binding generates it", k)
+		}
 	}
 }

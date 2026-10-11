@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -23,6 +25,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/cloudevidence"
 	"github.com/marmutapp/superbased-observer/internal/cloudgateway"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dataauthority"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -96,11 +99,17 @@ const (
 func newCloudCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cloud",
-		Short: "Signed-in personal cloud intelligence (manual-only)",
+		Short: "Signed-in personal cloud intelligence",
 		Long: "Personal cloud-intelligence commands (Signed-in Free spine).\n\n" +
-			"MANUAL-ONLY: these commands are the sole outbound trigger — nothing runs\n" +
-			"on a schedule and the observer/watcher make no cloud calls. The cloud base\n" +
-			"URL is taken from --base-url, else the " + cloudBaseURLEnv + " environment\n" +
+			"These commands are the ONLY code that talks to the hosted service: the\n" +
+			"observer/watcher never link a cloud network package. Besides being run by\n" +
+			"hand, they are spawned as a subprocess by the `observer start` daemon's two\n" +
+			"opt-in tickers (auto-sync when [cloud].auto_sync = true, every\n" +
+			"[cloud].auto_sync_interval_minutes, default " + strconv.Itoa(config.CloudAutoSyncDefaultMinutes) + " minutes; background\n" +
+			"enrichment while the enrichment policy is on) and by the dashboard's\n" +
+			"Settings -> Cloud Intelligence buttons. Every upload stays consent-gated:\n" +
+			"nothing is sent without a live grant, however the command was started.\n\n" +
+			"The cloud base URL is taken from --base-url, else the " + cloudBaseURLEnv + " environment\n" +
 			"variable, else [cloud].base_url in config.toml, else the built-in default\n" +
 			"(" + defaultCloudBaseURL + "). The WorkOS login callback port is taken from\n" +
 			cloudLoginPortEnv + ", else [cloud].login_port.",
@@ -145,6 +154,7 @@ func cloudBaseURLSource(flagVal string, cfg config.Config) string {
 	case strings.TrimSpace(flagVal) != "":
 		return "--base-url"
 	case strings.TrimSpace(os.Getenv(cloudBaseURLEnv)) != "":
+		// no-bare-usd:allow (the preview shows the exact bytes that would leave the machine)
 		return "$" + cloudBaseURLEnv
 	case strings.TrimSpace(cfg.Cloud.BaseURL) != "":
 		return "[cloud].base_url"
@@ -203,28 +213,15 @@ func cloudHostKey(resolved string) string {
 // it" error. It is the one place that copy lives.
 func requireCloudBaseURL(resolved string) error {
 	if resolved == "" {
-		return fmt.Errorf("no cloud base URL — pass --base-url, set %s, or set [cloud].base_url in config.toml", cloudBaseURLEnv)
+		return fmt.Errorf("no cloud base URL - pass --base-url, set %s, or set [cloud].base_url in config.toml", cloudBaseURLEnv)
 	}
 	return nil
 }
 
 // --- shared evidence build -------------------------------------------------
 
-// cloudEnvelopeResult is the output of buildCloudEnvelope — the exact bytes a
-// node previews AND uploads, their two digests, and a content-free summary.
-type cloudEnvelopeResult struct {
-	EvidenceSettingsJSON string
-	Bytes                []byte
-	Digests              cloudcontract.Digests
-	CloudSession         string
-	Actions              int
-	Excerpts             int
-	Purpose              cloudcontract.Purpose
-	// Envelope is the built envelope these bytes were serialized from, so a
-	// surface can summarize it without re-parsing the bytes. It is node-local
-	// and is never a second serialization: Bytes above stays the one truth.
-	Envelope *cloudcontract.Envelope
-}
+// cloudEnvelopeResult (the build output) lives in the core file
+// cloudenvelope_core.go, so the org intel rail compiles without this file.
 
 // buildCloudEnvelope is THE one build path preview, consent, and the sync
 // rebuild closure all funnel through, so preview bytes == the bytes consent
@@ -257,6 +254,43 @@ func buildCloudEnvelopeFor(ctx context.Context, st *store.Store, sessionID strin
 }
 
 func buildCloudEnvelopeWithSettings(ctx context.Context, st *store.Store, sessionID string, purpose cloudcontract.Purpose, fieldClasses []string, pricer *cost.Engine, settings *store.CloudEvidenceSettings) (cloudEnvelopeResult, error) {
+	return buildPlaneEnvelope(ctx, st, envelopePlane{plane: cloudcontract.PlanePersonal}, sessionID, purpose, fieldClasses, pricer, settings)
+}
+
+// envelopePlane names the plane an envelope is built for. The org plane
+// (Cloud Intelligence parity phase 2, the B1 rail) carries the org id so the
+// project pseudonym it mints is SCOPED to that org: a project with both
+// personal and org sessions never sends the same pseudonym to both planes.
+type envelopePlane struct {
+	plane cloudcontract.Plane
+	orgID string
+}
+
+// eligible applies the plane's authority rule (INV-1) before anything is read.
+func (p envelopePlane) eligible(sessionID string, auth dataauthority.Classification) error {
+	if p.plane == cloudcontract.PlaneOrg {
+		if !auth.EligibleForOrgEnrichment() {
+			return fmt.Errorf("session %q is classified %q, not org - only sessions captured while enrolled go to the organization (plane separation)", sessionID, auth.Authority)
+		}
+		return nil
+	}
+	if !auth.EligibleForPersonalEnrichment() {
+		return fmt.Errorf("session %q is classified %q, not personal - org and unknown sessions are never sent to the personal cloud (plane separation)", sessionID, auth.Authority)
+	}
+	return nil
+}
+
+// projectKey is the local key the project pseudonym is minted under.
+func (p envelopePlane) projectKey(projectID int64) string {
+	if p.plane == cloudcontract.PlaneOrg {
+		return "org:" + p.orgID + ":" + strconv.FormatInt(projectID, 10)
+	}
+	return strconv.FormatInt(projectID, 10)
+}
+
+// buildPlaneEnvelope is THE one build path for both planes (preview ==
+// consent == upload bytes on each).
+func buildPlaneEnvelope(ctx context.Context, st *store.Store, ep envelopePlane, sessionID string, purpose cloudcontract.Purpose, fieldClasses []string, pricer *cost.Engine, settings *store.CloudEvidenceSettings) (cloudEnvelopeResult, error) {
 	settings, settingsJSON, settingsErr := cloudSettingsForPurpose(settings, purpose)
 	if settingsErr != nil {
 		return cloudEnvelopeResult{}, settingsErr
@@ -275,10 +309,10 @@ func buildCloudEnvelopeWithSettings(ctx context.Context, st *store.Store, sessio
 		return cloudEnvelopeResult{}, fmt.Errorf("read session authority: %w", err)
 	}
 	if !ok {
-		return cloudEnvelopeResult{}, fmt.Errorf("session %q not found, or its data-authority is unknown — unknown-authority sessions are never eligible for personal cloud enrichment", sessionID)
+		return cloudEnvelopeResult{}, fmt.Errorf("session %q not found, or its data-authority is unknown - unknown-authority sessions are never eligible for cloud enrichment", sessionID)
 	}
-	if !auth.EligibleForPersonalEnrichment() {
-		return cloudEnvelopeResult{}, fmt.Errorf("session %q is classified %q, not personal — org and unknown sessions are never sent to the personal cloud (plane separation)", sessionID, auth.Authority)
+	if err := ep.eligible(sessionID, auth); err != nil {
+		return cloudEnvelopeResult{}, err
 	}
 
 	// CONTENT GATE. The text substrate is READ AT ALL only under the
@@ -342,7 +376,7 @@ func buildCloudEnvelopeWithSettings(ctx context.Context, st *store.Store, sessio
 	if err != nil {
 		return cloudEnvelopeResult{}, fmt.Errorf("session pseudonym: %w", err)
 	}
-	cloudProject, err := st.GetOrCreateCloudProjectPseudonym(ctx, strconv.FormatInt(facts.ProjectID, 10))
+	cloudProject, err := st.GetOrCreateCloudProjectPseudonym(ctx, ep.projectKey(facts.ProjectID))
 	if err != nil {
 		return cloudEnvelopeResult{}, fmt.Errorf("project pseudonym: %w", err)
 	}
@@ -407,7 +441,7 @@ func buildCloudEnvelopeWithSettings(ctx context.Context, st *store.Store, sessio
 		}, true)
 	}
 
-	env, err := cloudevidence.BuildEnvelope(input, cloudcontract.PlanePersonal, cloudevidence.BuildOptions{
+	env, err := cloudevidence.BuildEnvelope(input, ep.plane, cloudevidence.BuildOptions{
 		Scrubber:            scrub.New(),
 		ScrubberVersion:     cloudScrubberVersion,
 		GrantedPurposes:     purposeSet,
@@ -670,17 +704,17 @@ func newCloudStatusCmd() *cobra.Command {
 			}
 			w := cmd.OutOrStdout()
 
-			fmt.Fprintln(w, "SuperBased cloud (Signed-in Free) — status")
+			fmt.Fprintln(w, "SuperBased cloud (Signed-in Free) - status")
 			if resolved == "" {
-				fmt.Fprintf(w, "  base URL:            (unset — pass --base-url, set %s, or set [cloud].base_url in config.toml)\n", cloudBaseURLEnv)
+				fmt.Fprintf(w, "  base URL:            (unset - pass --base-url, set %s, or set [cloud].base_url in config.toml)\n", cloudBaseURLEnv)
 			} else {
 				fmt.Fprintf(w, "  base URL:            %s (from %s)\n", resolved, cloudBaseURLSource(baseURL, cfg))
 			}
 			if cfg.Cloud.AutoSync {
-				fmt.Fprintf(w, "  auto-sync:           on ([cloud].auto_sync=true) — while `observer start` is running it spawns `observer cloud sync` every %d min (consent-gated: nothing is sent without a live grant). Still runs manually here.\n",
+				fmt.Fprintf(w, "  auto-sync:           on ([cloud].auto_sync=true) - while `observer start` is running it spawns `observer cloud sync` every %d min (consent-gated: nothing is sent without a live grant). Still runs manually here.\n",
 					cfg.Cloud.ResolvedCloudAutoSyncMinutes())
 			} else {
-				fmt.Fprintln(w, "  auto-sync:           off ([cloud].auto_sync=false) — sync only when you run `observer cloud sync`")
+				fmt.Fprintln(w, "  auto-sync:           off ([cloud].auto_sync=false) - sync only when you run `observer cloud sync`")
 			}
 			// SUPERSEDED by the enrichment policy below (value-upgrade plan
 			// §W3, 2026-09-15): [cloud].auto_enrich is still parsed (an
@@ -711,7 +745,7 @@ func newCloudStatusCmd() *cobra.Command {
 			fmt.Fprintln(w, "  allowance:           unknown (server-reported at sync; not disclosed to the node in this release)")
 			fmt.Fprintf(w, "  credential backend:  %s\n", gw.CredentialBackend())
 			if diag := gw.CredentialDiagnostic(); diag != "" {
-				fmt.Fprintf(w, "  security:            DEGRADED — %s\n", diag)
+				fmt.Fprintf(w, "  security:            DEGRADED - %s\n", diag)
 			} else {
 				fmt.Fprintln(w, "  security:            OS-backed")
 			}
@@ -843,18 +877,18 @@ func presentOrNot(present bool) string {
 
 // cloudSignInExpiredHint is the one user-facing recovery line for an expired
 // sign-in: the API token was rejected and the self-heal could not refresh it.
-const cloudSignInExpiredHint = "sign-in expired — run `observer cloud login`"
+const cloudSignInExpiredHint = "sign-in expired - run `observer cloud login`"
 
 // cloudSignInLine states, without a network call, whether an expired API token
 // can self-heal on this device.
 func cloudSignInLine(gw *cloudgateway.Gateway) string {
 	switch {
 	case gw.WorkOSSignInPresent():
-		return "present — an expired API token is re-exchanged automatically on the next `observer cloud` call"
+		return "present - an expired API token is re-exchanged automatically on the next `observer cloud` call"
 	case gw.APITokenPresent():
-		return "not present (a --dev-token session stores none) — when the API token expires, run `observer cloud login`"
+		return "not present (a --dev-token session stores none) - when the API token expires, run `observer cloud login`"
 	default:
-		return "not present — run `observer cloud login`"
+		return "not present - run `observer cloud login`"
 	}
 }
 
@@ -895,7 +929,7 @@ func newCloudLoginCmd() *cobra.Command {
 				if err := gw.BootstrapExchange(cmd.Context()); err != nil {
 					return fmt.Errorf("exchange: %w", err)
 				}
-				fmt.Fprintln(w, "Signed in — device-bound API token stored. (dev token was not persisted)")
+				fmt.Fprintln(w, "Signed in - device-bound API token stored. (dev token was not persisted)")
 				return nil
 			}
 			// Production: WorkOS PKCE loopback sign-in.
@@ -1002,7 +1036,7 @@ func runWorkOSLogin(ctx context.Context, w io.Writer, cfg config.Config, baseURL
 		q := r.URL.Query()
 		if q.Get("state") != state {
 			writeCloudLoginPage(rw, cloudLoginPageStateMismatch)
-			errCh <- fmt.Errorf("state mismatch (possible CSRF) — sign-in aborted")
+			errCh <- fmt.Errorf("state mismatch (possible CSRF) - sign-in aborted")
 			return
 		}
 		if e := q.Get("error"); e != "" {
@@ -1053,7 +1087,7 @@ func runWorkOSLogin(ctx context.Context, w io.Writer, cfg config.Config, baseURL
 	if err := gw.BootstrapExchange(ctx); err != nil {
 		return fmt.Errorf("exchange: %w", err)
 	}
-	fmt.Fprintln(w, "Signed in — device-bound API token stored.")
+	fmt.Fprintln(w, "Signed in - device-bound API token stored.")
 	return nil
 }
 
@@ -1158,7 +1192,7 @@ func cloudPrintEnvelopeSummary(w io.Writer, res cloudEnvelopeResult) {
 	// 4 runs unknowable", which is the truth, rather than a clean-looking zero.
 	unknown := ""
 	if env.Outcomes.TestsUnknown > 0 || env.Outcomes.BuildsUnknown > 0 {
-		unknown = fmt.Sprintf(" (%d test / %d build run(s) had an unknowable outcome — the recorded exit status belonged to another segment of the same command line)",
+		unknown = fmt.Sprintf(" (%d test / %d build run(s) had an unknowable outcome - the recorded exit status belonged to another segment of the same command line)",
 			env.Outcomes.TestsUnknown, env.Outcomes.BuildsUnknown)
 	}
 	fmt.Fprintf(w, "outcomes:                tests %d/%d passed, build %s%s\n",
@@ -1197,7 +1231,7 @@ func newCloudConsentCmd() *cobra.Command {
 		Short: "Confirm a preview, record a consent receipt, and enqueue for sync",
 		Long: "Per-session consent: builds the envelope for one session, shows its digests,\n" +
 			"records a receipt binding those exact bytes, and enqueues it.\n\n" +
-			"Standing grants — which authorize a SCHEMA rather than one upload — are managed\n" +
+			"Standing grants - which authorize a SCHEMA rather than one upload - are managed\n" +
 			"by the subcommands: `grant`, `revoke`, and `list`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -1229,7 +1263,7 @@ func newCloudConsentCmd() *cobra.Command {
 
 			resolved := resolveCloudBaseURL(baseURL, cfg)
 			if resolved == "" {
-				return fmt.Errorf("no cloud base URL — pass --base-url, set %s, or set [cloud].base_url in config.toml (the receipt binds the upload endpoint)", cloudBaseURLEnv)
+				return fmt.Errorf("no cloud base URL - pass --base-url, set %s, or set [cloud].base_url in config.toml (the receipt binds the upload endpoint)", cloudBaseURLEnv)
 			}
 
 			// Device thumbprint is the node-local account pseudonym bound on the
@@ -1251,7 +1285,7 @@ func newCloudConsentCmd() *cobra.Command {
 				return errors.New("the evidence or settings changed since preview; preview again before confirming")
 			}
 			w := cmd.OutOrStdout()
-			fmt.Fprintf(w, "Session %s — purpose %s\n", sessionID, p)
+			fmt.Fprintf(w, "Session %s - purpose %s\n", sessionID, p)
 			fmt.Fprintf(w, "  evidence-content digest: %s\n", res.Digests.EvidenceContent)
 			fmt.Fprintf(w, "  upload digest:           %s\n", res.Digests.Upload)
 			fmt.Fprintf(w, "  upload size:             %d bytes (%d actions)\n", len(res.Bytes), res.Actions)
@@ -1277,7 +1311,7 @@ func newCloudConsentCmd() *cobra.Command {
 					return cerr
 				}
 				if !ok {
-					fmt.Fprintln(w, "Aborted — nothing recorded.")
+					fmt.Fprintln(w, "Aborted - nothing recorded.")
 					return nil
 				}
 			}
@@ -1497,7 +1531,7 @@ func newCloudSyncCmd() *cobra.Command {
 				return perr
 			})
 			if errors.Is(err, cloudgateway.ErrNoLiveGrant) {
-				fmt.Fprintln(w, "Results: skipped — no live consent grant, so nothing was fetched.")
+				fmt.Fprintln(w, "Results: skipped - no live consent grant, so nothing was fetched.")
 				return nil
 			}
 			if err != nil {
@@ -1585,7 +1619,7 @@ func newCloudJobCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "job <cloud-job-id>",
 		Short: "Show a hosted enrichment job's status",
-		Long: "Looks up one hosted enrichment job by its CLOUD job id — the id\n" +
+		Long: "Looks up one hosted enrichment job by its CLOUD job id - the id\n" +
 			"`observer cloud sync` prints as \"cloud job <id>\" once an item sends.\n\n" +
 			"This is NOT the same as the LOCAL outbox id (job_<hex>) `observer cloud\n" +
 			"consent` prints when it enqueues a session: observer does not store a\n" +
@@ -1597,7 +1631,7 @@ func newCloudJobCmd() *cobra.Command {
 			if strings.HasPrefix(id, cloudLocalOutboxIDPrefix) {
 				return fmt.Errorf(
 					"%q looks like a LOCAL outbox id (printed by `observer cloud consent`); "+
-						"observer does not store a mapping from it to the hosted job id — "+
+						"observer does not store a mapping from it to the hosted job id - "+
 						"pass the id `observer cloud sync` printed as \"cloud job <id>\" instead",
 					id)
 			}
@@ -1624,7 +1658,7 @@ func newCloudJobCmd() *cobra.Command {
 			})
 			switch {
 			case errors.Is(ferr, cloudgateway.ErrNoLiveGrant):
-				return errors.New("no live consent grant — nothing can be fetched (run `observer cloud consent` first)")
+				return errors.New("no live consent grant - nothing can be fetched (run `observer cloud consent` first)")
 			case errors.Is(ferr, cloudgateway.ErrJobNotFound):
 				fmt.Fprintln(w, "job not found for this device's account")
 				return nil
@@ -1671,12 +1705,12 @@ func cloudDrainOneGated(ctx context.Context, st *store.Store, gw *cloudgateway.G
 		return err
 	}
 	if !ok {
-		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION — its consent receipt no longer exists; not sent\n", it.ID)
+		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION - its consent receipt no longer exists; not sent\n", it.ID)
 		return fmt.Errorf("job %s: %w", it.ID, store.ErrCloudReceiptNotFound)
 	}
 	purpose, perr := parseCloudPurpose(rcpt.Purpose)
 	if perr != nil {
-		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION — its receipt names an unknown purpose %q; not sent\n", it.ID, rcpt.Purpose)
+		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION - its receipt names an unknown purpose %q; not sent\n", it.ID, rcpt.Purpose)
 		return perr
 	}
 	// A bounded upload needs BOTH purposes to actually authorize an evidence
@@ -1687,11 +1721,11 @@ func cloudDrainOneGated(ctx context.Context, st *store.Store, gw *cloudgateway.G
 	// drift from what is about to be sent.
 	set, serr := cloudPurposeSet(purpose)
 	if serr != nil {
-		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION — its receipt names a purpose this build no longer supports (%v); not sent\n", it.ID, serr)
+		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION - its receipt names a purpose this build no longer supports (%v); not sent\n", it.ID, serr)
 		return serr
 	}
 	if uerr := cloudPurposeSetUploadable(set); uerr != nil {
-		fmt.Fprintf(w, "  job %s: NOT SENT — %v\n", it.ID, uerr)
+		fmt.Fprintf(w, "  job %s: NOT SENT - %v\n", it.ID, uerr)
 		return uerr
 	}
 	err = gw.FeatureSend(ctx, purpose, func(sess cloudgateway.UploadSession) error {
@@ -1699,9 +1733,9 @@ func cloudDrainOneGated(ctx context.Context, st *store.Store, gw *cloudgateway.G
 	})
 	switch {
 	case errors.Is(err, cloudgateway.ErrNoLiveGrant), errors.Is(err, cloudgateway.ErrGrantRevoked):
-		fmt.Fprintf(w, "  job %s: NOT SENT — no live consent grant for purpose %q; nothing left this machine\n", it.ID, purpose)
+		fmt.Fprintf(w, "  job %s: NOT SENT - no live consent grant for purpose %q; nothing left this machine\n", it.ID, purpose)
 	case errors.Is(err, cloudgateway.ErrPurposeNotUploadable):
-		fmt.Fprintf(w, "  job %s: NOT SENT — purpose %q does not authorize an evidence upload (%v)\n", it.ID, purpose, err)
+		fmt.Fprintf(w, "  job %s: NOT SENT - purpose %q does not authorize an evidence upload (%v)\n", it.ID, purpose, err)
 	}
 	return err
 }
@@ -1751,10 +1785,10 @@ func cloudDrainOne(ctx context.Context, st *store.Store, sess cloudgateway.Uploa
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrCloudEndpointMismatch):
-			fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION — the sync endpoint does not match the one you consented to\n", it.ID)
+			fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION - the sync endpoint does not match the one you consented to\n", it.ID)
 			fmt.Fprintf(w, "    (%v). Re-run `observer cloud consent --session %s --base-url <approved>` to confirm.\n", err, it.SessionID)
 		case errors.Is(err, store.ErrCloudReconfirmationRequired):
-			fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION — the rebuilt envelope no longer matches the receipt\n", it.ID)
+			fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION - the rebuilt envelope no longer matches the receipt\n", it.ID)
 			fmt.Fprintf(w, "    (a local edit, scrubber upgrade, schema bump, or an authorization change). Re-preview and\n")
 			fmt.Fprintf(w, "    re-run `observer cloud consent --session %s` to confirm the new bytes.\n", it.SessionID)
 		}
@@ -1765,7 +1799,7 @@ func cloudDrainOne(ctx context.Context, st *store.Store, sess cloudgateway.Uploa
 	// session upgraded to org before we even mint a pseudonym, abort here (moving
 	// the item to reconfirmation_required) before doing any further work.
 	if verr := st.VerifyCloudSendAuthorization(ctx, lease); verr != nil {
-		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION — authorization changed before dispatch; not sent (%v)\n", it.ID, verr)
+		fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION - authorization changed before dispatch; not sent (%v)\n", it.ID, verr)
 		return verr
 	}
 
@@ -1812,7 +1846,7 @@ func cloudDrainOne(ctx context.Context, st *store.Store, sess cloudgateway.Uploa
 		// counts it as reconfirmation rather than a burned failure.
 		if d, ok := cloudgateway.HTTPError(upErr); ok && d.StatusCode == http.StatusConflict && d.Code == "reconfirmation_required" {
 			_ = st.MarkCloudOutboxReconfirmation(ctx, it.ID, "reconfirmation_required")
-			fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION — the server did not accept these exact bytes; re-preview and re-run `observer cloud consent --session %s`\n", it.ID, it.SessionID)
+			fmt.Fprintf(w, "  job %s: NEEDS RECONFIRMATION - the server did not accept these exact bytes; re-preview and re-run `observer cloud consent --session %s`\n", it.ID, it.SessionID)
 			return fmt.Errorf("cloudDrainOne: %w", store.ErrCloudReconfirmationRequired)
 		}
 		// The hosted enrichment provider is not accepting jobs yet
@@ -1822,7 +1856,7 @@ func cloudDrainOne(ctx context.Context, st *store.Store, sess cloudgateway.Uploa
 		// provider is enabled — never a scary "failed".
 		if d, ok := cloudgateway.HTTPError(upErr); ok && d.Code == "provider_policy_unverified" {
 			_ = st.MarkCloudOutboxRetryable(ctx, it.ID, "provider_policy_unverified")
-			fmt.Fprintf(w, "  job %s: QUEUED — the hosted enrichment provider is not accepting jobs yet; your job is kept and will send automatically on a later `observer cloud sync` (nothing to do)\n", it.ID)
+			fmt.Fprintf(w, "  job %s: QUEUED - the hosted enrichment provider is not accepting jobs yet; your job is kept and will send automatically on a later `observer cloud sync` (nothing to do)\n", it.ID)
 			return fmt.Errorf("cloudDrainOne: %w", errCloudProviderNotReady)
 		}
 		if cloudUploadTerminal(upErr) {
@@ -1945,7 +1979,7 @@ func cloudPullResultsAndDigests(ctx context.Context, st *store.Store, host strin
 			// valid enrichment. Skip it — never persist it, and never let a
 			// title-less zero-value record supersede a real local result.
 			if cloudResultIsTombstone(rec) {
-				fmt.Fprintf(w, "  result %s: tombstone/invalid record — skipped (not stored)\n", rec.ResultID)
+				fmt.Fprintf(w, "  result %s: tombstone/invalid record - skipped (not stored)\n", rec.ResultID)
 				continue
 			}
 			switch rec.Kind {
@@ -1973,7 +2007,7 @@ func cloudPullResultsAndDigests(ctx context.Context, st *store.Store, host strin
 				// W5: a forward-compat kind this build does not understand.
 				// Store nothing; a bounded, honest log line rather than
 				// silently dropping it or misclassifying it as a tombstone.
-				fmt.Fprintf(w, "  result %s: unknown kind %q — skipped (not stored)\n", rec.ResultID, rec.Kind)
+				fmt.Fprintf(w, "  result %s: unknown kind %q - skipped (not stored)\n", rec.ResultID, rec.Kind)
 			}
 		}
 		if res.NextCursor == "" || res.NextCursor == cursor {
@@ -2251,7 +2285,7 @@ const cloudErrCodeDigestMismatch = "digest_mismatch"
 // digest_mismatch. It is a hint, not a state change: the item stays terminal
 // (re-sending identical bytes to the same server cannot succeed), but the
 // operator is told the likeliest cause and what to do about it.
-const cloudDigestMismatchHint = "the server computed a different digest over these exact bytes — most often it PREDATES this " +
+const cloudDigestMismatchHint = "the server computed a different digest over these exact bytes - most often it PREDATES this " +
 	"node's envelope version (fields are added additively, and a server that does not know a field drops it and " +
 	"digests something else). The hosted service rolls BEFORE nodes: update it, then re-run `observer cloud preview` " +
 	"and `observer cloud consent` for this session."
@@ -2344,13 +2378,13 @@ func newCloudLogoutCmd() *cobra.Command {
 				if err := all.ClearCredentials(); err != nil {
 					return fmt.Errorf("clear credentials (all hosts): %w", err)
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "Logged out — credentials for every cloud host cleared. Local enrichment results are kept.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Logged out - credentials for every cloud host cleared. Local enrichment results are kept.")
 				return nil
 			}
 			if err := gw.ClearCredentials(); err != nil {
 				return fmt.Errorf("clear credentials: %w", err)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Logged out — credentials cleared. Local enrichment results are kept.")
+			fmt.Fprintln(cmd.OutOrStdout(), "Logged out - credentials cleared. Local enrichment results are kept.")
 			return nil
 		},
 	}
@@ -2400,7 +2434,7 @@ func newCloudDeleteAccountCmd() *cobra.Command {
 		Use:   "delete-account",
 		Short: "Request hosted account deletion (or --local-only to clear just this device)",
 		Long: "Requests server-side deletion of the signed-in account via the hosted\n" +
-			"deletion endpoint (authenticated by the stored device token — run\n" +
+			"deletion endpoint (authenticated by the stored device token - run\n" +
 			"`observer cloud login` first). Requires explicit confirmation unless\n" +
 			"--yes. Use --local-only to skip the server and only clear this device's\n" +
 			"local credentials.",
@@ -2426,7 +2460,7 @@ func newCloudDeleteAccountCmd() *cobra.Command {
 
 			resolved := resolveCloudBaseURL(baseURL, cfg)
 			if resolved == "" {
-				return fmt.Errorf("no cloud base URL — pass --base-url, set %s, or set [cloud].base_url in config.toml (or --local-only to clear just this device)", cloudBaseURLEnv)
+				return fmt.Errorf("no cloud base URL - pass --base-url, set %s, or set [cloud].base_url in config.toml (or --local-only to clear just this device)", cloudBaseURLEnv)
 			}
 			if !yes {
 				ok, cerr := cloudConfirm(cmd.InOrStdin(), w,
@@ -2435,7 +2469,7 @@ func newCloudDeleteAccountCmd() *cobra.Command {
 					return cerr
 				}
 				if !ok {
-					fmt.Fprintln(w, "Aborted — no deletion requested.")
+					fmt.Fprintln(w, "Aborted - no deletion requested.")
 					return nil
 				}
 			}

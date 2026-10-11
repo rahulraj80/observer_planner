@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 func TestCheckProcessObservability_DisabledIsOK(t *testing.T) {
@@ -70,7 +70,7 @@ func TestCheckProcessObservability_NetworkModes(t *testing.T) {
 			name: "off does not nag",
 			health: &ProcessHealth{
 				Backend: "poll", BackendUp: true,
-				NetworkAccountingMode:   processobs.NetworkAccountingOff,
+				NetworkAccountingMode:   procmodel.NetworkAccountingOff,
 				NetworkAccountingReason: "not enabled ([observer.process.network].process_bytes)",
 			},
 			wantStatus: StatusOK,
@@ -80,7 +80,7 @@ func TestCheckProcessObservability_NetworkModes(t *testing.T) {
 			name: "unavailable warns and carries the reason",
 			health: &ProcessHealth{
 				Backend: "linux_ebpf+poll", BackendUp: true,
-				NetworkAccountingMode:   processobs.NetworkAccountingUnavailable,
+				NetworkAccountingMode:   procmodel.NetworkAccountingUnavailable,
 				NetworkAccountingReason: "missing CAP_BPF/CAP_PERFMON",
 			},
 			wantStatus:  StatusWarn,
@@ -91,7 +91,7 @@ func TestCheckProcessObservability_NetworkModes(t *testing.T) {
 			name: "tcp is OK and states the TCP-only caveat",
 			health: &ProcessHealth{
 				Backend: "linux_ebpf+poll", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingTCP,
+				NetworkAccountingMode: procmodel.NetworkAccountingTCP,
 			},
 			wantStatus: StatusOK,
 			wantDetail: []string{"network bytes: live (tcp)", "UDP/QUIC"},
@@ -101,7 +101,7 @@ func TestCheckProcessObservability_NetworkModes(t *testing.T) {
 			health: &ProcessHealth{
 				Backend: "linux_ebpf+poll", BackendUp: true,
 				WrittenAt:             time.Now().UTC().Add(-30 * time.Minute),
-				NetworkAccountingMode: processobs.NetworkAccountingTCP,
+				NetworkAccountingMode: procmodel.NetworkAccountingTCP,
 			},
 			wantStatus: StatusOK,
 			wantDetail: []string{"STALE", "last report"},
@@ -110,7 +110,7 @@ func TestCheckProcessObservability_NetworkModes(t *testing.T) {
 			name: "a reported backend error surfaces",
 			health: &ProcessHealth{
 				Backend: "poll", BackendUp: false, LastError: "perf_event_open: operation not permitted",
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
 			},
 			wantStatus: StatusOK,
 			wantDetail: []string{"(down)", "perf_event_open: operation not permitted"},
@@ -188,7 +188,7 @@ func TestCheckProcessObservability_TransportStates(t *testing.T) {
 			name: "no transport configured adds no line",
 			health: ProcessHealth{
 				Backend: "poll", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
 			},
 			wantStatus:   StatusOK,
 			absentDetail: []string{"capturer link:"},
@@ -197,8 +197,8 @@ func TestCheckProcessObservability_TransportStates(t *testing.T) {
 			name: "configured but never connected is reported, not escalated",
 			health: ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 			},
 			wantStatus: StatusOK,
 			wantDetail: []string{"capturer link: waiting", "127.0.0.1:8823", "Scheduled Task"},
@@ -211,8 +211,8 @@ func TestCheckProcessObservability_TransportStates(t *testing.T) {
 			name: "a refused capturer WARNs with the daemon's verbatim reason, not a guessed cause",
 			health: ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures:  12,
 				TransportLastAuthError: "processobs/bridge: malformed handshake: capturer speaks protocol v2, this daemon speaks v1",
 			},
@@ -228,8 +228,8 @@ func TestCheckProcessObservability_TransportStates(t *testing.T) {
 			name: "a refusal with no recorded reason admits the gap",
 			health: ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures: 3,
 			},
 			wantStatus:    StatusWarn,
@@ -242,8 +242,8 @@ func TestCheckProcessObservability_TransportStates(t *testing.T) {
 			name: "a requested transport that never started WARNs instead of going silent",
 			health: ProcessHealth{
 				Backend: "composite[poll+bridge]", BackendUp: true,
-				NetworkAccountingMode:      processobs.NetworkAccountingOff,
-				TransportState:             processobs.TransportStateUnavailable,
+				NetworkAccountingMode:      procmodel.NetworkAccountingOff,
+				TransportState:             procmodel.TransportStateUnavailable,
 				TransportUnavailableReason: "processobs/bridge: listen 127.0.0.1:8823: bind: address already in use",
 			},
 			wantStatus: StatusWarn,
@@ -256,8 +256,8 @@ func TestCheckProcessObservability_TransportStates(t *testing.T) {
 			name: "a live capturer is OK",
 			health: ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingTCP,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingTCP,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportConnected: true, TransportConnections: 1,
 				TransportLastConnectAt: time.Now().UTC().Add(-time.Minute),
 			},

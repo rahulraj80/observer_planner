@@ -16,6 +16,11 @@ export function registerLifecycle(
     vscode.commands.registerCommand('observer.openDashboard', () => {
       DashboardPanel.createOrShow(daemon);
     }),
+    // Walkthrough "Choose components" (modular packaging plan 7.1): the
+    // dashboard's Settings > Components page in the same panel.
+    vscode.commands.registerCommand('observer.openComponents', () => {
+      DashboardPanel.createOrShow(daemon, '/settings/components');
+    }),
   ];
   ctx.subscriptions.push(...disposables);
   return disposables;

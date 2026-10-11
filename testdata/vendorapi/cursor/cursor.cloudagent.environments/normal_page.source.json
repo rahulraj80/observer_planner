@@ -1,0 +1,30 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "createdAt": "VerifiedOfficial",
+    "environmentJson": "VerifiedOfficial",
+    "id": "VerifiedOfficial",
+    "name": "VerifiedOfficial",
+    "owner": "VerifiedOfficial",
+    "repos": "VerifiedOfficial",
+    "repos[]": "VerifiedOfficial",
+    "repos[].url": "VerifiedOfficial",
+    "updatedAt": "VerifiedOfficial",
+    "versionId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "eb351c10fa65424c856857d38bec6ac9dfe2143b201b27ba084db2e0447d1e57",
+  "http": {
+    "method": "GET",
+    "path": "/v1/environments/{id}",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get An Environment\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Cloud Agents API endpoints page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "606bb636970ab8de2e8d87bfff9c13ae972ebe4817cc88ced9a60882aab124ef",
+  "source_url": "https://cursor.com/docs/cloud-agent/api/endpoints.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.cloudagent.environments"
+}

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/url"
 
+	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/policyfam"
+	"github.com/marmutapp/superbased-observer/internal/policyfam/nodegov"
 )
 
 // PolicyResourceSelectorCapability is the capability token this agent
@@ -17,21 +19,35 @@ import (
 // Pre-P0-10 agents reject EVERY targeted envelope outright (their closed-
 // envelope gate required selectors_json == "{}"), so the server must only
 // serve a targeted resource to a subject that positively advertises it can
-// evaluate selectors. SELF-DECLARATION IS SAFE HERE because the marker is
-// strictly DOWNGRADE-ONLY: omitting it can only yield untargeted resources
-// (or "no applicable policy"), and claiming it falsely only makes the agent
-// reject envelopes it cannot evaluate. It grants nothing — an attacker
-// cannot use it to widen what they are served, because the server still
-// resolves the audience from attributes bound to the verified identity, not
-// from anything the fetching node presents.
+// evaluate selectors. The marker grants nothing: the server still resolves
+// the audience from attributes bound to the verified identity, not from
+// anything the fetching node presents, and claiming it falsely only makes the
+// agent reject envelopes it cannot evaluate. It is NOT simply downgrade-only,
+// though: omitting it can turn a delivery into "no applicable policy", which
+// since the signed withdrawal (D-192) may be a signed tombstone. The server
+// therefore re-resolves a marker-less request as selector capable and
+// withdraws only when that finds nothing either (C156-17).
 const PolicyResourceSelectorCapability = "selectors"
 
 // policyResourceFetchURL builds the agent-side policy-resource GET URL,
 // including the R2 capability marker. It is the ONE place that URL is
 // composed (receivePolicyResource calls it), so the marker can never be
 // present on one code path and missing on another.
+//
+// The other markers are the node.governance target (nodegov.CapabilityTokens:
+// the section vocabulary level, the highest body schema and the key
+// vocabulary generation this build compiles): the server projects the body it
+// serves onto exactly that, so a page, schema or pinned key only newer builds
+// have never costs this node the rest of its governance. They ride as
+// repeated values so a server reading only the first policy_caps value still
+// sees "selectors", and a server that predates a token ignores it. The last
+// marker asks for a v2 (org-, member- and target-bound) signature
+// (orgcontract.PolicyBindingCapability); a server that predates it keeps
+// serving v1.
 func policyResourceFetchURL(orgURL, family string) string {
-	q := url.Values{"policy_caps": []string{PolicyResourceSelectorCapability}}
+	caps := append([]string{PolicyResourceSelectorCapability}, nodegov.CapabilityTokens()...)
+	caps = append(caps, orgcontract.PolicyBindingCapability)
+	q := url.Values{"policy_caps": caps}
 	return NormalizeOrgURL(orgURL) + "/api/agent/policy/" + family + "?" + q.Encode()
 }
 
@@ -115,30 +131,24 @@ func (c *Client) PolicyResourcePollLoop(ctx context.Context, opts PolicyResource
 func (c *Client) maybeKickPolicyResourceFetch(body []byte) {
 	var ack struct {
 		PolicyVersions map[string]int64 `json:"policy_versions"`
+		RailVersions   map[string]int64 `json:"rail_versions"`
 	}
-	if err := json.Unmarshal(body, &ack); err != nil || len(ack.PolicyVersions) == 0 {
+	if err := json.Unmarshal(body, &ack); err != nil {
 		return
 	}
-	c.policyVersMu.Lock()
-	prev := c.lastPolicyVersions
-	c.lastPolicyVersions = ack.PolicyVersions
-	c.policyVersMu.Unlock()
-	if prev == nil {
-		return
-	}
-	advanced := false
-	for family, v := range ack.PolicyVersions {
-		if v > prev[family] {
-			advanced = true
-			break
-		}
-	}
-	if !advanced {
+	// The rail half (2026-10-02 budget-latency arc) only records the
+	// freshness checker's baseline: this same push cycle already refreshed
+	// those rails.
+	c.recordRailVersions(ack.RailVersions)
+	// ONE comparison shared with the policy-version probe
+	// (policyfreshness.go notePolicyVersions), so the ack and the probe can
+	// never disagree about what "advanced" means.
+	if !c.notePolicyVersions(ack.PolicyVersions) {
 		return
 	}
 	select {
 	case c.policyResourceKick <- struct{}{}:
-		c.logger.Info("org policy resource: newer version published — fetching now (push-ack nudge)")
+		c.logger.Info("org policy resource: newer version published - fetching now (push-ack nudge)")
 	default:
 		// A kick is already pending; one cycle covers both.
 	}

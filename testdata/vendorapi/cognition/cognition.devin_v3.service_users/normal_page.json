@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "service_user_id": "service_user_synth01",
+      "name": "ci-bot",
+      "expires_at": 1798761600,
+      "deleted_at": null,
+      "role_assignments": [
+        {
+          "org_id": null,
+          "role": {
+            "role_id": "role_synth_enterprise_viewer",
+            "role_name": "Enterprise Viewer",
+            "role_type": "enterprise"
+          }
+        }
+      ]
+    },
+    {
+      "service_user_id": "service_user_synth02",
+      "name": "nightly-review",
+      "expires_at": null,
+      "deleted_at": null,
+      "role_assignments": [
+        {
+          "org_id": "org_synth01",
+          "role": {
+            "role_id": "role_synth_org_member",
+            "role_name": "Member",
+            "role_type": "org"
+          }
+        }
+      ]
+    }
+  ],
+  "has_next_page": true,
+  "end_cursor": "synthserviceusers0002",
+  "total": 3
+}

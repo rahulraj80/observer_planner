@@ -5,6 +5,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,7 +15,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/update"
+	"github.com/marmutapp/superbased-observer/internal/updatespec"
 )
 
 // update.go is the ONE writer of the node's update tables (agent migration
@@ -35,7 +38,7 @@ import (
 // written HERE before the swap, while the old daemon is still alive to write
 // it (§3.7 step 5).
 
-// UpdateStateRow is the node's durable update state: update.NodeState (the
+// UpdateStateRow is the node's durable update state: updatespec.NodeState (the
 // shape W1 already defined and the JSON file already carried) plus the
 // accepted manifest's canonical bytes.
 //
@@ -43,11 +46,26 @@ import (
 // pure package stays the single owner of the vocabulary, and a new field
 // lands in one place.
 type UpdateStateRow struct {
-	update.NodeState
+	updatespec.NodeState
 	// ManifestJSON is the canonical bytes of the last ACCEPTED manifest, so
 	// a restarted daemon can resume without a fetch. It is the org's own
 	// signed document coming back, never node data going out.
 	ManifestJSON string
+	// CurrentDistro, ComponentsDigest and DistroEpochs are the distro facts
+	// of agent migration 161 (modular packaging plan 5.6.1): the distro and
+	// compiled-set digest the last successful apply installed, and the
+	// distro_epoch of the last distro change applied per channel. Load
+	// returns the legacy defaults (full, "", empty map) on a database
+	// without the columns; Save writes them only when CurrentDistro is set,
+	// so a caller that builds a row from scratch never resets them.
+	CurrentDistro    string
+	ComponentsDigest string
+	DistroEpochs     map[string]int64
+}
+
+// DistroEpoch returns the epoch recorded for a channel (zero when none).
+func (r UpdateStateRow) DistroEpoch(ch updatespec.Channel) int64 {
+	return r.DistroEpochs[string(ch)]
 }
 
 // UpdateEventRow is one line of the node-local audit ledger.
@@ -57,8 +75,8 @@ type UpdateEventRow struct {
 	FromVersion     string
 	ToVersion       string
 	ManifestVersion int64
-	State           update.State
-	ErrorClass      update.ErrorClass
+	State           updatespec.State
+	ErrorClass      updatespec.ErrorClass
 	// Detail is the human-readable reason and MAY contain a local path. It
 	// is what makes the history usable and it is why this table never
 	// leaves the node.
@@ -93,16 +111,65 @@ SELECT channel, last_manifest_version, last_manifest_json, last_manifest_seen_at
 		&row.PreviousDBBackupPath, &row.ApplyingStartedAt, &row.AppliedAt, &row.UpdatedAt,
 	)
 	if err != nil {
-		return UpdateStateRow{NodeState: update.DefaultNodeState()}, nil //nolint:nilerr // fail-open by design: see the doc comment.
+		return UpdateStateRow{NodeState: updatespec.DefaultNodeState()}, nil //nolint:nilerr // fail-open by design: see the doc comment.
 	}
-	row.Channel = update.Channel(ch)
-	row.State = update.State(st)
-	row.Reason = update.Reason(rsn)
-	row.ErrorClass = update.ErrorClass(ec)
-	if strings.TrimSpace(string(row.State)) == "" || !update.KnownState(row.State) {
-		row.State = update.StateIdle
+	row.Channel = updatespec.Channel(ch)
+	row.State = updatespec.State(st)
+	row.Reason = updatespec.Reason(rsn)
+	row.ErrorClass = updatespec.ErrorClass(ec)
+	if strings.TrimSpace(string(row.State)) == "" || !updatespec.KnownState(row.State) {
+		row.State = updatespec.StateIdle
 	}
+	s.loadDistroState(ctx, &row)
 	return row, nil
+}
+
+// loadDistroState fills the migration-161 columns, falling back to the
+// legacy defaults (nodecomponents.LegacyDefaults: full, epoch 0) on a
+// database that has not run 161 or holds an unreadable epochs document.
+func (s *Store) loadDistroState(ctx context.Context, row *UpdateStateRow) {
+	row.CurrentDistro, row.ComponentsDigest, row.DistroEpochs = "full", "", map[string]int64{}
+	var distro, digest, epochs string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT current_distro, components_digest, distro_epochs FROM update_state WHERE id = 1`).
+		Scan(&distro, &digest, &epochs)
+	if err != nil {
+		return
+	}
+	if strings.TrimSpace(distro) != "" {
+		row.CurrentDistro = distro
+	}
+	row.ComponentsDigest = digest
+	if strings.TrimSpace(epochs) != "" {
+		var m map[string]int64
+		if json.Unmarshal([]byte(epochs), &m) == nil && m != nil {
+			row.DistroEpochs = m
+		}
+	}
+}
+
+// saveDistroState writes the migration-161 columns when the row carries
+// them. A database without the columns is left as it is: the apply that
+// would write them runs only on a migrated database (db.Open migrates).
+func (s *Store) saveDistroState(ctx context.Context, row UpdateStateRow) error {
+	if strings.TrimSpace(row.CurrentDistro) == "" {
+		return nil
+	}
+	epochs := row.DistroEpochs
+	if epochs == nil {
+		epochs = map[string]int64{}
+	}
+	js, err := json.Marshal(epochs)
+	if err != nil {
+		return fmt.Errorf("store.SaveUpdateState: distro epochs: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE update_state SET current_distro = ?, components_digest = ?, distro_epochs = ? WHERE id = 1`,
+		row.CurrentDistro, row.ComponentsDigest, string(js))
+	if err != nil && !strings.Contains(err.Error(), "no such column") {
+		return fmt.Errorf("store.SaveUpdateState: distro: %w", err)
+	}
+	return nil
 }
 
 // SaveUpdateState writes the singleton row.
@@ -110,10 +177,10 @@ SELECT channel, last_manifest_version, last_manifest_json, last_manifest_seen_at
 // It refuses an unknown state rather than storing one: the state column feeds
 // the org board through the posture composer, and a value outside the closed
 // vocabulary would arrive there as an enum nobody can render. A caller moves
-// between states with update.Transition, which validates the EDGE; this
+// between states with updatespec.Transition, which validates the EDGE; this
 // validates the destination, so an illegal write fails at the seam either way.
 func (s *Store) SaveUpdateState(ctx context.Context, row UpdateStateRow) error {
-	if !update.KnownState(row.State) {
+	if !updatespec.KnownState(row.State) {
 		return fmt.Errorf("store.SaveUpdateState: unknown state %q", row.State)
 	}
 	const q = `
@@ -124,7 +191,8 @@ UPDATE update_state SET
   previous_schema_version = ?, previous_db_backup_path = ?,
   applying_started_at = ?, applied_at = ?, updated_at = ?
 WHERE id = 1`
-	res, err := s.db.ExecContext(ctx, q,
+	res, err := s.db.ExecContext(
+		ctx, q,
 		string(row.Channel), row.LastManifestVersion, row.ManifestJSON,
 		row.LastManifestSeenAt, row.TargetVersion, string(row.State), string(row.Reason),
 		string(row.ErrorClass), row.PreviousBinaryPath, row.PreviousVersion,
@@ -140,7 +208,8 @@ WHERE id = 1`
 		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO update_state (id) VALUES (1)`); err != nil {
 			return fmt.Errorf("store.SaveUpdateState: restore singleton: %w", err)
 		}
-		if _, err := s.db.ExecContext(ctx, q,
+		if _, err := s.db.ExecContext(
+			ctx, q,
 			string(row.Channel), row.LastManifestVersion, row.ManifestJSON,
 			row.LastManifestSeenAt, row.TargetVersion, string(row.State), string(row.Reason),
 			string(row.ErrorClass), row.PreviousBinaryPath, row.PreviousVersion,
@@ -150,21 +219,61 @@ WHERE id = 1`
 			return fmt.Errorf("store.SaveUpdateState: %w", err)
 		}
 	}
+	return s.saveDistroState(ctx, row)
+}
+
+// LoadCeilingLastKnown returns the stored last-known local component ceiling
+// (agent migration 160, T-682): the JSON of the last valid explicit set the
+// ceiling loader read, "" when none was ever stored. A database not yet at
+// 160 (a short-lived process opens the file without migrating it) has no
+// such column; that reads as "" too, the same answer as a node that never
+// saw a valid ceiling, so the loader falls to core only exactly as before.
+func (s *Store) LoadCeilingLastKnown(ctx context.Context) (string, error) {
+	var js string
+	err := s.db.QueryRowContext(ctx, `SELECT ceiling_last_known FROM update_state WHERE id = 1`).Scan(&js)
+	if err != nil {
+		msg := err.Error()
+		if errors.Is(err, sql.ErrNoRows) || strings.Contains(msg, "no such column") || strings.Contains(msg, "no such table") {
+			return "", nil
+		}
+		return "", fmt.Errorf("store.LoadCeilingLastKnown: %w", err)
+	}
+	return js, nil
+}
+
+// SaveCeilingLastKnown stores the last-known local component ceiling JSON.
+// It touches only that column, so it never races the update apply path's
+// writes to the rest of the row, and it restores the singleton row when a
+// hand-edited database lost it.
+func (s *Store) SaveCeilingLastKnown(ctx context.Context, js string) error {
+	const q = `UPDATE update_state SET ceiling_last_known = ? WHERE id = 1`
+	res, err := s.db.ExecContext(ctx, q, js)
+	if err != nil {
+		return fmt.Errorf("store.SaveCeilingLastKnown: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO update_state (id) VALUES (1)`); err != nil {
+			return fmt.Errorf("store.SaveCeilingLastKnown: restore singleton: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx, q, js); err != nil {
+			return fmt.Errorf("store.SaveCeilingLastKnown: %w", err)
+		}
+	}
 	return nil
 }
 
 // TransitionUpdateState moves the node from its current state to next,
-// validating the edge against update.CanTransition, and appends an event.
+// validating the edge against updatespec.CanTransition, and appends an event.
 //
 // This is the seam every apply step uses instead of assigning a state field:
 // an impossible sequence then fails where it happens rather than surfacing
 // as a nonsensical row on the org board two push cycles later.
-func (s *Store) TransitionUpdateState(ctx context.Context, next update.State, mutate func(*UpdateStateRow), ev UpdateEventRow) error {
+func (s *Store) TransitionUpdateState(ctx context.Context, next updatespec.State, mutate func(*UpdateStateRow), ev UpdateEventRow) error {
 	cur, err := s.LoadUpdateState(ctx)
 	if err != nil {
 		return err
 	}
-	moved, err := update.Transition(cur.State, next)
+	moved, err := updatespec.Transition(cur.State, next)
 	if err != nil {
 		return fmt.Errorf("store.TransitionUpdateState: %w", err)
 	}
@@ -210,7 +319,8 @@ func (s *Store) AppendUpdateEventID(ctx context.Context, ev UpdateEventRow) (int
 	const q = `
 INSERT INTO update_events (at, from_version, to_version, manifest_version, state, error_class, detail, duration_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.ExecContext(ctx, q,
+	res, err := s.db.ExecContext(
+		ctx, q,
 		at.UTC().Format(time.RFC3339Nano), ev.FromVersion, ev.ToVersion, ev.ManifestVersion,
 		string(ev.State), string(ev.ErrorClass), ev.Detail, ev.DurationMS,
 	)
@@ -247,7 +357,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 // manifestJSON is the org's own CANONICAL SIGNED BYTES coming back — never
 // node data going out.
 func (s *Store) SaveVerifiedManifest(ctx context.Context, in VerifiedManifest) error {
-	if !update.KnownState(in.State) {
+	if !updatespec.KnownState(in.State) {
 		return fmt.Errorf("store.SaveVerifiedManifest: unknown state %q", in.State)
 	}
 	seenAt := in.SeenAt
@@ -276,8 +386,8 @@ func (s *Store) SaveVerifiedManifest(ctx context.Context, in VerifiedManifest) e
 	// An apply in flight owns the row. A manifest fetch that landed
 	// mid-handshake must not rewrite target_version underneath it — that is
 	// the value the rollback decision and the child's self-check both read.
-	if cur.State == update.StateApplying || cur.State == update.StateDownloading ||
-		cur.State == update.StateVerified {
+	if cur.State == updatespec.StateApplying || cur.State == updatespec.StateDownloading ||
+		cur.State == updatespec.StateVerified {
 		return nil
 	}
 	if cur.State == in.State {
@@ -290,7 +400,7 @@ func (s *Store) SaveVerifiedManifest(ctx context.Context, in VerifiedManifest) e
 		Detail: in.Detail,
 	}
 	err = s.TransitionUpdateState(ctx, in.State, mutate, ev)
-	if err == nil || in.State == update.StateAvailable {
+	if err == nil || in.State == updatespec.StateAvailable {
 		return err
 	}
 	// Re-arm through `available` when the direct edge is not legal — the same
@@ -299,8 +409,8 @@ func (s *Store) SaveVerifiedManifest(ctx context.Context, in VerifiedManifest) e
 	// already finished (or failed) an apply, and `applied -> blocked` is
 	// exactly that case: the node applied, then the org published something
 	// this platform has no artifact for.
-	if rearm := s.TransitionUpdateState(ctx, update.StateAvailable, nil, UpdateEventRow{
-		State: update.StateAvailable, Detail: "re-armed: a newer manifest was verified",
+	if rearm := s.TransitionUpdateState(ctx, updatespec.StateAvailable, nil, UpdateEventRow{
+		State: updatespec.StateAvailable, Detail: "re-armed: a newer manifest was verified",
 	}); rearm != nil {
 		return err
 	}
@@ -310,7 +420,7 @@ func (s *Store) SaveVerifiedManifest(ctx context.Context, in VerifiedManifest) e
 // VerifiedManifest is one verification outcome, durably recorded.
 type VerifiedManifest struct {
 	// Channel / ManifestVersion / TargetVersion identify the document.
-	Channel         update.Channel
+	Channel         updatespec.Channel
 	ManifestVersion int64
 	TargetVersion   string
 	// ManifestJSON is the canonical signed bytes, so a restarted daemon can
@@ -318,8 +428,8 @@ type VerifiedManifest struct {
 	// posture but no usable document.
 	ManifestJSON string
 	// State / Reason are what the node now reports.
-	State  update.State
-	Reason update.Reason
+	State  updatespec.State
+	Reason updatespec.Reason
 	// SeenAt is when the fetch verified; Detail is the ledger line.
 	SeenAt time.Time
 	Detail string
@@ -351,8 +461,8 @@ SELECT id, at, from_version, to_version, manifest_version, state, error_class, d
 			return nil, fmt.Errorf("store.LoadUpdateEvents: scan: %w", err)
 		}
 		r.At = parseUpdateTime(at)
-		r.State = update.State(st)
-		r.ErrorClass = update.ErrorClass(ec)
+		r.State = updatespec.State(st)
+		r.ErrorClass = updatespec.ErrorClass(ec)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {

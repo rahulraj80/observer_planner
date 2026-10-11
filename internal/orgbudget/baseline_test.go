@@ -311,8 +311,12 @@ func TestComposeSubjectCaps_NotAdoptedWithoutABody(t *testing.T) {
 		{name: "opted out", caps: Capabilities{FromOrg: false, HaveBody: true}},
 		{
 			name: "fail closed: managed with no body",
-			caps: Capabilities{FromOrg: true, HaveBody: false, RequireOrgBudget: true, OrgAuthoritative: true},
+			caps: Capabilities{FromOrg: true, HaveBody: false, RequireOrgBudget: true, OrgAuthoritative: true, FailClosed: true},
 			want: true,
+		},
+		{
+			name: "fail open (D-502): managed with no body, no fail_closed opt-in",
+			caps: Capabilities{FromOrg: true, HaveBody: false, RequireOrgBudget: true, OrgAuthoritative: true},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

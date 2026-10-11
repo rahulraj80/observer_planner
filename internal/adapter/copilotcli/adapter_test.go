@@ -879,8 +879,10 @@ func TestParseEventsJSONL_SessionShutdownModelMetrics(t *testing.T) {
 	if opus.InputTokens != 70845 {
 		t.Errorf("opus InputTokens = %d, want 70845 (578788 gross - 507943 cached)", opus.InputTokens)
 	}
-	if opus.OutputTokens != 0 {
-		t.Errorf("opus OutputTokens = %d, want 0 (Tier 3 covers output)", opus.OutputTokens)
+	// T-353: this fixture has NO assistant.message rows, so no Tier 3 row
+	// covers output and the shutdown row carries modelMetrics' output.
+	if opus.OutputTokens != 17822 {
+		t.Errorf("opus OutputTokens = %d, want 17822 (no Tier 3 output in the span)", opus.OutputTokens)
 	}
 	if opus.CacheReadTokens != 507943 {
 		t.Errorf("opus CacheReadTokens = %d, want 507943", opus.CacheReadTokens)

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 import (

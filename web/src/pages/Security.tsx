@@ -6,16 +6,29 @@ import {
   ComboChip,
   EmptyState,
   type ComboOption,
-  HeroStat,
   Icon,
   InlineLoading,
   PageHeader,
   Pill,
   SegmentedControl,
+  SinglePicker,
+  StatCard,
+  StatStrip,
+  TabPanel,
+  TabStrip,
   Tooltip,
-  Stagger,
   Table,
+  useTabVisited,
+  type TabDef,
 } from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import {
+  SECURITY_RECENT_VERDICTS,
+  SECURITY_TABS,
+  defaultTab,
+  type SecurityTab,
+} from "@/lib/nodePageTabs";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/DataTable";
 import { TitleWithHelp } from "@/components/HelpInd";
@@ -23,8 +36,10 @@ import { CopyOnClick } from "@/components/CopyOnClick";
 import { GuardOverrideCard } from "@/components/GuardOverrideCard";
 import { useApi, type ApiState } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { markRestartPending } from "@/lib/restartPending";
-import { fmtClock, fmtDateTime, fmtShortId } from "@/lib/format";
+import { dollarsShown, fmtClock, fmtCompact, fmtDateTime, fmtShortId, fmtUSD } from "@/lib/format";
+import { TOKEN_CAP_WINDOWS, capUsePct, tokenCapDraft, type TokenCapWindow } from "@/lib/guardTokenCaps";
 import type {
   GuardPolicyLint,
   GuardPolicyView,
@@ -33,8 +48,17 @@ import type {
   ProjectsResponse,
 } from "@/lib/types";
 import { RuleManager } from "./security/RuleManager";
+import { keepSelected } from "@/lib/pickerOptions";
+import { useSessionOptions } from "@/lib/usePickerSources";
 import { MCPAccessSection } from "@/components/security/MCPAccessSection";
+import { MCPReputationCard } from "@/components/security/MCPReputationCard";
 import { StatusTile } from "@/components/security/StatusTile";
+import { UserPolicyBanner } from "@/components/security/UserPolicyBanner";
+import type { GuardUserPolicyProblem } from "@/lib/userPolicyBanner";
+import { guardHookFailureLine, type GuardHookFailure } from "@/lib/guardHookFailure";
+import { guardToolGateChannelLabel, guardToolGateLine, type GuardToolGate } from "@/lib/guardToolGates";
+import { HookCoverageCard } from "@/components/security/HookCoverageCard";
+import { ApplyPolicyCard, MCPToolsBar, TestCommandCard } from "@/components/security/GuardTools";
 import {
   ChartColumnStacked,
   Check,
@@ -77,11 +101,18 @@ const SECURITY_SECTION_ICONS = {
 } satisfies Record<string, LucideIcon>;
 import { MetricIcon } from "@/components/MetricIcon";
 
-// Security page (guard spec §11.2, G7): guard posture header, the
-// verdict timeline with severity/decision filters, the §6.5
-// coverage/conformance matrix, and the §10.4 audit-chain status.
-// Approvals queue, posture panel (sandbox/yolo), budget burn-down and
-// the MCP pin inventory join with their respective arcs (G8/G10–G12).
+// Security page (guard spec §11.2, G7). Since the platform tabs plan
+// (docs/audits/platform-ia-tabs-audit-2026-10-02.md §2.2, mockup M4): a
+// four-stat strip (posture, verdicts 24h / 7d, audit chain) above seven
+// `?tab=` tabs, lazy per tab and kept mounted once visited:
+//   Overview            mode, approvals, enforce readiness, recent verdicts
+//   Verdicts            the verdict timeline with its filters
+//   Rules               rule manager, org guardrails, raw TOML layers
+//   Budgets             budget guardrails
+//   Prompt guard        the prompt-submit guard
+//   MCP                 MCP access (relay) + MCP server pins
+//   Coverage & evidence enforcement coverage matrix + compliance evidence
+// Node data is the developer's own (no audit-on-read), so no tab is audited.
 
 type GuardCounts = {
   total: number;
@@ -98,6 +129,15 @@ type GuardSummary = {
   counts_24h: GuardCounts;
   counts_7d: GuardCounts;
   chain: { ok: boolean; checked: number; divergence_id?: number; detail?: string };
+  // Present only when the user guard-policy.toml exists and does not load
+  // (T-323); older daemons never send it.
+  user_policy?: GuardUserPolicyProblem;
+  // Per-gate-family hook failure mode (T-346); older daemons never send it.
+  hook_failure?: GuardHookFailure;
+  // Per hook_block tool: does its tool-gate hook hold on THIS node, and the
+  // channel it falls back to when not (T-340 follow-up); older daemons
+  // never send it.
+  tool_gates?: GuardToolGate[];
 };
 
 type GuardEvent = {
@@ -196,6 +236,8 @@ type DecisionFilter = "all" | "flag" | "ask" | "deny";
 type WindowFilter = "24" | "168" | "720";
 
 export function SecurityPage() {
+  const pageTabs = usePageTabs("security", SECURITY_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
   const [severity, setSeverity] = useState<SeverityFilter>("all");
   const [decision, setDecision] = useState<DecisionFilter>("all");
   const [hours, setHours] = useState<WindowFilter>("168");
@@ -203,9 +245,18 @@ export function SecurityPage() {
   const [sessionFilter, setSessionFilter] = useState("");
   const [approveSeed, setApproveSeed] = useState<ApproveSeed | null>(null);
 
+  // Lazy per tab (platform tabs plan §1.5): a tab's loaders run on its first
+  // activation and the panel then stays mounted. The page-level loaders below
+  // feed more than one panel, so they are gated on the visited latch instead
+  // of living inside one TabPanel.
+  const verdictsVisited = useTabVisited<SecurityTab>("verdicts", tab);
+  const rulesVisited = useTabVisited<SecurityTab>("rules", tab);
+  const coverageVisited = useTabVisited<SecurityTab>("coverage", tab);
+
+  // Summary feeds the strip (every tab) and the Mode card.
   const summary = useApi<GuardSummary>("/api/guard/summary");
   const events = useApi<GuardEventsResponse>(
-    "/api/guard/events",
+    verdictsVisited ? "/api/guard/events" : null,
     {
       hours,
       severity: severity === "all" ? undefined : severity,
@@ -216,19 +267,21 @@ export function SecurityPage() {
     },
     [hours, severity, decision, ruleFilter, sessionFilter],
   );
-  const conformance = useApi<ConformanceResponse>("/api/guard/conformance");
+  const conformance = useApi<ConformanceResponse>(coverageVisited ? "/api/guard/conformance" : null);
   // effective=1 (G1.5): the install's real table — overrides applied,
   // disabled rules removed, user/project/org rules included with their
   // source — so custom-rule verdicts resolve too. Older daemons ignore
-  // the param and serve the built-in catalog (graceful).
+  // the param and serve the built-in catalog (graceful). Page level: the
+  // rule definitions label Overview's readiness table, the Approvals rule
+  // picker, every verdict row and the Rules tab (whose count it gives).
   const rulesApi = useApi<GuardRulesResponse>("/api/guard/rules", { effective: 1 });
   const approvals = useApi<GuardApprovalsResponse>("/api/guard/approvals");
   // Lifted here (rather than fetched inside RuleManager/PolicyLayersCard
   // separately) so the structured rule manager and the raw-TOML advanced
   // editor below it share ONE /api/guard/policy read — a save in either one
   // reloads the same ApiState the other reads from.
-  const policyApi = useApi<GuardPolicyView>("/api/guard/policy");
-  const projectsApi = useApi<ProjectsResponse>("/api/projects");
+  const policyApi = useApi<GuardPolicyView>(rulesVisited ? "/api/guard/policy" : null);
+  const projectsApi = useApi<ProjectsResponse>(rulesVisited ? "/api/projects" : null);
 
   // rule_id → catalog rows, so the timeline can show each verdict's
   // actual definition instead of a bare "R-151". Unknown IDs (user/
@@ -249,6 +302,42 @@ export function SecurityPage() {
   const matrix = conformance.data?.entries ?? [];
   const hookRows = matrix.filter((e) => e.channel !== "watcher");
   const watcherCount = matrix.filter((e) => e.channel === "watcher").length;
+
+  // Cross-tab hand-offs. "Filter the timeline to this rule" (Overview's
+  // readiness table) opens the Verdicts tab; "approve…" on a verdict row
+  // pre-fills the Approvals card, which lives on Overview.
+  const filterToRule = (rule: string) => {
+    setRuleFilter(rule);
+    setTab("verdicts");
+  };
+  // The invalid-user-policy banner's one action: the Rules tab's raw-TOML
+  // policy editor (lint-gated saves), scrolled into view once it mounts.
+  const openPolicyEditor = () => {
+    setTab("rules");
+    window.requestAnimationFrame(() =>
+      document.getElementById(SECURITY_POLICY_EDITOR_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" }),
+    );
+  };
+  // The empty verdict states' one action: the Rules tab's Test a command
+  // card (`observer guard test`). Undefined when the org hid the Rules tab.
+  const openGuardTest = pageTabs.ids.includes("rules")
+    ? () => {
+        setTab("rules");
+        window.requestAnimationFrame(() =>
+          document.getElementById(SECURITY_GUARD_TEST_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" }),
+        );
+      }
+    : undefined;
+  const seedApproval = (seed: ApproveSeed) => {
+    setApproveSeed(seed);
+    if (tab !== "overview") {
+      setTab("overview");
+      // The Overview panel may mount on this render; scroll once it has.
+      window.requestAnimationFrame(() =>
+        document.getElementById(SECURITY_APPROVALS_ANCHOR)?.scrollIntoView({ block: "start", behavior: "smooth" }),
+      );
+    }
+  };
 
   // Top noisy rules over the LOADED window rows (≤ the fetch limit) —
   // a drill-down affordance, not an exact census; clicking one filters
@@ -288,26 +377,7 @@ export function SecurityPage() {
       id: "decision",
       header: "Decision",
       accessorFn: (ev) => ev.decision ?? "",
-      cell: ({ row }) => {
-        const ev = row.original;
-        return (
-          <>
-            <VocabPill vocab="guardDecision" value={ev.decision} tone={decisionTone(ev.decision)}>
-              {ev.decision}
-              {ev.enforced && <Icon icon={Check} size={10} label="enforced" />}
-            </VocabPill>
-            {ev.degraded_from && (
-              <Pill
-                variant="neutral"
-                className="ml-1"
-                title={`The verdict wanted ${ev.degraded_from} but this channel cannot express it (§6.2 degradation - recorded, never silent).`}
-              >
-                from {ev.degraded_from}
-              </Pill>
-            )}
-          </>
-        );
-      },
+      cell: ({ row }) => <DecisionCell ev={row.original} />,
     },
     {
       id: "severity",
@@ -360,27 +430,7 @@ export function SecurityPage() {
           // Wraps (id first, then the two row actions) rather than forcing
           // the eight-column table past the card width at desktop sizes.
           <span className="inline-flex flex-wrap items-center gap-1">
-            <CopyOnClick
-              value={ev.session_id}
-              title={
-                <>
-                  Copy the full session id{" "}
-                  <span className="break-all font-mono">{ev.session_id}</span>
-                </>
-              }
-            >
-              <Link
-                // Deep-links straight to the Messages tab (LOC/guardmsg/APM
-                // followups plan Item 2.4): that verdict's session drawer now
-                // interleaves this exact rule's block into its timeline, so a
-                // reviewer following this link from the global verdict table
-                // lands where the block actually happened, not on Overview.
-                to={`/sessions?session=${encodeURIComponent(ev.session_id)}&tab=messages`}
-                className="font-mono text-[10.5px] text-accent underline decoration-dotted decoration-accent/50 underline-offset-[3px] hover:decoration-accent"
-              >
-                {fmtShortId(ev.session_id, 8)}
-              </Link>
-            </CopyOnClick>
+            <SessionLink id={ev.session_id} />
             <Tooltip content="Filter the timeline to this session">
               <button
                 type="button"
@@ -390,47 +440,86 @@ export function SecurityPage() {
                 filter
               </button>
             </Tooltip>
-            <Tooltip content="Grant a scoped exception for this rule (pre-fills the Approvals form)">
+            <Tooltip content="Grant a scoped exception for this rule (opens Overview with the Approvals form pre-filled)">
               <button
                 type="button"
                 className={miniBtn}
-                onClick={() => setApproveSeed({ rule: ev.rule_id, session: ev.session_id ?? "" })}
+                onClick={() => seedApproval({ rule: ev.rule_id, session: ev.session_id ?? "" })}
               >
                 approve…
               </button>
             </Tooltip>
+            {(ev.org_locked || (ev.enforced && (ev.decision === "deny" || ev.decision === "ask"))) && (
+              <Tooltip content="Ask your organization for a time-limited exception, starting from this exact command.">
+                <Link className={miniBtn} to={`/requests?event=${ev.id}`}>
+                  request access
+                </Link>
+              </Tooltip>
+            )}
           </span>
         );
       },
     },
   ];
 
+  // Counts only from data this page already loaded (plan §1.4): the 7-day
+  // verdict total from the summary (the Verdicts tab's default window) and
+  // the effective rule count the page reads for its rule labels.
+  const tabs: TabDef<SecurityTab>[] = pageTabs.ids.map((id) => ({
+    id,
+    label: SECURITY_TABS.labels[id],
+    count:
+      id === "verdicts"
+        ? (sum?.counts_7d.total ?? null)
+        : id === "rules"
+          ? // Unique rule ids, the Rule manager's "Effective rules (n)".
+            (rulesApi.data ? ruleDefs.size : null)
+          : null,
+    dot: id === "verdicts" && sum && sum.counts_24h.enforced > 0 ? "warn" : null,
+  }));
+
   return (
-    <div className="space-y-6 p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
       <PageHeader
+        className="mb-6"
         icon={navIcon("security")}
         title="Security"
         helpId="tab.security"
         sub="The guard layer's verdicts over your agents' actions: what was flagged, what was blocked, which channels can enforce at all, and whether the audit chain is intact. Local, deterministic, observe-first."
       />
 
-      <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <HeroStat
+      <UserPolicyBanner
+        problem={sum?.user_policy}
+        guardEnabled={!!sum?.enabled && sum.mode !== "off"}
+        onEdit={openPolicyEditor}
+      />
+
+      <StatStrip cols={4} ariaLabel="Guard summary">
+        <StatCard
           label="Guard posture"
           helpId="tile.security.posture"
           icon={<MetricIcon metric="guardPosture" />}
           loading={summary.loading}
           value={sum ? (sum.enabled ? sum.mode : "disabled") : "-"}
+          // What a FAILING gate hook does, per gate family (T-346): from the
+          // daemon's own hook failure derivation, never from [guard].strict.
+          // Then whether tool calls actually block by hook on THIS node
+          // (the node state, never the bare registry capability).
           sub={
-            sum
-              ? sum.strict
-                ? "strict: internal errors fail closed"
-                : "fail-open: internal errors never block"
-              : undefined
+            sum ? (
+              <>
+                {guardHookFailureLine(sum)}
+                {guardToolGateLine(sum.tool_gates, sum) && (
+                  <span className="block">{guardToolGateLine(sum.tool_gates, sum)}</span>
+                )}
+              </>
+            ) : undefined
           }
-          variant={sum && sum.enabled && sum.mode === "enforce" ? "danger" : "accent"}
+          // Enforce is the live-blocking posture: the loud tile.
+          accent={!(sum && sum.enabled && sum.mode === "enforce")}
+          warn={!!sum && sum.enabled && sum.mode === "enforce"}
         />
-        <HeroStat
+        <StatCard
           label="Verdicts - last 24h"
           icon={<MetricIcon metric="verdicts" />}
           helpId="tile.security.verdicts"
@@ -438,9 +527,9 @@ export function SecurityPage() {
           stale={summary.isStale}
           value={sum ? String(sum.counts_24h.total) : "-"}
           sub={sum ? `${sum.counts_24h.enforced} enforced (blocked or deferred)` : undefined}
-          variant={sum && sum.counts_24h.total > 0 ? "warn" : "accent"}
+          warn={!!sum && sum.counts_24h.total > 0}
         />
-        <HeroStat
+        <StatCard
           label="Verdicts - last 7d"
           icon={<MetricIcon metric="verdicts" />}
           helpId="tile.security.verdicts"
@@ -448,9 +537,8 @@ export function SecurityPage() {
           stale={summary.isStale}
           value={sum ? String(sum.counts_7d.total) : "-"}
           sub={sum ? severitySub(sum.counts_7d) : undefined}
-          variant="accent"
         />
-        <HeroStat
+        <StatCard
           label="Audit chain"
           icon={<MetricIcon metric={sum && !sum.chain.ok ? "auditChainBroken" : "auditChain"} />}
           helpId="tile.security.audit_chain"
@@ -461,207 +549,415 @@ export function SecurityPage() {
             sum
               ? sum.chain.ok
                 ? `${sum.chain.checked} rows verified (tamper-evident, SHA-256 chained)`
-                : `first divergence at id ${sum.chain.divergence_id} - run observer guard verify-audit`
+                : `first divergence at id ${sum.chain.divergence_id} - Verify audit chain on the Coverage tab walks it`
               : undefined
           }
-          variant={sum && !sum.chain.ok ? "danger" : "accent"}
+          warn={!!sum && !sum.chain.ok}
         />
-      </Stagger>
+      </StatStrip>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <GuardModeCard sum={sum} loading={summary.loading} />
-        <ApprovalsCard
-          api={approvals}
-          ruleDefs={ruleDefs}
-          seed={approveSeed}
-          onSeedConsumed={() => setApproveSeed(null)}
-        />
-      </div>
-
-      <EnforceReadinessCard
-        sum={sum}
-        ruleDefs={ruleDefs}
-        onFilterRule={setRuleFilter}
-        onApprove={setApproveSeed}
+      <TabStrip
+        tabs={tabs}
+        value={tab}
+        onChange={setTab}
+        idPrefix="security"
+        ariaLabel="Security sections"
+        className="mb-4"
       />
 
-      <GuardBudgetCard />
-
-      {/* Org-granted override (Track B). Renders nothing unless an
-          org policy bundle is active on this node. */}
-      <GuardOverrideCard />
-
-      <PromptGuardCard />
-
-      <ChartShell
-        title={<TitleWithHelp text="Verdict timeline" helpId="chart.security_timeline" />}
-        icon={SECURITY_SECTION_ICONS.verdictTimeline}
-        right={
-          <div className="flex flex-wrap items-center gap-2">
-            <SegmentedControl<WindowFilter>
-              size="sm"
-              options={[
-                { value: "24", label: "24h" },
-                { value: "168", label: "7d" },
-                { value: "720", label: "30d" },
-              ]}
-              value={hours}
-              onChange={setHours}
-            />
-            <SegmentedControl<SeverityFilter>
-              size="sm"
-              options={[
-                { value: "all", label: "All severities" },
-                { value: "warn", label: "Warn" },
-                { value: "high", label: "High" },
-                { value: "critical", label: "Critical" },
-              ]}
-              value={severity}
-              onChange={setSeverity}
-            />
-            <SegmentedControl<DecisionFilter>
-              size="sm"
-              options={[
-                { value: "all", label: "All decisions" },
-                { value: "flag", label: "Flag" },
-                { value: "ask", label: "Ask" },
-                { value: "deny", label: "Deny" },
-              ]}
-              value={decision}
-              onChange={setDecision}
+      {/* Overview answers "am I protected right now": the mode, the
+          exceptions in force, what enforce would block, the latest verdicts. */}
+      <TabPanel id="overview" active={tab} idPrefix="security" className="space-y-6">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <GuardModeCard sum={sum} loading={summary.loading} />
+          <div id={SECURITY_APPROVALS_ANCHOR} className="scroll-mt-4">
+            <ApprovalsCard
+              api={approvals}
+              ruleDefs={ruleDefs}
+              seed={approveSeed}
+              onSeedConsumed={() => setApproveSeed(null)}
             />
           </div>
-        }
-      >
-        {(ruleFilter || sessionFilter) && (
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-caption">
-            <span className="text-fg-3">Filtered to</span>
-            {ruleFilter && (
-              <Tooltip content="Clear the rule filter">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-2 border border-accent/40 bg-bg-3 px-2 py-0.5 font-mono text-accent hover:border-accent"
-                  onClick={() => setRuleFilter("")}
-                >
-                  {ruleFilter} <Icon icon={X} size={10} label="clear" />
-                </button>
-              </Tooltip>
-            )}
-            {sessionFilter && (
-              <Tooltip content={`Clear the session filter (${sessionFilter})`}>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-2 border border-accent/40 bg-bg-3 px-2 py-0.5 font-mono text-accent hover:border-accent"
-                  onClick={() => setSessionFilter("")}
-                >
-                  session {fmtShortId(sessionFilter, 8)} <Icon icon={X} size={10} label="clear" />
-                </button>
-              </Tooltip>
-            )}
-          </div>
-        )}
-        {topRules.length > 1 && (
-          <div className="mb-3 flex flex-wrap items-center gap-1.5 text-caption">
-            <span className="text-fg-3">Top rules in this window:</span>
-            {topRules.map(([rule, n]) => (
-              <Tooltip key={rule} content={`Filter the timeline to ${rule}`}>
-                <button
-                  type="button"
-                  className="rounded-2 border border-line-2 bg-bg-3 px-2 py-0.5 font-mono text-fg-2 hover:border-line-3 hover:text-fg-0"
-                  onClick={() => setRuleFilter(rule)}
-                >
-                  {rule} <span className="text-fg-3">{n}</span>
-                </button>
-              </Tooltip>
-            ))}
-          </div>
-        )}
-        {events.loading ? (
-          <InlineLoading label="Loading guard events" block />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            variant="inline"
-            illustration="all-clear"
-            title="No guard verdicts in this window"
-            body={
-              <>
-                The rules stayed quiet. Try{" "}
-                <code className="rounded-1 bg-bg-3 px-1">observer guard test "git push --force origin main"</code>{" "}
-                to see a verdict end to end.
-              </>
-            }
-          />
-        ) : (
-          <DataTable<GuardEvent>
-            data={rows}
-            columns={verdictColumns}
-            rowKey={(ev) => String(ev.id)}
-            minWidth={1000}
-            zebra
-            rowClassName={() => "align-top"}
-          />
-        )}
-      </ChartShell>
+        </div>
 
-      <ChartShell
-        title={<TitleWithHelp text="Enforcement coverage" helpId="chart.security_coverage" />}
-        icon={SECURITY_SECTION_ICONS.enforcementCoverage}
-        sub={
-          <>
-            Which channels can actually block before execution vs flag after the fact. Hooks see
-            declared tool calls; the watcher sees results - {watcherCount} adapters are covered
-            post-hoc, and that asymmetry is structural, not a configuration gap.
-          </>
-        }
-      >
-        {conformance.loading ? (
-          <InlineLoading label="Loading hook conformance" block />
-        ) : (
-          // The watcher row spans Client + Channel, so this is the shared
-          // Table primitive rather than DataTable.
-          <Table
-            minWidth={640}
-            head={
-              <tr>
-                <th className="py-1.5 pr-3 font-medium">Client</th>
-                <th className="py-1.5 pr-3 font-medium">Channel</th>
-                <th className="py-1.5 pr-3 font-medium">Pre-exec</th>
-                <th className="py-1.5 pr-3 font-medium">Can block</th>
-                <th className="py-1.5 pr-3 font-medium">Can ask</th>
-                <th className="py-1.5 font-medium">Notes</th>
-              </tr>
-            }
+        <EnforceReadinessCard
+          sum={sum}
+          ruleDefs={ruleDefs}
+          onFilterRule={filterToRule}
+          onApprove={setApproveSeed}
+        />
+
+        <RecentVerdictsCard ruleDefs={ruleDefs} onSeeAll={() => setTab("verdicts")} onTryTest={openGuardTest} />
+      </TabPanel>
+
+      <TabPanel id="verdicts" active={tab} idPrefix="security" className="space-y-6">
+        <ChartShell
+          title={<TitleWithHelp text="Verdict timeline" helpId="chart.security_timeline" />}
+          icon={SECURITY_SECTION_ICONS.verdictTimeline}
+          right={
+            <div className="flex flex-wrap items-center gap-2">
+              <SegmentedControl<WindowFilter>
+                size="sm"
+                options={[
+                  { value: "24", label: "24h" },
+                  { value: "168", label: "7d" },
+                  { value: "720", label: "30d" },
+                ]}
+                value={hours}
+                onChange={setHours}
+              />
+              <SegmentedControl<SeverityFilter>
+                size="sm"
+                options={[
+                  { value: "all", label: "All severities" },
+                  { value: "warn", label: "Warn" },
+                  { value: "high", label: "High" },
+                  { value: "critical", label: "Critical" },
+                ]}
+                value={severity}
+                onChange={setSeverity}
+              />
+              <SegmentedControl<DecisionFilter>
+                size="sm"
+                options={[
+                  { value: "all", label: "All decisions" },
+                  { value: "flag", label: "Flag" },
+                  { value: "ask", label: "Ask" },
+                  { value: "deny", label: "Deny" },
+                ]}
+                value={decision}
+                onChange={setDecision}
+              />
+            </div>
+          }
+        >
+          {(ruleFilter || sessionFilter) && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-caption">
+              <span className="text-fg-3">Filtered to</span>
+              {ruleFilter && (
+                <Tooltip content="Clear the rule filter">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-2 border border-accent/40 bg-bg-3 px-2 py-0.5 font-mono text-accent hover:border-accent"
+                    onClick={() => setRuleFilter("")}
+                  >
+                    {ruleFilter} <Icon icon={X} size={10} label="clear" />
+                  </button>
+                </Tooltip>
+              )}
+              {sessionFilter && (
+                <Tooltip content={`Clear the session filter (${sessionFilter})`}>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-2 border border-accent/40 bg-bg-3 px-2 py-0.5 font-mono text-accent hover:border-accent"
+                    onClick={() => setSessionFilter("")}
+                  >
+                    session {fmtShortId(sessionFilter, 8)} <Icon icon={X} size={10} label="clear" />
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          )}
+          {topRules.length > 1 && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 text-caption">
+              <span className="text-fg-3">Top rules in this window:</span>
+              {topRules.map(([rule, n]) => (
+                <Tooltip key={rule} content={`Filter the timeline to ${rule}`}>
+                  <button
+                    type="button"
+                    className="rounded-2 border border-line-2 bg-bg-3 px-2 py-0.5 font-mono text-fg-2 hover:border-line-3 hover:text-fg-0"
+                    onClick={() => setRuleFilter(rule)}
+                  >
+                    {rule} <span className="text-fg-3">{n}</span>
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
+          )}
+          {events.loading || (!events.data && !events.error) ? (
+            <InlineLoading label="Loading guard events" block />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              variant="inline"
+              illustration="all-clear"
+              title="No guard verdicts in this window"
+              body={<QuietRules onTryTest={openGuardTest} />}
+            />
+          ) : (
+            <DataTable<GuardEvent>
+              data={rows}
+              columns={verdictColumns}
+              rowKey={(ev) => String(ev.id)}
+              minWidth={1000}
+              zebra
+              rowClassName={() => "align-top"}
+            />
+          )}
+        </ChartShell>
+      </TabPanel>
+
+      <TabPanel id="rules" active={tab} idPrefix="security" className="space-y-6">
+        <RuleManager rulesApi={rulesApi} policyApi={policyApi} projects={projectsApi.data?.rows ?? []} />
+
+        <div id={SECURITY_GUARD_TEST_ANCHOR} className="scroll-mt-4">
+          <TestCommandCard projects={(projectsApi.data?.rows ?? []).map((p) => p.root_path)} />
+        </div>
+
+        {/* Org-granted override (Track B). Renders nothing unless an
+            org policy bundle is active on this node. */}
+        <GuardOverrideCard />
+
+        <div id={SECURITY_POLICY_EDITOR_ANCHOR} className="scroll-mt-4">
+          <PolicyLayersCard api={policyApi} />
+        </div>
+
+        <ApplyPolicyCard />
+      </TabPanel>
+
+      <TabPanel id="budgets" active={tab} idPrefix="security" className="space-y-6">
+        <GuardBudgetCard />
+      </TabPanel>
+
+      <TabPanel id="prompt-guard" active={tab} idPrefix="security" className="space-y-6">
+        <PromptGuardCard />
+      </TabPanel>
+
+      <TabPanel id="mcp" active={tab} idPrefix="security" className="space-y-6">
+        {/* Agent Access P10: node MCP relay status, approved servers,
+            coverage matrix and effective state. */}
+        <MCPAccessSection />
+
+        <MCPPinsCard />
+
+        {/* T-496: `observer guard mcp reputation` as a control. */}
+        <MCPReputationCard />
+      </TabPanel>
+
+      <TabPanel id="coverage" active={tab} idPrefix="security" className="space-y-6">
+        {sum?.tool_gates && sum.tool_gates.length > 0 && (
+          <ChartShell
+            title={<TitleWithHelp text="Tool-call blocking on this node" helpId="chart.security_toolgates" />}
+            icon={SECURITY_SECTION_ICONS.enforcementCoverage}
+            sub="A tool that can block by hook does so only while its tool-gate hook is registered and current here. Otherwise it falls back: in enforce mode its dashboard launches run sandboxed where sandboxing is available, and its calls are only recorded where it is not."
           >
-            {hookRows.map((e) => (
-              <ConformanceRow key={e.client + e.channel} e={e} />
-            ))}
-            <tr className="border-b border-line-1/60 last:border-0">
-              <td className="py-1.5 pr-3 text-fg-2" colSpan={2}>
-                every adapter ({watcherCount}) · watcher
-              </td>
-              <td className="py-1.5 pr-3"><BoolPill v={false} /></td>
-              <td className="py-1.5 pr-3"><BoolPill v={false} /></td>
-              <td className="py-1.5 pr-3"><BoolPill v={false} /></td>
-              <td className="py-1.5 text-fg-3">
-                post-hoc flagging; sees results (file changes, outputs) hooks structurally miss
-              </td>
-            </tr>
-          </Table>
+            <Table
+              minWidth={560}
+              head={
+                <tr>
+                  <th className="py-1.5 pr-3 font-medium">Tool</th>
+                  <th className="py-1.5 pr-3 font-medium">On this node</th>
+                  <th className="py-1.5 font-medium">Why</th>
+                </tr>
+              }
+            >
+              {sum.tool_gates.map((g) => (
+                <tr key={g.tool} className="border-b border-line-1/60 last:border-0">
+                  <td className="py-1.5 pr-3 font-mono text-[11px] text-fg-2">{g.tool}</td>
+                  <td className={clsx("py-1.5 pr-3", g.current ? "text-fg-1" : g.installed ? "text-warn" : "text-fg-3")}>
+                    {guardToolGateChannelLabel(g.channel)}
+                  </td>
+                  <td className="py-1.5 text-fg-3">{g.reason}</td>
+                </tr>
+              ))}
+            </Table>
+          </ChartShell>
         )}
-      </ChartShell>
 
-      <RuleManager rulesApi={rulesApi} policyApi={policyApi} projects={projectsApi.data?.rows ?? []} />
+        <ChartShell
+          title={<TitleWithHelp text="Enforcement coverage" helpId="chart.security_coverage" />}
+          icon={SECURITY_SECTION_ICONS.enforcementCoverage}
+          sub={
+            <>
+              Which channels can actually block before execution vs flag after the fact. Hooks see
+              declared tool calls; the watcher sees results - {watcherCount} adapters are covered
+              post-hoc, and that asymmetry is structural, not a configuration gap.
+            </>
+          }
+        >
+          {conformance.loading || (!conformance.data && !conformance.error) ? (
+            <InlineLoading label="Loading hook conformance" block />
+          ) : (
+            // The watcher row spans Client + Channel, so this is the shared
+            // Table primitive rather than DataTable.
+            <Table
+              minWidth={640}
+              head={
+                <tr>
+                  <th className="py-1.5 pr-3 font-medium">Client</th>
+                  <th className="py-1.5 pr-3 font-medium">Channel</th>
+                  <th className="py-1.5 pr-3 font-medium">Pre-exec</th>
+                  <th className="py-1.5 pr-3 font-medium">Can block</th>
+                  <th className="py-1.5 pr-3 font-medium">Can ask</th>
+                  <th className="py-1.5 font-medium">Notes</th>
+                </tr>
+              }
+            >
+              {hookRows.map((e) => (
+                <ConformanceRow key={e.client + e.channel} e={e} />
+              ))}
+              <tr className="border-b border-line-1/60 last:border-0">
+                <td className="py-1.5 pr-3 text-fg-2" colSpan={2}>
+                  every adapter ({watcherCount}) · watcher
+                </td>
+                <td className="py-1.5 pr-3"><BoolPill v={false} /></td>
+                <td className="py-1.5 pr-3"><BoolPill v={false} /></td>
+                <td className="py-1.5 pr-3"><BoolPill v={false} /></td>
+                <td className="py-1.5 text-fg-3">
+                  post-hoc flagging; sees results (file changes, outputs) hooks structurally miss
+                </td>
+              </tr>
+            </Table>
+          )}
+        </ChartShell>
 
-      <PolicyLayersCard api={policyApi} />
+        <HookCoverageCard />
 
-      <EvidenceCard />
-
-      {/* Agent Access P10: node MCP relay status, approved servers,
-          coverage matrix and effective state. */}
-      <MCPAccessSection />
-
-      <MCPPinsCard />
+        <EvidenceCard />
+      </TabPanel>
     </div>
+  );
+}
+
+// The Approvals card's wrapper id: "approve…" on a verdict row (Verdicts
+// tab) switches to Overview and scrolls here.
+const SECURITY_APPROVALS_ANCHOR = "security-approvals";
+
+// The Test a command card's wrapper id: the empty verdict states' "Test a
+// command" switches to the Rules tab and scrolls here.
+const SECURITY_GUARD_TEST_ANCHOR = "security-guard-test";
+
+// The raw-TOML policy editor's wrapper id: the invalid-user-policy banner's
+// "Edit the policy file" switches to the Rules tab and scrolls here.
+const SECURITY_POLICY_EDITOR_ANCHOR = "security-policy-editor";
+
+// DecisionCell is a verdict's decision pill plus the "from <wanted>" pill
+// when the channel degraded it. Shared by the timeline and Overview's list.
+function DecisionCell({ ev }: { ev: GuardEvent }) {
+  return (
+    <>
+      <VocabPill vocab="guardDecision" value={ev.decision} tone={decisionTone(ev.decision)}>
+        {ev.decision}
+        {ev.enforced && <Icon icon={Check} size={10} label="enforced" />}
+      </VocabPill>
+      {ev.degraded_from && (
+        <Pill
+          variant="neutral"
+          className="ml-1"
+          title={`The verdict wanted ${ev.degraded_from} but this channel cannot express it (§6.2 degradation - recorded, never silent).`}
+        >
+          from {ev.degraded_from}
+        </Pill>
+      )}
+    </>
+  );
+}
+
+// SessionLink is a verdict's session id: copy on click, and a link to that
+// session's Messages tab.
+function SessionLink({ id }: { id: string }) {
+  return (
+    <CopyOnClick
+      value={id}
+      title={
+        <>
+          Copy the full session id <span className="break-all font-mono">{id}</span>
+        </>
+      }
+    >
+      <Link
+        // Deep-links straight to the Messages tab (LOC/guardmsg/APM
+        // followups plan Item 2.4): that verdict's session drawer now
+        // interleaves this exact rule's block into its timeline, so a
+        // reviewer following this link from the global verdict table
+        // lands where the block actually happened, not on Overview.
+        to={`/sessions?session=${encodeURIComponent(id)}&dtab=messages`}
+        className="font-mono text-[10.5px] text-accent underline decoration-dotted decoration-accent/50 underline-offset-[3px] hover:decoration-accent"
+      >
+        {fmtShortId(id, 8)}
+      </Link>
+    </CopyOnClick>
+  );
+}
+
+// QuietRules is the empty verdict states' pointer at the Rules tab's Test a
+// command card (the dashboard twin of `observer guard test`); just the
+// sentence when the Rules tab is hidden.
+function QuietRules({ onTryTest }: { onTryTest?: () => void }) {
+  if (!onTryTest) return <>The rules stayed quiet.</>;
+  return (
+    <>
+      The rules stayed quiet. Use{" "}
+      <button
+        type="button"
+        className="text-accent underline decoration-dotted decoration-accent/50 underline-offset-[3px] hover:decoration-accent"
+        onClick={onTryTest}
+      >
+        Test a command
+      </button>{" "}
+      on the Rules tab to see a verdict end to end.
+    </>
+  );
+}
+
+// RecentVerdictsCard is Overview's glance at the newest verdicts (last 7
+// days, unfiltered): its own small read, independent of the Verdicts tab's
+// filters, with a hand-off to the full timeline.
+function RecentVerdictsCard({
+  ruleDefs,
+  onSeeAll,
+  onTryTest,
+}: {
+  ruleDefs: Map<string, GuardRule[]>;
+  onSeeAll: () => void;
+  onTryTest?: () => void;
+}) {
+  const api = useApi<GuardEventsResponse>("/api/guard/events", {
+    hours: 168,
+    limit: SECURITY_RECENT_VERDICTS,
+  });
+  const rows = api.data?.events ?? [];
+  return (
+    <ChartShell
+      title={<TitleWithHelp text="Recent verdicts" helpId="chart.security_timeline" />}
+      icon={SECURITY_SECTION_ICONS.verdictTimeline}
+      right={
+        <button
+          type="button"
+          className="text-caption text-accent underline decoration-dotted decoration-accent/50 underline-offset-[3px] hover:decoration-accent"
+          onClick={onSeeAll}
+        >
+          See all in Verdicts
+        </button>
+      }
+    >
+      {api.loading && !api.data ? (
+        <InlineLoading label="Loading recent verdicts" block />
+      ) : rows.length === 0 ? (
+        <p className="text-caption text-fg-3">
+          No guard verdicts in the last 7 days. <QuietRules onTryTest={onTryTest} />
+        </p>
+      ) : (
+        <ul className="divide-y divide-line-1/60">
+          {rows.map((ev) => (
+            <li key={ev.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2 text-caption">
+              <span className="w-[112px] shrink-0 whitespace-nowrap text-fg-3">{fmtClock(ev.ts)}</span>
+              <span className="min-w-0 flex-1 basis-[220px]">
+                <RuleCell id={ev.rule_id} category={ev.category} defs={ruleDefs.get(ev.rule_id)} compact />
+              </span>
+              <span className="shrink-0">
+                <DecisionCell ev={ev} />
+              </span>
+              <span className="shrink-0 text-fg-2">{ev.tool || "-"}</span>
+              {ev.session_id && (
+                <span className="shrink-0">
+                  <SessionLink id={ev.session_id} />
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </ChartShell>
   );
 }
 
@@ -928,6 +1224,7 @@ function MCPPinsCard() {
         </>
       }
     >
+      <MCPToolsBar onScanned={() => api.reload()} />
       {api.loading ? (
         <InlineLoading label="Loading MCP servers" block />
       ) : servers.length === 0 ? (
@@ -1107,11 +1404,7 @@ function GuardModeCard({ sum, loading }: { sum: GuardSummary | null; loading: bo
       // + org-bundle + CEL survive server-side regardless.
       const cfg = await fetchJSON<{ config: { Guard: Record<string, unknown> } }>("/api/config");
       const guardSec = { ...cfg.config.Guard, Mode: target, Enabled: target !== "off" };
-      await fetchJSON("/api/config/section/guard", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(guardSec),
-      });
+      await saveConfigSection("guard", guardSec);
       markRestartPending("guard");
       setSavedAs(target);
       setTarget(null);
@@ -1468,6 +1761,16 @@ type GuardBudget = {
   days: number;
   daily_p95_usd: number;
   daily_max_usd: number;
+  // The token-denominated caps ([guard.budget] *_tokens, rules B-621..B-624)
+  // and their usage on the same substrate (T-204). Optional: an older daemon
+  // does not send them.
+  session_tokens?: number;
+  daily_tokens?: number;
+  weekly_tokens?: number;
+  monthly_tokens?: number;
+  usage_today_tokens?: number;
+  usage_week_tokens?: number;
+  usage_month_tokens?: number;
 };
 
 // niceCeil rounds a suggestion up to an amount a human would type.
@@ -1479,9 +1782,17 @@ function niceCeil(x: number): number {
   return Math.ceil(x / 5) * 5;
 }
 
-const usd = (v: number) => `$${v.toFixed(2)}`;
+const usd = (v: number) => fmtUSD(v);
 
-// GuardBudgetCard — the G2.4 budget guardrails: suggested thresholds
+// GuardBudgetCard renders the budget guardrails in the developer cost display:
+// the dollar card (caps, spend, suggestions) in dollars, and in the token-usage
+// view the token caps with their usage, editable from the dashboard (T-204: in
+// that view the caps used to be editable only in config.toml).
+function GuardBudgetCard() {
+  return dollarsShown() ? <GuardBudgetDollarCard /> : <GuardBudgetTokenCard />;
+}
+
+// GuardBudgetDollarCard - the G2.4 budget guardrails: suggested thresholds
 // from observed spend (p95 + 25% headroom — a tripwire above normal
 // use, not a cost target) and a burn-down meter when a daily budget
 // is set. Applying a suggestion writes [guard.budget] through the one
@@ -1489,7 +1800,7 @@ const usd = (v: number) => `$${v.toFixed(2)}`;
 // the Cost page's BudgetCard (advisory MONTHLY budgets, never a
 // gate): these are the guard's per-session/per-day tripwires, and
 // `hard` ones actually deny at the proxy.
-function GuardBudgetCard() {
+function GuardBudgetDollarCard() {
   const api = useApi<GuardBudget>("/api/guard/budget");
   const [confirm, setConfirm] = useState<{ which: "session" | "daily"; value: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1515,11 +1826,7 @@ function GuardBudgetCard() {
       if (confirm.which === "session") budget.SessionUSD = confirm.value;
       else budget.DailyUSD = confirm.value;
       guardSec.Budget = budget;
-      await fetchJSON("/api/config/section/guard", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(guardSec),
-      });
+      await saveConfigSection("guard", guardSec);
       markRestartPending("guard");
       setSaved(`${confirm.which} budget ${usd(confirm.value)}`);
       setConfirm(null);
@@ -1665,6 +1972,144 @@ function GuardBudgetCard() {
                   {busy ? "Saving…" : "Set budget"}
                 </button>
                 <button type="button" className={actionBtn} onClick={() => setConfirm(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {error && <div className="text-danger">{error}</div>}
+        </div>
+      ) : null}
+    </ChartShell>
+  );
+}
+
+// GuardBudgetTokenCard is the budget guardrails card in the token-usage
+// developer cost display (T-204): the node's token caps ([guard.budget]
+// session_tokens / daily_tokens / weekly_tokens / monthly_tokens, rules
+// B-621..B-624) with each window's usage, editable here through the same
+// config seam the dollar card uses. No dollar figure is read or shown.
+function GuardBudgetTokenCard() {
+  const api = useApi<GuardBudget>("/api/guard/budget");
+  const [editing, setEditing] = useState<TokenCapWindow | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState("");
+  const [error, setError] = useState("");
+  const b = api.data;
+  const parsed = editing ? tokenCapDraft(draft) : null;
+
+  const capText = (v: number | undefined) => (v && v > 0 ? `${fmtCompact(v)} tok` : "off");
+
+  const save = async () => {
+    if (!editing || !parsed?.ok) return;
+    setBusy(true);
+    setError("");
+    try {
+      const cfg = await fetchJSON<{ config: { Guard: { Budget?: Record<string, unknown> } & Record<string, unknown> } }>(
+        "/api/config",
+      );
+      const guardSec = { ...cfg.config.Guard };
+      guardSec.Budget = { ...(guardSec.Budget ?? {}), [editing.configKey]: parsed.value };
+      await saveConfigSection("guard", guardSec);
+      markRestartPending("guard");
+      setSaved(`${editing.label.toLowerCase()} cap ${capText(parsed.value)}`);
+      setEditing(null);
+      api.reload();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ChartShell
+      title={<TitleWithHelp text="Budget guardrails" helpId="card.security_budget" />}
+      icon={SECURITY_SECTION_ICONS.budgetGuardrails}
+      right={saved ? <Pill variant="warn">saved: {saved} - restart the daemon to apply</Pill> : undefined}
+      sub={
+        <>
+          Usage tripwires in tokens on the guard's own substrate: soft caps flag, hard caps deny at the proxy -
+          clients not routed through the proxy can't be hard-stopped. 0 = off. Your organization shows token usage
+          instead of costs, so the caps here are token caps.
+        </>
+      }
+    >
+      {api.loading ? (
+        <InlineLoading label="Loading budgets" block />
+      ) : b ? (
+        <div className="space-y-3 text-[11.5px]">
+          <Table
+            minWidth={480}
+            head={
+              <tr>
+                <th className="py-1 pr-3 font-medium">Cap</th>
+                <th className="py-1 pr-3 text-right font-medium">Configured</th>
+                <th className="py-1 pr-3 text-right font-medium">Used</th>
+                <th className="py-1 font-medium"></th>
+              </tr>
+            }
+          >
+            {TOKEN_CAP_WINDOWS.map((w) => {
+              const cap = b[w.capField];
+              const used = w.usageField ? b[w.usageField] : undefined;
+              const pct = capUsePct(used, cap);
+              return (
+                <tr key={w.id} className="border-b border-line-1/60 last:border-0">
+                  <td className="py-1.5 pr-3 text-fg-2">{w.label}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-fg-1">{capText(cap)}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-fg-2">
+                    {used == null ? "-" : `${fmtCompact(used)} tok`}
+                    {pct != null && (
+                      <span className={pct >= 100 ? "ml-1 font-semibold text-danger" : pct >= 75 ? "ml-1 text-warn" : "ml-1 text-fg-3"}>
+                        ({Math.round(pct)}%)
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1.5 text-right">
+                    <button
+                      type="button"
+                      className={actionBtn}
+                      disabled={busy}
+                      onClick={() => {
+                        setEditing(w);
+                        setDraft(cap && cap > 0 ? String(cap) : "");
+                        setError("");
+                      }}
+                    >
+                      Set…
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </Table>
+          {editing && (
+            <div className="rounded-2 border border-line-2 bg-bg-3 p-3">
+              <label className="flex flex-wrap items-center gap-2 text-fg-2">
+                <span>{editing.label} token cap</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="e.g. 2M (0 = off)"
+                  aria-invalid={parsed ? !parsed.ok : undefined}
+                  className="w-40 rounded-2 border border-line-2 bg-bg-2 px-2 py-1 font-mono text-[11px] text-fg-1"
+                />
+              </label>
+              {parsed && !parsed.ok && draft.trim() !== "" && <div className="mt-1 text-danger">{parsed.error}</div>}
+              <p className="mt-2 text-fg-3">
+                Sets <code className="rounded-1 bg-bg-2 px-1 font-mono text-[10.5px]">[guard.budget] {editing.configKey.replace(/Tokens$/, "").toLowerCase()}_tokens</code>{" "}
+                through the config seam; binds at the next daemon restart. Breach behavior stays{" "}
+                {b.hard ? "hard (deny at the proxy)" : "soft (flag)"}.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <button type="button" className={actionBtn} disabled={busy || !parsed?.ok} onClick={save}>
+                  {busy ? "Saving…" : "Set cap"}
+                </button>
+                <button type="button" className={actionBtn} onClick={() => setEditing(null)}>
                   Cancel
                 </button>
               </div>
@@ -2010,6 +2455,9 @@ function ApprovalsCard({
   const [custom, setCustom] = useState(false);
   const [scope, setScope] = useState<"session" | "project" | "global">("session");
   const [sessionId, setSessionId] = useState("");
+  // D-571: the session is picked from this node's recent sessions; an id
+  // older than the list can still be pasted.
+  const sessions = useSessionOptions();
   const [ttl, setTtl] = useState(24);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -2276,14 +2724,19 @@ function ApprovalsCard({
           )}
           {scope !== "global" && (
             <div className="flex flex-wrap items-center gap-2">
-              <label className="text-fg-3">Session id</label>
-              <input
-                className="w-72 rounded-2 border border-line-2 bg-bg-2 px-2 py-1 font-mono text-caption text-fg-1"
+              <span className="text-fg-3">Session</span>
+              <SinglePicker
+                className="w-72"
+                options={keepSelected(sessions.options, sessionId ? [sessionId] : [])}
                 value={sessionId}
-                onChange={(e) => setSessionId(e.target.value)}
+                onChange={setSessionId}
+                allowFree
+                freeLabel="Use session id"
+                loading={sessions.loading}
                 placeholder={
                   scope === "project" ? "any session in the target project" : "the session to except"
                 }
+                ariaLabel="Session id"
               />
             </div>
           )}
@@ -2382,6 +2835,10 @@ type PromptStatus = {
   config: PromptStatusConfig;
   effective_modes: Record<string, string>;
   clients: PromptClient[] | null;
+  // Tools with NO pre-send prompt seam (no verified prompt-submit hook, no
+  // proxy route): prompt rules can only flag their prompts after they were
+  // sent, from the captured transcript (the "capture" lane).
+  post_hoc_only?: string[] | null;
   reconsider_total: number;
   reconsider_expired: number;
   pending: PromptReconsiderRow[] | null;
@@ -2393,12 +2850,15 @@ type PromptEvent = {
   ts: string;
   session_id?: string;
   tool?: string;
-  lane: "hook" | "proxy" | string;
+  lane: "hook" | "proxy" | "capture" | string;
   rule_id: string;
   category?: string;
   severity?: string;
   decision?: string;
   outcome?: string;
+  // What the developer experienced (the decision x seam table):
+  // warn | confirm | re-enter | block | flag-after. Absent on older rows.
+  action?: string;
   enforced: boolean;
   detectors?: string[] | null;
   fingerprint?: string;
@@ -2415,6 +2875,16 @@ const HOOK_LANE_TILE: Readonly<Record<string, Tone>> = {
   active: "danger",
   off: "neutral",
   observe_only: "warn",
+};
+
+// PROMPT_ACTION_LABEL is the developer-facing name of each action the
+// decision x seam table (internal/guard/promptaction.go) can resolve to.
+const PROMPT_ACTION_LABEL: Record<string, string> = {
+  warn: "warning",
+  confirm: "confirm dialog",
+  "re-enter": "resend to confirm",
+  block: "blocked",
+  "flag-after": "nothing before send (flagged after)",
 };
 
 // OutcomePill renders a prompt-guard outcome from the ONE
@@ -2517,6 +2987,7 @@ function PromptGuardCard() {
   const approvals = status.data?.approvals ?? [];
   const clients = status.data?.clients ?? [];
   const wiredCount = clients.filter((c) => c.wire_state === "auto_wired").length;
+  const postHocOnly = status.data?.post_hoc_only ?? [];
 
   // Pending reconsider-once grants and active R-172/R-190 grants. Rebuilt
   // per render (the Clear / Revoke buttons read busy). Time columns sort
@@ -2686,6 +3157,16 @@ function PromptGuardCard() {
         </div>
       ) : null}
 
+      {postHocOnly.length > 0 && (
+        <div className="mb-4 rounded-2 border border-line-2 bg-bg-3 p-3 text-[11.5px] text-fg-2">
+          <span className="font-semibold text-fg-1">No pre-send seam ({postHocOnly.length} tools): </span>
+          these tools expose no prompt-submit hook that can stop a prompt and no proxy route, so a prompt rule
+          cannot stop the prompt before it reaches the model. A finding is flagged afterwards from the
+          captured transcript (lane "capture"); antigravity-cli additionally warns the model before the call
+          (PreInvocation). {postHocOnly.join(", ")}
+        </div>
+      )}
+
       {err && <div className="mb-3 text-[11.5px] text-danger">{err}</div>}
 
       {probeChecks && (
@@ -2778,6 +3259,7 @@ function PromptGuardCard() {
               <th className="py-1 pr-3 font-medium">Rule</th>
               <th className="py-1 pr-3 font-medium">Detectors</th>
               <th className="py-1 pr-3 font-medium">Outcome</th>
+              <th className="py-1 pr-3 font-medium">Developer saw</th>
               <th className="py-1 font-medium">Session</th>
             </tr>
           }
@@ -2794,6 +3276,7 @@ function PromptGuardCard() {
               <td className="py-1.5 pr-3">
                 {ev.outcome ? <OutcomePill outcome={ev.outcome} /> : <span className="text-fg-3">-</span>}
               </td>
+              <td className="whitespace-nowrap py-1.5 pr-3 text-fg-2">{PROMPT_ACTION_LABEL[ev.action ?? ""] ?? "-"}</td>
               <td className="whitespace-nowrap py-1.5">
                 {ev.session_id ? (
                   <Tooltip content={<span className="break-all font-mono">{ev.session_id}</span>}>

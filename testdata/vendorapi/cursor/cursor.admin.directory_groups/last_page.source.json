@@ -1,0 +1,38 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "groups": "VerifiedOfficial",
+    "groups[]": "VerifiedOfficial",
+    "groups[].createdAt": "VerifiedOfficial",
+    "groups[].id": "VerifiedOfficial",
+    "groups[].memberCount": "VerifiedOfficial",
+    "groups[].monthlySpendingLimitDollars": "VerifiedOfficial",
+    "groups[].name": "VerifiedOfficial",
+    "groups[].updatedAt": "VerifiedOfficial",
+    "pagination": "VerifiedOfficial",
+    "pagination.hasNextPage": "VerifiedOfficial",
+    "pagination.hasPreviousPage": "VerifiedOfficial",
+    "pagination.page": "VerifiedOfficial",
+    "pagination.pageSize": "VerifiedOfficial",
+    "pagination.totalCount": "VerifiedOfficial",
+    "pagination.totalPages": "VerifiedOfficial"
+  },
+  "fixture_sha256": "30ab37919df6dd426bbb16c0af44d15134a52ef9e0f61b44aec3f97133431bed",
+  "http": {
+    "method": "GET",
+    "path": "/teams/directory-groups",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Team directory groups\" section. Verbatim example: the documented terminal page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "Cursor Admin API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "d6cf7e1dd3314a1b28f4ac1f699c255c0fd0b6acbff5c0d03cfb7b0837325cd3",
+  "source_url": "https://cursor.com/docs/account/teams/admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.directory_groups"
+}

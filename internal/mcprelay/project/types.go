@@ -267,12 +267,19 @@ type StdioEntry struct {
 
 // Staged is a writer's prepared edit: what the file holds now and what it
 // would hold after. Changed=false means the desired state is already
-// present (idempotent re-apply: nothing is journaled or written).
+// present (idempotent re-apply: nothing is journaled or written). Before
+// and After live only in this process (the Commit CAS compares against
+// Before); neither is persisted nor hashed into the journal.
 type Staged struct {
 	Changed bool
 	// Before is the file's current bytes verbatim (nil = absent).
 	Before []byte
 	After  []byte
+	// Owned maps every relay-owned entry key in After (a wrapped stdio
+	// entry, a relay remote entry) to its owned digest (OwnedStdioDigest /
+	// OwnedRemoteDigest). The journal stores these, never a whole-file
+	// digest (T-397).
+	Owned map[string]string
 	// Wrapped are the original stdio entries this stage replaces.
 	Wrapped []StdioEntry
 	// RemoteKeys are the relay-owned remote entry keys this stage adds or
@@ -286,11 +293,15 @@ type Staged struct {
 // Staged.Before; Revert is the format-aware reversal of ONLY the
 // relay-owned entries named by rows (a wrapped stdio entry gets its
 // journaled original back, a relay remote entry is deleted, everything
-// else is preserved) under the writer's own read-compare-write CAS.
+// else is preserved) under the writer's own read-compare-write CAS; Owned
+// returns the CURRENT owned digest of each row's entry (VerifyApplied's
+// input). Every edit is surgical: only the relay-owned entries change and
+// every other byte of the config stays (D-268 / D-270, T-397).
 type Writer interface {
 	Stage(ctx context.Context, client Client, desired Desired) (Staged, error)
 	Commit(ctx context.Context, client Client, staged Staged) error
 	Revert(ctx context.Context, client Client, rows []JournalRow) error
+	Owned(ctx context.Context, client Client, rows []JournalRow) (map[string]string, error)
 }
 
 // RowKind classifies a journal row.
@@ -320,17 +331,19 @@ type JournalRow struct {
 	OrigCwd     string
 	OrigEnvRefs []string
 	// ConfigGeneration is the CAS target (1 on the first write of this
-	// entry; bumped by every re-write).
+	// entry; bumped when the relay-owned entry changes shape).
 	ConfigGeneration int64
-	// BackupPath / BackupSHA256 name the verbatim pre-relay backup the row's
-	// FIRST write took (a re-write keeps it: the backup is the pre-relay
-	// original).
+	// BackupPath / BackupSHA256 are LEGACY: an older build kept a verbatim
+	// whole-file backup of the client config and its digest here. Since
+	// T-397 nothing writes them; the next projection clears them (and the
+	// node journal removes the backup file once no row names it), and a
+	// restore never reads the backup.
 	BackupPath   string
 	BackupSHA256 string
-	// AppliedSHA256 is the digest of the bytes the write that produced this
-	// row put on disk ("" = a pre-migration-132 row). A later write event on
-	// the same config that built on exactly those bytes refreshes it (the
-	// entry is still in the file it wrote).
+	// AppliedSHA256 is the OWNED digest of the entry this row's write put
+	// on disk (OwnedStdioDigest / OwnedRemoteDigest), never a digest of the
+	// whole config ("" = a pre-migration-132 row; a whole-file digest from
+	// an older build never matches and is replaced at the next projection).
 	AppliedSHA256 string
 	AppliedAt     time.Time
 	// VServer / RegistryServerID are the approved binding a RowStdioWrap
@@ -349,20 +362,15 @@ func (r JournalRow) Kind() RowKind {
 }
 
 // Journal is the durable launch-journal seam (Lane N-M's
-// mcp_relay_launch_spec store + the backup FILE half in internal/mcprelay/
-// journal.go). Put must be durable before it returns; a failure aborts the
-// write (restore-on-disable is only possible for a write whose original was
-// journaled). Backup writes the verbatim original to an owner-only file and
-// fsyncs it (doc3 §12.1 step 1); RestoreWhole rewrites the config byte-
-// identically from that file and MUST refuse with ErrConfigChanged when the
-// config's current bytes differ from row.AppliedSHA256 (Sol P3+P4 finding
-// 7) and with ErrNoAppliedDigest when the row carries none.
+// mcp_relay_launch_spec store). Put must be durable before it returns; a
+// failure aborts the write (restore-on-disable is only possible for a write
+// whose original launch was journaled). The journal holds the original
+// launch (command, args, cwd, env KEY names) and the owned digest only:
+// never a copy of the client config nor a digest of the whole file (T-397).
 type Journal interface {
 	List(ctx context.Context) ([]JournalRow, error)
 	Put(ctx context.Context, row JournalRow, expectedGeneration int64) error
 	Delete(ctx context.Context, tool, configPath, entryKey string) error
-	Backup(ctx context.Context, client Client, original []byte) (backupPath, sha256Hex string, err error)
-	RestoreWhole(ctx context.Context, client Client, row JournalRow) error
 }
 
 // Op is one planned action for one client.
@@ -392,13 +400,8 @@ type Receipt struct {
 	Refused []EntryRefusal
 	// Remote lists the relay-owned remote entry keys added or changed.
 	Remote []string
-	// BackupPath is the verbatim pre-write backup this apply took ("" when
-	// every row already had one).
-	BackupPath string
-	// AppliedSHA256 is the digest of the bytes written.
-	AppliedSHA256 string
-	// Note is a non-fatal remark (a post-commit applied-digest refresh that
-	// failed: those rows under-claim until the next write event).
+	// Note is a non-fatal remark (an owned-digest refresh that failed:
+	// those rows under-claim until the next projection).
 	Note string
 	Err  string
 }
@@ -409,14 +412,11 @@ type Report struct {
 	Receipts    []Receipt
 }
 
-// Restore modes.
+// Restore modes. Since T-397 the only mode is the reversal: no copy of a
+// client config is kept to rewrite it from.
 const (
-	// RestoreWholeFile: the config was rewritten byte-identically from the
-	// pre-relay backup (single write event, config untouched since).
-	RestoreWholeFile = "whole_file"
-	// RestoreReversal: only the relay-owned entries were reversed in place
-	// (config edited since the write, several write events, or a pre-132
-	// row); everything else in the file was preserved.
+	// RestoreReversal: only the relay-owned entries were reversed in place;
+	// everything else in the file was preserved.
 	RestoreReversal = "reversal"
 )
 
@@ -425,11 +425,11 @@ type RestoreReceipt struct {
 	Client Client
 	// Rows is the number of journal rows the group held.
 	Rows int
-	// Mode is RestoreWholeFile or RestoreReversal ("" when nothing ran).
+	// Mode is RestoreReversal ("" when nothing ran).
 	Mode string
 	// Rule names the restore-rule row that decided the mode.
 	Rule string
-	// Note explains a fallback (a refused whole-file restore).
+	// Note is a non-fatal remark.
 	Note     string
 	Restored bool
 	Err      string

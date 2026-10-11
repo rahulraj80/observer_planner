@@ -377,7 +377,7 @@ func applyGatewayProviders(gw *gatewayProvidersHandle, res orgclient.PolicyResou
 	}
 	if !res.EnforceAllowed {
 		gw.recordInert(res.Version, res.BodyHash, res.InertReason)
-		logger.Info("policy resource: gateway.providers accepted but INERT — the node's own lanes keep routing",
+		logger.Info("policy resource: gateway.providers accepted but INERT - the node's own lanes keep routing",
 			"version", res.Version, "reason", res.InertReason)
 		return
 	}
@@ -394,7 +394,7 @@ func applyGatewayProviders(gw *gatewayProvidersHandle, res orgclient.PolicyResou
 // §4). Unlike gatewayProvidersHandle/nodeGovernanceHandle, it applies
 // nothing onto a live subsystem — the compiled spec is only ever READ, at
 // the moment of a local action, by the four dashboard enforcement seams
-// (dashboard.Options.FeatureGate / TerminalFeatureGate). So this handle is
+// (dashapi.Options.FeatureGate / TerminalFeatureGate). So this handle is
 // simpler than its siblings: no apply/clear closures, just a mutex-guarded
 // pointer to the latest accepted spec plus enough identity to answer the
 // P0-6 policy_state effective-state row.
@@ -413,6 +413,71 @@ type nodeFeaturesHandle struct {
 	// a nil writer is the ungoverned/solo no-op. Invoked AFTER the state mutex
 	// is released so file I/O never holds the lock.
 	sidecarWriter func(disallow []string)
+	// toolGrant answers the dashboard launch gate's tool access question
+	// (request-grants G8, SetToolGrant): a verified org grant for exactly
+	// this tool, counting one use. nil = no grants.
+	toolGrant func(tool string) (grantID int64, ok bool)
+	// featureGrant answers "does a verified feature access grant name this
+	// node.features feature" (request-grants G8, SetFeatureGrant). A feature
+	// grant is time-bound only, so nothing is counted. nil = no grants.
+	featureGrant func(feature string) (grantID int64, ok bool)
+}
+
+// SetFeatureGrant binds the feature access grant reader (request-grants
+// G8); nil-safe.
+func (h *nodeFeaturesHandle) SetFeatureGrant(fn func(feature string) (int64, bool)) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.featureGrant = fn
+	h.mu.Unlock()
+}
+
+// grantedFeature asks the bound reader about feature (0, false when none).
+func (h *nodeFeaturesHandle) grantedFeature(feature string) (int64, bool) {
+	h.mu.Lock()
+	fn := h.featureGrant
+	h.mu.Unlock()
+	if fn == nil {
+		return 0, false
+	}
+	id, ok := fn(feature)
+	return id, ok && id > 0
+}
+
+// SetToolGrant binds the tool access grant reader (request-grants G8).
+// Called once at daemon construction, where the long-lived DB handle exists;
+// nil-safe.
+func (h *nodeFeaturesHandle) SetToolGrant(fn func(tool string) (int64, bool)) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.toolGrant = fn
+	h.mu.Unlock()
+}
+
+// ToolLaunchAllowed is ToolAllowed for a LAUNCH: a tool the org disallows
+// still launches under a verified tool access grant for it that has a use
+// left. This call only checks that a use is left and counts none; the
+// launched process claims its use once (M3-10). It returns the grant id that
+// let the launch through (0 = none needed or none held).
+func (h *nodeFeaturesHandle) ToolLaunchAllowed(tool string) (bool, string, int64) {
+	allowed, reason := h.ToolAllowed(tool)
+	if allowed || h == nil {
+		return allowed, reason, 0
+	}
+	h.mu.Lock()
+	fn := h.toolGrant
+	h.mu.Unlock()
+	if fn == nil {
+		return false, reason, 0
+	}
+	if id, ok := fn(tool); ok && id > 0 {
+		return true, fmt.Sprintf("allowed by org grant #%d", id), id
+	}
+	return false, reason, 0
 }
 
 // SetSidecarWriter binds the node.features LKG sidecar writer (P6 item 5).
@@ -467,7 +532,7 @@ func newNodeFeaturesHandle() *nodeFeaturesHandle {
 	return &nodeFeaturesHandle{}
 }
 
-// Allowed implements the dashboard.Options.FeatureGate closure shape:
+// Allowed implements the dashapi.Options.FeatureGate closure shape:
 // (bool allowed, string reason). Nil-safe.
 func (h *nodeFeaturesHandle) Allowed(feature string) (bool, string) {
 	if h == nil {
@@ -477,10 +542,15 @@ func (h *nodeFeaturesHandle) Allowed(feature string) (bool, string) {
 	spec := h.state.spec
 	h.mu.Unlock()
 	d := nodefeatures.FeatureDecision(spec, feature)
+	if !d.Allowed {
+		if id, ok := h.grantedFeature(feature); ok {
+			return true, fmt.Sprintf("allowed by org grant #%d", id)
+		}
+	}
 	return d.Allowed, d.Reason
 }
 
-// TerminalAllowed implements the dashboard.Options.TerminalFeatureGate
+// TerminalAllowed implements the dashapi.Options.TerminalFeatureGate
 // closure shape: (bool allowed, string reason). Nil-safe.
 func (h *nodeFeaturesHandle) TerminalAllowed(requestedSandbox bool) (bool, string) {
 	if h == nil {
@@ -490,6 +560,16 @@ func (h *nodeFeaturesHandle) TerminalAllowed(requestedSandbox bool) (bool, strin
 	spec := h.state.spec
 	h.mu.Unlock()
 	d := nodefeatures.TerminalDecision(spec, requestedSandbox)
+	if !d.Allowed && nodefeatures.TerminalDecisionEnabled(spec, true).Allowed {
+		// Denied because terminals are disabled: a feature access grant
+		// lifts that, and only that (the sandbox requirement stands).
+		if id, ok := h.grantedFeature(nodefeatures.FeatureTerminals); ok {
+			if g := nodefeatures.TerminalDecisionEnabled(spec, requestedSandbox); !g.Allowed {
+				return false, g.Reason
+			}
+			return true, fmt.Sprintf("allowed by org grant #%d", id)
+		}
+	}
 	return d.Allowed, d.Reason
 }
 
@@ -594,12 +674,36 @@ func applyNodeFeatures(nf *nodeFeaturesHandle, res orgclient.PolicyResourceResul
 	}
 	if !res.EnforceAllowed {
 		nf.recordInert(res.Version, res.BodyHash, res.InertReason)
-		logger.Info("policy resource: node.features accepted but INERT — every gated seam stays fail-open",
+		logger.Info("policy resource: node.features accepted but INERT - every gated seam stays fail-open",
 			"version", res.Version, "reason", res.InertReason)
 		return
 	}
 	nf.recordApplied(res.Version, res.BodyHash, spec)
 	logger.Info("policy resource: node.features applied", "version", res.Version)
+}
+
+// orgIdentityGate reports whether the node's live enrolment identity still
+// equals (orgKey, generation). Production builds it from the org client
+// (orgIdentityGateFor); it never depends on the Plane A admission handle, so
+// every build variant (full, sbo_omit_obs, no_obs, sbo_omit_judge_client)
+// installs the same org policy families (AA-67, T-673).
+type orgIdentityGate func(orgKey string, generation int64) bool
+
+// matches is the nil-safe call: a nil gate fails closed.
+func (g orgIdentityGate) matches(orgKey string, generation int64) bool {
+	if g == nil {
+		return false
+	}
+	return g(orgKey, generation)
+}
+
+// orgIdentityGateFor builds the install gate from the org client: a fresh
+// read of the active enrolment on every call (orgclient.PolicyIdentityMatches).
+// A nil client yields a gate that always fails closed.
+func orgIdentityGateFor(ctx context.Context, oc *orgclient.Client) orgIdentityGate {
+	return func(orgKey string, generation int64) bool {
+		return oc.PolicyIdentityMatches(ctx, orgKey, generation)
+	}
 }
 
 // publishPolicyResourceResult dispatches one family's fetch/LKG outcome
@@ -609,17 +713,18 @@ func applyNodeFeatures(nf *nodeFeaturesHandle, res orgclient.PolicyResourceResul
 // egress.routing_guardrail install through *obsAdmissionHandle (nil-safe);
 // gateway.providers installs through the separate *gatewayProvidersHandle
 // (also nil-safe) since it has no obs/admission counterpart at all.
-func publishPolicyResourceResult(handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, family string, res orgclient.PolicyResourceResult, logger *slog.Logger) {
-	switch res.Status {
-	case orgclient.PRApplied, orgclient.PRAppliedInert:
+func publishPolicyResourceResult(ident orgIdentityGate, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, family string, res orgclient.PolicyResourceResult, logger *slog.Logger) {
+	switch policyResourceDisposition(res) {
+	case prDispositionInstall:
 		// Plan §6.10 / GWF-SF1: re-check live enrolment identity immediately
 		// before Publish/Apply so a fetch paused after CAS commit cannot
-		// install under a since-superseded generation. handle.OrgIdentityMatches
-		// is nil-safe (returns false on a nil handle) — this is the SAME
-		// identity gate for all three families, including gateway.providers,
-		// even though only admission/egress publish onto *handle's own Org
-		// layer.
-		if !handle.OrgIdentityMatches(res.OrgKey, res.Generation) {
+		// install under a since-superseded generation. This is the SAME
+		// identity gate for every family. It comes from the org client
+		// (ident), never from the Plane A admission handle: a build without
+		// obs has a nil handle, and gating on it dropped every org policy
+		// family, not only the obs ones (AA-67, T-673). A nil gate fails
+		// closed.
+		if !ident.matches(res.OrgKey, res.Generation) {
 			return
 		}
 		switch family {
@@ -641,18 +746,78 @@ func publishPolicyResourceResult(handle *obsAdmissionHandle, gw *gatewayProvider
 			// Agent Access P4 (mcprelay_wire.go): compile → swap → cache.
 			// A nil process handle ([mcp_relay].enabled=false) is a no-op.
 			mcpRelayPublish(res)
+		case policyfam.FamilyNodeComponents:
+			// Modular packaging P4 (components_governance.go): there is no
+			// live seam. Every process that resolves component state reads
+			// the verified cache this fetch just wrote; the daemon's
+			// background work follows at its next start, exactly like a
+			// local component change.
+			if logger != nil {
+				logger.Info("policy resource: node.components accepted; component state follows it on every new command and at the next daemon start",
+					"version", res.Version, "inert_reason", res.InertReason)
+			}
 		}
-	case orgclient.PRNone:
-		// Withdrawn (404): clear any previously-installed Org layer.
+	case prDispositionClear:
 		clearOrgLayer(handle, gw, ngov, nf, family)
-	case orgclient.PRRejected:
-		// Plan §4.4: gate rejection keeps prior LKG — EXCEPT an identity
-		// change (unenrol/re-enrol), which must ClearOrg (§6.9).
-		if res.RejectCode == orgclient.PRRejectIdentityChanged {
-			clearOrgLayer(handle, gw, ngov, nf, family)
+	case prDispositionKeep:
+		if res.Status == orgclient.PRNone && logger != nil {
+			logger.Debug("policy resource: server answered 404; keeping the installed org layer (only a signed version replaces it)",
+				"family", family)
 		}
-		// PRUnchanged / PRDeliveredUnaccepted: no Org-layer mutation.
 	}
+}
+
+// prDisposition is what one fetch result does to a family's installed Org
+// layer.
+type prDisposition int
+
+const (
+	// prDispositionKeep leaves the installed layer (or its absence) alone.
+	prDispositionKeep prDisposition = iota
+	// prDispositionInstall publishes the verified, accepted spec.
+	prDispositionInstall
+	// prDispositionClear removes the installed layer.
+	prDispositionClear
+)
+
+// prStatusDispositions maps a fetch status onto its install-seam effect. It
+// is a table so the rule is one row per status (CLAUDE.md #5); a status
+// absent from the table keeps the layer, the safe default.
+//
+// PRNone is KEEP (D-016, Sol A5-01): it is an unsigned 404, which a proxy
+// error, a route mismatch, a downgraded server or anyone between this node
+// and its org can produce, and clearing on it would silently drop an org's
+// governance, admission, egress, gateway-provider, feature or MCP-access
+// controls. Before this rule a 404 cleared the live layer while the durable
+// cache stayed on disk, so the next daemon start re-installed it from the
+// last-known-good loader anyway: the clear was neither safe nor durable. The
+// org withdraws or loosens a family by publishing a newer SIGNED version.
+var prStatusDispositions = map[orgclient.PolicyResourceStatus]prDisposition{
+	orgclient.PRApplied:             prDispositionInstall,
+	orgclient.PRAppliedInert:        prDispositionInstall,
+	orgclient.PRUnchanged:           prDispositionKeep,
+	orgclient.PRNone:                prDispositionKeep,
+	orgclient.PRDeliveredUnaccepted: prDispositionKeep,
+	// A SIGNED withdrawal addressed to this node (D-016): the one verified
+	// way the org takes a layer back.
+	orgclient.PRWithdrawn: prDispositionClear,
+	// Plan §4.4: a gate rejection keeps the prior LKG; the identity-change
+	// override is applied in policyResourceDisposition.
+	orgclient.PRRejected: prDispositionKeep,
+}
+
+// policyResourceDisposition resolves one fetch result to its install-seam
+// effect: the status table, plus the one reject that must clear - an
+// identity change (unenrol/re-enrol), plan §6.9, which is a local fact about
+// this node's enrolment rather than anything the server said.
+func policyResourceDisposition(res orgclient.PolicyResourceResult) prDisposition {
+	if res.Status == orgclient.PRRejected && res.RejectCode == orgclient.PRRejectIdentityChanged {
+		return prDispositionClear
+	}
+	if d, ok := prStatusDispositions[res.Status]; ok {
+		return d
+	}
+	return prDispositionKeep
 }
 
 // clearOrgLayer clears the install seam for one family — the plan §6.9
@@ -705,6 +870,7 @@ func runPolicyResourcePoller(ctx context.Context, cfg config.Config, oc *orgclie
 		logger = slog.Default()
 	}
 	opts := policyResourceOptionsFor(cfg, nodeLiveCapabilities(handle))
+	ident := orgIdentityGateFor(ctx, oc)
 	logger.Debug("policy resource poller: starting", "families", policyfam.SupportedFamilies)
 	_ = oc.PolicyResourcePollLoop(ctx, opts, func(pr orgclient.PolicyResourcePollResult) {
 		switch {
@@ -721,7 +887,7 @@ func runPolicyResourcePoller(ctx context.Context, cfg config.Config, oc *orgclie
 			// on a decisive fetch outcome. PolicyResourcePollLoop already
 			// logs the failure.
 		default:
-			publishPolicyResourceResult(handle, gw, ngov, nf, pr.Family, pr.Result, logger)
+			publishPolicyResourceResult(ident, handle, gw, ngov, nf, pr.Family, pr.Result, logger)
 		}
 		// Apply-then-poke: classify AFTER the Org-layer mutation so the
 		// reporter's next snapshot observes the post-apply state.
@@ -796,10 +962,24 @@ func verifyCachedPolicyResource(ctx context.Context, st *store.Store, orgURL, fa
 	// Codex SF2 / plan §4.4: LKG fail-closed without a recorded pin — never
 	// trust a cache under TOFU-absent identity (live fetch may still TOFU).
 	if pin == "" {
-		return verifiedCachedResource{}, errors.New("no org policy signing key pin recorded — refuse LKG")
+		return verifiedCachedResource{}, errors.New("no org policy signing key pin recorded - refuse LKG")
 	}
 	if pin != orgcontract.PublicKeyPinHash(pub) {
 		return verifiedCachedResource{}, errors.New("cached envelope's signing key does not match the pinned key")
+	}
+	// A v2 (bound) cache must be bound to this node's current enrolment org
+	// and member (C156-14). The projection target is not re-checked here: a
+	// binary upgrade changes this build's target, and the cached projection
+	// onto the older one is a subset this build still compiles until the
+	// next fetch replaces it.
+	if resource.Binding != nil {
+		enr, eerr := st.LoadEnrolment(ctx)
+		if eerr != nil {
+			return verifiedCachedResource{}, fmt.Errorf("load enrolment: %w", eerr)
+		}
+		if enr == nil || resource.Binding.OrgID != enr.OrgID || resource.Binding.Subject != enr.UserID {
+			return verifiedCachedResource{}, errors.New("cached envelope is bound to a different org or member than this enrolment")
+		}
 	}
 	spec, _, cerr := policyfam.CompileFamilyBody(family, []byte(resource.Body), orgclient.DefaultMaxPolicyResourceBodyBytes)
 	if cerr != nil {
@@ -901,20 +1081,20 @@ func capabilitiesSubsetLKG(required, live []string) bool {
 // (matrix rows 3/4) as the family's Org layer, after re-applying the same
 // accept_families / runtime-capability gates live accept uses (plan §4.4 /
 // §6.6 — LKG must not resurrect a withdrawn or unrealizable envelope).
-func installPolicyResourceLKG(family, orgKey string, generation int64, opts orgclient.PolicyResourceOptions, cached verifiedCachedResource, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
+func installPolicyResourceLKG(ident orgIdentityGate, family, orgKey string, generation int64, opts orgclient.PolicyResourceOptions, cached verifiedCachedResource, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
 	if !containsString(family, opts.AcceptFamilies) {
-		logger.Info("policy resource LKG: family not in accept_families — leaving uninstalled", "family", family)
+		logger.Info("policy resource LKG: family not in accept_families - leaving uninstalled", "family", family)
 		return
 	}
 	if adm, ok := cached.spec.(admission.PolicySpec); ok {
 		if verr := admission.ValidateRuntimeCaps(adm, containsString("judge", opts.LiveCapabilities)); verr != nil {
-			logger.Info("policy resource LKG: body-derived capability mismatch — leaving uninstalled",
+			logger.Info("policy resource LKG: body-derived capability mismatch - leaving uninstalled",
 				"family", family, "err", verr)
 			return
 		}
 	}
 	if len(cached.resource.RequiredCapabilities) > 0 && !capabilitiesSubsetLKG(cached.resource.RequiredCapabilities, opts.LiveCapabilities) {
-		logger.Info("policy resource LKG: required capabilities not live — leaving uninstalled", "family", family)
+		logger.Info("policy resource LKG: required capabilities not live - leaving uninstalled", "family", family)
 		return
 	}
 	enforceAllowed, inertReason := policyResourceEnforceGate(family, cached.spec, opts.PreauthorizeEnforce)
@@ -922,7 +1102,7 @@ func installPolicyResourceLKG(family, orgKey string, generation int64, opts orgc
 	if !enforceAllowed {
 		status = orgclient.PRAppliedInert
 	}
-	publishPolicyResourceResult(handle, gw, ngov, nf, family, orgclient.PolicyResourceResult{
+	publishPolicyResourceResult(ident, handle, gw, ngov, nf, family, orgclient.PolicyResourceResult{
 		Status: status, Version: cached.resource.Version, EnforceAllowed: enforceAllowed,
 		InertReason: inertReason, Family: family, OrgKey: orgKey, Generation: generation,
 		BodyHash: cached.resource.BodyHash, Spec: cached.spec,
@@ -939,7 +1119,7 @@ func installPolicyResourceLKG(family, orgKey string, generation int64, opts orgc
 // envelope's own version/hash/digest, then installed. Re-validates identity
 // and the floor INSIDE the fence (a concurrent writer may have already
 // caught up), matching store.WithPolicyResourceFence's own contract.
-func repairAndInstallPolicyResourceLKG(ctx context.Context, st *store.Store, orgKey string, generation int64, family string, opts orgclient.PolicyResourceOptions, cached verifiedCachedResource, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
+func repairAndInstallPolicyResourceLKG(ident orgIdentityGate, ctx context.Context, st *store.Store, orgKey string, generation int64, family string, opts orgclient.PolicyResourceOptions, cached verifiedCachedResource, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
 	commit := store.PolicyResourceCommit{
 		Generation: generation, FloorVersion: cached.resource.Version, LastVersion: cached.resource.Version,
 		BodyHash: cached.resource.BodyHash, MsgDigest: cached.digest,
@@ -956,16 +1136,16 @@ func repairAndInstallPolicyResourceLKG(ctx context.Context, st *store.Store, org
 		return &commit, nil
 	})
 	if fenceErr != nil {
-		logger.Warn("policy resource LKG: DB repair failed — leaving family uninstalled", "family", family, "err", fenceErr)
+		logger.Warn("policy resource LKG: DB repair failed - leaving family uninstalled", "family", family, "err", fenceErr)
 		return
 	}
 	if !repaired {
 		// (nil, nil) abort inside the fence: identity/floor moved — do NOT
 		// install the stale cache (Codex B7 / plan §6.5).
-		logger.Info("policy resource LKG: repair aborted (identity/floor raced) — leaving family uninstalled", "family", family)
+		logger.Info("policy resource LKG: repair aborted (identity/floor raced) - leaving family uninstalled", "family", family)
 		return
 	}
-	installPolicyResourceLKG(family, orgKey, generation, opts, cached, handle, gw, ngov, nf, logger)
+	installPolicyResourceLKG(ident, family, orgKey, generation, opts, cached, handle, gw, ngov, nf, logger)
 }
 
 // refetchPolicyResourceLKG runs matrix rows 1/2: the on-disk cache is
@@ -976,17 +1156,17 @@ func repairAndInstallPolicyResourceLKG(ctx context.Context, st *store.Store, org
 // must be re-verified from scratch). A refetch failure leaves the family
 // with no Org layer (Local/nil), reporting none/no_policy — never
 // pending_restart.
-func refetchPolicyResourceLKG(ctx context.Context, oc *orgclient.Client, st *store.Store, opts orgclient.PolicyResourceOptions, orgKey string, generation int64, family string, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
+func refetchPolicyResourceLKG(ident orgIdentityGate, ctx context.Context, oc *orgclient.Client, st *store.Store, opts orgclient.PolicyResourceOptions, orgKey string, generation int64, family string, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
 	if err := st.SavePolicyResourceETag(ctx, orgKey, generation, family, ""); err != nil {
 		logger.Warn("policy resource LKG: etag clear failed (refetch may still hit a stale 304)", "family", family, "err", err)
 	}
 	res, err := oc.FetchAndAcceptPolicyResource(ctx, family, opts)
 	if err != nil {
-		logger.Warn("policy resource LKG: refetch failed — booting with no Org layer for this family", "family", family, "err", err)
+		logger.Warn("policy resource LKG: refetch failed - booting with no Org layer for this family", "family", family, "err", err)
 		clearOrgLayer(handle, gw, ngov, nf, family)
 		return
 	}
-	publishPolicyResourceResult(handle, gw, ngov, nf, family, res, logger)
+	publishPolicyResourceResult(ident, handle, gw, ngov, nf, family, res, logger)
 	logger.Info("policy resource LKG: refetch outcome", "family", family, "status", res.Status)
 }
 
@@ -995,44 +1175,44 @@ func refetchPolicyResourceLKG(ctx context.Context, oc *orgclient.Client, st *sto
 // (floor_version, msg_digest) state row, and either install it as-is,
 // repair the DB and install, or force a refetch — never installing a
 // cryptographically valid cache that sits below the durable replay floor.
-func loadPolicyResourceLKGFamily(ctx context.Context, oc *orgclient.Client, st *store.Store, opts orgclient.PolicyResourceOptions, orgURL, orgKey string, generation int64, family string, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
+func loadPolicyResourceLKGFamily(ident orgIdentityGate, ctx context.Context, oc *orgclient.Client, st *store.Store, opts orgclient.PolicyResourceOptions, orgURL, orgKey string, generation int64, family string, handle *obsAdmissionHandle, gw *gatewayProvidersHandle, ngov *nodeGovernanceHandle, nf *nodeFeaturesHandle, logger *slog.Logger) {
 	cachePath := filepath.Join(opts.CacheDir, orgKey, strconv.FormatInt(generation, 10), family+".json")
 	cached, cacheErr := verifyCachedPolicyResource(ctx, st, orgURL, family, cachePath, opts.NodeAttrs)
 
 	stateRow, hasState, err := st.LoadPolicyResourceState(ctx, orgKey, family)
 	if err != nil {
-		logger.Warn("policy resource LKG: state read failed — leaving family uninstalled", "family", family, "err", err)
+		logger.Warn("policy resource LKG: state read failed - leaving family uninstalled", "family", family, "err", err)
 		return
 	}
 
 	switch {
 	case cacheErr != nil:
 		// Row 1: no verified cache — force a refetch.
-		refetchPolicyResourceLKG(ctx, oc, st, opts, orgKey, generation, family, handle, gw, ngov, nf, logger)
+		refetchPolicyResourceLKG(ident, ctx, oc, st, opts, orgKey, generation, family, handle, gw, ngov, nf, logger)
 	case !hasState:
 		// No durable floor at all (implicitly 0): a verified cache with
 		// version > 0 is ahead of it — same repair-then-install path as
 		// row 4 below.
-		repairAndInstallPolicyResourceLKG(ctx, st, orgKey, generation, family, opts, cached, handle, gw, ngov, nf, logger)
+		repairAndInstallPolicyResourceLKG(ident, ctx, st, orgKey, generation, family, opts, cached, handle, gw, ngov, nf, logger)
 	case cached.resource.Version < stateRow.FloorVersion,
 		cached.resource.Version == stateRow.FloorVersion && cached.digest != stateRow.MsgDigest:
 		// Row 2: cache behind the durable floor, or an equal-version
 		// digest mismatch (replay/corruption) — never install; refetch.
-		refetchPolicyResourceLKG(ctx, oc, st, opts, orgKey, generation, family, handle, gw, ngov, nf, logger)
+		refetchPolicyResourceLKG(ident, ctx, oc, st, opts, orgKey, generation, family, handle, gw, ngov, nf, logger)
 	case cached.resource.Version == stateRow.FloorVersion:
 		// Row 3: cache matches the durable floor exactly — install as-is,
 		// but only when the state row's generation still matches the live
 		// enrolment generation and the family remains accepted (plan §4.4 /
 		// §6.6 — LKG must not resurrect a withdrawn accept-list entry).
 		if stateRow.Generation != generation {
-			logger.Warn("policy resource LKG: state generation mismatch — leaving family uninstalled", "family", family,
+			logger.Warn("policy resource LKG: state generation mismatch - leaving family uninstalled", "family", family,
 				"state_gen", stateRow.Generation, "live_gen", generation)
 			return
 		}
-		installPolicyResourceLKG(family, orgKey, generation, opts, cached, handle, gw, ngov, nf, logger)
+		installPolicyResourceLKG(ident, family, orgKey, generation, opts, cached, handle, gw, ngov, nf, logger)
 	default: // cached.resource.Version > stateRow.FloorVersion
 		// Row 4: cache ahead of the durable floor — repair, then install.
-		repairAndInstallPolicyResourceLKG(ctx, st, orgKey, generation, family, opts, cached, handle, gw, ngov, nf, logger)
+		repairAndInstallPolicyResourceLKG(ident, ctx, st, orgKey, generation, family, opts, cached, handle, gw, ngov, nf, logger)
 	}
 }
 
@@ -1064,7 +1244,8 @@ func loadPolicyResourceLKG(ctx context.Context, cfg config.Config, oc *orgclient
 		return // no live generation for this identity — nothing to load
 	}
 	opts := policyResourceOptionsFor(cfg, nodeLiveCapabilities(handle))
+	ident := orgIdentityGateFor(ctx, oc)
 	for _, family := range policyfam.SupportedFamilies {
-		loadPolicyResourceLKGFamily(ctx, oc, st, opts, enr.OrgServerURL, orgKey, genRow.Generation, family, handle, gw, ngov, nf, logger)
+		loadPolicyResourceLKGFamily(ident, ctx, oc, st, opts, enr.OrgServerURL, orgKey, genRow.Generation, family, handle, gw, ngov, nf, logger)
 	}
 }

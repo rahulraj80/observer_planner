@@ -1,5 +1,7 @@
 package mcp
 
+import "github.com/marmutapp/superbased-observer/internal/codeintelapi"
+
 // V7-17 (notes-file polish, v1.7.16+): in-band warnings on V7-12 tool
 // responses. Closed-set tag strings — agents pattern-match against
 // these constants rather than parse free text. Operators can also
@@ -46,7 +48,22 @@ const (
 	// to prevent. The accompanying `note` carries the date and the two
 	// recovery commands.
 	WarningProjectArchived = "project_archived"
+
+	// WarningCodeIntelDisabled fires when the index is unavailable
+	// because code intelligence is turned OFF on this install
+	// ([codeintel].enabled = false, the default since D-307), not because
+	// it is still being built. It is emitted ALONGSIDE index_unavailable
+	// (so an agent that only knows the older tag degrades exactly as
+	// before), and the accompanying `note` (or get_relations' `reason`)
+	// carries codeintelapi.DisabledNote: the fix is a user setting, so an
+	// agent should say so rather than retry or suggest `observer index`.
+	WarningCodeIntelDisabled = "codeintel_disabled"
 )
+
+// codeIntelDisabledNote is the in-band explanation the symbol tools attach
+// next to WarningCodeIntelDisabled: the shared sentence, so the MCP answer
+// matches the CLI and `observer doctor` word for word.
+const codeIntelDisabledNote = codeintelapi.DisabledNote
 
 // appendWarning adds tag to dst iff not already present. Cheap
 // O(n) dedup — the slice rarely exceeds 3 entries.
@@ -70,5 +87,6 @@ func allKnownWarnings() []string {
 		WarningIndexChangedMidQuery,
 		WarningRegexFallbackLanguageUnsupported,
 		WarningProjectArchived,
+		WarningCodeIntelDisabled,
 	}
 }

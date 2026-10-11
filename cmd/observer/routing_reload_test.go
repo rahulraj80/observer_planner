@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing && !sbo_omit_capture_proxy
+
 package main
 
 // Tests for the P0-7 router hot-reload convergence path

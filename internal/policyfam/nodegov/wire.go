@@ -20,7 +20,14 @@ import (
 // reject a body carrying them REGARDLESS of what we do. Bumping the schema
 // makes that rejection legible (`decode_failed`, keep the previous LKG)
 // rather than mysterious. A 1b agent accepts schemas 1 and 2.
-const MaxSchema = 2
+//
+// 2 → 3 (backlog item 4, managed-node visibility): `sections.visible` and
+// `sections.settings_visible` are the org's EXPOSE directive, overriding a
+// managed-node default (ManagedNavDefaults). Publishers stamp the LOWEST schema
+// a body needs (SchemaFor), so a body that exposes nothing stays at schema 2
+// and an older agent keeps accepting it; only a body that actually exposes a
+// page is refused (legibly, decode_failed + keep LKG) by a pre-3 agent.
+const MaxSchema = 3
 
 // Body is the org-wire body for the node.governance family
 // (docs/plans/admin-controlled-plane-b-spec-2026-08-15.md §3.2 for schema 1;
@@ -65,6 +72,27 @@ type SectionsV1 struct {
 	ReadOnly         []string `json:"read_only,omitempty"`
 	SettingsHidden   []string `json:"settings_hidden,omitempty"`
 	SettingsReadOnly []string `json:"settings_read_only,omitempty"`
+	// Visible / SettingsVisible are the schema-3 EXPOSE lists: ids the org
+	// shows a managed developer even though the managed default hides or
+	// locks them. On an individual node (which has no defaults) they change
+	// nothing.
+	Visible         []string `json:"visible,omitempty"`
+	SettingsVisible []string `json:"settings_visible,omitempty"`
+}
+
+// SchemaFor returns the LOWEST body schema that can carry b: 3 when it uses
+// the expose lists, 2 when it uses any Phase-1b class, 1 otherwise. Every
+// server-side publisher stamps this rather than MaxSchema so a new build never
+// strands an older agent on a body that did not need the newer schema.
+func SchemaFor(b Body) int {
+	switch {
+	case len(b.Sections.Visible) > 0 || len(b.Sections.SettingsVisible) > 0:
+		return 3
+	case len(b.Pinned) > 0 || len(b.Share) > 0 || len(b.Features) > 0:
+		return 2
+	default:
+		return 1
+	}
 }
 
 // NoticeV1 is the wire shape of the honesty copy.
@@ -81,6 +109,8 @@ func (b Body) ToPolicyInput() PolicyInput {
 		ReadOnlySections: b.Sections.ReadOnly,
 		HiddenSettings:   b.Sections.SettingsHidden,
 		ReadOnlySettings: b.Sections.SettingsReadOnly,
+		VisibleSections:  b.Sections.Visible,
+		VisibleSettings:  b.Sections.SettingsVisible,
 		Pinned:           b.Pinned,
 		Share:            b.Share,
 		Features:         b.Features,
@@ -98,11 +128,13 @@ func (b Body) ToPolicyInput() PolicyInput {
 // BodyFromPolicySpec is the inverse, letting a server GET surface or a
 // round-trip test reconstruct the wire shape from a compiled spec.
 //
-// Note that the FEATURE block does not round-trip as a feature block: a
-// feature is a compile-time alias, so a compiled spec carries only the pins
-// it expanded to. The canonical form of `{"features":{"guard":true}}` is
-// therefore `{"pinned":{"guard.enabled":true}}`, which is exactly the
-// property that stops a feature lock drifting from the pin implementing it.
+// The FEATURE block round-trips as the feature block (Features), never as
+// the pins it expands to: the node re-expands it at compile time
+// (FeaturePinned) and gates it on its own authority token (feature.lock, not
+// settings.pin), so a feature lock still cannot drift from the pin
+// implementing it. Until T-707 (lane MP-GOV3) the block was dropped here, so
+// a published feature lock never reached a node: the canonical body of
+// `{"features":{"guard":true}}` was `{}`.
 func BodyFromPolicySpec(s PolicySpec) Body {
 	b := Body{
 		Schema: MaxSchema,
@@ -111,15 +143,21 @@ func BodyFromPolicySpec(s PolicySpec) Body {
 			ReadOnly:         s.ReadOnlySections,
 			SettingsHidden:   s.HiddenSettings,
 			SettingsReadOnly: s.ReadOnlySettings,
+			Visible:          s.VisibleSections,
+			SettingsVisible:  s.VisibleSettings,
 		},
-		Pinned: s.Pinned,
-		Share:  s.Share,
+		Pinned:   s.Pinned,
+		Share:    s.Share,
+		Features: s.Features,
 	}
 	if len(b.Pinned) == 0 {
 		b.Pinned = nil
 	}
 	if len(b.Share) == 0 {
 		b.Share = nil
+	}
+	if len(b.Features) == 0 {
+		b.Features = nil
 	}
 	if s.Notice != (Notice{}) {
 		b.Notice = &NoticeV1{
@@ -176,6 +214,18 @@ func DecodeBody(raw []byte, maxBytes int64) (Body, error) {
 		} {
 			if present {
 				return Body{}, fmt.Errorf("policyfam/nodegov.DecodeBody: %q requires schema 2, but the body declares schema %d", name, body.Schema)
+			}
+		}
+	}
+	// Schema 3 is the same rule one step up: the expose lists are refused on a
+	// body that declares itself older than them.
+	if body.Schema < 3 {
+		for name, present := range map[string]bool{
+			"sections.visible":          len(body.Sections.Visible) > 0,
+			"sections.settings_visible": len(body.Sections.SettingsVisible) > 0,
+		} {
+			if present {
+				return Body{}, fmt.Errorf("policyfam/nodegov.DecodeBody: %q requires schema 3, but the body declares schema %d", name, body.Schema)
 			}
 		}
 	}

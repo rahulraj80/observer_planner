@@ -1,0 +1,143 @@
+ADAPTER           PROXY                   SURFACE        HOOK                           MCP                 NATIVE  TOKEN                    VOCAB  HANDOFF            ATTACH          RESUME   PROMPT      ENFORCE     LIFECYCLE
+aider             launcher                routable       —                              —                   —       transcript (gap)         yes    full+doc-assisted  yes (--attach)  handoff  proxy-only  sandbox     active
+antigravity       —                       native-exempt  —                              —                   —       sqlite (gap)             yes    partial            —               —        —           recorded    active
+antigravity-cli   —                       probe          antigravity_hooks_json         —                   —       sqlite                   yes    partial+seeded     yes (--attach)  native   —           hook-block  active
+chatgpt-web       —                       native-exempt  chrome_native_messaging        —                   —       browser_extension (gap)  —      —                  —               —        —           recorded    active
+claude-code       env:ANTHROPIC_BASE_URL  routable       claude_settings_json+bridge    mcp_servers_json    A/B/C   proxy                    yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+claude-web        —                       native-exempt  chrome_native_messaging        —                   —       browser_extension (gap)  —      —                  —               —        —           recorded    active
+cline             —                       routable       —                              mcp_servers_json    —       transcript               yes    full               —               —        probe       recorded    active
+cline-cli         provider_json           routable       cline_hook_files               —                   —       sqlite                   yes    full+seeded        yes (--attach)  native   proxy-only  hook-block  active
+codex             config-file             routable       codex_config_toml+bridge       codex_config_toml   A/B/C   proxy                    yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+command-code      —                       after-bridge   commandcode_mods_ts+bridge     mcp_servers_json    —       jsonl (gap)              yes    full+seeded        yes (--attach)  native   hook        sandbox     active
+copilot           —                       probe          —                              —                   A/B/C   events_jsonl (gap)       yes    partial            —               —        —           recorded    active
+copilot-cli       launcher+key            routable       copilot_cli_hooks_json         —                   —       events_jsonl (gap)       yes    full+seeded        yes (--attach)  native   proxy-only  hook-block  active
+copilot-web       —                       native-exempt  chrome_native_messaging        —                   —       browser_extension (gap)  —      —                  —               —        —           recorded    active
+cowork            —                       probe          —                              —                   —       transcript (gap)         yes    full               —               —        —           recorded    active
+crush             provider_json           routable       crush_json                     —                   —       sqlite (gap)             yes    full+doc-assisted  yes (--attach)  handoff  proxy-only  sandbox     active
+cursor            —                       probe          cursor_hooks+bridge            mcp_servers_json    —       hook (gap)               yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+deepseek          —                       native-exempt  plugin_shim_ts+manual          —                   —       events_jsonl (gap)       yes    full               —               —        —           recorded    active
+devin             —                       native-exempt  cascade_hooks_json             —                   —       sqlite (gap)             yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+droid             —                       probe          factory_hooks_json+bridge      mcp_servers_json    —       jsonl (gap)              yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+freebuff          —                       probe          —                              —                   —       sqlite (gap)             yes    full+doc-assisted  yes (--attach)  native   —           sandbox     active
+gemini-cli        launcher+key            routable       gemini_settings_json+bridge    —                   —       events_jsonl             yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+gemini-web        —                       native-exempt  chrome_native_messaging        —                   —       browser_extension (gap)  —      —                  —               —        —           recorded    active
+goose             launcher                routable       goose_open_plugin              —                   —       sqlite (gap)             yes    full+seeded        yes (--attach)  native   proxy-only  hook-block  active
+grok              launcher                routable       grok_hooks_json                —                   —       transcript (gap)         yes    full+seeded        yes (--attach)  native   proxy-only  hook-block  active
+grokbot           —                       native-exempt  —                              —                   —       none (gap)               —      full               —               —        —           recorded    active
+hermes            provider_json           routable       hermes_embedded_plugin         hermes_config_yaml  —       sqlite                   yes    full+doc-assisted  yes (--attach)  native   proxy-only  sandbox     active
+junie             —                       probe          junie_config_json              —                   —       events_jsonl             yes    full+doc-assisted  yes (--attach)  handoff  —           sandbox     active
+kilo-code         —                       routable       —                              —                   —       sqlite                   yes    —                  —               —        —           recorded    active
+kilo-code-cli     —                       native-exempt  plugin_shim_ts                 —                   —       sqlite                   yes    full+seeded        yes (--attach)  native   —           hook-block  active
+kimi-code         config-file             routable       kimi_code_config_toml          —                   —       transcript (gap)         yes    full+doc-assisted  yes (--attach)  native   hook        hook-block  active
+kiro-cli          —                       native-exempt  —                              —                   —       transcript (gap)         yes    full+seeded        yes (--attach)  native   probe       sandbox     active
+kiro-crew         —                       native-exempt  —                              —                   —       none (gap)               yes    full               —               —        —           recorded    active
+mistral-code      —                       probe          vibe_hooks_toml                —                   —       session_meta (gap)       yes    full+seeded        yes (--attach)  native   —           sandbox     active
+muse              —                       probe          muse_settings_json             —                   —       transcript (gap)         yes    full+seeded        yes (--attach)  native   —           hook-block  active
+open-interpreter  —                       probe          open_interpreter_hooks_json    —                   —       jsonl (gap)              yes    full+seeded        yes (--attach)  native   probe       sandbox     active
+openclaw          —                       probe          plugin_shim_ts+manual          —                   —       transcript               yes    full+seeded        yes (--attach)  handoff  —           sandbox     active
+opencode          launcher                routable       plugin_shim_ts                 opencode_json       —       sqlite                   yes    full+seeded        yes (--attach)  native   proxy-only  hook-block  active
+perplexity-web    —                       native-exempt  chrome_native_messaging        —                   —       browser_extension (gap)  —      —                  —               —        —           recorded    active
+pi                provider_json           routable       plugin_shim_ts                 —                   —       transcript (gap)         yes    full+seeded        yes (--attach)  native   proxy-only  hook-block  active
+poolside          —                       probe          poolside_settings_yaml+bridge  —                   —       trajectory_ndjson (gap)  yes    full+doc-assisted  yes (--attach)  handoff  hook        sandbox     active
+prime-agent       launcher                routable       —                              —                   —       transcript (gap)         yes    full+seeded        yes (--attach)  native   proxy-only  sandbox     active
+qoder             —                       native-exempt  qoder_settings_json+bridge     —                   —       none (gap)               yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+qwen-code         config-file             routable       qwen_settings_json+bridge      —                   —       transcript (gap)         yes    full+seeded        yes (--attach)  native   hook        hook-block  active
+zcode             —                       probe          zcode_config_json              —                   —       sqlite                   yes    full+seeded        yes (--attach)  native   hook        sandbox     active
+zed               —                       probe          —                              —                   —       sqlite (gap)             yes    full               —               —        —           recorded    active
+
+legend  PROXY = route observer applies today (or dash). SURFACE = the
+        surface-specific routability bucket (routable / after-upstream /
+        after-bridge / probe / native-exempt). TOKEN shows the capture
+        tier, with (gap) flagging a known hole. VOCAB = the adapter's
+        native tool names are carried by the canonical taxonomy
+        (internal/tooltax), so its tool calls resolve to canonical
+        action types; a dash means the capture has no native tool
+        vocabulary at all (`observer doctor <tool>` prints the grounded
+        reason). HANDOFF shows the session-handoff transcript tier +
+        launch mode (seeded / doc-assisted); a dash is the
+        actions-only carry floor (file lane only, not launchable in
+        the embedded terminal). ATTACH = can hand the PTY to the
+        daemon for dashboard jump-in (`observer <x> --attach`).
+        RESUME = how a closed session reopens: native (the tool's own
+        resume) / handoff (a --continue-from fork) / dash (neither).
+        ENFORCE = the guard-policy enforcement bucket (P7): hook-block
+        (a wired tool-gate hook, its deny proven live, can deny the call) /
+        sandbox (no blocking hook, but the launcher can require a bwrap
+        sandboxed launch - Linux/WSL2 only; this is the STATIC bucket,
+        not degraded for the current host) / org-disallow (neither hook
+        nor sandbox - a signed org policy naming the tool disallowed is
+        the only lever) / recorded (no grounded lever at all - an
+        acknowledgment, not a block).
+        LIFECYCLE = the vendor-support status under the harness
+        lifecycle policy: active (advertised for install / launch /
+        init) vs DEPRECATED / DEAD (never advertised - but ALWAYS
+        still captured; rows are never deleted). `observer doctor
+        <tool>` prints the grounded reason verbatim. PROMPT = the
+        prompt-submit intervention lane (docs/guard-prompt.md):
+        hook (a verified, wired dialect) / proxy-only (no hook, the
+        proxy lane is the only path) / probe (a documented mechanism
+        whose exact wire shape is unverified - `observer doctor
+        --probe-hook <tool>` decides) / dash (no grounded capability).
+
+product lifecycle (products with no adapter row of their own):
+ID                              STATUS      SERVICED-BY  NOTE
+gemini-code-assist-individuals  DEPRECATED  gemini-cli   On 2026-06-18 Google stopped serving Gemini CLI and the Gemini
+                                                         Code Assist IDE extensions for the free 'for individuals' tier
+                                                         and for Google AI Pro / Ultra accounts; those users are directed
+                                                         to the Antigravity family (Antigravity CLI `agy` and the
+                                                         Antigravity IDE - Observer rows antigravity-cli / antigravity).
+                                                         Gemini Code Assist STANDARD and ENTERPRISE subscriptions are
+                                                         unchanged, so the gemini-cli registry row stays ACTIVE (capture,
+                                                         install and launch still valid for those tiers); the operator's
+                                                         live attempt 2026-09-03 returned "This client is no longer
+                                                         supported for Gemini Code Assist for individuals". Sources:
+                                                         https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals,
+                                                         https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/.
+open-interpreter-python         DEAD        —            The legacy Python open-interpreter line (pip `open-interpreter`)
+                                                         is no longer vendor-maintained as of 2026 and lives on only as
+                                                         the community fork endolith/open-interpreter; the vendor's
+                                                         current product is the Rust rewrite based on Codex that the
+                                                         `open-interpreter` registry row targets. COMMAND-NAME COLLISION:
+                                                         both answer to `interpreter`. Observer's adapter is path-keyed
+                                                         (~/.openinterpreter/sessions via INTERPRETER_HOME, a codex
+                                                         retag) and never reads the Python line's data; any launcher or
+                                                         detector keyed on the command name must disambiguate by binary
+                                                         path / version string. Sources:
+                                                         https://pypi.org/project/open-interpreter,
+                                                         https://github.com/endolith/open-interpreter,
+                                                         docs/audits/vendor-surface-inventory-2026-09-03.md §3.3.
+roo-code                        DEAD        cline        Roo Code (RooVeterinaryInc.roo-cline) shut down 2026-04-21; the
+                                                         GitHub repo and the VS Code extension were archived read-only
+                                                         2026-05-15 at v3.54.0 and the vendor pivoted to the Slack-only
+                                                         cloud product Roomote (community continuation: ZooCode).
+                                                         Observer keeps parsing the existing
+                                                         rooveterinaryinc.roo-cline/tasks globalStorage through
+                                                         internal/adapter/cline (a per-file retag, no roo-code registry
+                                                         row by design - IDE-20) and never deletes its rows; nothing is
+                                                         advertised for it. Sources:
+                                                         https://github.com/RooCodeInc/Roo-Code (archived),
+                                                         docs/audits/vendor-surface-inventory-2026-09-03.md §3.3 (MEDIUM
+                                                         confidence - third-party corroboration, Roo's own pages are
+                                                         archived).
+windsurf                        DEPRECATED  devin        Windsurf was renamed Devin Desktop on 2026-06-02 (Cognition
+                                                         folded the Windsurf IDE and the Devin agent into one install).
+                                                         The name survives as an ALIAS only: the IDE still installs under
+                                                         %LOCALAPPDATA%\Programs\Windsurf with a `windsurf` shim, and its
+                                                         bundled devin.exe lane is expected to write ~/.devin (captured
+                                                         by the devin row, UNVERIFIED until a logged-in run). The
+                                                         separate Cascade / "Devin Local" agent store is NOT covered
+                                                         (would be a new tool id - inventory §3.1 #2). Source:
+                                                         https://docs.devin.ai/desktop,
+                                                         docs/audits/vendor-surface-inventory-2026-09-03.md §1.5.
+zoo-code                        active      cline        ZooCode (ZooCodeOrganization.zoo-code) is the community
+                                                         continuation of Roo Code after its 2026-04-21 shutdown, shipped
+                                                         2026 as a separate VS Code listing; parsed by
+                                                         internal/adapter/cline as a per-file retag (no registry row by
+                                                         design, like roo-code). Vendor status: active community project
+                                                         - on-disk extension-dir spelling still UNCONFIRMED (inventory
+                                                         rates the ext id LOW; the Marketplace id
+                                                         ZooCodeOrganization.zoo-code itself is vendor-confirmed).
+                                                         Sources: https://www.zoocode.dev/,
+                                                         https://github.com/Zoo-Code-Org/Zoo-Code,
+                                                         docs/audits/vendor-surface-inventory-2026-09-03.md §2.6 /
+                                                         §3.3.

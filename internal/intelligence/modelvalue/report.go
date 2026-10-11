@@ -5,7 +5,7 @@ import (
 	"sort"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // toolActionTypes are the action types counted as "tool work" for the
@@ -36,7 +36,7 @@ func Build(f *Facts, opts Options) Report {
 	}
 	tiers := f.Tiers
 	if tiers == nil {
-		tiers = routing.NewTierResolver().Table()
+		tiers = routingcore.NewTierResolver().Table()
 	}
 
 	turns, actionsBySession := indexFacts(f)
@@ -44,7 +44,7 @@ func Build(f *Facts, opts Options) Report {
 
 	type cellKey struct {
 		model     string
-		kind      routing.TurnKind
+		kind      routingcore.TurnKind
 		projectID int64
 	}
 	perProject := map[cellKey]*Cell{}
@@ -124,7 +124,7 @@ func Build(f *Facts, opts Options) Report {
 	all = append(all, rep.Cells...)
 	rep.Deltas = buildDeltas(all, opts)
 	// §R10.3 sub-agent recommendations from the sidechain stream.
-	rep.Subagents = routing.RecommendSubagentModels(
+	rep.Subagents = routingcore.RecommendSubagentModels(
 		tiers, buildSubagentEvidence(turns, actionsBySession), opts.minSample(),
 	)
 	return rep
@@ -135,7 +135,7 @@ func Build(f *Facts, opts Options) Report {
 // session's next turn).
 type classifiedTurn struct {
 	row          TurnRow
-	kind         routing.TurnKind
+	kind         routingcore.TurnKind
 	toolActions  int64
 	toolFailures int64
 }
@@ -171,15 +171,15 @@ func indexFacts(f *Facts) ([]TurnRow, map[string][]ActionRow) {
 // loader flagged the turn itself). Returns the input plus the action
 // index cut (first action strictly after the turn) for outcome
 // attribution.
-func assembleInput(row TurnRow, acts []ActionRow, window int) (routing.DecisionInput, int) {
+func assembleInput(row TurnRow, acts []ActionRow, window int) (routingcore.DecisionInput, int) {
 	cut := sort.Search(len(acts), func(k int) bool { return acts[k].Timestamp.After(row.Timestamp) })
 	lo := cut - window
 	if lo < 0 {
 		lo = 0
 	}
-	recent := make([]routing.ActionSignal, 0, cut-lo)
+	recent := make([]routingcore.ActionSignal, 0, cut-lo)
 	for _, a := range acts[lo:cut] {
-		recent = append(recent, routing.ActionSignal{
+		recent = append(recent, routingcore.ActionSignal{
 			Type:         a.Type,
 			CommandClass: a.CommandClass,
 			Success:      a.Success,
@@ -199,14 +199,14 @@ func assembleInput(row TurnRow, acts []ActionRow, window int) (routing.DecisionI
 	if !sidechain && cut > 0 && acts[cut-1].IsSidechain {
 		sidechain = true
 	}
-	return routing.DecisionInput{
-		Shape: routing.TurnShape{
+	return routingcore.DecisionInput{
+		Shape: routingcore.TurnShape{
 			Model:        row.Model,
 			MessageCount: row.MessageCount,
 			ToolUseCount: row.ToolUseCount,
 			PromptTokens: row.Input + row.CacheRead + row.CacheCreation,
 		},
-		Session: routing.SessionState{
+		Session: routingcore.SessionState{
 			RecentActions: recent,
 			ClientPhase:   phase,
 			IsSidechain:   sidechain,
@@ -224,7 +224,7 @@ func classifyTurns(turns []TurnRow, actionsBySession map[string][]ActionRow, opt
 	for i, row := range turns {
 		acts := actionsBySession[row.SessionID]
 		in, cut := assembleInput(row, acts, window)
-		cls := routing.ClassifyTurnKind(in)
+		cls := routingcore.ClassifyTurnKind(in)
 
 		// Outcome window: actions strictly after this turn up to the
 		// session's next turn (or end of window for the last turn).
@@ -252,9 +252,9 @@ func classifyTurns(turns []TurnRow, actionsBySession map[string][]ActionRow, opt
 // turnCost prices one turn via the injected PriceFn, falling back to the
 // row's stored insert-time cost when the model has no pricing entry (or
 // no PriceFn was injected).
-func turnCost(price routing.PriceFn, row TurnRow) float64 {
+func turnCost(price routingcore.PriceFn, row TurnRow) float64 {
 	if price != nil {
-		usd, ok := price(row.Model, routing.PromptUsage{
+		usd, ok := price(row.Model, routingcore.PromptUsage{
 			Input:             row.Input,
 			Output:            row.Output,
 			CacheRead:         row.CacheRead,
@@ -277,7 +277,7 @@ func turnCost(price routing.PriceFn, row TurnRow) float64 {
 func buildDeltas(cells []Cell, opts Options) []Delta {
 	type groupKey struct {
 		projectID int64
-		kind      routing.TurnKind
+		kind      routingcore.TurnKind
 	}
 	groups := map[groupKey][]Cell{}
 	for _, c := range cells {

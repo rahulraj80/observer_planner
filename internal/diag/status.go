@@ -56,6 +56,12 @@ type StatusSnapshot struct {
 	// for "daemon too old to know", which the client handles.
 	HostOS string `json:"host_os"`
 
+	// HostName is the machine's own hostname (os.Hostname), so a dashboard
+	// opened on a REMOTE machine through the instance switcher can always
+	// name the machine it shows (T-425). Empty when the OS will not say;
+	// omitted then, which is also what an older daemon sends.
+	HostName string `json:"host_name,omitempty"`
+
 	// QueryErrors counts the individual lookups in Snapshot that FAILED and
 	// were swallowed into a zero value. Snapshot is deliberately tolerant —
 	// a partial schema, a table that pre-dates its migration, or a scan cut
@@ -183,6 +189,16 @@ type ToolActivity struct {
 	ActionCount int       `json:"action_count"`
 }
 
+// excerptCountTable is the table the excerpt count reads. It is the FTS5
+// shadow table, not the action_excerpts virtual table (T-415): FTS5 answers
+// `COUNT(*)` on the virtual table by a full scan that reads every stored
+// excerpt (0.6-6 s over 529k rows on the operator node, on every
+// `observer status`, every /metrics scrape and every dashboard status
+// refresh), while the shadow table holds exactly one row per FTS row and its
+// count is served from the migration-147 c0 index in milliseconds. Pinned by
+// TestSnapshotExcerptCountAvoidsFTSScan.
+const excerptCountTable = "action_excerpts_content"
+
 // Snapshot returns a status snapshot of the observer DB. Errors loading
 // individual fields surface as zero values; the caller can render whatever's
 // available.
@@ -191,6 +207,9 @@ func Snapshot(ctx context.Context, database *sql.DB, dbPath string) (StatusSnaps
 		return StatusSnapshot{}, errors.New("diag.Snapshot: nil DB")
 	}
 	snap := StatusSnapshot{DBPath: dbPath, HostOS: runtime.GOOS}
+	if h, err := os.Hostname(); err == nil {
+		snap.HostName = h
+	}
 	if fi, err := os.Stat(expandTilde(dbPath)); err == nil {
 		snap.DBSizeBytes = fi.Size()
 	}
@@ -239,7 +258,7 @@ func Snapshot(ctx context.Context, database *sql.DB, dbPath string) (StatusSnaps
 		{"api_turns", &snap.Counts.APITurns},
 		{"file_state", &snap.Counts.FileState},
 		{"failure_context", &snap.Counts.FailureContext},
-		{"action_excerpts", &snap.Counts.ActionExcerpts},
+		{excerptCountTable, &snap.Counts.ActionExcerpts},
 		{"token_usage", &snap.Counts.TokenUsageRows},
 		{"cache_events", &snap.Counts.CacheEvents},
 		{"guard_events", &snap.Counts.GuardEvents},
@@ -366,7 +385,7 @@ func FormatStatus(s StatusSnapshot) string {
 		if s.Integrity.Message != "" {
 			fmt.Fprintf(&b, "                  %s\n", s.Integrity.Message)
 		}
-		fmt.Fprintf(&b, "                  run `observer doctor db` — capture may be degraded\n")
+		fmt.Fprintf(&b, "                  run `observer doctor db` - capture may be degraded\n")
 	}
 	if !s.LastActionAt.IsZero() {
 		fmt.Fprintf(&b, "Last action:      %s by %s\n",
@@ -387,7 +406,7 @@ func FormatStatus(s StatusSnapshot) string {
 		if s.QueryErrors != 1 {
 			word = "queries"
 		}
-		fmt.Fprintf(&b, "WARNING:          %d %s failed — the counts above are INCOMPLETE, do not trust them as exact\n",
+		fmt.Fprintf(&b, "WARNING:          %d %s failed - the counts above are INCOMPLETE, do not trust them as exact\n",
 			s.QueryErrors, word)
 	}
 	return b.String()

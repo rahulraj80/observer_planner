@@ -1,6 +1,6 @@
 # Guard rule catalog
 
-GENERATED — do not edit by hand. Regenerate with:
+GENERATED - do not edit by hand. Regenerate with:
 
     observer guard rules --markdown > docs/guard-rules.md
 
@@ -13,7 +13,10 @@ appear once per row.
 | ID | Category | Severity | Observe | Enforce | Trigger |
 |---|---|---|---|---|---|
 | R-101 | destructive | critical | flag | deny | recursive delete targeting a filesystem root, the home directory, a root-depth wildcard, or a path outside the project |
+| R-101 | destructive | critical | flag | deny | interpreter one-liner or inline script recursively deleting a filesystem root, the home directory, a root-depth wildcard, or a path outside the project |
+| R-101 | destructive | critical | flag | ask | recursive delete of the pipeline item ($_) inside a PowerShell script block, whose target the guard cannot check |
 | R-102 | destructive | high | flag | ask | recursive delete inside the project targeting the VCS directory or the project root itself |
+| R-102 | destructive | high | flag | ask | recursive delete after a directory change in the same command that the guard cannot resolve, or that is outside the project only if an earlier directory change fails |
 | R-103 | destructive | high | flag | ask | mass-deletion chain (find -delete / xargs rm) |
 | R-104 | destructive | high | flag | ask | git command that discards uncommitted work (reset --hard / checkout -- / clean -f) |
 | R-110 | destructive | critical | flag | deny | force push to a protected branch |
@@ -29,19 +32,26 @@ appear once per row.
 | R-152 | boundary | critical | flag | deny | write to a sensitive credential/profile location |
 | R-152 | boundary | critical | flag | ask | read of a sensitive credential/profile location |
 | R-152 | boundary | critical | flag | deny | shell command writing to a sensitive credential/profile location |
+| R-152 | boundary | critical | flag | deny | interpreter one-liner or inline script deleting a sensitive credential/profile location |
 | R-152 | boundary | critical | flag | ask | shell command reading a sensitive credential/profile location |
+| R-152 | boundary | critical | flag | ask | interpreter one-liner or inline script naming a sensitive credential/profile location |
 | R-153 | boundary | high | flag | ask | read of a secret-bearing file (.env / key material / credentials) |
 | R-153 | boundary | high | flag | ask | shell command reading a secret-bearing file (.env / key material / credentials) |
+| R-153 | boundary | high | flag | ask | interpreter one-liner or inline script naming a secret-bearing file (.env / key material / credentials) |
 | R-154 | boundary | critical | flag | deny | write to a shell rc/profile file (persistence vector) |
 | R-154 | boundary | critical | flag | deny | shell command writing to a shell rc/profile file (persistence vector) |
+| R-154 | boundary | critical | flag | deny | interpreter one-liner or inline script deleting a shell rc/profile file |
 | R-155 | boundary | critical | flag | deny | write to an autostart/persistence location (cron, systemd, LaunchAgents, Startup) |
 | R-155 | boundary | critical | flag | deny | shell command writing to an autostart/persistence location |
+| R-155 | boundary | critical | flag | deny | interpreter one-liner or inline script deleting an autostart/persistence location |
 | R-155 | boundary | critical | flag | deny | persistence-installing command (crontab / schtasks /create / Run registry key / systemctl enable) |
 | R-156 | boundary | high | flag | ask | write to .git/hooks (in-repo persistence vector) |
 | R-156 | boundary | high | flag | ask | shell command writing to .git/hooks (in-repo persistence vector) |
+| R-156 | boundary | high | flag | ask | interpreter one-liner or inline script deleting a .git/hooks entry |
 | R-157 | boundary | high | flag | deny | wrapper whose inner command could not be analysed (fail-closed) |
 | R-160 | boundary | critical | flag | deny | agent modifying observer/guard/hook configuration |
 | R-160 | boundary | critical | flag | deny | shell command modifying observer/guard/hook configuration |
+| R-160 | boundary | critical | flag | deny | interpreter one-liner or inline script deleting observer/guard/hook configuration |
 | R-161 | boundary | high | flag | flag | agent modifying the project guard policy file |
 | R-161 | boundary | high | flag | flag | shell command modifying the project guard policy file |
 | R-170 | exfil | critical | flag | deny | remote content piped into an interpreter (curl\|sh-class remote-code execution) |

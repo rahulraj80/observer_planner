@@ -243,6 +243,12 @@ type WrappedCommand struct {
 	// definition (the registry flips Proxy only after that proof); a GUI row
 	// is proven only when its WrapSpec.TrafficProof is set.
 	TrafficProven bool
+	// RouteConditional reports that Routes holds only for some launches: the
+	// CLI row's proxy route is gated (ProxyRoute.Gate) on the developer's own
+	// provider credential, and without it the wrapped form launches the
+	// product unrouted on its own sign-in. A Settings UI must not show such a
+	// row as plainly routed.
+	RouteConditional bool
 }
 
 // WrappedCommandFor resolves a registry tool key or GUI launch id to its
@@ -255,11 +261,12 @@ func WrappedCommandFor(id string) (WrappedCommand, bool) {
 			return WrappedCommand{}, false
 		}
 		w := WrappedCommand{
-			ID:            id,
-			Kind:          LaunchKindTerminal,
-			Args:          []string{c.Handoff.Launch.Subcommand},
-			Routes:        c.Proxy != nil,
-			TrafficProven: c.Proxy != nil,
+			ID:               id,
+			Kind:             LaunchKindTerminal,
+			Args:             []string{c.Handoff.Launch.Subcommand},
+			Routes:           c.Proxy != nil,
+			TrafficProven:    c.Proxy != nil,
+			RouteConditional: c.Proxy != nil && c.Proxy.Gate != nil,
 		}
 		if c.Binary != nil {
 			w.Replaces = c.Binary.Names

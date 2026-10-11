@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -121,7 +123,7 @@ func TestCloudAutoSyncLoopSpawnsAndStops(t *testing.T) {
 		case fired <- struct{}{}:
 		default:
 		}
-		return []byte("Structural: skipped — no standing grant\n"), errors.New("exit status 1")
+		return []byte("Structural: skipped - no standing grant\n"), errors.New("exit status 1")
 	}
 
 	cfg := config.Default()

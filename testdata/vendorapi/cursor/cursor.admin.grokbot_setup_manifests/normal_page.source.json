@@ -1,0 +1,27 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "manifest": "VerifiedOfficial",
+    "manifest.id": "VerifiedOfficial",
+    "manifest.scripts": "VerifiedOfficial",
+    "manifest.scripts[]": "VerifiedOfficial",
+    "manifest.scripts[].check": "VerifiedOfficial",
+    "manifest.scripts[].id": "VerifiedOfficial",
+    "manifest.scripts[].setup": "VerifiedOfficial"
+  },
+  "fixture_sha256": "5b8f22efe93009d102429e1361d7905761900ad83c67ceca4282850bf5be72d8",
+  "http": {
+    "method": "PUT",
+    "path": "/grok-bot/setup-manifests/{manifestId}",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Upsert Grok Bot Setup Manifest\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Admin API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "d6cf7e1dd3314a1b28f4ac1f699c255c0fd0b6acbff5c0d03cfb7b0837325cd3",
+  "source_url": "https://cursor.com/docs/account/teams/admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.grokbot_setup_manifests"
+}

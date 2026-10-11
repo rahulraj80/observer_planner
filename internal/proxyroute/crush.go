@@ -1,11 +1,11 @@
 package proxyroute
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/marmutapp/superbased-observer/internal/cfgfmt"
 )
 
 // resolveCrushConfigPath returns the platform-native global Crush config
@@ -27,98 +27,31 @@ func resolveCrushConfigPath(homeDir string) string {
 
 // RegisterCrush points Crush's OpenAI-compatible provider at the observer
 // proxy by ADDITIVELY setting `base_url` on the `providers.openai` entry in
-// crush.json. It preserves every other key semantically (round-trips the
-// whole document through map[string]any) and NEVER reads, writes, or moves
-// an API key — crush.json embeds literal provider keys, so only the
-// base_url field of the openai provider is touched.
+// crush.json. crush.json embeds literal provider keys, so only the base_url
+// member of the openai provider is added and nothing else is read into a
+// result or an error.
 //
 // Guard semantics mirror RegisterKimiCode:
-//   - config file absent      → ConfigMissing (benign skip)
-//   - no providers.openai     → Error (nothing to route)
-//   - base_url absent         → add it (Added)
-//   - base_url already loopback/observer → AlreadySet (idempotent)
-//   - base_url points elsewhere → Error (refuse to overwrite a foreign URL)
+//   - config file absent      -> ConfigMissing (benign skip)
+//   - no providers.openai     -> Error (nothing to route)
+//   - base_url absent         -> add it (Added)
+//   - base_url already loopback/observer -> AlreadySet (idempotent)
+//   - base_url points elsewhere -> Error (refuse to overwrite a foreign URL)
 //
-// Backs the file up to crush.json.bak before the write, then writes via
-// temp+rename.
+// The write follows the probe-writer credential-file discipline
+// (probe_write.go, T-657): one member spliced in through cfgfmt (every other
+// byte and key order kept), no backup copy, mode kept, a symlinked layout
+// refused, and no error quotes the file.
 func (r *Registrar) RegisterCrush() RegistrationResult {
+	return r.note(r.writeCrush(), openAICompatProxyURL(r.opts.ProxyPort))
+}
+
+// writeCrush is RegisterCrush without the provenance record.
+func (r *Registrar) writeCrush() RegistrationResult {
+	const what = "proxyroute.crush"
 	path := resolveCrushConfigPath(r.opts.HomeDir)
 	want := openAICompatProxyURL(r.opts.ProxyPort)
 	res := RegistrationResult{Tool: "crush", ConfigPath: path, BaseURL: want, DryRun: r.opts.DryRun}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			res.ConfigMissing = true
-			return res
-		}
-		res.Error = fmt.Errorf("proxyroute.crush: read: %w", err)
-		return res
-	}
-	root := map[string]any{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &root); err != nil {
-			res.Error = fmt.Errorf("proxyroute.crush: parse %s: %w", path, err)
-			return res
-		}
-	}
-
-	providers, _ := root["providers"].(map[string]any)
-	if providers == nil {
-		res.Error = fmt.Errorf("proxyroute.crush: %s has no providers.openai to route", path)
-		return res
-	}
-	openai, _ := providers["openai"].(map[string]any)
-	if openai == nil {
-		res.Error = fmt.Errorf("proxyroute.crush: %s has no providers.openai to route", path)
-		return res
-	}
-
-	if prior, _ := openai["base_url"].(string); strings.TrimSpace(prior) != "" {
-		res.PriorBaseURL = prior
-		switch {
-		case prior == want:
-			res.AlreadySet = true
-			res.BaseURL = prior
-			return res
-		case IsObserverBaseURL(prior):
-			res.AlreadySet = true
-			res.BaseURL = prior
-			return res
-		default:
-			res.Error = fmt.Errorf(
-				"proxyroute.crush: providers.openai.base_url already set to %q; refusing to overwrite a non-observer URL", prior,
-			)
-			return res
-		}
-	}
-
-	if r.opts.DryRun {
-		res.Added = true
-		return res
-	}
-	if err := os.WriteFile(path+".bak", raw, 0o600); err != nil {
-		res.Error = fmt.Errorf("proxyroute.crush: backup: %w", err)
-		return res
-	}
-	openai["base_url"] = want
-	providers["openai"] = openai
-	root["providers"] = providers
-
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		res.Error = fmt.Errorf("proxyroute.crush: encode: %w", err)
-		return res
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
-		res.Error = fmt.Errorf("proxyroute.crush: write: %w", err)
-		return res
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		res.Error = fmt.Errorf("proxyroute.crush: rename: %w", err)
-		return res
-	}
-	res.Added = true
+	res.AlreadySet, res.Added, res.Error = r.addProbeBaseURL(what, cfgfmt.FormatJSON, path, crushBaseURLPath, want, &res)
 	return res
 }

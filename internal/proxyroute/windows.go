@@ -189,12 +189,12 @@ func (r *Registrar) resolveWindowsHomeFor(override, subdir string) (dir string, 
 // INSIDE the pinned home.
 func (r *Registrar) sandboxRouteSkip(tool, subdir, optionName, override string) RegistrationResult {
 	reason := fmt.Sprintf(
-		"HomeDir was pinned by the caller but no %s was given — cross-OS %s/ resolution is suppressed (incident 2026-07-31); set %s to a home UNDER the pinned HomeDir to wire this target",
+		"HomeDir was pinned by the caller but no %s was given - cross-OS %s/ resolution is suppressed (incident 2026-07-31); set %s to a home UNDER the pinned HomeDir to wire this target",
 		optionName, subdir, optionName,
 	)
 	if override != "" {
 		reason = fmt.Sprintf(
-			"%s (%s) resolves OUTSIDE the pinned HomeDir (%s) — cross-OS %s/ resolution is suppressed (incident 2026-07-31)",
+			"%s (%s) resolves OUTSIDE the pinned HomeDir (%s) - cross-OS %s/ resolution is suppressed (incident 2026-07-31)",
 			optionName, override, r.homeOverride, subdir,
 		)
 	}
@@ -224,12 +224,12 @@ func (r *Registrar) sandboxRouteSkip(tool, subdir, optionName, override string) 
 func windowsRouteRefusalError(fn, subdir, flag, optionName string, refuse []string) error {
 	if len(refuse) == 1 {
 		return fmt.Errorf(
-			"%s: found %s but could not verify it belongs to the current Windows user (%%USERNAME%% mismatch or interop unavailable) — pass %s to confirm",
+			"%s: found %s but could not verify it belongs to the current Windows user (%%USERNAME%% mismatch or interop unavailable) - pass %s to confirm",
 			fn, refuse[0], flag,
 		)
 	}
 	return fmt.Errorf(
-		"%s: multiple Windows-side %s/ homes were detected (%s) but none could be verified as the current Windows user's — refusing to auto-pick; pass %s (%s) to choose",
+		"%s: multiple Windows-side %s/ homes were detected (%s) but none could be verified as the current Windows user's - refusing to auto-pick; pass %s (%s) to choose",
 		fn, subdir, strings.Join(refuse, ", "), flag, optionName,
 	)
 }

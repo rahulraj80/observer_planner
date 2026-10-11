@@ -12,7 +12,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // seedModelValueCorpus stands up a project + session with one proxy
@@ -175,7 +175,7 @@ func TestLoadModelValueFacts_ActionBoundaryResolution(t *testing.T) {
 	for _, a := range f.Actions {
 		byType[a.Type] = a
 	}
-	if got := byType[models.ActionRunCommand]; got.CommandClass != routing.CommandTest {
+	if got := byType[models.ActionRunCommand]; got.CommandClass != routingcore.CommandTest {
 		t.Errorf("run_command class = %q, want test", got.CommandClass)
 	}
 	if got := byType[models.ActionPermissionMode]; got.PhaseHint != "plan" {
@@ -186,7 +186,7 @@ func TestLoadModelValueFacts_ActionBoundaryResolution(t *testing.T) {
 	}
 	// The read_file row's target must not leak through any field.
 	read := byType[models.ActionReadFile]
-	if read.PhaseHint != "" || read.SubagentName != "" || read.CommandClass != routing.CommandNone {
+	if read.PhaseHint != "" || read.SubagentName != "" || read.CommandClass != routingcore.CommandNone {
 		t.Errorf("read_file leaked content-derived fields: %+v", read)
 	}
 }

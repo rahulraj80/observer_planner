@@ -114,7 +114,7 @@ function TasksBody({
   if (!data.has_tasks) {
     return (
       <p className="rounded-3 border border-dashed border-line-2 px-4 py-3 text-[11.5px] text-fg-3">
-        No task tracking for this session — it never called a todo/plan tool
+        No task tracking for this session - it never called a todo/plan tool
         (<span className="font-mono">TaskCreate</span>/
         <span className="font-mono">TodoWrite</span>/
         <span className="font-mono">update_plan</span>/etc.). Most sessions
@@ -228,7 +228,7 @@ function TasksBody({
           <span className="font-medium text-fg-2">shared</span> = two or more
           tasks were in progress at once (bucketed together, never split
           evenly). Only ~52% of a session's usage attributes to one specific
-          task on average — these are first-class totals here, not a
+          task on average - these are first-class totals here, not a
           rounding residue.
         </p>
         {data.sidechain && (
@@ -292,7 +292,7 @@ function StatusPill({ item }: { item: TaskItemLike }) {
 // its open window is closed at the last sighting rather than left open
 // forever. Distinct from a real completion or cancellation.
 const VANISHED_GLOSS =
-  "dropped from the list while in progress — a later snapshot no longer listed it, so this isn't a real completion or cancellation.";
+  "dropped from the list while in progress - a later snapshot no longer listed it, so this isn't a real completion or cancellation.";
 
 function statusGloss(item: TaskItemLike): string | null {
   if (item.terminal_status === "vanished" || item.status === "vanished") {

@@ -95,7 +95,7 @@ func TestHandleSessionPredict_CostBand(t *testing.T) {
 	}
 	var resp PredictResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 	if !resp.Estimate.HasEstimate {
 		t.Fatalf("expected an estimate; warnings=%v reason=%q", resp.Estimate.Warnings, resp.Reason)
@@ -295,7 +295,7 @@ func TestHandleSessionPredict_CodexTranscriptGauge(t *testing.T) {
 
 	var resp PredictResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 	if !resp.Limit.Available || resp.Limit.NeedsProxy || resp.Limit.NoWindow {
 		t.Errorf("codex gauge should be available via transcript, got %+v", resp.Limit)
@@ -353,7 +353,7 @@ func TestHandleSessionPredict_NoSourceTool(t *testing.T) {
 
 		var resp PredictResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("%s: decode: %v — body %s", tool, err, rec.Body.String())
+			t.Fatalf("%s: decode: %v - body %s", tool, err, rec.Body.String())
 		}
 		if !resp.Limit.NoSource {
 			t.Errorf("%s: NoSource = false, want true", tool)
@@ -365,10 +365,10 @@ func TestHandleSessionPredict_NoSourceTool(t *testing.T) {
 			t.Errorf("%s: Available = true, want false (nothing to render)", tool)
 		}
 		if resp.Limit.NeedsProxy {
-			t.Errorf("%s: NeedsProxy = true at the same time as NoSource — must never both be true (the exact bug class this fix kills)", tool)
+			t.Errorf("%s: NeedsProxy = true at the same time as NoSource - must never both be true (the exact bug class this fix kills)", tool)
 		}
 		if resp.Limit.NoWindow {
-			t.Errorf("%s: NoWindow = true at the same time as NoSource — must never both be true", tool)
+			t.Errorf("%s: NoWindow = true at the same time as NoSource - must never both be true", tool)
 		}
 	}
 }
@@ -471,7 +471,7 @@ func TestHandleSessionPredict_NoPricingKeepsTokenFacts(t *testing.T) {
 	}
 	var resp PredictResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 
 	// Dollar half absent, and the reason names the PRICING gap.

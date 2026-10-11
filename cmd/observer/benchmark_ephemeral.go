@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import (
@@ -15,6 +17,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/benchmark"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // benchmark_ephemeral.go stands up an isolated, throwaway observer daemon so a
@@ -56,17 +59,32 @@ func newBenchmarkDrivers(observerBin, dbPath string) map[string]HarnessDriver {
 
 // shouldEngageEphemeralDaemon decides whether to stand up an isolated ephemeral
 // daemon for this run. The operator's explicit --ephemeral-daemon always wins;
-// otherwise auto-engage only when they gave NO --config (so we won't override a
-// daemon they wired themselves) AND the spec uses a harness whose Preflight
-// needs daemon isolation. Pure so the decision is unit-tested without I/O.
-func shouldEngageEphemeralDaemon(flag bool, configPath string, spec benchmark.Spec, drivers map[string]HarnessDriver) bool {
+// otherwise engage only when the spec uses a harness whose Preflight needs
+// daemon isolation AND either they gave NO --config (so we won't override a
+// daemon they wired themselves) or they asked for isolation when needed
+// (--isolate-if-needed, the dashboard's spend run, T-664). Pure so the
+// decision is unit-tested without I/O.
+func shouldEngageEphemeralDaemon(flag, ifNeeded bool, configPath string, spec benchmark.Spec, drivers map[string]HarnessDriver) bool {
 	if flag {
 		return true
 	}
-	if strings.TrimSpace(configPath) != "" {
+	if strings.TrimSpace(configPath) != "" && !ifNeeded {
 		return false
 	}
 	return specNeedsIsolatedDaemon(spec, drivers)
+}
+
+// importIsolatedBenchmarkRun copies a finished isolated run into this node's
+// database (T-664) before the throwaway database is deleted, and says what it
+// carried.
+func importIsolatedBenchmarkRun(ctx context.Context, node *store.Store, ephDBPath, runID string, out io.Writer) error {
+	stats, err := node.ImportBenchmarkRunFrom(ctx, ephDBPath, runID)
+	if err != nil {
+		return fmt.Errorf("copy benchmark run %s into this node's database: %w", runID, err)
+	}
+	fmt.Fprintf(out, "benchmark: copied run %s into this node's database (%d attempts, %d sessions, %d api turns, %d scores).\n",
+		runID, stats.Attempts, stats.Sessions, stats.APITurns, stats.Scores)
+	return nil
 }
 
 // specNeedsIsolatedDaemon reports whether any harness in the spec is driven by a
@@ -138,7 +156,8 @@ func startEphemeralDaemon(ctx context.Context) (*ephemeralDaemon, error) {
 	// run-ctx cancel / ctrl-c) stops the proxy+watcher.
 	dctx, cancel := context.WithCancel(ctx)
 
-	p, pCleanup, addr, _, _, _, _, err := buildProxy(dctx, configPath, "", 0, "127.0.0.1", nil)
+	pwire, err := buildProxy(dctx, configPath, "", 0, "127.0.0.1", nil)
+	p, pCleanup, addr := pwire.Proxy, pwire.Cleanup, pwire.Addr
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("build proxy: %w", err)
@@ -239,19 +258,6 @@ func writeEphemeralBenchmarkConfig(configPath, dbPath string, port int) error {
 	return config.WriteToml(configPath, cfg)
 }
 
-// freeTCPPort asks the kernel for an unused loopback TCP port. There is a small
-// TOCTOU window between close and the proxy re-binding it; acceptable for a
-// short-lived benchmark daemon (the proxy bind is the authority — a lost race
-// surfaces as a readiness timeout, not silent corruption).
-func freeTCPPort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = l.Close() }()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
 // waitProxyReady dials addr until a TCP connection succeeds (the proxy
 // goroutine has bound it) or the deadline/ctx elapses.
 func waitProxyReady(ctx context.Context, addr string, timeout time.Duration) error {
@@ -278,6 +284,6 @@ func waitProxyReady(ctx context.Context, addr string, timeout time.Duration) err
 // old Preflight wall-of-text.
 func announceEphemeralDaemon(out io.Writer, d *ephemeralDaemon) {
 	fmt.Fprintf(out,
-		"benchmark: started an isolated ephemeral daemon at %s (proxy %s) — your real Observer data is untouched.\n",
+		"benchmark: started an isolated ephemeral daemon at %s (proxy %s); the run's results are copied into this node's database when it finishes.\n",
 		d.Dir, d.ProxyURL)
 }

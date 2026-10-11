@@ -1,8 +1,18 @@
-import { useCallback } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { createQueryCache } from "@shared/lib/queryCache";
 import { useQuery, useQueryActivity } from "@shared/lib/useQuery";
 import { buildUrl, fetchJSON, type QueryParams } from "./api";
 import { describeApiFailure } from "./apiFailure";
+import {
+  concealedRoutesSnapshot,
+  isRouteConcealed,
+  subscribeConcealedRoutes,
+} from "./concealedRoutes";
+import {
+  inactiveRoutesSnapshot,
+  isRouteInactive,
+  subscribeInactiveRoutes,
+} from "./componentState";
 
 // Window-level CustomEvent emitted by the TopBar's Refresh button (and a few
 // settings flows). One module-level listener refetches every key that has a
@@ -54,6 +64,12 @@ export type ApiState<T> = {
   status: number | null;
   /** The permission key the server's 403 named, when it named one. */
   deniedPermission: string | null;
+  /**
+   * The component a 404 component_not_installed named (lib/apiFailure.ts):
+   * render the shared NotInstalled state for it, never the failed-to-load
+   * card. Null while there is no such error.
+   */
+  notInstalled: { component: string; state: string } | null;
 };
 
 // UseApiOptions configures optional refetch behaviour. Both fields
@@ -113,7 +129,17 @@ export function useApi<T, S = T>(
   deps: unknown[] = [],
   opts?: UseApiOptions<T, S>,
 ): ApiState<S> {
-  const key = path == null ? null : buildUrl(path, params);
+  // The one shared guard for routes the visibility posture hides on this
+  // machine (T-401, lib/concealedRoutes): a concealed route is not fetched
+  // at all (its reader sees no data, no error), and the subscription
+  // re-renders the reader when the posture changes either way.
+  useSyncExternalStore(subscribeConcealedRoutes, concealedRoutesSnapshot, concealedRoutesSnapshot);
+  // The same skip for routes of components that are not active on this
+  // machine (modular packaging plan 7.3, lib/componentState): the daemon
+  // would answer 404 component_not_installed, so the read is not sent.
+  useSyncExternalStore(subscribeInactiveRoutes, inactiveRoutesSnapshot, inactiveRoutesSnapshot);
+  const concealed = path != null && (isRouteConcealed(path) || isRouteInactive(path));
+  const key = path == null || concealed ? null : buildUrl(path, params);
   const fetcher = useCallback(
     (signal: AbortSignal) => fetchJSON<T>(path as string, params, { signal }),
     // The fetcher is read through a ref inside useQuery; identity is moot.
@@ -143,6 +169,7 @@ export function useApi<T, S = T>(
     denied: failure?.denied ?? false,
     status: failure?.status ?? null,
     deniedPermission: failure?.permission ?? null,
+    notInstalled: failure?.notInstalled ?? null,
     reload: q.reload,
     isStale: q.isStale,
     isRefreshing: q.isRefreshing,

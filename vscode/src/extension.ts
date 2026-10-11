@@ -12,6 +12,7 @@ import { BudgetNotifier } from './notifications/budget';
 import { WatcherLagNotifier } from './notifications/watcherLag';
 import { createCostStatusBar, StatusBarController } from './status/costBar';
 import { createCacheStatusBar } from './status/cacheBar';
+import { createComponentGate } from './components';
 import { createAgentAccessStatusBar } from './agentAccessStatus';
 import { registerLocTracker } from './loc/tracker';
 import { registerTerminalProfile } from './terminal/profile';
@@ -46,7 +47,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     trustSubscription = vscode.workspace.onDidGrantWorkspaceTrust(() => {
       trustSubscription?.dispose();
       trustSubscription = undefined;
-      output.appendLine('Workspace trust granted — resuming activation.');
+      output.appendLine('Workspace trust granted - resuming activation.');
       void activate(ctx);
     });
     ctx.subscriptions.push(trustSubscription);
@@ -95,7 +96,12 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       ctx.subscriptions.push(statusBar);
     }
 
-    cacheStatusBar = createCacheStatusBar(ctx, manager);
+    // Component gate (T-670): hides surfaces of components that are not
+    // active on this machine (context keys + the cache bar's route check).
+    const gate = createComponentGate(manager);
+    ctx.subscriptions.push(gate);
+
+    cacheStatusBar = createCacheStatusBar(ctx, manager, gate);
     if (cacheStatusBar) {
       ctx.subscriptions.push(cacheStatusBar);
     }

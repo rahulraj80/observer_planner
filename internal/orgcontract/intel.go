@@ -108,4 +108,8 @@ type IntelResultsResponse struct {
 	// page. The node stores nothing durable from it — a restart re-pages from
 	// the start and the node table's UNIQUE key dedups the re-fetch.
 	NextCursor string `json:"next_cursor,omitempty"`
+	// Tombstones is the signed set of this node's purged sessions
+	// (inteltombstone.go), present whenever the org holds at least one. It is
+	// additive: an older node ignores it, and an older server never sends it.
+	Tombstones *IntelTombstoneDoc `json:"tombstones,omitempty"`
 }

@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/agentid"
-	"github.com/marmutapp/superbased-observer/internal/attachsock"
+	"github.com/marmutapp/superbased-observer/internal/localipc"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay"
 )
 
@@ -78,7 +78,7 @@ func TestLoopbackProjectDirIsNotAttested(t *testing.T) {
 // a repeated directory), signs it into the actor assertion, and never reuses
 // one project's token for another project or for a project-less stream.
 func TestIPCProjectTokensAreCachedPerProject(t *testing.T) {
-	if !attachsock.Supported() {
+	if !localipc.Supported() {
 		t.Skip("no owner-only transport on this platform")
 	}
 	ln, ep, err := mcprelay.ListenIPC(filepath.Join(t.TempDir(), "observer.db"))
@@ -221,7 +221,7 @@ func TestTokenForRefusesMalformedProject(t *testing.T) {
 // (project_dir); the relay resolves it and signs the hash into the actor
 // assertion of every call on the stream.
 func TestIPCHelloProjectDirIsAttested(t *testing.T) {
-	if !attachsock.Supported() {
+	if !localipc.Supported() {
 		t.Skip("no owner-only transport on this platform")
 	}
 	ln, ep, err := mcprelay.ListenIPC(filepath.Join(t.TempDir(), "observer.db"))

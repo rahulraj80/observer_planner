@@ -26,7 +26,7 @@ observer start                    # run the local daemon
 | Component | What it declares |
 |---|---|
 | `.mcp.json` | The `observer` MCP server: `observer serve` — on-demand project/session/cost queries from inside Claude Code. |
-| `hooks/hooks.json` | 22 lifecycle hooks: ConfigChange, CwdChanged, InstructionsLoaded, Notification, PermissionDenied, PermissionRequest, PostCompact, PostToolBatch, PostToolUse, PostToolUseFailure, PreCompact, PreToolUse, SessionEnd, SessionStart, Setup, Stop, StopFailure, SubagentStart, SubagentStop, UserPromptExpansion, UserPromptSubmit, WorktreeRemove. Each runs `observer hook claude-code <event>` and records the event locally. |
+| `hooks/hooks.json` | 24 lifecycle hooks: ConfigChange, CwdChanged, InstructionsLoaded, Notification, PermissionDenied, PermissionRequest, PostCompact, PostToolBatch, PostToolUse, PostToolUseFailure, PreCompact, PreToolUse, SessionEnd, SessionStart, Setup, Stop, StopFailure, SubagentStart, SubagentStop, TaskCompleted, TaskCreated, UserPromptExpansion, UserPromptSubmit, WorktreeRemove. Each runs `observer hook claude-code <event>` and records the event locally. |
 
 Captured events are written to the local `~/.observer/observer.db`; the hook
 commands themselves make no network calls. (Shipping anything off the machine

@@ -197,10 +197,19 @@ func TestHookCapabilities(t *testing.T) {
 		{"cursor", HookCursor, true, true},
 		{"codex", HookCodexConfig, true, true},
 		{"hermes", HookHermesPlugin, false, true},
-		{"cline-cli", HookClineCLIJSONL, false, false}, // receiver exists, not auto-wired
-		{"opencode", HookNone, false, false},
+		// T-342: the ~/.cline/hooks/PreToolUse gate (hook-parity A6) is the
+		// CLI's (live); the extension row keeps the vendor surface only.
+		{"cline-cli", HookClineHookFiles, false, true},
 		{"cline", HookNone, false, false},
-		{"pi", HookNone, false, false},
+		// Hook-parity Lane D: the one embedded plugin shim. AutoWired where
+		// the host's plugin directory is grounded; OpenClaw and DeepSeek
+		// render the shim but have no install location Observer writes.
+		{"opencode", HookPluginShimTS, false, true},
+		{"kilo-code-cli", HookPluginShimTS, false, true},
+		{"pi", HookPluginShimTS, false, true},
+		{"openclaw", HookPluginShimTS, false, false},
+		{"deepseek", HookPluginShimTS, false, false},
+		{"kilo-code", HookNone, false, false},
 		// The six Part B item 1/2 long-tail vendors' own cross-OS bridge
 		// targets (internal/hook's register*Windows writers) —
 		// CrossOSBridge flipped true once the wsl.exe bridge writer
@@ -366,7 +375,7 @@ func TestPromptLaneClassifiedForEveryAdapter(t *testing.T) {
 		// genuinely UNVERIFIED or contested in the vendor's own
 		// tracker — a live `observer doctor --probe-hook` run, not a
 		// docs re-read, is what would resolve it.
-		"kimi-code":        PromptLaneProbeRequired,
+		"kimi-code":        PromptLaneHook,
 		"kiro-cli":         PromptLaneProbeRequired,
 		"cline":            PromptLaneProbeRequired,
 		"open-interpreter": PromptLaneProbeRequired,

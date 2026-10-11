@@ -1,0 +1,27 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "git@github\\.com:*/copilot": "VerifiedOfficial",
+    "git@github\\.com:*/copilot[]": "VerifiedOfficial",
+    "octo-org/octo-repo": "VerifiedOfficial",
+    "octo-org/octo-repo[]": "VerifiedOfficial"
+  },
+  "fixture_sha256": "286ce023f1fde2705b11f03589898149313e229f2f668df9ed24d34286cf13cb",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/copilot/content_exclusion",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/copilot/content_exclusion (operationId copilot/copilot-content-exclusion-for-enterprise).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.copilot.content_exclusion_ent"
+}

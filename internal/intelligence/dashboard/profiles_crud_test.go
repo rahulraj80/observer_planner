@@ -45,7 +45,7 @@ func profilesReq(t *testing.T, s *Server, method, path, body string) *httptest.R
 		rd = strings.NewReader(body)
 	}
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(method, path, rd))
+	s.Handler().ServeHTTP(rr, armLocalWrite(httptest.NewRequest(method, path, rd)))
 	return rr
 }
 
@@ -92,7 +92,9 @@ func TestConfigProfilesCRUDCycle(t *testing.T) {
 		Builtin  bool   `json:"builtin"`
 		Editable bool   `json:"editable"`
 		Raw      string `json:"raw"`
-		Resolved struct {
+		// ResolvedTOML is `observer profile show`'s body, config key names.
+		ResolvedTOML string `json:"resolved_toml"`
+		Resolved     struct {
 			Conversation struct {
 				TargetRatio float64 `json:"TargetRatio"`
 			} `json:"Conversation"`
@@ -106,6 +108,9 @@ func TestConfigProfilesCRUDCycle(t *testing.T) {
 	}
 	if shown.Resolved.Conversation.TargetRatio != 0.7 {
 		t.Errorf("resolved target_ratio: got %v want 0.7", shown.Resolved.Conversation.TargetRatio)
+	}
+	if !strings.Contains(shown.ResolvedTOML, "target_ratio = 0.7") || strings.Contains(shown.ResolvedTOML, "TargetRatio") {
+		t.Errorf("resolved_toml should carry the config key names:\n%s", shown.ResolvedTOML)
 	}
 	if !strings.Contains(shown.Raw, "target_ratio") {
 		t.Errorf("raw body missing set key:\n%s", shown.Raw)

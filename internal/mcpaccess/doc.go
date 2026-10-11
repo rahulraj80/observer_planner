@@ -34,16 +34,17 @@
 // v1 REJECTS what it cannot enforce (R8.1, doc2-B11): the `judge` effect, a
 // `taint` condition, `requires_mfa` AND a grant on any of the three task
 // actions are typed feature_unavailable lint ERRORS, never silently
-// dropped. The task refusal is grounded in the pinned agentgateway v1.5.0:
-// its mcpAuthorization CEL context carries mcp.task{target,name} and no
-// request method (rbac.rs McpAuthorizationSet::validate builds
-// MCPInfo::from(&ResourceType) with method_name None; session.rs routes
-// tasks/get, tasks/update and tasks/cancel through ONE
-// authorize_task_request), so a tasks/get-only grant would compile to a
-// rule that also allows tasks/cancel - a silent widening. The three task
-// actions stay in the vocabulary (a request naming them default-denies on
-// every target; the A2 front dispatches them natively) until agentgateway
-// exposes the method. The action set is enumerated with NO wildcard
+// dropped. The task refusal was grounded in agentgateway v1.5.0, whose
+// mcpAuthorization CEL context carried mcp.task{target,name} and no request
+// method. The pinned v1.6.0 now sets mcp.methodName (rbac.rs
+// McpAuthorizationSet::validate; session.rs authorize_task_request passes
+// tasks/get, tasks/update and tasks/cancel as distinct methods; T-749), but
+// no compiler here emits a method-keyed task rule yet, so a tasks/get-only
+// grant would still compile to a rule that also allows tasks/cancel - a
+// silent widening. The three task actions stay in the vocabulary (a request
+// naming them default-denies on every target; the A2 front dispatches them
+// natively) until the compilers key task rules on mcp.methodName. The
+// action set is enumerated with NO wildcard
 // (R8.30.g). Product-scoped grants are honoured only at client_attestation
 // process_attested / ipc_bound (R2); at configured/claimed the caller is
 // node-wide and a product predicate does not match.

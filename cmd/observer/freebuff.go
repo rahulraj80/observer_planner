@@ -47,7 +47,7 @@ func newFreebuffCmd() *cobra.Command {
 		Use:   "freebuff [-- freebuff-args...]",
 		Short: "Launch Freebuff (CodebuffAI); with --continue-from, write a handover doc and open the TUI (doc-assisted)",
 		Long: "Wraps Freebuff (`freebuff`, the CodebuffAI agent). This launcher\n" +
-			"is NON-PROXIED — freebuff authenticates to the CodebuffAI backend\n" +
+			"is NON-PROXIED - freebuff authenticates to the CodebuffAI backend\n" +
 			"and has no grounded base-URL override, so routing it through the\n" +
 			"proxy would be a guess. Freebuff records no billable token usage,\n" +
 			"so capture is sessions + actions only via observer's local freebuff\n" +
@@ -123,7 +123,7 @@ func newFreebuffCmd() *cobra.Command {
 					return cerr
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(),
-					"observer freebuff: freebuff has no initial-prompt seed — handover written to %s\n", out.DocPath)
+					"observer freebuff: freebuff has no initial-prompt seed - handover written to %s\n", out.DocPath)
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"observer freebuff: paste it as your first message in the TUI\n")
 				if out.Note != "" {
@@ -146,7 +146,7 @@ func newFreebuffCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml); used to resolve the source session for --continue-from")
 	cmd.Flags().StringVar(&binPath, "freebuff-path", "", "Path to the freebuff binary (default: resolve `freebuff` on PATH)")
-	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "Session id to continue from: distill a handover, write it to disk, and open the freebuff TUI (doc-assisted — freebuff has no initial-prompt seed). See docs/session-handoff.md.")
+	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "Session id to continue from: distill a handover, write it to disk, and open the freebuff TUI (doc-assisted - freebuff has no initial-prompt seed). See docs/session-handoff.md.")
 	cmd.Flags().StringVar(&carry, "carry", "", "Carry mode for --continue-from: metadata|distilled|distilled_tail|full|full_cache (default from [handoff] config)")
 	cmd.Flags().IntVar(&fromMessage, "from-message", 0, "With --continue-from: fork after this 1-based transcript message (default: last message)")
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")

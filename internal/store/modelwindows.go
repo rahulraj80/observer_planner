@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
-	"github.com/marmutapp/superbased-observer/internal/pricingfeed"
+	"github.com/marmutapp/superbased-observer/internal/pricingfeedwire"
 	"github.com/marmutapp/superbased-observer/internal/sessiongauge"
 )
 
@@ -45,7 +45,7 @@ func (s *Store) LoadModelContextWindows(ctx context.Context) (sessiongauge.Windo
 	}
 	feed, feedErr := s.LoadPricingFeed(ctx)
 	if feedErr == nil {
-		econ := map[string]*pricingfeed.Economics{}
+		econ := map[string]*pricingfeedwire.Economics{}
 		for _, row := range feed.Envelope.Rows {
 			if row.Economics != nil {
 				econ[row.Model] = row.Economics

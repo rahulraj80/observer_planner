@@ -73,7 +73,7 @@ func StartCapture(opts Options) (*Capture, error) {
 func (c *Capture) pump() {
 	defer close(c.done)
 	if err := c.sess.Process(); err != nil {
-		c.status.degradeIfLive("the ETW session stopped unexpectedly — " + err.Error())
+		c.status.degradeIfLive("the ETW session stopped unexpectedly - " + err.Error())
 	}
 }
 

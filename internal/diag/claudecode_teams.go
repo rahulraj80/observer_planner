@@ -43,7 +43,7 @@ func checkClaudeCodeTeams(cfg config.Config) Check {
 		if dialable(addr) {
 			note(StatusOK, fmt.Sprintf("OTLP receiver reachable at %s", addr))
 		} else {
-			note(StatusWarn, fmt.Sprintf("OTLP receiver NOT reachable at %s — is `observer start` running with [ingest.otel].enabled?", addr))
+			note(StatusWarn, fmt.Sprintf("OTLP receiver NOT reachable at %s - is `observer start` running with [ingest.otel].enabled?", addr))
 		}
 	}
 
@@ -55,20 +55,20 @@ func checkClaudeCodeTeams(cfg config.Config) Check {
 			note(StatusOK, fmt.Sprintf("Claude Code managed-settings present + parseable (%s)", path))
 		}
 	} else {
-		note(StatusWarn, "Claude Code managed-settings not found — deploy with `observer org emit-managed-settings` (file channel: /etc/claude-code/managed-settings.json)")
+		note(StatusWarn, "Claude Code managed-settings not found - deploy with `observer org emit-managed-settings` (file channel: /etc/claude-code/managed-settings.json)")
 	}
 
 	// (c) MCP pin resolvable: the managed-mcp.json pin runs `npx -y
 	// @superbased/observer …`, so npx must be on PATH for the pin to start.
 	if _, err := exec.LookPath("npx"); err == nil {
-		note(StatusOK, "npx present — the managed-mcp.json pin can bootstrap the MCP server")
+		note(StatusOK, "npx present - the managed-mcp.json pin can bootstrap the MCP server")
 	} else {
-		note(StatusWarn, "npx not on PATH — the managed-mcp.json `npx -y @superbased/observer` pin will not start")
+		note(StatusWarn, "npx not on PATH - the managed-mcp.json `npx -y @superbased/observer` pin will not start")
 	}
 
-	msg := "native-console ingest enabled — all checks passed"
+	msg := "native-console ingest enabled - all checks passed"
 	if worst != StatusOK {
-		msg = "native-console ingest enabled — see warnings below"
+		msg = "native-console ingest enabled - see warnings below"
 	}
 	return Check{Name: name, Status: worst, Message: msg, Details: details}
 }

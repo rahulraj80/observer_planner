@@ -35,6 +35,9 @@ export const PROMPT_GUARD_OUTCOME: VocabTable = {
   redacted: { tone: "accent" },
   allowed: { tone: "neutral" },
   degraded: { tone: "warn" },
+  // detected: the POST-HOC capture lane found it in a prompt that was
+  // already sent (no pre-send seam judged it) - nothing was stopped.
+  detected: { tone: "danger" },
 };
 
 /** promptGuardOutcomeKey folds a "degraded:<why>" outcome onto its table row. */

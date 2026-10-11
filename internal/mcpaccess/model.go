@@ -52,16 +52,15 @@ var Actions = []Action{ActionDiscover, ActionList, ActionCall, ActionRead, Actio
 // An empty celObject means the action is PDP-owned (response-phase
 // visibility filtering, R8.23.h) and is not rendered into CEL.
 //
-// grantable=false marks the three task actions: on the pinned agentgateway
-// v1.5.0 the mcpAuthorization CEL context is built from the RBAC resource
-// alone (crates/agentgateway/src/mcp/rbac.rs McpAuthorizationSet::validate
-// -> MCPInfo::from(&ResourceType), which leaves method_name None) and
-// tasks/get, tasks/update and tasks/cancel all call the SAME
-// authorize_task_request with an identical ResourceType::Task{target, id}
-// (crates/agentgateway/src/mcp/session.rs). There is NO method
-// discriminator a CEL rule could conjoin, so a grant on one task action
-// would compile to a rule covering all three - a silent widening R8.30.g
-// forbids. Lint therefore refuses every task-action grant with a typed
+// grantable=false marks the three task actions: tasks/get, tasks/update and
+// tasks/cancel all call the SAME authorize_task_request with an identical
+// ResourceType::Task{target, id} (crates/agentgateway/src/mcp/session.rs),
+// and the celObject the compilers render is that resource alone. On
+// agentgateway v1.5.0 the CEL context had NO method discriminator at all;
+// the pinned v1.6.0 sets mcp.methodName (rbac.rs
+// McpAuthorizationSet::validate, T-749), but no compiler conjoins it yet,
+// so a grant on one task action would still compile to a rule covering all
+// three - a silent widening R8.30.g forbids. Lint therefore refuses every task-action grant with a typed
 // feature_unavailable ERROR, from all four compilers identically (R8.1).
 // The actions stay in the vocabulary (a request naming them evaluates to
 // default-deny on every target) so the A2 front's method table and the

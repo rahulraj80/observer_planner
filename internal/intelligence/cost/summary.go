@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/spendverdict"
 )
 
@@ -121,6 +122,12 @@ type Options struct {
 	// means no tool filter. Mirrors the dashboard's global Tool dropdown
 	// so cost rollups can scope to "what did codex cost me this month".
 	Tool string
+	// Model filters rows to a single model by matching each row's OWN model
+	// column (api_turns.model / token_usage.model / summary_calls.model):
+	// cost is turn grain, so a model filter narrows spend to that model's
+	// turns (internal/modelfilter.RowIs). Empty means no model filter.
+	// Mirrors the dashboard's global Model dropdown.
+	Model string
 	// SessionIDs scopes the row scan to a specific set of session_ids
 	// across api_turns / token_usage / summary_calls. Empty means no
 	// session filter. Lets callers like handleSessions amortize one
@@ -806,6 +813,10 @@ func (e *Engine) loadProxyRows(ctx context.Context, db *sql.DB, opts Options, si
 		where = append(where, "s.tool = ?")
 		args = append(args, opts.Tool)
 	}
+	if frag, margs := modelfilter.RowIs("at.model", opts.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
 	if len(opts.SessionIDs) > 0 {
 		ph := strings.TrimRight(strings.Repeat("?,", len(opts.SessionIDs)), ",")
 		where = append(where, "at.session_id IN ("+ph+")")
@@ -814,7 +825,7 @@ func (e *Engine) loadProxyRows(ctx context.Context, db *sql.DB, opts Options, si
 		}
 	}
 	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	}
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -911,6 +922,10 @@ func (e *Engine) loadJSONLRows(ctx context.Context, db *sql.DB, opts Options, si
 		where = append(where, "s.tool = ?")
 		args = append(args, opts.Tool)
 	}
+	if frag, margs := modelfilter.RowIs("tu.model", opts.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
 	if len(opts.SessionIDs) > 0 {
 		ph := strings.TrimRight(strings.Repeat("?,", len(opts.SessionIDs)), ",")
 		where = append(where, "tu.session_id IN ("+ph+")")
@@ -919,7 +934,7 @@ func (e *Engine) loadJSONLRows(ctx context.Context, db *sql.DB, opts Options, si
 		}
 	}
 	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	}
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -957,10 +972,14 @@ func (e *Engine) loadJSONLRows(ctx context.Context, db *sql.DB, opts Options, si
 	return out.rows(), nil
 }
 
+// SummaryCallTool is the tool a summary_calls row is reported under: the
+// observer's own rolling-summary spend, kept apart from real user turns.
+const SummaryCallTool = "observer-rolling-summary"
+
 // loadSummaryCallRows reads the D20 summary_calls ledger — Anthropic
 // Haiku calls that the rolling-summarisation summariser fires direct
 // to api.anthropic.com (not through the proxy). Each row produces one
-// rawRow with source = "summary_calls" and tool = "rolling_summary"
+// rawRow with source = "summary_calls" and tool = SummaryCallTool
 // so per-tool aggregations naturally surface this internal spend as a
 // separate line. recordedUSD is taken verbatim from the ledger's
 // pre-priced cost_usd column.
@@ -969,6 +988,14 @@ func (e *Engine) loadJSONLRows(ctx context.Context, db *sql.DB, opts Options, si
 // migration 016). Other failures still surface so genuine bugs aren't
 // hidden.
 func (e *Engine) loadSummaryCallRows(ctx context.Context, db *sql.DB, opts Options, since time.Time) ([]rawRow, error) {
+	// Every row this loader yields carries tool = SummaryCallTool, so a tool
+	// filter naming any other tool matches none of them, the same rule the
+	// proxy and JSONL loaders apply to their own rows (Sol A3-06: the model
+	// picker, /api/models, offered a model seen only in summary calls under
+	// tool=codex).
+	if opts.Tool != "" && opts.Tool != SummaryCallTool {
+		return nil, nil
+	}
 	// The project scope (added 2026-09-22, F1/F6/F9 arc review) needs a
 	// join to sessions — summary_calls carries no project column of its
 	// own. Only join when a project scope was actually requested, OR
@@ -1022,6 +1049,10 @@ func (e *Engine) loadSummaryCallRows(ctx context.Context, db *sql.DB, opts Optio
 		where = append(where, "summary_calls.timestamp < ?")
 		args = append(args, opts.Until.UTC().Format(time.RFC3339Nano))
 	}
+	if frag, margs := modelfilter.RowIs("summary_calls.model", opts.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
 	if len(opts.SessionIDs) > 0 {
 		ph := strings.TrimRight(strings.Repeat("?,", len(opts.SessionIDs)), ",")
 		where = append(where, "summary_calls.session_id IN ("+ph+")")
@@ -1030,7 +1061,7 @@ func (e *Engine) loadSummaryCallRows(ctx context.Context, db *sql.DB, opts Optio
 		}
 	}
 	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	}
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -1059,7 +1090,7 @@ func (e *Engine) loadSummaryCallRows(ctx context.Context, db *sql.DB, opts Optio
 		// Surface as its own tool so per-tool grouping makes the
 		// observer-initiated spend visible without confusing it with
 		// real user turns.
-		r.tool = "observer-rolling-summary"
+		r.tool = SummaryCallTool
 		if isNoiseRow(r) {
 			continue
 		}

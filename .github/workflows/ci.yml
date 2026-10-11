@@ -11,7 +11,9 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    # integration/** too (P3-07): long-lived integration branches merge many
+    # lanes before main, and the embed drift gates must see them.
+    branches: [main, 'integration/**']
 
 permissions:
   contents: read
@@ -106,15 +108,16 @@ jobs:
         # gofumpt + goimports formatting, errorlint, gosec, gocritic, and
         # gocyclo (threshold 30; see .golangci.yml for the documented
         # pre-existing exclusions). Joined CI in v1.7; the tree is clean.
-        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v1.64.8
-          # Build golangci-lint from source with the runner's Go (1.25 via
-          # setup-go/go.mod). The prebuilt v1.64.8 binary is compiled with
-          # go1.24 and refuses to run against a go.mod that targets 1.25
-          # ("language version used to build golangci-lint is lower than the
-          # targeted Go version"). goinstall sidesteps that mismatch.
-          install-mode: goinstall
+          # v2.12.2 is the newest golangci-lint release whose prebuilt
+          # binary is compiled with Go 1.26 (go1.26.2), so it can lint this
+          # go.mod (go 1.26.0) without the "language version used to build
+          # golangci-lint is lower than the targeted Go version" refusal
+          # that forced install-mode goinstall under v1.64.8 (built with
+          # go1.24). Moved with the Go 1.26 toolchain (T-696); .golangci.yml
+          # was migrated to the v2 schema at the same time.
+          version: v2.12.2
 
       # The `-race` test run used to live here as a single `go test -race
       # -timeout 40m ./...` step. It now runs in the sharded `go-test` job
@@ -207,6 +210,127 @@ jobs:
 
       - name: test
         run: go test -race -timeout 90m $(scripts/ci/go-test-shards.sh list ${{ matrix.shard }} "${SHARDS}")
+
+  # ----------------------------------------------------------------
+  # Prebuilt node distros (modular packaging plan 5.2 / 5.9 "Every PR",
+  # phase P3). Builds each distro for linux/amd64 through
+  # scripts/build-distro.sh (tags from the catalog, never typed here),
+  # runs the per-artifact proof gate (sbo-components proof: tags read
+  # back from the binary, go list -deps package absence for every
+  # excluded component that claims L1, linked modules equal the
+  # closure, the binary's own report), writes the CycloneDX SBOM, then
+  # starts the binary under scripts/distro-smoke.sh and checks it
+  # listens on exactly its distro's default listeners. Build, prove and
+  # smoke only: nothing is signed, uploaded or published.
+  # ----------------------------------------------------------------
+  distros:
+    name: distro ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [minimal, developer, managed, full]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: build + proof + SBOM
+        run: scripts/build-distro.sh ${{ matrix.distro }} --proof
+
+      - name: listener smoke
+        # The harness runs in its own user, mount and network namespace.
+        # Ubuntu 24.04 runners restrict unprivileged user namespaces by
+        # AppArmor policy; lift that for this throwaway runner only.
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          scripts/distro-smoke.sh bin/distro/observer-${{ matrix.distro }}-linux-amd64
+
+  # ----------------------------------------------------------------
+  # Edition installers (T-729): scripts/install.sh is shellchecked and
+  # run by scripts/test-install.sh against a fixture release signed with a
+  # throwaway key (checksum, signature, every edition, uninstall); the
+  # Windows twin runs scripts/test-install.ps1 the same way. Hermetic: every
+  # case uses --from-dir, no network, no real key.
+  # ----------------------------------------------------------------
+  installer:
+    name: installer ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck scripts/install.sh scripts/test-install.sh
+
+      - name: install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/vendorsign" ./scripts/vendorsign
+          VENDORSIGN_BIN="$RUNNER_TEMP/vendorsign" bash scripts/test-install.sh
+
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          go build -o "$env:RUNNER_TEMP\vendorsign.exe" ./scripts/vendorsign
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-install.ps1 -VendorSign "$env:RUNNER_TEMP\vendorsign.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # ----------------------------------------------------------------
+  # Omit-tag variants (plan 5.9, risk R1 "stub rot"): every sbo_omit_*
+  # tag a build line names, the no_obs alias and each distro's tag set
+  # get `go vet ./...` and the tests of the packages that hold a tagged
+  # file. The set list comes from the tree (omit-tag-check.sh --list),
+  # one matrix job per set.
+  # ----------------------------------------------------------------
+  omit-tag-sets:
+    name: omit-tag sets
+    runs-on: ubuntu-latest
+    outputs:
+      sets: ${{ steps.list.outputs.sets }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - id: list
+        run: echo "sets=$(scripts/omit-tag-check.sh --list | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  omit-tags:
+    name: omit tags ${{ matrix.set }}
+    needs: omit-tag-sets
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        set: ${{ fromJSON(needs.omit-tag-sets.outputs.sets) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: vet + test
+        run: scripts/omit-tag-check.sh --only "${{ matrix.set }}"
 
   # ----------------------------------------------------------------
   # Plugin-manifest drift gate. plugins/plugingen derives the in-tool
@@ -308,6 +432,8 @@ jobs:
         run: make verify-reasoning-migration
       - name: Verify the generated dashboard config schema
         run: make verify-config-schema
+      - name: Verify the generated adapter settings catalogue
+        run: make verify-agentconfig-catalog
       - name: Verify the webcloud portal dist matches source
         # webcloud is an npm workspace member (root package-lock.json), so its
         # own npm ci here — separate from the web/ install above, which the

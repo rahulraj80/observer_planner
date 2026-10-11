@@ -8,14 +8,19 @@ import (
 	"strings"
 )
 
-// MaxTargetNameLen is agentgateway v1.5.0's MCP target-name length cap
-// (MCP_TARGET_NAME_MAX_LEN in crates/agentgateway/src/types/agent.rs: the
-// Gateway API SectionName limit).
+// MaxTargetNameLen is the pinned agentgateway v1.6.0's MCP target-name
+// length cap (MCP_TARGET_NAME_MAX_LEN in
+// crates/agentgateway/src/types/agent.rs: the Gateway API SectionName
+// limit). Re-checked at the v1.6.0 tag (commit ea5608642, T-749): the cap,
+// the pattern, validate_mcp_target_name and its four upstream test vector
+// sets are unchanged from v1.5.0, and v1.6.0 applies the check on both the
+// local-file (types/local.rs) and xDS (types/agent_xds.rs) loaders.
 const MaxTargetNameLen = 253
 
-// targetNameRE is agentgateway v1.5.0's MCP_TARGET_NAME_RE, verbatim: dot-
-// separated DNS labels of lowercase letters, digits and '-', each starting
-// and ending with a letter or digit. '_' and '+' are NOT in it - they are
+// targetNameRE is the pinned agentgateway v1.6.0's MCP_TARGET_NAME_RE,
+// verbatim: dot-separated DNS labels of lowercase letters, digits and '-',
+// each starting and ending with a letter or digit. '_' and '+' are NOT in
+// it - they are
 // agentgateway's multiplexing delimiters (`<target>_<tool>` names,
 // `<target>+<uri>` resources), which is why a raw registry id (srv_<hex>)
 // is refused as a target name.

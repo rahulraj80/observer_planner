@@ -209,6 +209,19 @@ action = { set_effort = "low", reason = "overpowered_test_run" }
 	}
 }
 
+// TestRoutingTranslationIsDeferredNotRefused: a config asking for the P3
+// translation track loads (D-514: never refuse to start over a setting) with
+// the feature switched off on the loaded copy.
+func TestRoutingTranslationIsDeferredNotRefused(t *testing.T) {
+	cfg, err := loadRoutingTOML(t, "[routing.translation]\nenabled = true\n")
+	if err != nil {
+		t.Fatalf("Load refused a deferred setting: %v", err)
+	}
+	if cfg.Routing.Translation.Enabled {
+		t.Fatal("routing.translation.enabled stayed on in a build without the translation track")
+	}
+}
+
 func TestRoutingValidateRejects(t *testing.T) {
 	cases := []struct {
 		name string
@@ -225,11 +238,10 @@ func TestRoutingValidateRejects(t *testing.T) {
 			toml: "[routing]\npolicy = \"\"\n",
 			want: "routing.policy",
 		},
-		{
-			name: "translation_enable_rejected",
-			toml: "[routing.translation]\nenabled = true\n",
-			want: "P3 track",
-		},
+		// routing.translation.enabled = true is no longer a load error: since
+		// D-514 / D-516 Load switches a not-yet-built feature off with one
+		// reason (deferred.go); TestRoutingTranslationIsDeferredNotRefused
+		// pins that.
 		{
 			name: "budget_bad_window",
 			toml: "[[routing.budget.scopes]]\nscope = \"global\"\nlimit_usd = 10.0\nwindow = \"year\"\n",

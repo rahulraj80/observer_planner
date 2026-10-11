@@ -1,0 +1,26 @@
+{
+  "schemas": [
+    "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+  ],
+  "totalResults": 3,
+  "itemsPerPage": 1,
+  "startIndex": 3,
+  "Resources": [
+    {
+      "schemas": [
+        "urn:ietf:params:scim:schemas:core:2.0:User"
+      ],
+      "id": "a1b2c3d4-0000-4000-8000-000000000003",
+      "userName": "kwong",
+      "displayName": "K. Wong",
+      "active": true,
+      "emails": [
+        {
+          "value": "kwong@example.com",
+          "type": "work",
+          "primary": true
+        }
+      ]
+    }
+  ]
+}

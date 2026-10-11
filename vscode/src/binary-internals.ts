@@ -326,7 +326,7 @@ export async function resolveLocalBinary(
   let settingError: string | undefined;
   if (settingPath) {
     if (!(await probes.fileExists(settingPath))) {
-      settingError = `observer.binary.path "${settingPath}" is not an executable file — ignoring it and falling back to the bundled/PATH binary.`;
+      settingError = `observer.binary.path "${settingPath}" is not an executable file - ignoring it and falling back to the bundled/PATH binary.`;
     } else {
       const v = await probes.probeVersion(settingPath);
       if (v.ok) {
@@ -334,7 +334,7 @@ export async function resolveLocalBinary(
       }
       settingError = `observer.binary.path "${settingPath}" could not be run (${
         v.error ?? '--version failed'
-      }) — ignoring it and falling back to the bundled/PATH binary.`;
+      }) - ignoring it and falling back to the bundled/PATH binary.`;
     }
   }
 

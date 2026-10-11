@@ -295,7 +295,7 @@ func TestGuidanceScanPassStampsEachRootSeparately(t *testing.T) {
 		t.Fatalf("both roots must be persisted: %v", fake.stampedAt)
 	}
 	if !b.After(a) {
-		t.Errorf("/b stamped %v, /a stamped %v — each root must carry its OWN scan time", b, a)
+		t.Errorf("/b stamped %v, /a stamped %v - each root must carry its OWN scan time", b, a)
 	}
 	for _, r := range res.Roots {
 		if r.ScannedAt == "" {
@@ -336,7 +336,7 @@ func TestGuidanceScanPassPersistsAroundAHangingRoot(t *testing.T) {
 		t.Errorf("persisted = %v, want the two healthy roots only", fake.persisted)
 	}
 	if fake.stampedAt["/one"].Equal(fake.stampedAt["/three"]) {
-		t.Errorf("both healthy roots share a timestamp %v — they must be stamped independently",
+		t.Errorf("both healthy roots share a timestamp %v - they must be stamped independently",
 			fake.stampedAt["/one"])
 	}
 	if res.Incomplete != 1 {
@@ -414,7 +414,7 @@ func TestGuidanceScanPassBudgetsAndRotation(t *testing.T) {
 			t.Fatalf("guidanceScanPass: %v", err)
 		}
 		if strings.Join(fake.scanned, ",") != "/tmp/repro" {
-			t.Errorf("scanned = %v — `--project` must be honoured verbatim", fake.scanned)
+			t.Errorf("scanned = %v - `--project` must be honoured verbatim", fake.scanned)
 		}
 	})
 }
@@ -435,7 +435,7 @@ func TestGuidanceScanPassFiltersNoisyRoots(t *testing.T) {
 		t.Fatalf("guidanceScanPass: %v", err)
 	}
 	if strings.Join(fake.scanned, ",") != "/real" {
-		t.Errorf("scanned = %v, want only the real project — a filtered root must cost no filesystem work", fake.scanned)
+		t.Errorf("scanned = %v, want only the real project - a filtered root must cost no filesystem work", fake.scanned)
 	}
 	if res.SkippedFiltered != 2 {
 		t.Errorf("skipped_filtered = %d, want 2", res.SkippedFiltered)
@@ -835,7 +835,7 @@ func TestGuidanceRunLoopAdvancesRotation(t *testing.T) {
 	consume(2)
 	second := strings.Join(fake.scanned, ",")
 	if first == second {
-		t.Errorf("both passes scanned %q — the offset did not rotate the window", first)
+		t.Errorf("both passes scanned %q - the offset did not rotate the window", first)
 	}
 	if second != "/c,/a,/b" {
 		t.Errorf("rotated pass scanned %q, want /c,/a,/b", second)
@@ -942,7 +942,7 @@ func TestGuidanceRootFilterIsWired(t *testing.T) {
 		t.Error("a root under the OS temp dir must be filtered")
 	}
 	if _, skip := seams.SkipRoot("/mnt/c/Users/dev/proj"); skip {
-		t.Error("a /mnt project must stay eligible — it is slow, not illegitimate")
+		t.Error("a /mnt project must stay eligible - it is slow, not illegitimate")
 	}
 	if seams.RootTimeout != 20*time.Second || seams.PassTimeout != 10*time.Minute {
 		t.Errorf("budgets not wired: root=%v pass=%v", seams.RootTimeout, seams.PassTimeout)

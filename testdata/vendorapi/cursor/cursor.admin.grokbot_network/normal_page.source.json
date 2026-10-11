@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "allowlist": "VerifiedOfficial",
+    "allowlist[]": "VerifiedOfficial",
+    "egressMode": "VerifiedOfficial",
+    "locked": "VerifiedOfficial"
+  },
+  "fixture_sha256": "239ee5b679a0e8b74df01a3b7a9a6b2b6a9f79c4d667492387a8b0321e899eab",
+  "http": {
+    "method": "GET",
+    "path": "/grok-bot/network",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get Grok Bot Network Policy\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Admin API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "d6cf7e1dd3314a1b28f4ac1f699c255c0fd0b6acbff5c0d03cfb7b0837325cd3",
+  "source_url": "https://cursor.com/docs/account/teams/admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.grokbot_network"
+}

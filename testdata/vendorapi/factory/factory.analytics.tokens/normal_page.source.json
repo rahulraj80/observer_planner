@@ -1,0 +1,38 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].billable_tokens": "VerifiedOfficial",
+    "data[].cache_read_tokens": "VerifiedOfficial",
+    "data[].cache_write_tokens": "VerifiedOfficial",
+    "data[].date": "Inferred",
+    "data[].group_key": "VerifiedOfficial",
+    "data[].input_tokens": "VerifiedOfficial",
+    "data[].output_tokens": "VerifiedOfficial",
+    "meta": "VerifiedOfficial",
+    "meta.end_date": "VerifiedOfficial",
+    "meta.org_id": "VerifiedOfficial",
+    "meta.start_date": "VerifiedOfficial"
+  },
+  "fixture_sha256": "738ca15f8f16f55a5300d3699c553b61046e038107685a7aeab5362e74af99d8",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/analytics/tokens",
+    "query": {
+      "startDate": "2026-01-15",
+      "endDate": "2026-01-15",
+      "group_by": "model"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the /tokens response-field reference and the documented envelope (data, meta with org_id, start_date and end_date). With group_by=model each row carries group_key (documented in 'Understanding group_by'); that a grouped row still carries its date is Inferred. A null cache count means not reported, never zero (documented). The org id is the reference's own example value.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Factory Analytics API reference (analytics.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "fa4729614fa5faadaedb2e0514cc8d9969bb76f15924387dcadd77cea8f1ee4b",
+  "source_url": "https://docs.factory.com/api-reference/analytics.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.analytics.tokens"
+}

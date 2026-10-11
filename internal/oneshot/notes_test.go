@@ -21,7 +21,7 @@ func syntheticCaps() []integration.Capability {
 		{Tool: "gemini-cli", TokenTier: integration.TokenTier{Best: "jsonl"}},
 		{Tool: "antigravity", TokenTier: integration.TokenTier{Best: "proto", Gap: "desktop/.pb path still decrypt-gated"}},
 		{Tool: "chatgpt-web", TokenTier: integration.TokenTier{Best: "browser_extension"}},
-		{Tool: "qoder", TokenTier: integration.TokenTier{Best: "none", Gap: "usage server-side only — local logs carry zero tokens and no model; no base-URL knob"}},
+		{Tool: "qoder", TokenTier: integration.TokenTier{Best: "none", Gap: "usage server-side only - local logs carry zero tokens and no model; no base-URL knob"}},
 	}
 }
 

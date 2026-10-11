@@ -29,6 +29,7 @@ func runProfileCmd(t *testing.T, args ...string) (string, error) {
 // TestProfileList renders every profile with the baked default
 // assignments and the hot-reload footer.
 func TestProfileList(t *testing.T) {
+	requireComponents(t, "proxy.compression")
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	out, err := runProfileCmd(t, "list", "--config", cfgPath)
 	if err != nil {
@@ -44,6 +45,7 @@ func TestProfileList(t *testing.T) {
 // TestProfileShow prints resolved TOML: profile-pinned keys win,
 // master-owned enablement is honest (default master = disabled).
 func TestProfileShow(t *testing.T) {
+	requireComponents(t, "proxy.compression")
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	out, err := runProfileCmd(t, "show", "claude-code", "--config", cfgPath)
 	if err != nil {
@@ -65,6 +67,7 @@ func TestProfileShow(t *testing.T) {
 // and round-trips through config.Load; unknown profiles and unknown
 // traffic classes stay loud.
 func TestProfileAssign(t *testing.T) {
+	requireComponents(t, "proxy.compression")
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	out, err := runProfileCmd(t, "assign", "anthropic", "codex-variant", "--config", cfgPath)
 	if err != nil {
@@ -142,6 +145,7 @@ func TestProfileAssign(t *testing.T) {
 // built-in, set a key, list shows it as user-sourced, assign it,
 // show resolves it, delete refusals + cleanup.
 func TestProfileCRUD(t *testing.T) {
+	requireComponents(t, "proxy.compression")
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.toml")
 

@@ -32,7 +32,7 @@ func TestOrgEnrolmentWarnsWhenEnrolledButDisabled(t *testing.T) {
 
 	c := checkOrgEnrolment(context.Background(), database, cfg)
 	if c.Status != StatusWarn {
-		t.Fatalf("status=%s want WARN — %q", c.Status, c.Message)
+		t.Fatalf("status=%s want WARN - %q", c.Status, c.Message)
 	}
 	if !strings.Contains(c.Message, "enrolled but [org_client] enabled = false") {
 		t.Errorf("message=%q", c.Message)
@@ -47,7 +47,7 @@ func TestOrgEnrolmentDisabledNeverEnrolledStaysOK(t *testing.T) {
 
 	c := checkOrgEnrolment(context.Background(), database, cfg)
 	if c.Status != StatusOK {
-		t.Fatalf("status=%s want OK — %q", c.Status, c.Message)
+		t.Fatalf("status=%s want OK - %q", c.Status, c.Message)
 	}
 }
 
@@ -111,10 +111,10 @@ func TestOrgEnrolmentServerURLUnsetMessageStaysActive(t *testing.T) {
 		t.Errorf("Message = %q, want it to name the persisted server it's dialing", c.Message)
 	}
 	if strings.Contains(c.Message, "INACTIVE") {
-		t.Errorf("Message = %q, must not say INACTIVE — a persisted row means the org client actually starts", c.Message)
+		t.Errorf("Message = %q, must not say INACTIVE - a persisted row means the org client actually starts", c.Message)
 	}
 	if strings.Contains(strings.ToLower(c.Message), "not enrolled") {
-		t.Errorf("Message = %q, must not say 'not enrolled' — this node IS enrolled and running", c.Message)
+		t.Errorf("Message = %q, must not say 'not enrolled' - this node IS enrolled and running", c.Message)
 	}
 }
 
@@ -128,8 +128,8 @@ func TestOrgEnrolmentFullyWiredMessageStaysPlainEnrolled(t *testing.T) {
 	insertEnrolmentRow(t, database, "https://org.acme.example")
 
 	c := checkOrgEnrolment(context.Background(), database, cfg)
-	if !strings.HasPrefix(c.Message, "enrolled — ") {
-		t.Errorf("Message = %q, want it to start with %q", c.Message, "enrolled — ")
+	if !strings.HasPrefix(c.Message, "enrolled - ") {
+		t.Errorf("Message = %q, want it to start with %q", c.Message, "enrolled - ")
 	}
 	if strings.Contains(c.Message, "INACTIVE") || strings.Contains(c.Message, "ACTIVE, dialing") {
 		t.Errorf("Message = %q, should not mention the blank-URL wording when org_server_url is set", c.Message)

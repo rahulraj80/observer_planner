@@ -1,0 +1,46 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedSDK",
+    "data[]": "VerifiedSDK",
+    "data[].end_time": "VerifiedSDK",
+    "data[].object": "VerifiedSDK",
+    "data[].results": "VerifiedSDK",
+    "data[].results[]": "VerifiedSDK",
+    "data[].results[].api_key_id": "VerifiedSDK",
+    "data[].results[].batch": "VerifiedSDK",
+    "data[].results[].input_audio_tokens": "VerifiedSDK",
+    "data[].results[].input_cached_tokens": "VerifiedSDK",
+    "data[].results[].input_tokens": "VerifiedSDK",
+    "data[].results[].model": "VerifiedSDK",
+    "data[].results[].num_model_requests": "VerifiedSDK",
+    "data[].results[].object": "VerifiedSDK",
+    "data[].results[].output_audio_tokens": "VerifiedSDK",
+    "data[].results[].output_tokens": "VerifiedSDK",
+    "data[].results[].project_id": "VerifiedSDK",
+    "data[].results[].service_tier": "VerifiedSDK",
+    "data[].results[].user_id": "VerifiedSDK",
+    "data[].start_time": "VerifiedSDK",
+    "has_more": "VerifiedSDK",
+    "next_page": "VerifiedSDK",
+    "object": "VerifiedSDK"
+  },
+  "fixture_sha256": "abd733343b59889d17de2544e49df5c7a5143cb65cb7eae8ec9b5b95cd6a388d",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/usage/completions",
+    "query": {
+      "page": "page_AAAAAGdGxdEiJdKOAAAAAGcqsYA="
+    },
+    "status": 200
+  },
+  "notes": "Synthesized: ungrouped results (group fields null), an empty bucket, last page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "openai-python main, generated from the OpenAI OpenAPI spec, fetched 2026-10-07",
+  "source_kind": "sdk_type",
+  "source_sha256": "5b1ae255aa4e43f3e016587b55fe06ffa961ba6a974a0909e3062d0553419b92",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/admin/organization/usage_completions_response.py",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.usage_completions"
+}

@@ -1,0 +1,51 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "Resources": "VerifiedOfficial",
+    "Resources[]": "VerifiedOfficial",
+    "Resources[].active": "VerifiedOfficial",
+    "Resources[].displayName": "VerifiedOfficial",
+    "Resources[].emails": "VerifiedOfficial",
+    "Resources[].emails[]": "VerifiedOfficial",
+    "Resources[].emails[].primary": "VerifiedOfficial",
+    "Resources[].emails[].type": "VerifiedOfficial",
+    "Resources[].emails[].value": "VerifiedOfficial",
+    "Resources[].externalId": "VerifiedOfficial",
+    "Resources[].id": "VerifiedOfficial",
+    "Resources[].name": "VerifiedOfficial",
+    "Resources[].name.familyName": "VerifiedOfficial",
+    "Resources[].name.formatted": "VerifiedOfficial",
+    "Resources[].name.givenName": "VerifiedOfficial",
+    "Resources[].name.middleName": "VerifiedOfficial",
+    "Resources[].roles": "VerifiedOfficial",
+    "Resources[].roles[]": "VerifiedOfficial",
+    "Resources[].roles[].primary": "VerifiedOfficial",
+    "Resources[].roles[].value": "VerifiedOfficial",
+    "Resources[].schemas": "VerifiedOfficial",
+    "Resources[].schemas[]": "VerifiedOfficial",
+    "Resources[].userName": "VerifiedOfficial",
+    "itemsPerPage": "VerifiedOfficial",
+    "schemas": "VerifiedOfficial",
+    "schemas[]": "VerifiedOfficial",
+    "startIndex": "VerifiedOfficial",
+    "totalResults": "VerifiedOfficial"
+  },
+  "fixture_sha256": "6d2cb281190e496024aaa4832ace0dee6962b1e271c912da55cba64e72f9f40e",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/scim/v2/enterprises/{enterprise}/Users",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /scim/v2/enterprises/{enterprise}/Users (operationId enterprise-admin/list-provisioned-identities-enterprise).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.enterprise.scim"
+}

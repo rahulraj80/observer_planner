@@ -693,7 +693,7 @@ SELECT p.root_path
 			placeholders = append(placeholders, "?")
 			args = append(args, root)
 		}
-		query += "\n   AND p.root_path NOT IN (" + strings.Join(placeholders, ", ") + ")"
+		query += "\n   AND p.root_path NOT IN (" + strings.Join(placeholders, ", ") + ")" //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	}
 	query += `
  ORDER BY COALESCE(NULLIF(p.last_session_at, ''), p.created_at) DESC, p.id DESC`

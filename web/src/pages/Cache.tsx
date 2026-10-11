@@ -16,8 +16,14 @@ import {
   Stagger,
   Meter,
   Table,
+  TabPanel,
+  TabStrip,
   Tooltip,
+  useTabVisited,
 } from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { CACHE_TABS, defaultTab, type CacheTab } from "@/lib/nodePageTabs";
 import { ChartState } from "@/components/ChartState";
 import { CacheExpiryCard } from "@/components/CacheExpiryCard";
 import { HelpInd, TitleWithHelp } from "@/components/HelpInd";
@@ -44,8 +50,10 @@ import {
   fmtPct,
   fmtShortId,
   fmtUSD,
+  dollarsShown,
   localeString,
 } from "@/lib/format";
+import { csvText } from "@/lib/costExport";
 import { MixCell, Td, Th } from "@/components/tableCells";
 import { CACHE_ENTRY_STATE, CACHE_EVENT_KIND, CACHE_TIER, cacheCauseTone } from "@shared/lib/cacheVocab";
 import { vocabTone } from "@shared/lib/vocabEntry";
@@ -112,18 +120,19 @@ export function CachePage() {
   // accepts the same days / tool / project query-param shape.
   // Days==0 is the "all-time" sentinel so the page is non-empty even
   // when the corpus pre-dates the operator's default window.
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   // Cache endpoints use 0 (not 36500) as their all-time sentinel.
   const winParams = windowParams(win, customRange, { allSentinel: 0 });
   // Prior-period comparison is day-grained: shift the window back by
   // its own span in whole days (sub-day / custom windows round up).
   const priorSpanDays = windowDaysApprox(win, customRange, 0);
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const projectParam = project === "all" ? undefined : project;
   const cache = useApi<CacheOverviewResponse>(
     "/api/cache/overview",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
     { refreshMs: 15000 },
   );
   // Prior-period fetch — shifts the window backward by the same
@@ -137,9 +146,10 @@ export function CachePage() {
       days: priorSpanDays,
       period_offset_days: priorSpanDays,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
     },
-    [win, customRange, tool, project],
+    [win, customRange, tool, model, project],
     { refreshMs: 60000 },
   );
   // Timeseries powers the three chart panels and the sparklines on the
@@ -153,9 +163,10 @@ export function CachePage() {
       ...winParams,
       ...gran.params,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
     },
-    [win, customRange, tool, project, gran.params],
+    [win, customRange, tool, model, project, gran.params],
     { refreshMs: 30000 },
   );
   const sparks = useMemo(() => deriveSparks(timeseries.data), [timeseries.data]);
@@ -174,30 +185,41 @@ export function CachePage() {
   // summary's graded_events — if the engine has graded ANY event
   // ever, the corpus isn't empty, so the right empty-state is the
   // filter-mismatch one.
-  const filtersActive = win !== "all" || tool !== "all" || project !== "all";
+  const filtersActive = win !== "all" || tool !== "all" || project !== "all" || model !== "all";
   const corpusHasEvents = (health.data?.graded_events ?? 0) > 0;
   const winLabel = win === "all" ? "all time" : windowLabel(win, customRange);
   // Recent events — paginated drill-down below the charts. Page
   // size 50 / no page state in URL (yet); refresh 30s.
   const [eventsOffset, setEventsOffset] = useState(0);
+  // Page tabs (platform tabs plan §2.2): Overview (rollups, charts, entry
+  // states) / Events (recent events, top causes, worst sessions). The
+  // recent-events read runs once the Events tab has been opened.
+  const pageTabs = usePageTabs("cache", CACHE_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const eventsVisited = useTabVisited<CacheTab>("events", tab);
   const events = useApi<CacheEventsResponse>(
-    "/api/cache/events",
+    eventsVisited ? "/api/cache/events" : null,
     {
       ...winParams,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       limit: 50,
       offset: eventsOffset,
     },
-    [win, customRange, tool, project, eventsOffset],
+    [win, customRange, tool, model, project, eventsOffset],
     { refreshMs: 30000 },
   );
-  // Entry-state distribution — engine global (no window filter; the
-  // entries table is a current snapshot, not a historical series).
+  // Entry-state distribution: a current snapshot, not a historical series,
+  // so no window; it does follow the Model filter (an entry carries its own
+  // model). Only the
+  // Overview tab renders it, so it loads once that tab has been opened (an
+  // organization can hide the tab, and the daemon then refuses this read).
+  const overviewVisited = useTabVisited<CacheTab>("overview", tab);
   const entryStates = useApi<CacheEntryStatesResponse>(
-    "/api/cache/entry-states",
-    undefined,
-    [],
+    overviewVisited ? "/api/cache/entry-states" : null,
+    { model: modelParam },
+    [model],
     { refreshMs: 60000 },
   );
   // Empty-state copy is filter-aware AND provider-aware. As of §15.3
@@ -210,7 +232,7 @@ export function CachePage() {
   const hasImplicit = (health.data?.implicit_cache_events ?? 0) > 0;
   const emptyHint =
     filtersActive && corpusHasEvents
-      ? "No cache events match the current filters. Try widening the window, clearing the tool / project filter, or resetting from the TopBar."
+      ? "No cache events match the current filters. Try widening the window, clearing the tool / project / model filter, or resetting from the TopBar."
       : hasUntracked && !corpusHasEvents && !hasImplicit
         ? `Recent traffic is dominated by ${health.data?.untracked_provider_top_tool || "non-Anthropic"} sessions. These route through the implicit-cache surface, but no implicit-cache events were captured - the running binary may pre-date implicit support (restart on the current build), or retrofit history via Settings → Backfill → cache-rescan.`
         : "No cache events recorded yet. Cache tracking is on by default (toggle under Settings → Cache tracking); to retrofit historical transcripts, run cache-rescan from Settings → Backfill.";
@@ -262,11 +284,18 @@ export function CachePage() {
             entryStatesError={entryStates.error}
             onEntryStatesRetry={entryStates.reload}
             onOpenSession={setOpenSessionId}
+            tab={tab}
+            tabIds={pageTabs.ids}
+            onTab={setTab}
           />
         )}
       </ChartState>
 
+      {/* This drawer is opened from local state (no ?session=), so it is
+          not route state: its tab stays local. (The drawer's URL slot is
+          `?dtab=`, never this page's `?tab=`; lib/drawerTab.ts.) */}
       <SessionDetailPanel
+        urlTabState={false}
         sessionId={openSessionId}
         open={openSessionId != null}
         onClose={() => setOpenSessionId(null)}
@@ -306,6 +335,9 @@ function CacheContent({
   entryStatesError,
   onEntryStatesRetry,
   onOpenSession,
+  tab,
+  tabIds,
+  onTab,
 }: {
   data: CacheOverviewResponse;
   priorData: CacheOverviewResponse | null;
@@ -329,6 +361,10 @@ function CacheContent({
   entryStatesError: Error | null;
   onEntryStatesRetry: () => void;
   onOpenSession: (sid: string) => void;
+  tab: CacheTab;
+  /** The tabs the organization left visible on this machine (T-132). */
+  tabIds: readonly CacheTab[];
+  onTab: (t: CacheTab) => void;
 }) {
   const global = data.global;
   const ratio = global.efficiency?.ratio ?? 0;
@@ -338,7 +374,10 @@ function CacheContent({
   const hasTraffic = hasNonZero(timeseries?.series, ["event_count"]);
   const readTokens = global.efficiency?.read_tokens ?? 0;
   const writeTokens = global.efficiency?.written_tokens ?? 0;
-  const avoidable = global.efficiency?.avoidable_usd ?? 0;
+  // Avoidable spend is dollars only: in the org's token-usage view
+  // (format.ts cost affordances) the tile reads as cache events and the
+  // table drops its Avoidable column.
+  const avoidable = dollarsShown() ? global.efficiency?.avoidable_usd ?? 0 : 0;
   const totalTraffic = readTokens + writeTokens;
   const readShare = totalTraffic > 0 ? readTokens / totalTraffic : 0;
   const writeShare = totalTraffic > 0 ? writeTokens / totalTraffic : 0;
@@ -528,6 +567,20 @@ function CacheContent({
         </div>
       )}
 
+      <TabStrip
+        tabs={tabIds.map((id) => ({
+          id,
+          label: CACHE_TABS.labels[id],
+          // The window's event total from the overview read already loaded.
+          count: id === "events" ? (global.event_count ?? null) : null,
+        }))}
+        value={tab}
+        onChange={onTab}
+        idPrefix="cache"
+        ariaLabel="Cache sections"
+      />
+
+      <TabPanel id="overview" active={tab} idPrefix="cache" className="space-y-6">
       {/* Two-column rollups — By model + By project — promoted from
           single-line bullets to real tables with mix bars and explicit
           Read / Write / Events / Ratio columns. Matches the Cost
@@ -676,7 +729,9 @@ function CacheContent({
           <EntryStatesBar rows={entryStates.rows} total={entryStates.total} />
         )}
       </ChartShell>
+      </TabPanel>
 
+      <TabPanel id="events" active={tab} idPrefix="cache" className="space-y-6">
       {/* Recent cache events — paginated drill-down. Mirrors the
           Compression tab's recent-events list shape. */}
       <ChartShell
@@ -746,6 +801,7 @@ function CacheContent({
           )}
         </ChartShell>
       </div>
+      </TabPanel>
     </>
   );
 }
@@ -1055,7 +1111,7 @@ function ByDimensionTable({
           <Th align="right">Write<HelpInd id="metric.cache_creation" /></Th>
           <Th align="right">Events<HelpInd id="tile.cache_events" /></Th>
           <Th align="right">Ratio<HelpInd id="tile.cache_ratio" /></Th>
-          <Th align="right">Avoidable<HelpInd id="tile.cache_avoidable" /></Th>
+          {dollarsShown() && <Th align="right">Avoidable<HelpInd id="tile.cache_avoidable" /></Th>}
         </tr>
       }
     >
@@ -1088,21 +1144,23 @@ function ByDimensionTable({
                 {r.ratio > 0 ? `${r.ratio.toFixed(1)}×` : "-"}
               </strong>
             </Td>
-            <Td align="right" mono>
-              {r.avoidable > 0 ? (
-                <span
-                  className={
-                    r.avoidable === maxAvoidable
-                      ? "font-semibold text-warn"
-                      : "text-fg-2"
-                  }
-                >
-                  {fmtUSD(r.avoidable)}
-                </span>
-              ) : (
-                <span className="text-fg-3">-</span>
-              )}
-            </Td>
+            {dollarsShown() && (
+              <Td align="right" mono>
+                {r.avoidable > 0 ? (
+                  <span
+                    className={
+                      r.avoidable === maxAvoidable
+                        ? "font-semibold text-warn"
+                        : "text-fg-2"
+                    }
+                  >
+                    {fmtUSD(r.avoidable)}
+                  </span>
+                ) : (
+                  <span className="text-fg-3">-</span>
+                )}
+              </Td>
+            )}
           </tr>
         );
       })}
@@ -1386,7 +1444,7 @@ function Pager({
         ← Prev
       </button>
       <span className="px-1 text-[10.5px] tabular-nums text-fg-3">
-        {fmtInt(offset + 1)}–{fmtInt(Math.min(offset + limit, total))} of{" "}
+        {fmtInt(offset + 1)}-{fmtInt(Math.min(offset + limit, total))} of{" "}
         {fmtInt(total)}
       </span>
       <button
@@ -1600,32 +1658,22 @@ function exportByDimensionCsv(
   rows: ByDimensionRow[],
 ) {
   if (rows.length === 0) return;
-  const header = [
-    dimension,
-    "read_tokens",
-    "write_tokens",
-    "read_pct",
-    "write_pct",
-    "events",
-    "ratio",
-    "avoidable_usd",
-  ].join(",");
-  const lines = rows.map((r) => {
+  // The export follows the developer cost display through lib/costExport
+  // (T-204): avoidable_usd is left out in the token-usage view.
+  const share = (r: ByDimensionRow, part: number) => {
     const total = r.read + r.write;
-    const readPct = total > 0 ? r.read / total : 0;
-    const writePct = total > 0 ? r.write / total : 0;
-    return [
-      escapeCsv(r.title || r.display),
-      r.read,
-      r.write,
-      readPct.toFixed(4),
-      writePct.toFixed(4),
-      r.events,
-      r.ratio.toFixed(4),
-      r.avoidable.toFixed(6),
-    ].join(",");
-  });
-  const csv = [header, ...lines].join("\n");
+    return (total > 0 ? part / total : 0).toFixed(4);
+  };
+  const csv = csvText<ByDimensionRow>(rows, [
+    { header: dimension, value: (r) => r.title || r.display },
+    { header: "read_tokens", value: (r) => r.read },
+    { header: "write_tokens", value: (r) => r.write },
+    { header: "read_pct", value: (r) => share(r, r.read) },
+    { header: "write_pct", value: (r) => share(r, r.write) },
+    { header: "events", value: (r) => r.events },
+    { header: "ratio", value: (r) => r.ratio.toFixed(4) },
+    { header: "avoidable_usd", value: (r) => r.avoidable.toFixed(6) },
+  ]);
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1635,12 +1683,6 @@ function exportByDimensionCsv(
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-function escapeCsv(s: string): string {
-  if (!s) return "";
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
 }
 
 // isoDateStamp returns today's date as YYYY-MM-DD without pulling

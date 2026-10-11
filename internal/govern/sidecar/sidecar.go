@@ -95,6 +95,16 @@ type File struct {
 	// page says "your organization requires the guard to be on" rather than
 	// "guard.enabled = true".
 	Features map[string]bool `json:"features,omitempty"`
+
+	// NO FIELD MAY BE ADDED HERE without a schema bump and a reader-compat
+	// plan. Decode is strict, and every released observer reads this file
+	// with its own copy of this struct: a field a released reader does not
+	// know makes that reader refuse the WHOLE file and run ungoverned (the
+	// D-234 class), which an enterprise update rollback (an older binary
+	// next to a newer file) hits for real. A new directive class goes in
+	// its OWN sidecar file that only the binaries knowing it write and read,
+	// the way the feature-access exceptions do (exceptions.go). Pinned by
+	// TestFileShapeIsTheReleasedShape against testdata/released-v1-fields.json.
 }
 
 // Dormant reports whether this file records a node that is NOT governed.

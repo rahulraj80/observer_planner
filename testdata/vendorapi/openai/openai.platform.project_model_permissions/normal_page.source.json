@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "mode": "VerifiedOfficial",
+    "model_ids": "VerifiedOfficial",
+    "model_ids[]": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "8ea4a8fd0d3fe19c723022a1f9fd92a003888b2b82734d4c580e4b04a685bd24",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/projects/{project_id}/model_permissions",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId retrieve-project-model-permissions.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.project_model_permissions"
+}

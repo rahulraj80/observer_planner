@@ -16,7 +16,9 @@
 //   - plugin.yaml — the Hermes plugin manifest.
 //   - __init__.py — the actual Python bridge that calls
 //     `observer hook hermes <event>` as a fire-and-forget subprocess
-//     on each lifecycle hook the observer adapter consumes.
+//     on each lifecycle hook the observer adapter consumes, and as a
+//     GATE on pre_tool_call (hook-parity Lane A7: Observer's guard can
+//     block a Hermes tool call or raise Hermes' own approval prompt).
 //
 // Re-running WritePlugin against an existing install is idempotent:
 // existing files are overwritten with whatever the embedded copy

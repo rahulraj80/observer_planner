@@ -19,6 +19,14 @@ import (
 // manifest without bricking older nodes.
 const SchemaV1 = "sbo.update-manifest.v1"
 
+// SchemaV2 is the distro-aware manifest (modular packaging plan 5.6.1):
+// v1's fields plus, per artifact, distro and components_digest, and at
+// manifest level release_index_sha256 and distro_epoch. It is served only
+// on the parallel /api/agent/update/manifest/v2 route and signed under its
+// own domain tag (SigningDomainV2), so a v1 node never sees one and a v2
+// document can never be re-presented on the v1 rail.
+const SchemaV2 = "sbo.update-manifest.v2"
+
 // MaxNotesChars caps Manifest.Notes in runes.
 //
 // It deliberately equals announce.MaxBodyChars (280): the update notice
@@ -37,34 +45,6 @@ const MaxManifestBytes = 256 * 1024
 // MaxEnvelopeBytes is the decode cap for the signed envelope that
 // carries a manifest (the base64 manifest plus its signature fields).
 const MaxEnvelopeBytes = 512 * 1024
-
-// Channel is a release channel. Channel is a property of the MANIFEST,
-// not of the binary: the same version can be published on more than one
-// channel at different times (§1, open decision O2 owns the names).
-type Channel string
-
-const (
-	// ChannelStable is the default channel every node gets unless the
-	// org assigns another.
-	ChannelStable Channel = "stable"
-	// ChannelLTS is the long-term-support channel. Pinning a fleet here
-	// implies a support-duration promise the operator doc must state.
-	ChannelLTS Channel = "lts"
-	// ChannelEdge is the fast channel, for a canary fleet.
-	ChannelEdge Channel = "edge"
-)
-
-// KnownChannel reports whether c is one of the three published
-// channels. An unknown channel is a validation failure, never a silent
-// pass: a typo'd channel would publish a manifest no node ever asks for.
-func KnownChannel(c Channel) bool {
-	switch c {
-	case ChannelStable, ChannelLTS, ChannelEdge:
-		return true
-	default:
-		return false
-	}
-}
 
 // KindAgent is the artifact kind for the node agent binary. It is the
 // only kind v1 delivers; the field exists so the org server can mirror
@@ -117,6 +97,16 @@ type Artifact struct {
 	// blocked{unsigned_artifact} and never applied — the fail-closed
 	// interim until the W6 release pipeline produces these (review H0).
 	UpstreamSig string `json:"upstream_sig,omitempty"`
+	// Distro names the prebuilt node distro, or the custom distro id
+	// (custom-<manifest digest>, distro.go), the archive holds (v2 only).
+	// A v1 artifact leaves it empty, which means full: every v1 document
+	// delivers the full build and an old node never reads this field.
+	Distro string `json:"distro,omitempty"`
+	// ComponentsDigest is components.Digest of the binary's compiled set
+	// (v2 only). The vendor release index binds it to the archive hash,
+	// and the node's pre-swap probe compares it with what the staged
+	// binary reports about itself.
+	ComponentsDigest string `json:"components_digest,omitempty"`
 }
 
 // Manifest is one signed publication: everything needed to move a node
@@ -180,6 +170,15 @@ type Manifest struct {
 	// before; one that carries it snapshots only across a real
 	// migration.
 	SchemaVersion int `json:"schema_version,omitempty"`
+	// ReleaseIndexSHA256 is the hex sha256 of the vendor-signed release
+	// index served beside a v2 manifest (v2 only). The node checks the
+	// index bytes it received against it, so the org cannot swap in a
+	// different (even genuinely vendor-signed) index for another release.
+	ReleaseIndexSHA256 string `json:"release_index_sha256,omitempty"`
+	// DistroEpoch is the org-authored distro epoch for this channel (v2
+	// only). A node accepts a distro CHANGE only when it is ahead of the
+	// epoch it last applied on the channel (plan 5.6.1).
+	DistroEpoch int64 `json:"distro_epoch,omitempty"`
 	// Artifacts lists every artifact for this version.
 	Artifacts []Artifact `json:"artifacts"`
 }
@@ -293,8 +292,11 @@ var ErrInvalidManifest = errors.New("invalid manifest")
 // stop, platform) are verify.go's ordered rules, so a caller cannot
 // accidentally treat a structurally valid manifest as an authorised one.
 func Validate(m Manifest) error {
-	if m.Schema != SchemaV1 {
+	if m.Schema != SchemaV1 && m.Schema != SchemaV2 {
 		return fmt.Errorf("update.Validate: %w: unknown schema %q", ErrInvalidManifest, m.Schema)
+	}
+	if err := validateDistroFields(m); err != nil {
+		return fmt.Errorf("update.Validate: %w", err)
 	}
 	if !KnownChannel(m.Channel) {
 		return fmt.Errorf("update.Validate: %w: unknown channel %q", ErrInvalidManifest, m.Channel)
@@ -351,7 +353,7 @@ func Validate(m Manifest) error {
 		}
 		k := KeyOf(a)
 		if seen[k] {
-			return fmt.Errorf("update.Validate: %w: duplicate artifact %s/%s/%s", ErrInvalidManifest, a.Kind, a.OS, a.Arch)
+			return fmt.Errorf("update.Validate: %w: duplicate artifact %s", ErrInvalidManifest, k)
 		}
 		seen[k] = true
 	}
@@ -399,6 +401,42 @@ func validateArtifact(a Artifact) error {
 	}
 	if a.UpstreamSigType != "" && !KnownSigType(a.UpstreamSigType) {
 		return fmt.Errorf("%w: unknown upstream_sig_type %q", ErrInvalidManifest, a.UpstreamSigType)
+	}
+	return nil
+}
+
+// validateDistroFields checks the fields that differ between the two
+// schemas. A v1 document must carry none of v2's fields (it always means
+// the full build, plan 5.6), so a v1 artifact naming another distro is a
+// malformed document, not a hint. A v2 document must carry all of them:
+// a distro artifact without a components digest is one the release index
+// cannot bind and the node's probe cannot check.
+func validateDistroFields(m Manifest) error {
+	if m.Schema == SchemaV1 {
+		if m.ReleaseIndexSHA256 != "" || m.DistroEpoch != 0 {
+			return fmt.Errorf("%w: a v1 manifest carries no release_index_sha256 or distro_epoch", ErrInvalidManifest)
+		}
+		for _, a := range m.Artifacts {
+			if NormalizeDistro(a.Distro) != DistroFull || a.ComponentsDigest != "" {
+				return fmt.Errorf("%w: a v1 manifest delivers only the full build (%s names distro %q)",
+					ErrInvalidManifest, a.Filename, a.Distro)
+			}
+		}
+		return nil
+	}
+	if !isHexSHA256(m.ReleaseIndexSHA256) {
+		return fmt.Errorf("%w: release_index_sha256 must be 64 hex characters", ErrInvalidManifest)
+	}
+	if m.DistroEpoch < 0 {
+		return fmt.Errorf("%w: distro_epoch must not be negative", ErrInvalidManifest)
+	}
+	for _, a := range m.Artifacts {
+		if strings.TrimSpace(a.Distro) == "" || !ArtifactDistro(a.Distro) {
+			return fmt.Errorf("%w: %s: distro %q is neither a prebuilt node distro nor a custom distro id", ErrInvalidManifest, a.Filename, a.Distro)
+		}
+		if !isHexSHA256(a.ComponentsDigest) {
+			return fmt.Errorf("%w: %s: components_digest must be 64 hex characters", ErrInvalidManifest, a.Filename)
+		}
 	}
 	return nil
 }
@@ -497,6 +535,11 @@ func SortArtifacts(as []Artifact) {
 	sort.SliceStable(as, func(i, j int) bool {
 		if as[i].Kind != as[j].Kind {
 			return as[i].Kind < as[j].Kind
+		}
+		// Distro sorts between kind and platform. A v1 list is all full,
+		// so its order (and its canonical bytes) are unchanged.
+		if di, dj := NormalizeDistro(as[i].Distro), NormalizeDistro(as[j].Distro); di != dj {
+			return di < dj
 		}
 		if as[i].OS != as[j].OS {
 			return as[i].OS < as[j].OS

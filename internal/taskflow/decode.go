@@ -248,6 +248,34 @@ func RegisteredRawToolNames() []string {
 	return names
 }
 
+// DecoderNames returns, for every tool with at least one decoderTable
+// entry, the raw tool names that tool's checklist calls are decoded from
+// (original casing, sorted, deduplicated case-insensitively). It is a
+// read-only view of the table for docs/adapter-parity.md
+// (tools/adapterparitygen), so the parity doc never hand-copies which
+// adapters have a checklist decoder. The caller owns the returned map.
+func DecoderNames() map[string][]string {
+	out := make(map[string][]string)
+	seen := make(map[string]map[string]bool)
+	for _, e := range decoderTable {
+		if seen[e.tool] == nil {
+			seen[e.tool] = make(map[string]bool)
+		}
+		for _, n := range e.names {
+			key := strings.ToLower(n)
+			if seen[e.tool][key] {
+				continue
+			}
+			seen[e.tool][key] = true
+			out[e.tool] = append(out[e.tool], n)
+		}
+	}
+	for tool := range out {
+		sort.Strings(out[tool])
+	}
+	return out
+}
+
 // ActionInput is the store seam's projection of one actions row — the
 // only shape this package reads. It never sees a database row directly
 // (CLAUDE.md module boundary #1).

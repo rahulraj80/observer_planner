@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -46,7 +48,7 @@ func TestExtraRoutesLocalPropagation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := newWith(tc.route)
 			if tc.wantErr && err == nil {
-				t.Fatalf("New accepted %q as %s — a mutation ExtraRoute must be Local or allowlisted", tc.route.Pattern, tc.route.Capability)
+				t.Fatalf("New accepted %q as %s - a mutation ExtraRoute must be Local or allowlisted", tc.route.Pattern, tc.route.Capability)
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("New rejected %q as %s: %v", tc.route.Pattern, tc.route.Capability, err)
@@ -110,7 +112,7 @@ func TestServeMuxShadowing(t *testing.T) {
 				t.Fatalf("mux.Handler(%s %s) matched %q, want %q", tc.method, tc.path, pattern, tc.wantPattern)
 			}
 			if cap := capMap[pattern]; cap != tc.wantCap {
-				t.Fatalf("capMap[%q] = %s, want %s — the enforced capability must be the more-specific route's", pattern, cap, tc.wantCap)
+				t.Fatalf("capMap[%q] = %s, want %s - the enforced capability must be the more-specific route's", pattern, cap, tc.wantCap)
 			}
 		})
 	}

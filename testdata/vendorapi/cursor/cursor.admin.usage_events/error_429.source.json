@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "code": "VerifiedOfficial",
+    "message": "VerifiedOfficial"
+  },
+  "fixture_sha256": "c226b60ed1b84d12385a860754b37f0130102a19f0d0fa499dd7e155fce8b8a4",
+  "http": {
+    "headers": {
+      "retry-after": "60"
+    },
+    "method": "POST",
+    "path": "/teams/filtered-usage-events",
+    "status": 429
+  },
+  "notes": "Verbatim documented 429 body with Retry-After: 60.",
+  "scenario": "error_429",
+  "sdk_or_spec_version_or_commit": "Cursor API overview page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "ed3a3eb7e1f33dd6409f4c2ed283208cb6f952e16ff5ca73ed1ba7896e4fb033",
+  "source_url": "https://cursor.com/docs/api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.usage_events"
+}

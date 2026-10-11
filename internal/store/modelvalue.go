@@ -7,7 +7,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 	"github.com/marmutapp/superbased-observer/internal/sessionmsg"
 )
 
@@ -310,7 +310,7 @@ func (s *Store) loadModelValueActions(
 		}
 		switch actionType {
 		case models.ActionRunCommand:
-			row.CommandClass = routing.ResolveCommandClass(target)
+			row.CommandClass = routingcore.ResolveCommandClass(target)
 		case models.ActionPermissionMode:
 			row.PhaseHint = target
 		case models.ActionSubagentStart:

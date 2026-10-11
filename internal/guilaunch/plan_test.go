@@ -204,12 +204,14 @@ func TestComposeWrapTable(t *testing.T) {
 		wantApplied bool
 		wantEnv     []string
 		wantNote    string // substring
+		wantReason  WrapReason
 	}{
 		{
 			name:        "child env applies both variables with suffixes",
 			spec:        specExe(),
 			in:          Inputs{GOOS: "linux", Bin: "/b", ProxyURL: proxy},
 			wantApplied: true,
+			wantReason:  WrapReasonNone,
 			wantEnv:     []string{"ANTHROPIC_BASE_URL=" + proxy, "OPENAI_BASE_URL=" + proxy + "/v1"},
 		},
 		{
@@ -217,6 +219,7 @@ func TestComposeWrapTable(t *testing.T) {
 			spec:        coldSpec(),
 			in:          Inputs{GOOS: "linux", Bin: "/b", ProxyURL: proxy},
 			wantApplied: true,
+			wantReason:  WrapReasonNone,
 			wantEnv:     []string{"ANTHROPIC_BASE_URL=" + proxy, "OPENAI_BASE_URL=" + proxy + "/v1"},
 			wantNote:    "cold-start only",
 		},
@@ -225,6 +228,7 @@ func TestComposeWrapTable(t *testing.T) {
 			spec:        specExe(),
 			in:          Inputs{GOOS: "linux", Bin: "/mnt/c/App/Code.exe", ProxyURL: proxy, ViaInterop: true},
 			wantApplied: false,
+			wantReason:  WrapReasonInteropEnvNotPropagated,
 			wantNote:    "WSLENV not set",
 		},
 		{
@@ -232,6 +236,7 @@ func TestComposeWrapTable(t *testing.T) {
 			spec:        coldSpec(),
 			in:          Inputs{GOOS: "linux", Bin: "/mnt/c/App/Code.exe", ProxyURL: proxy, ViaInterop: true},
 			wantApplied: false,
+			wantReason:  WrapReasonInteropEnvNotPropagated,
 			wantNote:    "cold-start only",
 		},
 		{
@@ -243,6 +248,7 @@ func TestComposeWrapTable(t *testing.T) {
 			}(),
 			in:          Inputs{GOOS: "windows", ProxyURL: proxy},
 			wantApplied: false,
+			wantReason:  WrapReasonPackagedAppNoEnv,
 			wantNote:    "inherits no environment",
 		},
 		{
@@ -250,6 +256,7 @@ func TestComposeWrapTable(t *testing.T) {
 			spec:        specExe(),
 			in:          Inputs{GOOS: "linux", Bin: "/b"},
 			wantApplied: false,
+			wantReason:  WrapReasonNoProxyURL,
 			wantNote:    "no observer proxy URL resolved",
 		},
 		{
@@ -261,6 +268,7 @@ func TestComposeWrapTable(t *testing.T) {
 			}(),
 			in:          Inputs{GOOS: "linux", Bin: "/b", ProxyURL: proxy},
 			wantApplied: false,
+			wantReason:  WrapReasonNoRoutingVars,
 			wantNote:    "no routing variables are declared",
 		},
 		{
@@ -271,6 +279,7 @@ func TestComposeWrapTable(t *testing.T) {
 			},
 			in:          Inputs{GOOS: "linux", Bin: "/b", ProxyURL: proxy},
 			wantApplied: false,
+			wantReason:  WrapReasonConfigWrite,
 			wantNote:    "written by the opencode config-lane writer",
 		},
 		{
@@ -281,6 +290,7 @@ func TestComposeWrapTable(t *testing.T) {
 			},
 			in:          Inputs{GOOS: "linux", Bin: "/b", ProxyURL: proxy},
 			wantApplied: false,
+			wantReason:  WrapReasonNoMechanism,
 			wantNote:    "native backend is hard-wired",
 		},
 		{
@@ -288,6 +298,7 @@ func TestComposeWrapTable(t *testing.T) {
 			spec:        integration.GUILaunchSpec{ID: "ide"},
 			in:          Inputs{GOOS: "linux", Bin: "/b", ProxyURL: proxy},
 			wantApplied: false,
+			wantReason:  WrapReasonNoMechanism,
 			wantNote:    "no grounded base-URL mechanism",
 		},
 	}
@@ -308,6 +319,14 @@ func TestComposeWrapTable(t *testing.T) {
 				}
 			} else if !reflect.DeepEqual(plan.Env, tc.wantEnv) {
 				t.Errorf("env = %q, want %q", plan.Env, tc.wantEnv)
+			}
+			if plan.WrapReason != tc.wantReason {
+				t.Errorf("wrap_reason = %q, want %q", plan.WrapReason, tc.wantReason)
+			}
+			// The structured reason and the boolean are one verdict: empty
+			// exactly when the wrap applied.
+			if (plan.WrapReason == WrapReasonNone) != plan.WrapApplied {
+				t.Errorf("wrap_reason %q disagrees with wrap_applied %v", plan.WrapReason, plan.WrapApplied)
 			}
 			if tc.wantNote != "" && !strings.Contains(plan.WrapNote, tc.wantNote) {
 				t.Errorf("wrap_note = %q, want it to contain %q", plan.WrapNote, tc.wantNote)

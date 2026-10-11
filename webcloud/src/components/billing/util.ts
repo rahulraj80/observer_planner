@@ -66,7 +66,9 @@ export function statusMeta(
 // PLAN_COMPARISON_ROWS is the ruled §2 table (cloud-intelligence value-upgrade
 // plan, 2026-09-15): what every account gets for free, and what Plus adds on
 // top of it. No row is locked behind "coming soon" - everything free lists
-// ships today.
+// ships today. The per-day / per-month counts are plan v3 (cloud migration
+// 0041, operator ruling D-299, 2026-10-05): Signed-in Free 100 / 3,000, Plus
+// 5x that. Keep them equal to the plans rows the server resolves.
 export const PLAN_COMPARISON_ROWS: {
   label: string;
   free: string;
@@ -77,8 +79,8 @@ export const PLAN_COMPARISON_ROWS: {
     free: "Included",
     plus: "Included",
   },
-  { label: "Sessions per day", free: "5", plus: "25" },
-  { label: "Sessions per month", free: "100", plus: "500" },
+  { label: "Sessions per day", free: "100", plus: "500" },
+  { label: "Sessions per month", free: "3,000", plus: "15,000" },
   { label: "Weekly project digest", free: "Not included", plus: "Included" },
   { label: "Hosted history", free: "30 days", plus: "12 months" },
   {

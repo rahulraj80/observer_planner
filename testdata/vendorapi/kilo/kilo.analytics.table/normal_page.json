@@ -1,0 +1,51 @@
+{
+  "result": {
+    "data": {
+      "rows": [
+        {
+          "datetime": "2026-10-06T00:00:00Z",
+          "dimensions": {
+            "user": "user_7c1f2a",
+            "model": "anthropic/claude-sonnet-4.6"
+          },
+          "costMicrodollars": 184250,
+          "requestCount": 12,
+          "inputTokens": 48000,
+          "outputTokens": 6100,
+          "cacheWriteTokens": 2000,
+          "cacheHitTokens": 30000,
+          "errorCount": 0
+        },
+        {
+          "datetime": "2026-10-06T00:00:00Z",
+          "dimensions": {
+            "user": "user_9d3e4b",
+            "model": "openai/gpt-5.5"
+          },
+          "costMicrodollars": 91500,
+          "requestCount": 5,
+          "inputTokens": 21000,
+          "outputTokens": 3300,
+          "cacheWriteTokens": 0,
+          "cacheHitTokens": 8000,
+          "errorCount": 1
+        },
+        {
+          "datetime": "2026-10-07T00:00:00Z",
+          "dimensions": {
+            "user": "user_7c1f2a",
+            "model": "anthropic/claude-sonnet-4.6"
+          },
+          "costMicrodollars": 40125,
+          "requestCount": 3,
+          "inputTokens": 9000,
+          "outputTokens": 1200,
+          "cacheWriteTokens": 0,
+          "cacheHitTokens": 6000,
+          "errorCount": 0
+        }
+      ],
+      "effectiveGranularity": "day"
+    }
+  }
+}

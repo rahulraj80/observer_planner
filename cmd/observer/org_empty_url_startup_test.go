@@ -210,17 +210,18 @@ func runOrgEmptyURLTestNode(t *testing.T, useConfigURL, seedRow bool) orgEmptyUR
 // print the "not enrolled" startup notice and start no org loop at all
 // (no keychain probe, no HTTP, org_push_log stays empty).
 func TestStartupSkipsOrgClientWhenNeverEnrolled(t *testing.T) {
+	requireComponents(t, "org.client")
 	res := runOrgEmptyURLTestNode(t, false /* useConfigURL */, false /* seedRow */)
 
-	const wantLine = "org push disabled — [org_client].enabled = true but org_server_url is empty and no enrolment record was found (not enrolled)"
+	const wantLine = "org push disabled: [org_client].enabled = true but org_server_url is empty and no enrolment record was found (not enrolled)"
 	if !strings.Contains(res.output, wantLine) {
 		t.Errorf("output missing the org-disabled startup notice.\nwant substring: %q\ngot:\n%s", wantLine, res.output)
 	}
 	if res.hits != 0 {
-		t.Errorf("fake org server received %d request(s) — a never-enrolled node must start no org loop", res.hits)
+		t.Errorf("fake org server received %d request(s) - a never-enrolled node must start no org loop", res.hits)
 	}
 	if res.pushLogRows != 0 {
-		t.Errorf("org_push_log has %d row(s), want 0 — the push loop ran despite there being nothing to enrol against", res.pushLogRows)
+		t.Errorf("org_push_log has %d row(s), want 0 - the push loop ran despite there being nothing to enrol against", res.pushLogRows)
 	}
 }
 
@@ -238,13 +239,14 @@ func TestStartupSkipsOrgClientWhenNeverEnrolled(t *testing.T) {
 // never the blank config field — so the fake server (reachable ONLY via
 // that row's URL) sees at least one hit within the poll window.
 func TestStartupUsesPersistedEnrolmentWhenConfigURLBlank(t *testing.T) {
+	requireComponents(t, "org.client")
 	res := runOrgEmptyURLTestNode(t, false /* useConfigURL */, true /* seedRow */)
 
 	if strings.Contains(res.output, "org push disabled") {
 		t.Errorf("output wrongly disabled org push for an enrolled node whose config org_server_url is blank:\n%s", res.output)
 	}
 	if res.hits == 0 {
-		t.Errorf("fake org server received 0 requests — the org client never started despite a persisted enrolment row (BLOCK-1 regression: a blank config org_server_url must not disable a real enrolment)")
+		t.Errorf("fake org server received 0 requests - the org client never started despite a persisted enrolment row (BLOCK-1 regression: a blank config org_server_url must not disable a real enrolment)")
 	}
 }
 
@@ -253,13 +255,14 @@ func TestStartupUsesPersistedEnrolmentWhenConfigURLBlank(t *testing.T) {
 // persisted row pointing at the same server. Behavior here is unchanged
 // from before this fix — the org client starts and pushes normally.
 func TestStartupRunsNormallyWithConfigURLAndRow(t *testing.T) {
+	requireComponents(t, "org.client")
 	res := runOrgEmptyURLTestNode(t, true /* useConfigURL */, true /* seedRow */)
 
 	if strings.Contains(res.output, "org push disabled") {
 		t.Errorf("output wrongly disabled org push for a fully-configured enrolled node:\n%s", res.output)
 	}
 	if res.hits == 0 {
-		t.Errorf("fake org server received 0 requests — the fully-configured case must stay active")
+		t.Errorf("fake org server received 0 requests - the fully-configured case must stay active")
 	}
 }
 
@@ -289,9 +292,9 @@ func TestStartupConstructsOrgClientWithConfigURLButNoRow(t *testing.T) {
 		t.Errorf("output wrongly disabled org push for a config-URL-configured node (orgClientShouldStart must return true here):\n%s", res.output)
 	}
 	if res.hits != 0 {
-		t.Errorf("fake org server received %d request(s) — a config URL with NO persisted enrolment row must dial nowhere (no bearer/row to authenticate with)", res.hits)
+		t.Errorf("fake org server received %d request(s) - a config URL with NO persisted enrolment row must dial nowhere (no bearer/row to authenticate with)", res.hits)
 	}
 	if res.pushLogRows != 0 {
-		t.Errorf("org_push_log has %d row(s), want 0 — nothing should have been pushed without a persisted enrolment", res.pushLogRows)
+		t.Errorf("org_push_log has %d row(s), want 0 - nothing should have been pushed without a persisted enrolment", res.pushLogRows)
 	}
 }

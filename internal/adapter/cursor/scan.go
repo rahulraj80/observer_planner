@@ -265,14 +265,14 @@ func (a *Adapter) parseTranscriptFile(ctx context.Context, path string, fromOffs
 
 	convID := convIDFromPath(path)
 	if convID == "" {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("cursor: cannot derive conversation_id from %s — skipping", path))
+		res.Warnings = append(res.Warnings, fmt.Sprintf("cursor: cannot derive conversation_id from %s - skipping", path))
 		return res, nil
 	}
 	slug := projectSlugFromPath(path)
 	projectRoot := a.resolveProjectRoot(path)
 	if projectRoot == "" {
 		res.Warnings = append(res.Warnings,
-			fmt.Sprintf("cursor: cannot decode project slug %q for %s — emitting events with empty project_root", slug, path))
+			fmt.Sprintf("cursor: cannot decode project slug %q for %s - emitting events with empty project_root", slug, path))
 	}
 
 	// Use file mtime as the per-turn timestamp. The transcript's
@@ -495,11 +495,11 @@ func (a *Adapter) promptSectionEvent(sec promptSection, convID, projectRoot, sou
 		Timestamp:     ts,
 		Tool:          models.ToolCursor,
 		ActionType:    models.ActionPromptContext,
-		Target:        fmt.Sprintf("%s — %d tokens, %d chars", label, sec.Tokens, sec.Chars),
+		Target:        fmt.Sprintf("%s - %d tokens, %d chars", label, sec.Tokens, sec.Chars),
 		Success:       true,
 		RawToolName:   "prompt_section." + sec.Name,
 		RawToolInput: fmt.Sprintf(
-			"Cursor prompt section %q (%s): %d tokens, %d chars.\n\nThese tokens are part of every turn's input but Cursor records only the budget — the section content is not persisted to disk. Shown to reconcile the per-turn input total.",
+			"Cursor prompt section %q (%s): %d tokens, %d chars.\n\nThese tokens are part of every turn's input but Cursor records only the budget - the section content is not persisted to disk. Shown to reconcile the per-turn input total.",
 			sec.Name, label, sec.Tokens, sec.Chars,
 		),
 		MessageID: "promptsection:" + sec.Name + ":" + convID,

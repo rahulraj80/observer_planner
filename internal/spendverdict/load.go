@@ -78,6 +78,7 @@ func CapsFor(tool string) sessionmsg.Caps {
 		ShadowCapable:     ic.TokenTier.OutputOnlyShadow,
 		ReasoningDisjoint: ic.TokenTier.ReasoningDisjoint,
 		SessionCumulative: ic.TokenTier.SessionCumulative,
+		PromptHookShadow:  ic.Hook.PromptShadowsTranscript,
 	}
 }
 

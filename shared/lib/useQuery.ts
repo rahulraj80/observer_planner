@@ -62,8 +62,10 @@ export type QueryResult<T> = {
   isStale: boolean;
   isRefreshing: boolean;
   updatedAt: number;
-  /** Force a refetch (foreground). */
-  reload: () => void;
+  /** Force a refetch (foreground). The promise settles once the refetch has
+   * landed in the cache (data or error), so a caller that must not act on the
+   * old data (a publish that sends the newest version it saw) can await it. */
+  reload: () => Promise<void>;
 };
 
 const DEFAULT_DEDUP_MS = 1500;
@@ -179,8 +181,9 @@ export function useQuery<T, S = T>(
       ? opts.keepPrevious(prev.key, key)
       : opts.keepPrevious ?? true);
 
-  const reload = useCallback(() => {
-    if (key != null) void cache.fetch(key, run, { force: true, foreground: true });
+  const reload = useCallback((): Promise<void> => {
+    if (key == null) return Promise.resolve();
+    return cache.fetch(key, run, { force: true, foreground: true }).catch(() => undefined);
   }, [cache, key, run]);
 
   const raw = snap.hasData ? (snap.data as T) : keep ? (prev!.data as T) : null;

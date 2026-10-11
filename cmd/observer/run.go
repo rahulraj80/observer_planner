@@ -264,13 +264,13 @@ func reportStats(w io.Writer, rs runStats, asJSON bool) {
 	}
 	label := runLabel(rs)
 	if rs.BytesIn == 0 {
-		fmt.Fprintf(w, "[observer run] %s — no output (%dms, exit=%d)\n",
+		fmt.Fprintf(w, "[observer run] %s - no output (%dms, exit=%d)\n",
 			label, rs.DurationMs, rs.ExitCode)
 		return
 	}
 	fmt.Fprintf(
 		w,
-		"[observer run] %s — %d→%d lines, %s→%s bytes (%.0f%% saved) in %dms, exit=%d\n",
+		"[observer run] %s - %d→%d lines, %s→%s bytes (%.0f%% saved) in %dms, exit=%d\n",
 		label,
 		rs.LinesIn, rs.LinesOut,
 		humanBytes(rs.BytesIn), humanBytes(rs.BytesOut),

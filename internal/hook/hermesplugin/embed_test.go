@@ -66,7 +66,8 @@ func TestWritePlugin_RoundTripDropsBothFiles(t *testing.T) {
 		`ctx.register_hook("post_tool_call"`,
 		`ctx.register_hook("post_api_request"`,
 		`ctx.register_hook("subagent_stop"`,
-		`"pid": os.getpid()`, // process-attribution seed (session_start)
+		`ctx.register_hook("pre_tool_call"`, // the guard tool gate (Lane A7)
+		`"pid": os.getpid()`,                // process-attribution seed (session_start)
 		`"ppid": os.getppid()`,
 		`"observer hook hermes`, // confirm subprocess command shape
 	} {

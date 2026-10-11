@@ -57,6 +57,25 @@ type UnitOptions struct {
 	// and lets a caller that has nothing to report (a failed capture)
 	// pass "" and get DefaultPath instead of an empty/malformed line.
 	Path string
+	// Runs names what `observer start` runs on this node, in order, for the
+	// unit's Description (T-744: a build or selection without the proxy
+	// must not be described as one). nil keeps the full set (proxy, watcher,
+	// dashboard).
+	Runs []string
+}
+
+// defaultRuns is what a full node's `observer start` runs.
+var defaultRuns = []string{"proxy", "watcher", "dashboard"}
+
+// Description is the unit's Description= value for runs (nil: the full set).
+func Description(runs []string) string {
+	if runs == nil {
+		runs = defaultRuns
+	}
+	if len(runs) == 0 {
+		return "SuperBased Observer"
+	}
+	return "SuperBased Observer (" + strings.Join(runs, " + ") + ")"
 }
 
 // DefaultPath is systemd's own manager default and the fallback used when
@@ -82,7 +101,7 @@ func RenderUnit(opts UnitOptions) string {
 
 	var b strings.Builder
 	b.WriteString("[Unit]\n")
-	b.WriteString("Description=SuperBased Observer (proxy + watcher + dashboard)\n")
+	b.WriteString("Description=" + Description(opts.Runs) + "\n")
 	b.WriteString("After=network.target\n\n")
 	b.WriteString("[Service]\n")
 	b.WriteString("Type=simple\n")

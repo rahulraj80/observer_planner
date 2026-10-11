@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -49,7 +51,7 @@ func cloudSettingsForPurpose(settings *store.CloudEvidenceSettings, purpose clou
 	if purpose == cloudcontract.PurposeContextEnrichment {
 		level = store.CloudEnrichExcerpts
 	}
-	effective := settings.ForLevel(level)
+	effective := store.CloudEvidenceSettingsForLevel(*settings, level)
 	raw, err := effective.JSON()
 	return &effective, raw, err
 }

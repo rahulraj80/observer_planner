@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 func TestLaunchSeed_InsertPendingClaimRoundtrip(t *testing.T) {
@@ -13,7 +13,7 @@ func TestLaunchSeed_InsertPendingClaimRoundtrip(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 
-	if err := s.InsertLaunchSeed(ctx, processobs.LaunchSeed{PID: 4242, Tool: "opencode", CWD: "/proj"}); err != nil {
+	if err := s.InsertLaunchSeed(ctx, procmodel.LaunchSeed{PID: 4242, Tool: "opencode", CWD: "/proj"}); err != nil {
 		t.Fatalf("InsertLaunchSeed: %v", err)
 	}
 	pending, err := s.PendingLaunchSeeds(ctx, time.Hour)
@@ -43,10 +43,10 @@ func TestLaunchSeed_UpsertReplacesRecycledPID(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 
-	if err := s.InsertLaunchSeed(ctx, processobs.LaunchSeed{PID: 7, Tool: "pi", CWD: "/old"}); err != nil {
+	if err := s.InsertLaunchSeed(ctx, procmodel.LaunchSeed{PID: 7, Tool: "pi", CWD: "/old"}); err != nil {
 		t.Fatalf("InsertLaunchSeed: %v", err)
 	}
-	if err := s.InsertLaunchSeed(ctx, processobs.LaunchSeed{PID: 7, Tool: "opencode", CWD: "/new"}); err != nil {
+	if err := s.InsertLaunchSeed(ctx, procmodel.LaunchSeed{PID: 7, Tool: "opencode", CWD: "/new"}); err != nil {
 		t.Fatalf("InsertLaunchSeed (recycled pid): %v", err)
 	}
 	pending, err := s.PendingLaunchSeeds(ctx, time.Hour)
@@ -63,7 +63,7 @@ func TestLaunchSeed_ClaimIsIdempotentDelete(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 
-	if err := s.InsertLaunchSeed(ctx, processobs.LaunchSeed{PID: 9, Tool: "goose", CWD: "/proj"}); err != nil {
+	if err := s.InsertLaunchSeed(ctx, procmodel.LaunchSeed{PID: 9, Tool: "goose", CWD: "/proj"}); err != nil {
 		t.Fatalf("InsertLaunchSeed: %v", err)
 	}
 	for i := 0; i < 2; i++ {
@@ -82,7 +82,7 @@ func TestLaunchSeed_ExpireStaleRemovesOnlyOldRows(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 
-	if err := s.InsertLaunchSeed(ctx, processobs.LaunchSeed{PID: 11, Tool: "grok", CWD: "/proj"}); err != nil {
+	if err := s.InsertLaunchSeed(ctx, procmodel.LaunchSeed{PID: 11, Tool: "grok", CWD: "/proj"}); err != nil {
 		t.Fatalf("InsertLaunchSeed: %v", err)
 	}
 	// Nothing is stale yet inside a generous window.
@@ -141,17 +141,17 @@ func TestLaunchSeed_RunIDRoundtrip(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 
-	if err := s.InsertLaunchSeed(ctx, processobs.LaunchSeed{PID: 11, Tool: "opencode", CWD: "/a", RunID: "run-A"}); err != nil {
+	if err := s.InsertLaunchSeed(ctx, procmodel.LaunchSeed{PID: 11, Tool: "opencode", CWD: "/a", RunID: "run-A"}); err != nil {
 		t.Fatalf("InsertLaunchSeed(with run): %v", err)
 	}
-	if err := s.InsertLaunchSeed(ctx, processobs.LaunchSeed{PID: 22, Tool: "opencode", CWD: "/b"}); err != nil {
+	if err := s.InsertLaunchSeed(ctx, procmodel.LaunchSeed{PID: 22, Tool: "opencode", CWD: "/b"}); err != nil {
 		t.Fatalf("InsertLaunchSeed(bare shell): %v", err)
 	}
 	pending, err := s.PendingLaunchSeeds(ctx, time.Hour)
 	if err != nil {
 		t.Fatalf("PendingLaunchSeeds: %v", err)
 	}
-	byPID := map[int]processobs.LaunchSeed{}
+	byPID := map[int]procmodel.LaunchSeed{}
 	for _, p := range pending {
 		byPID[p.PID] = p
 	}

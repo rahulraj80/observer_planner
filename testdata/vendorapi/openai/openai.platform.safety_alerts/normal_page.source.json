@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "created_at": "VerifiedOfficial",
+    "error_type": "VerifiedOfficial",
+    "id": "VerifiedOfficial",
+    "model": "VerifiedOfficial",
+    "object": "VerifiedOfficial",
+    "reason": "VerifiedOfficial",
+    "request_id": "VerifiedOfficial",
+    "request_paused": "VerifiedOfficial",
+    "response_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "301bd512f91e8ec91da3e0c40f72b2c3258727a0cdd8408edb4a53268bde1cf4",
+  "http": {
+    "method": "GET",
+    "path": "/v1/safety/alerts/{id}",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId Getprojectsafetyalert.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.safety_alerts"
+}

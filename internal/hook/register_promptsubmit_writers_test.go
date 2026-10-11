@@ -41,8 +41,8 @@ func TestRegisterGeminiCLI_FreshInstall(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "BeforeAgent" {
-		t.Errorf("HooksAdded = %v, want [BeforeAgent]", res.HooksAdded)
+	if strings.Join(res.HooksAdded, ",") != "BeforeAgent,BeforeTool" {
+		t.Errorf("HooksAdded = %v, want [BeforeAgent BeforeTool]", res.HooksAdded)
 	}
 	wantPath := filepath.Join(r.opts.HomeDir, ".gemini", "settings.json")
 	if res.ConfigPath != wantPath {
@@ -82,8 +82,8 @@ func TestRegisterGeminiCLI_Idempotent(t *testing.T) {
 	if len(res.HooksAdded) != 0 {
 		t.Errorf("second register added %v, want none", res.HooksAdded)
 	}
-	if len(res.AlreadySet) != 1 || res.AlreadySet[0] != "BeforeAgent" {
-		t.Errorf("AlreadySet = %v, want [BeforeAgent]", res.AlreadySet)
+	if strings.Join(res.AlreadySet, ",") != "BeforeAgent,BeforeTool" {
+		t.Errorf("AlreadySet = %v, want [BeforeAgent BeforeTool]", res.AlreadySet)
 	}
 }
 
@@ -140,8 +140,8 @@ func TestUnregisterGeminiCLI_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != 2 {
+		t.Errorf("HooksRemoved = %v, want the prompt and tool-gate entries", res.HooksRemoved)
 	}
 	body, _ := os.ReadFile(path)
 	var got map[string]any
@@ -165,8 +165,10 @@ func TestRegisterQwenCode_FreshInstall(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "UserPromptSubmit" {
-		t.Errorf("HooksAdded = %v, want [UserPromptSubmit]", res.HooksAdded)
+	// The event list is the registry's Registered bindings (Lane C1 added
+	// the live-grounded lifecycle events beside UserPromptSubmit).
+	if want := registeredEvents("qwen-code"); strings.Join(res.HooksAdded, ",") != strings.Join(want, ",") {
+		t.Errorf("HooksAdded = %v, want %v", res.HooksAdded, want)
 	}
 	wantPath := filepath.Join(r.opts.HomeDir, ".qwen", "settings.json")
 	if res.ConfigPath != wantPath {
@@ -191,8 +193,8 @@ func TestRegisterQwenCode_Idempotent(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("second: %v", res.Error)
 	}
-	if len(res.AlreadySet) != 1 {
-		t.Errorf("AlreadySet = %v, want one entry", res.AlreadySet)
+	if len(res.AlreadySet) != len(registeredEvents("qwen-code")) || len(res.HooksAdded) != 0 {
+		t.Errorf("AlreadySet = %v HooksAdded = %v, want every registered event already set", res.AlreadySet, res.HooksAdded)
 	}
 }
 
@@ -203,8 +205,8 @@ func TestRegisterFactoryDroid_FreshInstall(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "UserPromptSubmit" {
-		t.Errorf("HooksAdded = %v, want [UserPromptSubmit]", res.HooksAdded)
+	if strings.Join(res.HooksAdded, ",") != "UserPromptSubmit,PreToolUse" {
+		t.Errorf("HooksAdded = %v, want [UserPromptSubmit PreToolUse]", res.HooksAdded)
 	}
 	wantPath := filepath.Join(r.opts.HomeDir, ".factory", "hooks.json")
 	if res.ConfigPath != wantPath {
@@ -218,11 +220,12 @@ func TestRegisterFactoryDroid_FreshInstall(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("hooks.json not valid JSON: %v\n%s", err, body)
 	}
-	hooks, ok := got["hooks"].(map[string]any)
-	if !ok {
-		t.Fatalf("hooks.json missing top-level hooks block: %s", body)
+	// droid's hooks.json keeps events at the ROOT (live 2026-10-04,
+	// droid 0.233.0); a "hooks" wrapper is ignored by droid.
+	if _, wrapped := got["hooks"]; wrapped {
+		t.Fatalf("hooks.json nests events under \"hooks\", which droid ignores: %s", body)
 	}
-	groups, ok := hooks["UserPromptSubmit"].([]any)
+	groups, ok := got["UserPromptSubmit"].([]any)
 	if !ok || len(groups) != 1 {
 		t.Fatalf("UserPromptSubmit group missing/wrong shape: %s", body)
 	}
@@ -244,8 +247,8 @@ func TestRegisterFactoryDroid_Idempotent(t *testing.T) {
 	if len(res.HooksAdded) != 0 {
 		t.Errorf("second register added %v, want none", res.HooksAdded)
 	}
-	if len(res.AlreadySet) != 1 {
-		t.Errorf("AlreadySet = %v, want one entry", res.AlreadySet)
+	if len(res.AlreadySet) != 2 {
+		t.Errorf("AlreadySet = %v, want the prompt and tool-gate entries", res.AlreadySet)
 	}
 }
 
@@ -253,7 +256,7 @@ func TestRegisterFactoryDroid_ConflictWithoutForce(t *testing.T) {
 	t.Parallel()
 	r := genericSettingsRegistry(t, ".factory")
 	path := filepath.Join(r.opts.HomeDir, ".factory", "hooks.json")
-	pre := `{"hooks":{"UserPromptSubmit":[{"matcher":"*","hooks":[{"type":"command","command":"/usr/local/bin/my-policy"}]}]}}`
+	pre := `{"UserPromptSubmit":[{"matcher":"*","hooks":[{"type":"command","command":"/usr/local/bin/my-policy"}]}]}`
 	if err := os.WriteFile(path, []byte(pre), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -276,18 +279,16 @@ func TestUnregisterFactoryDroid_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != 2 {
+		t.Errorf("HooksRemoved = %v, want the prompt and tool-gate entries", res.HooksRemoved)
 	}
 	body, _ := os.ReadFile(filepath.Join(r.opts.HomeDir, ".factory", "hooks.json"))
 	var got map[string]any
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("hooks.json not valid JSON after unregister: %v\n%s", err, body)
 	}
-	if hooks, ok := got["hooks"].(map[string]any); ok {
-		if _, has := hooks["UserPromptSubmit"]; has {
-			t.Errorf("UserPromptSubmit group still present after unregister: %s", body)
-		}
+	if _, has := got["UserPromptSubmit"]; has {
+		t.Errorf("UserPromptSubmit group still present after unregister: %s", body)
 	}
 }
 
@@ -309,8 +310,8 @@ func TestRegisterQoder_FreshInstall(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "UserPromptSubmit" {
-		t.Errorf("HooksAdded = %v, want [UserPromptSubmit]", res.HooksAdded)
+	if want := registeredEvents("qoder"); strings.Join(res.HooksAdded, ",") != strings.Join(want, ",") {
+		t.Errorf("HooksAdded = %v, want %v", res.HooksAdded, want)
 	}
 	wantPath := filepath.Join(r.opts.HomeDir, ".qoder", "settings.json")
 	if res.ConfigPath != wantPath {
@@ -335,8 +336,8 @@ func TestRegisterQoder_Idempotent(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("second: %v", res.Error)
 	}
-	if len(res.AlreadySet) != 1 {
-		t.Errorf("AlreadySet = %v, want one entry", res.AlreadySet)
+	if len(res.AlreadySet) != len(registeredEvents("qoder")) || len(res.HooksAdded) != 0 {
+		t.Errorf("AlreadySet = %v HooksAdded = %v, want every registered event already set", res.AlreadySet, res.HooksAdded)
 	}
 }
 
@@ -350,8 +351,8 @@ func TestUnregisterQoder_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != len(registeredEvents("qoder")) {
+		t.Errorf("HooksRemoved = %v, want every registered event", res.HooksRemoved)
 	}
 }
 
@@ -379,8 +380,8 @@ func TestRegisterPoolside_FreshInstall(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "UserPromptSubmit" {
-		t.Errorf("HooksAdded = %v, want [UserPromptSubmit]", res.HooksAdded)
+	if len(res.HooksAdded) != len(poolsideEvents) || res.HooksAdded[0] != "UserPromptSubmit" {
+		t.Errorf("HooksAdded = %v, want [UserPromptSubmit PreToolUse]", res.HooksAdded)
 	}
 	wantPath := filepath.Join(r.opts.HomeDir, ".config", "poolside", "settings.yaml")
 	if res.ConfigPath != wantPath {
@@ -415,8 +416,8 @@ func TestRegisterPoolside_Idempotent(t *testing.T) {
 	if len(res.HooksAdded) != 0 {
 		t.Errorf("second register added %v, want none", res.HooksAdded)
 	}
-	if len(res.AlreadySet) != 1 {
-		t.Errorf("AlreadySet = %v, want one entry", res.AlreadySet)
+	if len(res.AlreadySet) != len(poolsideEvents) {
+		t.Errorf("AlreadySet = %v, want one per registered event", res.AlreadySet)
 	}
 }
 
@@ -470,8 +471,8 @@ func TestUnregisterPoolside_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != len(poolsideEvents) {
+		t.Errorf("HooksRemoved = %v, want one per registered event", res.HooksRemoved)
 	}
 	body, _ := os.ReadFile(path)
 	if !strings.Contains(string(body), "inference.poolside.ai") {
@@ -519,8 +520,10 @@ func TestRegisterPoolside_HardenedLikeJSONWriters(t *testing.T) {
 	if !ok {
 		t.Fatalf("no checksum entry for %q in %s", res.ConfigPath, csBody)
 	}
-	if entry["sha256"] == "" || entry["sha256"] == nil {
-		t.Errorf("checksum entry missing sha256: %+v", entry)
+	// settings.yaml is credential-bearing (D-268): the entry is a digest of
+	// the hooks subtree, never a whole-file hash.
+	if entry["hooks_sha256"] == "" || entry["hooks_sha256"] == nil || entry["sha256"] != nil {
+		t.Errorf("checksum entry is not a hooks-subtree digest: %+v", entry)
 	}
 
 	// The advisory lock was taken and released — no stale
@@ -582,8 +585,8 @@ func TestRegisterCascade_FreshInstall(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "pre_user_prompt" {
-		t.Errorf("HooksAdded = %v, want [pre_user_prompt]", res.HooksAdded)
+	if len(res.HooksAdded) != len(cascadeEvents) || res.HooksAdded[0] != "pre_user_prompt" {
+		t.Errorf("HooksAdded = %v, want pre_user_prompt first, one per cascadeEvents", res.HooksAdded)
 	}
 	wantPath := filepath.Join(r.opts.HomeDir, ".codeium", "windsurf", "hooks.json")
 	if res.ConfigPath != wantPath {
@@ -619,8 +622,8 @@ func TestRegisterCascade_Idempotent(t *testing.T) {
 	if len(res.HooksAdded) != 0 {
 		t.Errorf("second register added %v, want none", res.HooksAdded)
 	}
-	if len(res.AlreadySet) != 1 {
-		t.Errorf("AlreadySet = %v, want one entry", res.AlreadySet)
+	if len(res.AlreadySet) != len(cascadeEvents) {
+		t.Errorf("AlreadySet = %v, want one per registered event", res.AlreadySet)
 	}
 }
 
@@ -651,8 +654,8 @@ func TestUnregisterCascade_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != len(cascadeEvents) {
+		t.Errorf("HooksRemoved = %v, want one per registered event", res.HooksRemoved)
 	}
 	body, _ := os.ReadFile(filepath.Join(r.opts.HomeDir, ".codeium", "windsurf", "hooks.json"))
 	var got cascadeHooksConfig
@@ -684,8 +687,8 @@ func TestRegisterCommandCode_FreshInstall(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "transformInput" {
-		t.Errorf("HooksAdded = %v, want [transformInput]", res.HooksAdded)
+	if strings.Join(res.HooksAdded, ",") != "beforeToolCall,transformInput" {
+		t.Errorf("HooksAdded = %v, want [beforeToolCall transformInput] (the plugin shim)", res.HooksAdded)
 	}
 	wantPath := filepath.Join(r.opts.HomeDir, ".commandcode", "mods", "observer-guard.ts")
 	if res.ConfigPath != wantPath {
@@ -695,8 +698,8 @@ func TestRegisterCommandCode_FreshInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "hook\", \"command-code\", \"transformInput\"") {
-		t.Errorf("observer-guard.ts command does not name the command-code receiver: %s", body)
+	if !strings.Contains(string(body), `"tool":"command-code"`) || !strings.Contains(string(body), `"transformInput":"prompt_gate"`) {
+		t.Errorf("observer-guard.ts does not name the command-code receiver: %s", body)
 	}
 }
 
@@ -713,8 +716,8 @@ func TestRegisterCommandCode_Idempotent(t *testing.T) {
 	if len(res.HooksAdded) != 0 {
 		t.Errorf("second register added %v, want none", res.HooksAdded)
 	}
-	if len(res.AlreadySet) != 1 {
-		t.Errorf("AlreadySet = %v, want one entry", res.AlreadySet)
+	if len(res.AlreadySet) != 2 {
+		t.Errorf("AlreadySet = %v, want both shim events", res.AlreadySet)
 	}
 }
 
@@ -747,8 +750,8 @@ func TestUnregisterCommandCode_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != 2 {
+		t.Errorf("HooksRemoved = %v, want both shim events", res.HooksRemoved)
 	}
 	if _, err := os.Stat(filepath.Join(r.opts.HomeDir, ".commandcode", "mods", "observer-guard.ts")); !os.IsNotExist(err) {
 		t.Errorf("unregister left observer-guard.ts behind (err=%v)", err)
@@ -793,7 +796,7 @@ func TestRegisterCommandCode_BakesConfigPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), `const OBSERVER_CONFIG_DEFAULT = "/home/u/.observer/custom-config.toml"`) {
+	if !strings.Contains(string(body), `"config":"/home/u/.observer/custom-config.toml"`) {
 		t.Errorf("observer-guard.ts missing baked --config path: %s", body)
 	}
 }

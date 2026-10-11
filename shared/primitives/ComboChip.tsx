@@ -1,5 +1,7 @@
 import {
   useEffect,
+  useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -9,6 +11,7 @@ import clsx from "clsx";
 import { Check, ChevronDown } from "lucide-react";
 import { Icon } from "./Icon";
 import { Tooltip } from "./Tooltip";
+import { STABLE_SCROLL_Y } from "../lib/scroll";
 
 // ComboChip — filter-chip button + anchored popover combobox.
 // Mirrors design/shell.jsx:155-166 + design/app.css:259-275: icon +
@@ -18,6 +21,13 @@ import { Tooltip } from "./Tooltip";
 // Single-select; replace useState in parent. Empty/clear is modelled
 // as a sentinel option in `options` (typically value="all"). Caller
 // owns the option list — the chip just renders + filters + selects.
+//
+// Keyboard: the search input owns focus while the popover is open
+// (role="combobox" + aria-activedescendant over the role="listbox" list);
+// ArrowUp/ArrowDown move the active row, Enter picks it, Tab leaves, and
+// Escape closes ONLY the popover — the key event is stopped here so an
+// enclosing Modal/SlideOver (which listens for Escape on `document`) stays
+// open. Escape and a pick return focus to the trigger.
 
 export type ComboOption = {
   value: string;
@@ -33,6 +43,13 @@ export type ComboOption = {
   rightMeta?: ReactNode;
   // Optional tooltip on the popover row.
   title?: string;
+  // Optional secondary line under the label (e.g. a host list or a status
+  // explanation). Truncated to one line while the row is idle and shown in
+  // FULL (wrapped) while the row is active — hovered or keyboard-focused —
+  // so long text stays readable inside the popover without a tooltip
+  // overlapping the list. Optional — rows without it render exactly as
+  // before.
+  detail?: ReactNode;
   // When true, the row renders dimmed/non-interactive: clicking or pressing
   // Enter on it is a no-op (the row stays visible with its `title` reason —
   // the honest-disabled-copy convention, never simply hidden). Mirrors a
@@ -59,6 +76,11 @@ export function ComboChip({
   emptyHint = "No matches.",
   buttonValueRender,
   fullWidth = false,
+  id,
+  labelledBy,
+  disabled = false,
+  hideTriggerLabel = false,
+  triggerTooltip,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -77,23 +99,51 @@ export function ComboChip({
   // When true, the trigger stretches to fill its container width (space-
   // between label/value and the chevron) instead of the resting inline chip
   // size — for form-field contexts (a modal, a settings panel) where the
-  // control should match the width of adjacent inputs. Default false keeps
-  // every existing filter-bar caller pixel-identical.
+  // control should match the width of adjacent inputs. The popover then
+  // matches the trigger's width, so it can never be wider than the field
+  // (and the dialog/viewport the field sits in). Default false keeps every
+  // existing filter-bar caller pixel-identical.
   fullWidth?: boolean;
+  // id for the trigger button, so a form `<label htmlFor>` can point at it.
+  id?: string;
+  // id of an external visible label. When set, the trigger's accessible name
+  // is that label PLUS the selected value (aria-labelledby), and the listbox
+  // is labelled by it too.
+  labelledBy?: string;
+  // Disables the trigger (the popover cannot open). Callers state WHY in
+  // visible copy next to the control — a disabled button cannot show a
+  // hover tooltip.
+  disabled?: boolean;
+  // Hides the small in-chip `label` prefix — for form fields that already
+  // carry a visible `<label>` above the control. `label` still names the
+  // listbox for assistive tech.
+  hideTriggerLabel?: boolean;
+  // Overrides the trigger's hover tooltip. Omitted = the default
+  // "<label>: <value>" tooltip; null = no tooltip.
+  triggerTooltip?: ReactNode | null;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const uid = useId().replace(/:/g, "");
+  const listId = `combo-${uid}-list`;
+  const valueId = `combo-${uid}-value`;
+  const optId = (i: number) => `combo-${uid}-opt-${i}`;
 
   const selected = options.find((o) => o.value === value);
 
+  // Every whitespace-separated term must appear somewhere in `searchable`
+  // (order-free), so "cursor ide" finds a row whose haystack reads
+  // "cursor cursor-ide ide". A single-term query behaves exactly as the old
+  // plain substring match, and any old match still matches.
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter((o) => o.searchable.includes(q));
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return options;
+    return options.filter((o) => terms.every((t) => o.searchable.includes(t)));
   }, [options, query]);
 
   // Reset state when the popover opens/closes so each open starts
@@ -110,6 +160,33 @@ export function ComboChip({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Keep the popover inside the viewport. It is anchored to the chip's left
+  // edge, so on a phone a chip that wrapped to the middle of the filter bar
+  // (or a popover wider than the screen) used to push the page sideways.
+  // Measured once per open: shift left by the overflow, never past the
+  // viewport's left margin; maxWidth below caps a popover wider than the
+  // viewport itself. Desktop layouts never overflow, so shiftX stays 0.
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [shiftX, setShiftX] = useState(0);
+  useLayoutEffect(() => {
+    if (!open || fullWidth) {
+      setShiftX(0);
+      return;
+    }
+    const el = popoverRef.current;
+    if (!el || typeof window === "undefined") return;
+    const margin = 8;
+    const rect = el.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const overflow = rect.right - (vw - margin);
+    setShiftX(overflow > 0 ? -Math.max(0, Math.min(overflow, rect.left - margin)) : 0);
+  }, [open, fullWidth, popoverWidth]);
+
+  // A disabled trigger never holds an open popover.
+  useEffect(() => {
+    if (disabled && open) setOpen(false);
+  }, [disabled, open]);
 
   // Click-outside closes.
   useEffect(() => {
@@ -131,6 +208,13 @@ export function ComboChip({
     el?.scrollIntoView({ block: "nearest" });
   }, [open, activeIdx]);
 
+  // closeAndRefocus closes the popover and hands focus back to the trigger,
+  // so keyboard users land where they started instead of on <body>.
+  function closeAndRefocus() {
+    setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }
+
   function selectIdx(i: number) {
     const opt = filtered[i];
     // A disabled row (mirrors native `<option disabled>`) can be highlighted
@@ -138,7 +222,7 @@ export function ComboChip({
     // stays open so the user can pick a different row.
     if (!opt || opt.disabled) return;
     onChange(opt.value);
-    setOpen(false);
+    closeAndRefocus();
   }
 
   // nextEnabledIdx walks from `from` in `dir` (+1/-1), skipping disabled
@@ -165,39 +249,62 @@ export function ComboChip({
       selectIdx(activeIdx);
     } else if (e.key === "Escape") {
       e.preventDefault();
+      // Escape belongs to the popover while it is open: stop it here so an
+      // enclosing dialog's document-level Escape handler does not ALSO
+      // close the dialog.
+      e.stopPropagation();
+      closeAndRefocus();
+    } else if (e.key === "Tab") {
+      // Tab leaves the combobox (rows are not tab stops); close behind it.
       setOpen(false);
     }
   }
 
+  const tooltipContent =
+    triggerTooltip !== undefined
+      ? triggerTooltip
+      : `${label}: ${selected?.searchable ?? value}`;
+  const activeOptionId =
+    open && filtered[activeIdx] ? optId(activeIdx) : undefined;
+
   return (
     <div ref={rootRef} className={clsx("relative", fullWidth && "w-full", className)}>
       <Tooltip
-        content={`${label}: ${selected?.searchable ?? value}`}
-        disabled={open}
+        content={tooltipContent}
+        disabled={open || disabled || tooltipContent == null}
       >
       <button
+        ref={triggerRef}
+        id={id}
         type="button"
+        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-labelledby={labelledBy ? `${labelledBy} ${valueId}` : undefined}
         className={clsx(
-          "flex h-7 items-center gap-1.5 rounded-2 border bg-bg-2 px-2 text-[11px] text-fg-1 transition-colors",
+          "flex h-7 items-center gap-1.5 rounded-2 border bg-bg-2 px-2 text-[11px] text-fg-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring",
           fullWidth && "w-full justify-between",
-          open
-            ? "border-accent"
-            : "border-line-2 hover:bg-bg-3 hover:text-fg-0",
+          disabled
+            ? "cursor-not-allowed border-line-2 opacity-60"
+            : open
+              ? "border-accent"
+              : "border-line-2 hover:bg-bg-3 hover:text-fg-0",
         )}
       >
         <span className={clsx("flex min-w-0 items-center gap-1.5", fullWidth && "flex-1 truncate")}>
           {icon}
-          <span className="text-fg-3">{label}</span>
-          {buttonValueRender ? (
-            buttonValueRender(selected)
-          ) : (
-            <b className={clsx("font-semibold text-fg-0", fullWidth && "min-w-0 truncate")}>
-              {selected?.label ?? value}
-            </b>
-          )}
+          {!hideTriggerLabel && <span className="text-fg-3">{label}</span>}
+          <span id={valueId} className="contents">
+            {buttonValueRender ? (
+              buttonValueRender(selected)
+            ) : (
+              <b className={clsx("font-semibold text-fg-0", fullWidth && "min-w-0 truncate")}>
+                {selected?.label ?? value}
+              </b>
+            )}
+          </span>
         </span>
         <Icon icon={ChevronDown} size={10} className="ml-0.5 text-fg-3" />
       </button>
@@ -205,18 +312,31 @@ export function ComboChip({
 
       {open && (
         <div
+          ref={popoverRef}
           className={clsx(
             "absolute left-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-3 border border-line-2 bg-bg-1 shadow-drawer",
             fullWidth && "w-full",
           )}
-          style={fullWidth ? undefined : { width: popoverWidth }}
-          role="listbox"
-          aria-label={label}
+          style={
+            fullWidth
+              ? undefined
+              : {
+                  width: popoverWidth,
+                  maxWidth: "calc(100vw - 16px)",
+                  transform: shiftX ? `translateX(${shiftX}px)` : undefined,
+                }
+          }
         >
           <div className="border-b border-line-1 bg-bg-2/60 px-2 py-1.5">
             <input
               ref={inputRef}
               type="search"
+              role="combobox"
+              aria-expanded
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={activeOptionId}
+              aria-label={`${label} search`}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -229,7 +349,11 @@ export function ComboChip({
           </div>
           <div
             ref={listRef}
-            className="max-h-[280px] overflow-y-auto py-1"
+            id={listId}
+            role="listbox"
+            aria-label={labelledBy ? undefined : label}
+            aria-labelledby={labelledBy}
+            className={clsx("max-h-[min(280px,50vh)] py-1", STABLE_SCROLL_Y)}
             onKeyDown={onKey}
             tabIndex={-1}
           >
@@ -245,34 +369,65 @@ export function ComboChip({
                 // groupLabel never trigger a header.
                 const prevGroup = i > 0 ? filtered[i - 1].groupLabel : undefined;
                 const showGroupHeader = !!o.groupLabel && o.groupLabel !== prevGroup;
+                const hasDetail = o.detail != null && o.detail !== false;
                 return (
-                  <div key={o.value}>
+                  <div key={o.value} role="presentation">
                     {showGroupHeader && (
-                      <div className="mt-1 px-2.5 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-fg-4 first:mt-0">
+                      <div
+                        role="presentation"
+                        className="mt-1 px-2.5 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-fg-4 first:mt-0"
+                      >
                         {o.groupLabel}
                       </div>
                     )}
                     <Tooltip content={o.title ?? null} side="right" disabled={!o.title}>
                     <button
                       type="button"
+                      id={optId(i)}
                       data-idx={i}
                       role="option"
+                      tabIndex={-1}
                       aria-selected={sel}
                       aria-disabled={o.disabled}
                       onMouseEnter={() => setActiveIdx(i)}
                       onClick={() => selectIdx(i)}
                       className={clsx(
-                        "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
+                        "flex w-full gap-2 px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
+                        hasDetail ? "items-start" : "items-center",
                         o.disabled
-                          ? "cursor-not-allowed text-fg-4 opacity-50"
+                          ? [
+                              "cursor-not-allowed text-fg-4",
+                              // A detail line carries the disabled row's
+                              // reason, so keep it legible; a bare row keeps
+                              // the classic dimmed look.
+                              hasDetail ? (active ? "bg-bg-2" : "bg-transparent") : "opacity-50",
+                            ]
                           : [
                               active ? "bg-bg-3" : "bg-transparent",
                               sel ? "text-accent" : "text-fg-1",
                             ],
                       )}
                     >
-                      {o.leading}
-                      <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                      {hasDetail && o.leading ? (
+                        <span className="mt-[3px] flex shrink-0">{o.leading}</span>
+                      ) : (
+                        o.leading
+                      )}
+                      {hasDetail ? (
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{o.label}</span>
+                          <span
+                            className={clsx(
+                              "mt-0.5 block text-[10.5px] leading-snug text-fg-3",
+                              active ? "whitespace-normal break-words" : "truncate",
+                            )}
+                          >
+                            {o.detail}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                      )}
                       {o.rightMeta && (
                         <span className="shrink-0 font-mono text-[10.5px] text-fg-3">
                           {o.rightMeta}

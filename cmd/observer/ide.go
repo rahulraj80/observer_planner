@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 // ide.go — `observer ide <id> [project-dir] [-- app-args...]`: launch an IDE or
 // desktop app WRAPPED, the CLI sibling of the dashboard's GUI launch.
 //

@@ -9,6 +9,13 @@
 // and the dashboard (POST /api/shell-wrap/apply, via a seam cmd wires) call
 // Service; neither writes a file itself.
 //
+// Every call names a target (target.go): the shells of the OS this process
+// runs on, or, from inside WSL, the Windows shells of the same machine (the
+// WSL bridge target, T-419). A target maps the planner's paths (in its own
+// notation) to the paths this process reaches, so the Windows target is read
+// and written over the /mnt/<drive> mount with the same write discipline, and
+// its choice is recorded in [shell_wrap.windows].
+//
 // Write discipline:
 //
 //   - Nothing is written unless the operator asked (Apply / Disable); Status

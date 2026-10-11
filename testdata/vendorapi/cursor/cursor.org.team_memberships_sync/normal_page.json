@@ -1,0 +1,22 @@
+{
+  "results": [
+    {
+      "userId": 12345,
+      "teamIds": [
+        7,
+        8
+      ],
+      "status": "success"
+    },
+    {
+      "userId": "user_abc123",
+      "teamIds": [
+        8
+      ],
+      "destinationTeamId": 8,
+      "status": "success"
+    }
+  ],
+  "successCount": 2,
+  "errorCount": 0
+}

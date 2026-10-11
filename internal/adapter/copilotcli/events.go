@@ -419,6 +419,17 @@ type parserState struct {
 	// content without tool_use blocks). Same deferral logic; same
 	// post-loop patch.
 	pendingSubagentToolEmits []pendingSubagentEmit
+	// spanOutputTokens sums assistant.message.outputTokens (Tier 3) since
+	// the most recent session.resume / session.shutdown, the same span a
+	// shutdown's modelMetrics block covers. Advanced by dispatchState on
+	// EVERY line (even before fromOffset) so it is complete at emit time.
+	spanOutputTokens int64
+	// shutdownSpanOutput is spanOutputTokens frozen at the current
+	// session.shutdown line (dispatchState runs before emitEvent for the
+	// same line and resets the running sum). Zero means no Tier 3 row in
+	// the span reported output, so the Tier 0 row carries modelMetrics'
+	// outputTokens instead of leaving output unmeasured (T-353).
+	shutdownSpanOutput int64
 }
 
 // pendingSubagentEmit pairs the index of an emitted event in
@@ -674,6 +685,7 @@ func dispatchState(st *parserState, env eventEnvelope, sc *scrub.Scrubber) {
 		// session.start's field-by-field updates — non-empty wins,
 		// empty leaves the prior value in place (resumes often omit
 		// gitRoot/branch/repository, which we want to preserve).
+		st.spanOutputTokens = 0
 		var d sessionResumeData
 		if err := json.Unmarshal(env.Data, &d); err == nil {
 			if d.SelectedModel != "" {
@@ -747,6 +759,15 @@ func dispatchState(st *parserState, env eventEnvelope, sc *scrub.Scrubber) {
 		if err := json.Unmarshal(env.Data, &d); err == nil && d.Model != "" {
 			st.subagentModels[env.AgentID] = d.Model
 		}
+	case "assistant.message":
+		// T-353: running Tier 3 output sum for the current shutdown span.
+		var d assistantMessageData
+		if err := json.Unmarshal(env.Data, &d); err == nil && d.OutputTokens > 0 {
+			st.spanOutputTokens += d.OutputTokens
+		}
+	case "session.shutdown":
+		st.shutdownSpanOutput = st.spanOutputTokens
+		st.spanOutputTokens = 0
 	}
 	_ = sc
 }
@@ -1097,11 +1118,25 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 		// constraint. When Tier 1 (otel) rows exist for the same
 		// session the store-layer dedup drops these (Tier 1 wins —
 		// it has per-request granularity instead of per-shutdown).
+		//
+		// T-353 (copilot-cli 1.0.91): a live session recorded input from
+		// this block but output 0, i.e. no Tier 3 row in the span carried
+		// outputTokens. When the span's Tier 3 output sum is zero the
+		// shutdown row carries modelMetrics' own outputTokens, so output is
+		// never silently dropped; when any Tier 3 row reported output the
+		// old rule stands (output 0 here, no double count). The decision is
+		// per span, all models together: Tier 3 rows resolve their model
+		// late (subagent patch), so a per-model sum would be unreliable.
+		carryOutput := st.shutdownSpanOutput == 0
 		var sd sessionShutdownData
 		if jsonErr := json.Unmarshal(env.Data, &sd); jsonErr == nil {
 			for model, entry := range sd.ModelMetrics {
 				u := entry.Usage
-				if u.InputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.ReasoningTokens == 0 {
+				outT := int64(0)
+				if carryOutput {
+					outT = u.OutputTokens
+				}
+				if u.InputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.ReasoningTokens == 0 && outT == 0 {
 					// Empty delta — shutdown fired without API activity
 					// since the previous resume (compaction-only, idle
 					// sleep, etc.). Skip emitting a zero row.
@@ -1127,7 +1162,7 @@ func emitEvent(st *parserState, env eventEnvelope, path string, out *adapter.Par
 					Tool:                models.ToolCopilotCLI,
 					Model:               model,
 					InputTokens:         netInput,
-					OutputTokens:        0, // Tier 3 captures output per-message
+					OutputTokens:        outT, // 0 unless the span had no Tier 3 output (T-353)
 					CacheReadTokens:     u.CacheReadTokens,
 					CacheCreationTokens: u.CacheWriteTokens,
 					ReasoningTokens:     u.ReasoningTokens,

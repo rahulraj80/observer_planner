@@ -101,9 +101,9 @@ func Estimate(in EstimateInput) EstimateResult {
 	if in.ContextTokens > 0 {
 		full := int64(float64(in.ContextTokens) * in.ForkShare)
 		add(CarryFull, full, "whole context through the fork; the target pulls full bodies on demand via get_session_message")
-		cacheNote := "full read bodies inlined from the first prompt — replicates the source prompt cache; resent per turn until the target's cache warms"
+		cacheNote := "full read bodies inlined from the first prompt - replicates the source prompt cache; resent per turn until the target's cache warms"
 		if !in.SourceHasFullReader {
-			cacheNote = "= full: this source has no un-excerpted (full-body) reader, so full_cache carries the same excerpted bodies as full — no distinct read cache to inline"
+			cacheNote = "= full: this source has no un-excerpted (full-body) reader, so full_cache carries the same excerpted bodies as full - no distinct read cache to inline"
 		}
 		add(CarryFullCache, full, cacheNote)
 	}
@@ -138,7 +138,7 @@ func ContextFitWarning(res EstimateResult, warnTokens int64) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"Full carry ≈ %s tokens exceeds a %s-token context window. The target tool's default model may be smaller than the source's (many default/free models cap near 128K–200K), so the full carry can't be rehydrated there in one shot. Fork earlier, or use a smaller carry (Distilled + tail ≈ %s tokens).",
+		"Full carry ≈ %s tokens exceeds a %s-token context window. The target tool's default model may be smaller than the source's (many default/free models cap near 128K-200K), so the full carry can't be rehydrated there in one shot. Fork earlier, or use a smaller carry (Distilled + tail ≈ %s tokens).",
 		humanTokens(full), humanTokens(warnTokens), humanTokens(distilledTail),
 	)
 }

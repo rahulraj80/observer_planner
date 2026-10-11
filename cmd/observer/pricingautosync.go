@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_pricing_feed
+
 package main
 
 import (
@@ -84,7 +86,7 @@ func runPricingAutoSync(ctx context.Context, cfg config.Config, out, errOut io.W
 		hours = 24 // D2 default; never a zero-interval busy loop.
 	}
 	interval := time.Duration(hours) * time.Hour
-	fmt.Fprintf(out, "  pricing feed auto-sync → every %s (in-process; re-prices the live daemon; standalone nodes only — refuses when enrolled)\n", interval)
+	fmt.Fprintf(out, "  pricing feed auto-sync → every %s (in-process; re-prices the live daemon; standalone nodes only - refuses when enrolled)\n", interval)
 	pricingAutoSyncLoop(ctx, cfg, interval, errOut, tick)
 }
 

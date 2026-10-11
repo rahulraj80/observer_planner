@@ -42,12 +42,12 @@ func newCacheHealthCmd() *cobra.Command {
 			"Exits 0 when the gate passes; non-zero otherwise.\n\n" +
 			"Two secondary validations also run (informational; neither\n" +
 			"changes pass/fail):\n" +
-			"  - read:write consistency — any *_rewrite event with\n" +
+			"  - read:write consistency - any *_rewrite event with\n" +
 			"    tokens_read > N× tokens_written is mechanically\n" +
 			"    inconsistent with a real cache invalidation. This\n" +
 			"    catches mislabeled causes even when the cause\n" +
 			"    isn't dominant.\n" +
-			"  - cause concentration — when any single non-suffix_growth\n" +
+			"  - cause concentration - when any single non-suffix_growth\n" +
 			"    cause exceeds the share threshold, surface as WARN.\n" +
 			"    Catches over-firing rules that the rate gate is blind\n" +
 			"    to (when both predicted and observed land in the same\n" +
@@ -517,7 +517,7 @@ func printCacheHealth(w interface{ Write([]byte) (int, error) }, r CacheHealthRe
 	// signals over-firing of a non-suffix_growth rule.
 	rwVerdict := "CLEAN"
 	if len(r.InconsistentRewriteEvents) > 0 {
-		rwVerdict = fmt.Sprintf("WARN — %d event(s)", len(r.InconsistentRewriteEvents))
+		rwVerdict = fmt.Sprintf("WARN - %d event(s)", len(r.InconsistentRewriteEvents))
 	}
 	_, _ = fmt.Fprintf(w, "read:write consistency: %s  (flag when read > %.1f× write on *_rewrite/compaction_reset)\n",
 		rwVerdict, r.InconsistentRewriteThreshold)

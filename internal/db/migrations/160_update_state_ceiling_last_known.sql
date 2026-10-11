@@ -1,0 +1,30 @@
+-- 160_update_state_ceiling_last_known.sql - modular packaging P3 (lane
+-- MP-REL, T-682; plan 6.2.2 and the fourth-pass M1 fail-closed table; the
+-- next contiguous agent number per the migration steward, D-417).
+--
+-- WHY. The OS-pinned local component ceiling (internal/managedconfig) is
+-- read from a fixed per-OS source on every resolve. When that source exists
+-- but fails a check (ownership, symlink, size, parse), the loader must keep
+-- the last VALID explicit set in force rather than fall to core only, and it
+-- can do that only if somebody stored that set. managedconfig.Result.Persist
+-- asks the caller to store it; before this column nobody could, so every
+-- invalid source fell to core only (managedconfig.Load(nil)).
+--
+-- SHAPE. JSON exactly as managedconfig.Ceiling marshals it:
+-- {"ids": [...], "catalog_version": N, "source_hash": "<hex sha256>"}.
+-- Never a distro name: a distro is resolved to ids at provisioning time, so a
+-- later release that grows a distro cannot widen the node. '' means no valid
+-- ceiling was ever read on this node.
+--
+-- One writer: internal/store/update.go (SaveCeilingLastKnown), the owner of
+-- update_state. Written only after the loader reports a valid source whose
+-- set differs from the stored one.
+--
+-- NODE-LOCAL. update_state is in tests/invariant/privacy_test.go's
+-- forbidden-name set (migration 105), so an additive column needs no
+-- privacy-test edit, and the org wire carries none of it. NO server pair.
+-- Additive with a default; a binary from before 160 never names the column,
+-- and a newer binary on a database not yet at 160 reads it as absent
+-- (store.LoadCeilingLastKnown tolerates the missing column).
+
+ALTER TABLE update_state ADD COLUMN ceiling_last_known TEXT NOT NULL DEFAULT '';

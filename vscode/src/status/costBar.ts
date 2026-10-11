@@ -132,10 +132,10 @@ function buildTooltip(data: HeadlineResponse): vscode.MarkdownString {
   if (month) {
     const budget =
       month.budget_usd > 0
-        ? ` — budget ${month.budget_pct.toFixed(1)}% of ${formatUSD(month.budget_usd)}`
+        ? ` - budget ${month.budget_pct.toFixed(1)}% of ${formatUSD(month.budget_usd)}`
         : '';
     lines.push(
-      `**Month**: ${formatUSD(month.to_date_usd)} to date — projection ${formatUSD(
+      `**Month**: ${formatUSD(month.to_date_usd)} to date - projection ${formatUSD(
         month.projection_usd,
       )}${budget}`,
     );

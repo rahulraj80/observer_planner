@@ -112,7 +112,7 @@ func newCursorCmd() *cobra.Command {
 		Use:   "cursor [-- cursor-agent-args...]",
 		Short: "Launch cursor-agent, optionally seeded with a distilled handover",
 		Long: "Wraps the `cursor-agent` CLI as a pure SEEDING launcher. NO proxy\n" +
-			"routing — cursor talks to its own backend, so the child inherits\n" +
+			"routing - cursor talks to its own backend, so the child inherits\n" +
 			"your environment unchanged. Token capture for cursor is via the\n" +
 			"cursor hook + the chats/store.db watcher adapter (registered by\n" +
 			"`observer init --cursor`), not the proxy.\n\n" +

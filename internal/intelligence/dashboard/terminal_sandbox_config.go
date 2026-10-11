@@ -54,6 +54,8 @@ func (s *Server) handleTerminalSandboxConfig(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleTerminalSandboxConfigGet(w http.ResponseWriter, r *http.Request) {
 	confirmTok := setConfirmCookie(w, r)
+	// The base a save sends back as ?base_etag= (T-639).
+	etag, _ := configEtag(s.opts.ConfigPath)
 	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
 	if err != nil {
 		writeErr(w, fmt.Errorf("load sandbox config: %w", err))
@@ -61,6 +63,7 @@ func (s *Server) handleTerminalSandboxConfigGet(w http.ResponseWriter, r *http.R
 	}
 	p := sandboxConfigPayload(cfg.Terminal.Sandbox)
 	writeJSON(w, map[string]any{
+		"config_etag":              etag,
 		"confirm_token":            confirmTok,
 		"config_writable":          s.opts.ConfigPath != "",
 		"restart_required_on_save": true,
@@ -73,7 +76,7 @@ func (s *Server) handleTerminalSandboxConfigPut(w http.ResponseWriter, r *http.R
 		return
 	}
 	if s.opts.ConfigPath == "" {
-		http.Error(w, "config path not configured — server has no file to save to", http.StatusConflict)
+		http.Error(w, "config path not configured - server has no file to save to", http.StatusConflict)
 		return
 	}
 	var body terminalSandboxConfigPayload
@@ -88,47 +91,41 @@ func (s *Server) handleTerminalSandboxConfigPut(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Join the one whole-config write domain. Lock order is the established
-	// remoteManageMu -> configWriteMu order used by terminal policy/limits.
-	remoteManageMu.Lock()
-	s.configWriteMu.Lock()
-	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
-	if err == nil {
-		// Omitted optional fields keep their saved value (see the payload).
-		if body.Egress == nil {
-			next.Egress = cfg.Terminal.Sandbox.Egress
-		}
-		if body.AllowToolConfigWrites == nil {
-			next.AllowToolConfigWrites = cfg.Terminal.Sandbox.AllowToolConfigWrites
-		}
-		if body.EgressAllowCIDRs == nil {
-			next.EgressAllowCIDRs = cfg.Terminal.Sandbox.EgressAllowCIDRs
-		}
-		cfg.Terminal.Sandbox = next
-		err = config.Validate(cfg)
-	}
-	if err == nil {
-		err = writeConfigToml(s.opts.ConfigPath, cfg)
-	}
-	s.configWriteMu.Unlock()
-	remoteManageMu.Unlock()
-	if err != nil {
-		writeErr(w, fmt.Errorf("save sandbox config: %w", err))
-		return
-	}
-
-	s.notifyConfigSaved()
-	s.recordManageAudit(r, "terminal_sandbox_config", fmt.Sprintf(
-		"enabled=%v default_on=%v egress=%s egress_allow_cidrs=%d tool_config_writes=%v remote_clone=%v worktree=%v mask_paths=%d ro_binds=%d rw_binds=%d",
-		next.Enabled, next.DefaultOn, next.Egress, len(next.EgressAllowCIDRs), next.AllowToolConfigWrites, next.AllowRemoteClone, next.AllowWorktreeSource,
-		len(next.MaskPaths), len(next.ExtraROBinds), len(next.ExtraRWBinds),
-	))
-	writeJSON(w, map[string]any{
-		"saved":            true,
-		"sandbox":          sandboxConfigPayload(next),
-		"config_path":      s.opts.ConfigPath,
-		"backup_path":      s.opts.ConfigPath + ".bak",
-		"restart_required": true,
+	// The ONE save pipeline (T-572): the established remoteManageMu ->
+	// configWriteMu lock domain, `?dry_run=1` previews the masked diff and
+	// writes nothing, `?base_etag=` refuses a file changed since that
+	// preview, and the write is validated, read back and audited like every
+	// section save.
+	s.commitConfigEdit(w, r, configEdit{
+		section: "terminal.sandbox",
+		apply: func(cfg *config.Config) {
+			// Omitted optional fields keep their saved value (see the payload).
+			if body.Egress == nil {
+				next.Egress = cfg.Terminal.Sandbox.Egress
+			}
+			if body.AllowToolConfigWrites == nil {
+				next.AllowToolConfigWrites = cfg.Terminal.Sandbox.AllowToolConfigWrites
+			}
+			if body.EgressAllowCIDRs == nil {
+				next.EgressAllowCIDRs = cfg.Terminal.Sandbox.EgressAllowCIDRs
+			}
+			cfg.Terminal.Sandbox = next
+		},
+		auditAction: "terminal_sandbox_config",
+		auditDetailFor: func(cfg config.Config) string {
+			n := cfg.Terminal.Sandbox
+			return fmt.Sprintf(
+				"enabled=%v default_on=%v egress=%s egress_allow_cidrs=%d tool_config_writes=%v remote_clone=%v worktree=%v mask_paths=%d ro_binds=%d rw_binds=%d",
+				n.Enabled, n.DefaultOn, n.Egress, len(n.EgressAllowCIDRs), n.AllowToolConfigWrites, n.AllowRemoteClone, n.AllowWorktreeSource,
+				len(n.MaskPaths), len(n.ExtraROBinds), len(n.ExtraRWBinds),
+			)
+		},
+		extra: func(cfg config.Config) map[string]any {
+			return map[string]any{
+				"sandbox":          sandboxConfigPayload(cfg.Terminal.Sandbox),
+				"restart_required": true,
+			}
+		},
 	})
 }
 

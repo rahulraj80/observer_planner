@@ -144,6 +144,15 @@ type Config struct {
 	// ProtectedBranches are the branch glob patterns R-110/R-111
 	// protect. Nil means DefaultProtectedBranches.
 	ProtectedBranches []string
+	// ResolveLinks, when set, resolves the symlinks in the longest
+	// EXISTING prefix of a normalized absolute path and returns the
+	// result (forward slashes), or "" when the path is not on this
+	// machine's path flavor or nothing resolves. It is I/O, injected by
+	// the guard layer; nil keeps resolution purely lexical. R-101 uses it
+	// so a delete that reaches the home directory or a filesystem root
+	// THROUGH a symlink (`ln -s ~ out; rm -rf out/*`) is judged by where
+	// it lands (Sol A2-04).
+	ResolveLinks func(path string) string
 	// KnownProjectRoots are ALL project roots the daemon observes —
 	// the cross-project-bleed rule R-151's reference set (unique to
 	// observer: we know every project the user works in). Static
@@ -268,6 +277,65 @@ func DefaultProtectedBranches() []string {
 type Engine struct {
 	cfg   Config
 	rules []Rule
+	// readsBudgetStamps is ReadsBudgetStamps, resolved once at New.
+	readsBudgetStamps bool
+}
+
+// budgetStampConsumers is the closed table of configured facts that make a
+// row compare a guard-stamped spend, usage or utilization value. Any one true
+// means the guard must stamp; all false means every budget, limit and subject
+// row is inert (an unconfigured ceiling disables its row) and a stamp would
+// be read by nothing. A new configured ceiling is one more row here.
+var budgetStampConsumers = []func(*Config) bool{
+	func(c *Config) bool { return c.BudgetSessionUSD > 0 },
+	func(c *Config) bool { return c.BudgetDailyUSD > 0 },
+	func(c *Config) bool { return c.BudgetWeeklyUSD > 0 },
+	func(c *Config) bool { return c.BudgetMonthlyUSD > 0 },
+	func(c *Config) bool { return c.BudgetSessionTokens > 0 },
+	func(c *Config) bool { return c.BudgetDailyTokens > 0 },
+	func(c *Config) bool { return c.BudgetWeeklyTokens > 0 },
+	func(c *Config) bool { return c.BudgetMonthlyTokens > 0 },
+	func(c *Config) bool { return len(c.BudgetSubjectCaps) > 0 },
+	func(c *Config) bool { return c.LimitUtil5hWarn > 0 },
+	func(c *Config) bool { return c.LimitUtil5hDeny > 0 },
+	func(c *Config) bool { return c.LimitUtilWeeklyWarn > 0 },
+	func(c *Config) bool { return c.LimitUtilWeeklyDeny > 0 },
+	// B-625 compares no number, but a node whose organization requires a
+	// budget is one the org budget rail governs; stamping keeps its admission
+	// path exactly as it was.
+	func(c *Config) bool { return c.BudgetRequired },
+}
+
+// resolveReadsBudgetStamps computes ReadsBudgetStamps for one built engine.
+func resolveReadsBudgetStamps(cfg *Config, rules []Rule) bool {
+	for _, consumes := range budgetStampConsumers {
+		if consumes(cfg) {
+			return true
+		}
+	}
+	for i := range rules {
+		if rules[i].ReadsBudgetStamps {
+			return true
+		}
+	}
+	return false
+}
+
+// ReadsBudgetStamps reports whether any row of this engine can read the
+// guard-stamped spend / usage / utilization fields: a configured budget,
+// limit or subject cap (local or composed from the organization's budget),
+// the fail-closed org-budget posture, or a policy-file rule with a spend
+// matcher. When false, the guard skips its budget accounting lookup
+// entirely: nothing would read the numbers it returns (T-418).
+//
+// It is a CAPABILITY of the built engine, resolved once at New, so the hot
+// path reads a bool rather than walking the configuration per event; a
+// changed budget or policy rebuilds the engine and with it this answer.
+func (e *Engine) ReadsBudgetStamps() bool {
+	if e == nil {
+		return false
+	}
+	return e.readsBudgetStamps
 }
 
 // New constructs an Engine from cfg plus the built-in rule tables,
@@ -336,33 +404,7 @@ func New(cfg Config) (*Engine, error) {
 				continue
 			}
 			matched = true
-			if ov.Decision != nil && *ov.Decision < rules[i].Enforce &&
-				overrideWeakensProtected(cfg, &rules[i], ov) {
-				// A below-org override cannot WEAKEN a protected row: an
-				// organization-authoritative hard budget, or one of the
-				// guard's own integrity rules (R-160/R-161). An ESCALATION
-				// still passes — a stricter decision is not < the current
-				// enforce stance. This is a hard backstop; the guard merge
-				// layer already drops these with a surfaced issue.
-				continue
-			}
-			if ov.Decision != nil {
-				rules[i].Observe = *ov.Decision
-				rules[i].Enforce = *ov.Decision
-			}
-			if ov.Enforced {
-				rules[i].Enforced = true
-			}
-			// Org-granted override (Track B): additive-only, "false
-			// wins". A row only ever GAINS overridability, and only
-			// from an org-layer override (guard/merge.go is the one
-			// place that lets the key through).
-			if ov.Overridable {
-				rules[i].Overridable = true
-			}
-			if ov.Source != "" {
-				rules[i].Source = ov.Source
-			}
+			applyOverride(cfg, &rules[i], ov)
 		}
 		if !matched {
 			return nil, fmt.Errorf("policy.New: override references unknown rule %q", ov.RuleID)
@@ -371,7 +413,47 @@ func New(cfg Config) (*Engine, error) {
 	if err := validateRules(rules); err != nil {
 		return nil, fmt.Errorf("policy.New: %w", err)
 	}
-	return &Engine{cfg: cfg, rules: rules}, nil
+	return &Engine{cfg: cfg, rules: rules, readsBudgetStamps: resolveReadsBudgetStamps(&cfg, rules)}, nil
+}
+
+// applyOverride applies one override to one matching rule row.
+func applyOverride(cfg Config, r *Rule, ov Override) {
+	if ((ov.Decision != nil && *ov.Decision < r.Enforce) || ov.EnforceOff) &&
+		overrideWeakensProtected(cfg, r, ov) {
+		// A below-org override cannot WEAKEN a protected row: an
+		// organization-authoritative hard budget, or one of the
+		// guard's own integrity rules (R-160/R-161). An ESCALATION
+		// still passes — a stricter decision is not < the current
+		// enforce stance. An explicit `enforce = false` is a weakening
+		// (Sol A2-06). This is a hard backstop; the guard merge layer
+		// already drops these with a surfaced issue.
+		return
+	}
+	if ov.Decision != nil {
+		r.Observe = *ov.Decision
+		r.Enforce = *ov.Decision
+	}
+	if ov.Enforced {
+		r.Enforced = true
+		r.EnforceCappedBy = ""
+	}
+	if ov.EnforceOff {
+		r.Enforced = false
+		r.EnforceCappedBy = ov.Source
+		if r.EnforceCappedBy == "" {
+			r.EnforceCappedBy = SourceBuiltin
+		}
+	}
+	// Org-granted override (Track B): additive-only, "false
+	// wins". A row only ever GAINS overridability, and only
+	// from an org-layer override (guard/merge.go is the one
+	// place that lets the key through).
+	if ov.Overridable {
+		r.Overridable = true
+	}
+	if ov.Source != "" {
+		r.Source = ov.Source
+	}
 }
 
 // builtinRules assembles the built-in rule tables in catalog order
@@ -414,7 +496,7 @@ func (e *Engine) BudgetRuleProtected(ruleID string) bool {
 		return false
 	}
 	for i := range e.rules {
-		if e.rules[i].ID != ruleID || e.rules[i].Enforce < DecisionDeny {
+		if e.rules[i].ID != ruleID || e.rules[i].Enforce < DecisionDeny || e.rules[i].EnforceCappedBy != "" {
 			continue
 		}
 		if protectedBudgetRule(e.cfg, &e.rules[i]) {
@@ -590,11 +672,11 @@ func (e *Engine) evaluate(ev Event, budgetOnly, managedOnly bool) Verdict {
 		if !r.appliesTo(ev.Kind) {
 			continue
 		}
-		hit, detail := applyRule(r, ctx)
+		hit, detail, capped := applyRuleCeiling(r, ctx)
 		if !hit {
 			continue
 		}
-		v := e.verdictFor(r, detail)
+		v := capUncalled(e.verdictFor(r, detail), capped)
 		if stricter(v, best) {
 			best = v
 		}
@@ -640,11 +722,7 @@ func (e *Engine) BudgetAdmissionRequiresFresh() bool {
 		if !protectedBudgetRule(e.cfg, r) {
 			continue
 		}
-		d := r.Observe
-		if e.cfg.Mode == ModeEnforce || r.Enforced {
-			d = r.Enforce
-		}
-		if d >= DecisionDeny {
+		if e.ruleDecision(r) >= DecisionDeny {
 			return true
 		}
 	}
@@ -693,22 +771,71 @@ func (e *Engine) buildContext(ev *Event) *MatchContext {
 // still evaluate. Event-scoped rules get one safe-pattern pass with a
 // nil unit.
 func applyRule(r *Rule, ctx *MatchContext) (bool, string) {
+	hit, detail, _ := applyRuleCeiling(r, ctx)
+	return hit, detail
+}
+
+// applyRuleCeiling is applyRule that also reports whether the hit came
+// only from units that run solely if a later command calls the function
+// whose body holds them (Command.uncalledDef, T-525 / D-338): such a hit
+// is capped at ASK by the caller. A hit on a unit that can run wins over
+// a capped one, so the cap never hides a real hit later in the line.
+func applyRuleCeiling(r *Rule, ctx *MatchContext) (hit bool, detail string, capped bool) {
 	if r.MatchCmd != nil {
+		capHit, capDetail := false, ""
 		for i := range ctx.Cmds {
 			cmd := &ctx.Cmds[i]
 			if anySafe(r.SafePat, ctx, cmd) {
 				continue
 			}
-			if hit, detail := r.MatchCmd(ctx, cmd); hit {
-				return true, detail
+			ok, d := r.MatchCmd(ctx, cmd)
+			if !ok {
+				continue
+			}
+			if cmd.uncalledDef == "" {
+				return true, d, false
+			}
+			if !capHit {
+				capHit = true
+				capDetail = d + " (inside function " + cmd.uncalledDef + ", which this command defines but does not call)"
 			}
 		}
-		return false, ""
+		return capHit, capDetail, capHit
 	}
 	if anySafe(r.SafePat, ctx, nil) {
-		return false, ""
+		return false, "", false
 	}
-	return r.Match(ctx)
+	hit, detail = r.Match(ctx)
+	if !hit {
+		return false, "", false
+	}
+	// An event-scoped rule reads every unit at once, so it is asked again
+	// over the units that can run; only a hit that needs an uncalled body
+	// is capped.
+	runnable := make([]Command, 0, len(ctx.Cmds))
+	for i := range ctx.Cmds {
+		if ctx.Cmds[i].uncalledDef == "" {
+			runnable = append(runnable, ctx.Cmds[i])
+		}
+	}
+	if len(runnable) == len(ctx.Cmds) {
+		return true, detail, false
+	}
+	sub := *ctx
+	sub.Cmds = runnable
+	if h, d := r.Match(&sub); h {
+		return true, d, false
+	}
+	return true, detail + " (inside a function this command defines but does not call)", true
+}
+
+// capUncalled lowers a verdict drawn only from an uncalled function body
+// to ASK (D-338); a lower decision is kept.
+func capUncalled(v Verdict, capped bool) Verdict {
+	if capped && v.Decision > DecisionAsk {
+		v.Decision = DecisionAsk
+	}
+	return v
 }
 
 // anySafe reports whether any safe pattern exempts the candidate.
@@ -728,10 +855,7 @@ func anySafe(pats []SafeFn, ctx *MatchContext, cmd *Command) bool {
 // enforce-mode decision even while the engine mode is observe — the
 // "enforce critical, observe rest" posture.
 func (e *Engine) verdictFor(r *Rule, detail string) Verdict {
-	d := r.Observe
-	if e.cfg.Mode == ModeEnforce || r.Enforced {
-		d = r.Enforce
-	}
+	d := e.ruleDecision(r)
 	reason := r.Doc
 	if detail != "" {
 		reason += ": " + detail
@@ -748,7 +872,45 @@ func (e *Engine) verdictFor(r *Rule, detail string) Verdict {
 		Advice:      r.Advice,
 		Source:      source,
 		Overridable: r.Overridable,
+
+		EnforceCappedBy: r.EnforceCappedBy,
 	}
+}
+
+// ruleDecision is the ONE mode-to-decision selection for a rule row: the
+// observe decision, or the enforce decision in enforce mode or for a
+// per-rule-enforced row, then capped at FLAG when an explicit
+// `enforce = false` override capped the row (D-030, Sol A2-06).
+func (e *Engine) ruleDecision(r *Rule) Decision {
+	d := r.Observe
+	if e.cfg.Mode == ModeEnforce || r.Enforced {
+		d = r.Enforce
+	}
+	if r.EnforceCappedBy != "" && d > DecisionFlag {
+		d = DecisionFlag
+	}
+	return d
+}
+
+// RuleEnforceCapped reports whether every row with ruleID is capped at
+// FLAG by an explicit `enforce = false` override (false when no row has
+// the ID). Seams that decide from a rule ID without an evaluated verdict
+// (the gate posture, the unscanned-prompt fallback) read it.
+func (e *Engine) RuleEnforceCapped(ruleID string) bool {
+	if e == nil || ruleID == "" {
+		return false
+	}
+	found := false
+	for i := range e.rules {
+		if e.rules[i].ID != ruleID {
+			continue
+		}
+		if e.rules[i].EnforceCappedBy == "" {
+			return false
+		}
+		found = true
+	}
+	return found
 }
 
 // stricter reports whether verdict a should replace current winner b:

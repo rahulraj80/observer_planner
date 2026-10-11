@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -72,8 +73,74 @@ type EnrolmentGrant struct {
 	// the signing message.
 	ConsentMode  string `json:"consent_mode,omitempty"`
 	ConsentActor string `json:"consent_actor,omitempty"`
+	// InitialComponents is the managed node's component set until its org
+	// publishes a node.components policy (modular packaging plan 5.6.1 and
+	// 6.2 row 9: no fail-open window). Absent on every grant minted before
+	// the field existed, and on every grant offered to a node that did not
+	// advertise EnrolCapabilityInitialComponents (see GrantForNode). A
+	// present set with no ids means core only.
+	InitialComponents *InitialComponentSet `json:"initial_components,omitempty"`
 	// Signature is base64url(Ed25519) over EnrolmentGrantSigningMessage.
 	Signature string `json:"signature"`
+}
+
+// InitialComponentSet is the explicit component allow-set a managed
+// enrolment starts with, plus the catalog version the ids were resolved
+// against (a component added to the catalog later is not in the set, so it
+// stays inert until a policy allows it: operator ruling Q5, D-374).
+type InitialComponentSet struct {
+	CatalogVersion int      `json:"catalog_version"`
+	IDs            []string `json:"ids"`
+}
+
+// EnrolCapabilityInitialComponents is the EnrollRequest capability token a
+// node sends when it can verify, store and re-verify a grant that carries
+// InitialComponents.
+//
+// WHY A CAPABILITY AND NOT JUST omitempty. The field is bound into the
+// signing message, so "old nodes ignore it" is false: a node that predates
+// it decodes the grant without the field, recomputes a message without the
+// initial_components writes, fails VerifyEnrolmentGrant, and enrols
+// UNGOVERNED. The server must therefore never put the field on a grant for
+// a node that did not ask for it, and GrantForNode is the one place that
+// decides.
+const EnrolCapabilityInitialComponents = "grant.initial_components.v1"
+
+// GrantForNode returns the grant shaped for the enrolling node's advertised
+// capabilities: fields the node cannot verify are removed. The org server
+// calls it BEFORE SignEnrolmentGrant, never after (a signature over the
+// removed field would not verify either way).
+func GrantForNode(g EnrolmentGrant, nodeCapabilities []string) EnrolmentGrant {
+	if g.InitialComponents != nil && !hasCapability(nodeCapabilities, EnrolCapabilityInitialComponents) {
+		g.InitialComponents = nil
+	}
+	return g
+}
+
+func hasCapability(caps []string, want string) bool {
+	for _, c := range caps {
+		if strings.TrimSpace(c) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// writeInitialComponents appends the presence-versioned initial component
+// block: a marker, the catalog version, the id count and each canonical id,
+// so no field can shift a boundary into another.
+func writeInitialComponents(write func(string), s *InitialComponentSet) {
+	if s == nil {
+		return
+	}
+	ids := CanonicalAuthority(s.IDs)
+	write("initial_components")
+	write(strconv.Itoa(s.CatalogVersion))
+	write(strconv.Itoa(len(ids)))
+	for _, id := range ids {
+		write("component")
+		write(id)
+	}
 }
 
 // CanonicalAuthority returns the grant's tokens sorted and deduplicated —
@@ -136,6 +203,10 @@ func EnrolmentGrantSigningMessage(g EnrolmentGrant) []byte {
 		write("consent_actor")
 		write(g.ConsentActor)
 	}
+	// Presence-versioned like the consent evidence: a grant without
+	// InitialComponents produces the pre-field bytes exactly (pinned by
+	// TestSigningMessageByteIdenticalWithoutInitialComponents).
+	writeInitialComponents(write, g.InitialComponents)
 	return h.Sum(nil)
 }
 

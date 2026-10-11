@@ -1,0 +1,27 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "organization.project.api_key",
+      "redacted_value": "sk-abc...def",
+      "name": "My API Key",
+      "created_at": 1711471533,
+      "last_used_at": 1711471534,
+      "id": "key_abc",
+      "owner_project_access": "active",
+      "owner": {
+        "type": "user",
+        "user": {
+          "id": "user_abc",
+          "name": "First Last",
+          "email": "user@example.com",
+          "role": "owner",
+          "created_at": 1711471533
+        }
+      }
+    }
+  ],
+  "first_id": "key_abc",
+  "last_id": "key_xyz",
+  "has_more": false
+}

@@ -17,6 +17,7 @@ import {
 import { ChartState } from "@/components/ChartState";
 import { SessionDetailPanel } from "@/components/SessionDetailPanel";
 import { useApi } from "@/lib/useApi";
+import { useFilters } from "@/lib/filters";
 import { fmtCompact, fmtDateTime, fmtDuration, fmtInt, fmtUSD } from "@/lib/format";
 import { actionMeta } from "@/lib/actions";
 import { vocabIcon } from "@shared/lib/vocabIcons";
@@ -46,10 +47,13 @@ export function LivePage() {
   // The panel is modal (scrim + scroll lock) and polls its own session, so
   // the card poll behind it pauses while it is open; on close the query
   // cache revalidates at once when the cards are overdue.
+  // The global Model filter keeps the live sessions that used it.
+  const { model } = useFilters();
+  const modelArg = model !== "all" ? model : undefined;
   const live = useApi<LiveResponse>(
     "/api/live",
-    { window_minutes: 15 },
-    [],
+    { window_minutes: 15, model: modelArg },
+    [modelArg],
     { refreshMs: selected != null ? 0 : 5000 },
   );
   const active = live.data?.active ?? [];

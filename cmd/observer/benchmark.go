@@ -1,8 +1,11 @@
+//go:build !sbo_omit_benchmark
+
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -34,7 +37,7 @@ func newBenchmarkCmd() *cobra.Command {
 			"(Wilson CIs + paired analysis + non-inferiority verdicts). Real spend is\n" +
 			"bounded by a dry-run estimate + confirmation gate + per-attempt/per-run caps.\n\n" +
 			"Harnesses: codex, claude-code. claude-code requires an ISOLATED benchmark\n" +
-			"daemon (own --config db_path, small DB) — its Preflight refuses the operator\n" +
+			"daemon (own --config db_path, small DB) - its Preflight refuses the operator\n" +
 			"default ~/.observer/observer.db (the 2026-07-12 re-spike's large-DB stall).",
 	}
 	cmd.AddCommand(newBenchmarkRunCmd())
@@ -55,13 +58,14 @@ func newBenchmarkRunCmd() *cobra.Command {
 		allowUnpriced   bool
 		keepWorkspaces  bool
 		ephemeralDaemon bool
+		isolateIfNeeded bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run <spec.toml>",
 		Short: "Run a benchmark spec (DRY RUN by default; --confirm-spend to spend)",
 		Long: "Estimates the matrix cost and prints the plan. By DEFAULT this is a dry run\n" +
 			"that launches nothing and persists nothing. Pass --confirm-spend to actually\n" +
-			"drive the harnesses — this spends real API budget, bounded by the spec's\n" +
+			"drive the harnesses - this spends real API budget, bounded by the spec's\n" +
 			"[budget] caps.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -101,7 +105,22 @@ func newBenchmarkRunCmd() *cobra.Command {
 			// daemon gives it a fresh temp DB instead — the real data untouched.
 			// When engaged, its config path threads everywhere (store, driver
 			// Preflight, and the claude-code hooks that write the isolated DB).
-			engage := shouldEngageEphemeralDaemon(ephemeralDaemon, configPath, spec, newBenchmarkDrivers(exe, ""))
+			engage := shouldEngageEphemeralDaemon(ephemeralDaemon, isolateIfNeeded, configPath, spec, newBenchmarkDrivers(exe, ""))
+			// T-664: an isolated run's results live in the throwaway DB, which
+			// Close() deletes. The node's own DB (the --config the operator
+			// gave, or the default) prices the estimate from its billed
+			// history and receives the finished run before the throwaway DB
+			// goes away.
+			var nodeStore *store.Store
+			var ephDBPath string
+			if engage {
+				_, nodeDB, nodeCleanup, nerr := loadConfigAndDB(ctx, budgetConfigPath)
+				if nerr != nil {
+					return fmt.Errorf("open this node's observer database for the isolated run's results: %w", nerr)
+				}
+				defer nodeCleanup()
+				nodeStore = store.New(nodeDB)
+			}
 			if engage {
 				eph, derr := startEphemeralDaemon(ctx)
 				if derr != nil {
@@ -109,6 +128,7 @@ func newBenchmarkRunCmd() *cobra.Command {
 				}
 				defer eph.Close()
 				announceEphemeralDaemon(cmd.OutOrStdout(), eph)
+				ephDBPath = eph.DBPath
 				configPath = eph.ConfigPath
 				if proxyURL == "" {
 					proxyURL = eph.ProxyURL
@@ -142,6 +162,9 @@ func newBenchmarkRunCmd() *cobra.Command {
 				},
 				scrubber: scrub.New(),
 				estimateTurnUSD: func(ctx context.Context, model string) (float64, bool) {
+					if nodeStore != nil {
+						return nodeStore.AvgTurnCostUSD(ctx, model, 30)
+					}
 					return st.AvgTurnCostUSD(ctx, model, 30)
 				},
 				pricingSnapshot: func(models []string) (string, error) {
@@ -160,6 +183,13 @@ func newBenchmarkRunCmd() *cobra.Command {
 				KeepWorkspaces:  keepWorkspaces,
 			}
 			runID, err := runner.Run(ctx, spec, opts)
+			if runID != "" && nodeStore != nil {
+				// WithoutCancel: a ctrl-c that stopped the run must not also
+				// lose what it recorded.
+				if ierr := importIsolatedBenchmarkRun(context.WithoutCancel(ctx), nodeStore, ephDBPath, runID, cmd.OutOrStdout()); ierr != nil {
+					return errors.Join(err, ierr)
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -176,7 +206,8 @@ func newBenchmarkRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&confirmSpend, "confirm-spend", false, "Actually run (spends real API budget); omit for a dry run")
 	cmd.Flags().BoolVar(&allowUnpriced, "allow-unpriced", false, "Permit spending on a config whose model has no billed history to estimate cost from (default: refuse rather than show a false $0.00)")
 	cmd.Flags().BoolVar(&keepWorkspaces, "keep-workspaces", false, "Retain every per-attempt workspace for inspection (failed attempts are always retained)")
-	cmd.Flags().BoolVar(&ephemeralDaemon, "ephemeral-daemon", false, "Stand up a throwaway isolated observer daemon (temp DB, free port) for this run instead of using your real ~/.observer daemon. Auto-engaged for a claude-code spec when no --config is given, so first-run just works; your real Observer data is never touched.")
+	cmd.Flags().BoolVar(&ephemeralDaemon, "ephemeral-daemon", false, "Stand up a throwaway isolated observer daemon (temp DB, free port) for this run instead of using your real ~/.observer daemon. Auto-engaged for a claude-code spec when no --config is given, so first-run just works. When the run finishes, its results (the run, its attempts, their sessions and billed api_turns) are copied into this node's database so `observer benchmark report` and the dashboard keep them.")
+	cmd.Flags().BoolVar(&isolateIfNeeded, "isolate-if-needed", false, "Use the isolated daemon of --ephemeral-daemon only when the spec has a harness that needs one (claude-code), even when --config is given. The dashboard's spend run passes it.")
 	return cmd
 }
 
@@ -368,7 +399,7 @@ func renderBenchmarkReport(w interface{ Write([]byte) (int, error) }, run benchm
 		if c.CostPerSuccessDefined {
 			cps = fmt.Sprintf("$%.4f", c.CostPerSuccessUSD)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%.0f%% [%.0f–%.0f]\t%d/%d/%d/%d\t%s\t$%.4f\t%.0f%%\t%.0f\n",
+		fmt.Fprintf(tw, "%s\t%s\t%.0f%% [%.0f-%.0f]\t%d/%d/%d/%d\t%s\t$%.4f\t%.0f%%\t%.0f\n",
 			c.ConfigID, c.Model,
 			c.SuccessRate*100, c.SuccessCI.Lo*100, c.SuccessCI.Hi*100,
 			c.Planned, c.Executed, c.Scored, c.Passed,

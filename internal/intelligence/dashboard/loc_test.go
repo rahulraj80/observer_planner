@@ -471,7 +471,7 @@ func TestSessionsListCarriesAICodeLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := card.AIMain.CodeTouched + card.AISidechain.CodeTouched; got != 3 {
-		t.Errorf("session card code_touched = %d, list said 3 — the list subquery and "+
+		t.Errorf("session card code_touched = %d, list said 3 - the list subquery and "+
 			"locDedupCTE have drifted", got)
 	}
 }
@@ -497,7 +497,7 @@ func TestSessionsListOmitsLOCWhenNeverCounted(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/sessions?limit=10", nil))
 	if strings.Contains(rr.Body.String(), "ai_code_lines") {
-		t.Errorf("ai_code_lines is present on an uncounted corpus — omitempty is not holding, "+
+		t.Errorf("ai_code_lines is present on an uncounted corpus - omitempty is not holding, "+
 			"and the UI would render 0 where it should render 'not counted': %s", rr.Body.String())
 	}
 }
@@ -534,7 +534,7 @@ func TestSessionsSortByAICodeLines(t *testing.T) {
 		t.Fatalf("want 2 sessions, got %d", len(payload.Rows))
 	}
 	if payload.Rows[0].ID != "big" {
-		t.Errorf("first row = %q (%d lines), want big — sort_by=ai_code_lines did not order",
+		t.Errorf("first row = %q (%d lines), want big - sort_by=ai_code_lines did not order",
 			payload.Rows[0].ID, payload.Rows[0].AICodeLines)
 	}
 }
@@ -607,7 +607,7 @@ func TestSessionsListAndCardAgreeOnRepeatedHumanSaves(t *testing.T) {
 		}
 		found = true
 		if row.HumanCodeLines != 60 {
-			t.Errorf("list human_code_lines = %d, card said %d — the list MAX-collapsed the "+
+			t.Errorf("list human_code_lines = %d, card said %d - the list MAX-collapsed the "+
 				"digest-less editor rows and reported only the largest single save",
 				row.HumanCodeLines, card.Human.CodeTouched)
 		}
@@ -651,7 +651,7 @@ func TestSessionsListExcludesEditorEchoRows(t *testing.T) {
 			continue
 		}
 		if row.HumanCodeLines != 0 {
-			t.Errorf("list human_code_lines = %d, want 0 — the echo was counted", row.HumanCodeLines)
+			t.Errorf("list human_code_lines = %d, want 0 - the echo was counted", row.HumanCodeLines)
 		}
 		if row.AICodeLines != 3 {
 			t.Errorf("list ai_code_lines = %d, want 3", row.AICodeLines)
@@ -689,7 +689,7 @@ func TestPossibleAgentSaveIsNotHumanAuthorship(t *testing.T) {
 		t.Fatalf("recorded = %d, want 1 (note %q)", res.Recorded, res.Note)
 	}
 	if res.Echo {
-		t.Error("a possible-agent save is not an echo — no AI row exists for that file")
+		t.Error("a possible-agent save is not an echo - no AI row exists for that file")
 	}
 
 	got, err := store.New(database).LoadSessionLOC(context.Background(), "s1")
@@ -701,7 +701,7 @@ func TestPossibleAgentSaveIsNotHumanAuthorship(t *testing.T) {
 			t.Errorf("an in-editor agent's 120 lines were counted as human authorship: %+v", b)
 		}
 		if b.Actor == store.LOCActorAI && b.Stats.AddedCode == 120 {
-			t.Errorf("the flagged save was ATTRIBUTED to an agent — Observer did not see which "+
+			t.Errorf("the flagged save was ATTRIBUTED to an agent - Observer did not see which "+
 				"agent wrote it and must not invent one: %+v", b)
 		}
 	}
@@ -713,7 +713,7 @@ func TestPossibleAgentSaveIsNotHumanAuthorship(t *testing.T) {
 		}
 	}
 	if unknown.AddedCode != 120 {
-		t.Errorf("unknown added_code = %d, want 120 — the row must be kept, just not credited",
+		t.Errorf("unknown added_code = %d, want 120 - the row must be kept, just not credited",
 			unknown.AddedCode)
 	}
 	// It is still editor evidence, so the card can say human capture
@@ -741,7 +741,7 @@ func TestPossibleAgentSaveIsNotHumanAuthorship(t *testing.T) {
 		}
 	}
 	if human.AddedCode != 4 {
-		t.Errorf("human added_code = %d, want 4 — an unflagged save must stay human",
+		t.Errorf("human added_code = %d, want 4 - an unflagged save must stay human",
 			human.AddedCode)
 	}
 }
@@ -831,7 +831,7 @@ func TestSessionsListAndCardAgreeOnTheDedupRepresentative(t *testing.T) {
 		}
 		found = true
 		if row.AICodeLines != cardAI {
-			t.Errorf("list ai_code_lines = %d, card said %d — the list took the digest group's "+
+			t.Errorf("list ai_code_lines = %d, card said %d - the list took the digest group's "+
 				"MAX (41) while the card sums its MIN(id) representative (11); one collapse rule, "+
 				"or the two surfaces describe the same session differently",
 				row.AICodeLines, cardAI)

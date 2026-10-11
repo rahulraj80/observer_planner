@@ -102,7 +102,7 @@ func emitBatch(w interface{ Write([]byte) (int, error) }, res scoring.BatchResul
 		return err
 	}
 	if res.Errors > 0 {
-		return errors.New("some sessions failed to score — rerun with --session <id> for details")
+		return errors.New("some sessions failed to score - rerun with --session <id> for details")
 	}
 	return nil
 }

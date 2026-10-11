@@ -12,19 +12,19 @@ import (
 // Feature identifiers. Only session_enrichment ships this arc.
 const FeatureSessionEnrichment = "session_enrichment"
 
-// Default Signed-in Free entitlement: 100 enrichment bundles/month, ≤20/day
-// (migration 0039 raised the daily burst from 5 to 20; the monthly ceiling is
-// unchanged). Concurrency is an operational bound.
+// Default Signed-in Free entitlement: 3000 enrichment bundles/month, ≤100/day
+// (migration 0041, operator ruling D-299: 0039's 20/day and 100/month rose to
+// 100/day and 3000/month). Concurrency is an operational bound.
 //
 // Since W4 these values live in the seeded `free` row of the `plans` table —
-// v2 as of 0039 — which is the authority the reservation path consults. They
+// v3 as of 0041, which is the authority the reservation path consults. They
 // are kept here only as the seed written into a new account's entitlements row,
 // so that row still reads honestly when nothing overrides it. Keep them equal
 // to the plan row's caps: a drift here is invisible (the row is written with
 // overrides_plan = false) until an operator flips that flag.
 const (
-	defaultDailyCap       = 20
-	defaultMonthlyCap     = 100
+	defaultDailyCap       = 100
+	defaultMonthlyCap     = 3000
 	defaultConcurrencyCap = 2
 )
 

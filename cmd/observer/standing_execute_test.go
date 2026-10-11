@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote && !sbo_omit_terminals && !sbo_omit_ui_dashboard
+
 package main
 
 import (
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/remoteauth"
 	"github.com/marmutapp/superbased-observer/internal/termfeed"
@@ -101,11 +104,11 @@ func newStandingStub() *standingStubAuthz {
 	return s
 }
 
-func requireControlDenial(t *testing.T, err error, want dashboard.ControlDenialReason) {
+func requireControlDenial(t *testing.T, err error, want dashapi.ControlDenialReason) {
 	t.Helper()
-	var denial *dashboard.ControlDeniedError
+	var denial *dashapi.ControlDeniedError
 	if !errors.As(err, &denial) {
-		t.Fatalf("want *dashboard.ControlDeniedError with reason %q, got %T: %v", want, err, err)
+		t.Fatalf("want *dashapi.ControlDeniedError with reason %q, got %T: %v", want, err, err)
 	}
 	if denial.Reason != want {
 		t.Fatalf("control denial reason = %q, want %q", denial.Reason, want)
@@ -115,7 +118,7 @@ func requireControlDenial(t *testing.T, err error, want dashboard.ControlDenialR
 // newStandingExecAdapter assembles the process-free adapter + a live
 // termsvc-tracked handle (the same shape as newExecuteHarness) wired to the
 // given standing stub.
-func newStandingExecAdapter(t *testing.T, stub dashboard.TerminalControlAuthorizer) (*launchManagerAdapter, *termsession.Manager, string) {
+func newStandingExecAdapter(t *testing.T, stub dashapi.TerminalControlAuthorizer) (*launchManagerAdapter, *termsession.Manager, string) {
 	t.Helper()
 	return newStandingExecAdapterGate(t, stub, func() bool { return true })
 }
@@ -123,7 +126,7 @@ func newStandingExecAdapter(t *testing.T, stub dashboard.TerminalControlAuthoriz
 // newStandingExecAdapterGate is newStandingExecAdapter with a caller-supplied
 // LIVE allow_terminal gate closure, so a test can flip allow_terminal mid-verify
 // (the finding-3 install-time race) rather than pin it true.
-func newStandingExecAdapterGate(t *testing.T, stub dashboard.TerminalControlAuthorizer, allowTerminal func() bool) (*launchManagerAdapter, *termsession.Manager, string) {
+func newStandingExecAdapterGate(t *testing.T, stub dashapi.TerminalControlAuthorizer, allowTerminal func() bool) (*launchManagerAdapter, *termsession.Manager, string) {
 	t.Helper()
 	mgr := termsession.NewManager(termsession.Options{Spawner: fakeSpawner{}})
 	t.Cleanup(mgr.Shutdown)
@@ -145,8 +148,8 @@ func newStandingExecAdapterGate(t *testing.T, stub dashboard.TerminalControlAuth
 
 // standingReq builds a remote acquire request whose credential is a standing
 // secret (the `standing.` prefix routes it to AuthorizeStanding).
-func standingReq(handle string) dashboard.RemoteWriterRequest {
-	r := dashboard.RemoteWriterRequest{
+func standingReq(handle string) dashapi.RemoteWriterRequest {
+	r := dashapi.RemoteWriterRequest{
 		Handle:          handle,
 		DeviceSessionID: "device-session-raw",
 		RemoteExposed:   true,
@@ -179,7 +182,7 @@ func TestStandingRejectedNoWriter(t *testing.T) {
 	stub := newStandingStub()
 	adapter, mgr, handle := newStandingExecAdapter(t, stub)
 	_, err := adapter.AcquireWriterRemote(standingReq(handle))
-	requireControlDenial(t, err, dashboard.ControlDenialAuth)
+	requireControlDenial(t, err, dashapi.ControlDenialAuth)
 	if _, held := mgr.WriterHolder(handle); held {
 		t.Fatal("a refused standing acquire left a writer lease installed")
 	}
@@ -206,9 +209,9 @@ func TestStandingRevokeDuringVerifyCannotInstallWriter(t *testing.T) {
 	stub.bumpDuringVerify = true
 	adapter, mgr, handle := newStandingExecAdapter(t, stub)
 	_, err := adapter.AcquireWriterRemote(standingReq(handle))
-	requireControlDenial(t, err, dashboard.ControlDenialAuthTransient)
+	requireControlDenial(t, err, dashapi.ControlDenialAuthTransient)
 	if holder, held := mgr.WriterHolder(handle); held {
-		t.Fatalf("a verify that raced a revoke installed a SURVIVING writer (holder %q) — the TOCTOU is open", holder)
+		t.Fatalf("a verify that raced a revoke installed a SURVIVING writer (holder %q) - the TOCTOU is open", holder)
 	}
 }
 
@@ -235,7 +238,7 @@ func TestStandingRealControllerAcquireAndRevoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashSecret: %v", err)
 	}
-	rc := dashboard.NewRemoteController(dashboard.RemoteOptions{
+	rc := dashboard.NewRemoteController(dashapi.RemoteOptions{
 		HashedSecret:               pairHash,
 		AllowedHosts:               []string{"remote.example:8443"},
 		RateLimitPerMin:            60,
@@ -245,13 +248,13 @@ func TestStandingRealControllerAcquireAndRevoke(t *testing.T) {
 	})
 	device := pairDevice(t, rc, encPair)
 
-	authz, ok := rc.(dashboard.TerminalControlAuthorizer)
+	authz, ok := rc.(dashapi.TerminalControlAuthorizer)
 	if !ok {
 		t.Fatal("controller lacks TerminalControlAuthorizer")
 	}
 	adapter, mgr, handle := newStandingExecAdapter(t, authz)
 
-	req := dashboard.RemoteWriterRequest{Handle: handle, DeviceSessionID: device, RemoteExposed: true}
+	req := dashapi.RemoteWriterRequest{Handle: handle, DeviceSessionID: device, RemoteExposed: true}
 	req.CapabilityToken = encStanding
 	w, err := adapter.AcquireWriterRemote(req)
 	if err != nil || w == nil {
@@ -279,7 +282,7 @@ func TestStandingRealControllerAcquireAndRevoke(t *testing.T) {
 	// the "I cannot tell a revoke from a disable" shape — and that shape must
 	// resolve to the preserving side. The sibling test below wires the probe and
 	// gets the permanent verdict.
-	requireControlDenial(t, err, dashboard.ControlDenialAuthTransient)
+	requireControlDenial(t, err, dashapi.ControlDenialAuthTransient)
 	if _, held := mgr.WriterHolder(handle); held {
 		t.Fatal("post-revoke standing acquire left a writer lease")
 	}
@@ -313,7 +316,7 @@ func TestStandingRealControllerRevokedSecretIsPermanent(t *testing.T) {
 	}
 	// secretAtRest models the hash FILE: present until the revoke unlinks it.
 	secretAtRest := true
-	rc := dashboard.NewRemoteController(dashboard.RemoteOptions{
+	rc := dashboard.NewRemoteController(dashapi.RemoteOptions{
 		HashedSecret:               pairHash,
 		AllowedHosts:               []string{"remote.example:8443"},
 		RateLimitPerMin:            60,
@@ -324,13 +327,13 @@ func TestStandingRealControllerRevokedSecretIsPermanent(t *testing.T) {
 	})
 	device := pairDevice(t, rc, encPair)
 
-	authz, ok := rc.(dashboard.TerminalControlAuthorizer)
+	authz, ok := rc.(dashapi.TerminalControlAuthorizer)
 	if !ok {
 		t.Fatal("controller lacks TerminalControlAuthorizer")
 	}
 	adapter, mgr, handle := newStandingExecAdapter(t, authz)
 
-	req := dashboard.RemoteWriterRequest{Handle: handle, DeviceSessionID: device, RemoteExposed: true}
+	req := dashapi.RemoteWriterRequest{Handle: handle, DeviceSessionID: device, RemoteExposed: true}
 	req.CapabilityToken = encStanding
 	w, err := adapter.AcquireWriterRemote(req)
 	if err != nil || w == nil {
@@ -349,7 +352,7 @@ func TestStandingRealControllerRevokedSecretIsPermanent(t *testing.T) {
 	secretAtRest = false // remotecfg.StandingTerminalDisable unlinked the hash
 
 	_, err = adapter.AcquireWriterRemote(req)
-	requireControlDenial(t, err, dashboard.ControlDenialAuthRevoked)
+	requireControlDenial(t, err, dashapi.ControlDenialAuthRevoked)
 	if _, held := mgr.WriterHolder(handle); held {
 		t.Fatal("post-revoke standing acquire left a writer lease")
 	}
@@ -359,7 +362,7 @@ func TestStandingRealControllerRevokedSecretIsPermanent(t *testing.T) {
 	// seen a revoke once.
 	secretAtRest = true
 	_, err = adapter.AcquireWriterRemote(req)
-	requireControlDenial(t, err, dashboard.ControlDenialAuthTransient)
+	requireControlDenial(t, err, dashapi.ControlDenialAuthTransient)
 	if _, held := mgr.WriterHolder(handle); held {
 		t.Fatal("post-disable standing acquire left a writer lease")
 	}
@@ -376,7 +379,7 @@ func TestStandingSessionRevokeDuringVerifyCannotInstallWriter(t *testing.T) {
 	stub.invalidateSessionDuringVerify = true // session dies mid-verify; gen unchanged
 	adapter, mgr, handle := newStandingExecAdapter(t, stub)
 	_, err := adapter.AcquireWriterRemote(standingReq(handle))
-	requireControlDenial(t, err, dashboard.ControlDenialSessionInvalid)
+	requireControlDenial(t, err, dashapi.ControlDenialSessionInvalid)
 	if holder, held := mgr.WriterHolder(handle); held {
 		t.Fatalf("a verify that raced a SESSION revoke installed a surviving writer (holder %q)", holder)
 	}
@@ -396,11 +399,11 @@ func TestSingleUseSessionRevokeDuringConsumeCannotInstallWriter(t *testing.T) {
 	adapter, mgr, handle := newStandingExecAdapter(t, stub)
 	// A one-time credential (NOT a standing secret — no prefix) routes to the
 	// single-use Authorize path.
-	req := dashboard.RemoteWriterRequest{Handle: handle, DeviceSessionID: "dev", RemoteExposed: true}
+	req := dashapi.RemoteWriterRequest{Handle: handle, DeviceSessionID: "dev", RemoteExposed: true}
 	req.CapabilityToken = "cap-" + "onetime"
 	req.Confirm = "conf-" + "irm"
 	_, err := adapter.AcquireWriterRemote(req)
-	requireControlDenial(t, err, dashboard.ControlDenialSessionInvalid)
+	requireControlDenial(t, err, dashapi.ControlDenialSessionInvalid)
 	if _, held := mgr.WriterHolder(handle); held {
 		t.Fatal("single-use acquire that raced a session revoke left a surviving writer")
 	}
@@ -450,9 +453,9 @@ func TestStandingAllowTerminalFlipDuringVerifyCannotInstallWriter(t *testing.T) 
 	stub.flipAllowTermDuringVerify = true // allow_terminal→false mid-verify; gen + session unchanged
 	adapter, mgr, handle := newStandingExecAdapterGate(t, stub, stub.allowTerm.Load)
 	_, err := adapter.AcquireWriterRemote(standingReq(handle))
-	requireControlDenial(t, err, dashboard.ControlDenialTerminalDisabled)
+	requireControlDenial(t, err, dashapi.ControlDenialTerminalDisabled)
 	if holder, held := mgr.WriterHolder(handle); held {
-		t.Fatalf("a standing verify that raced an allow_terminal→false flip installed a SURVIVING writer (holder %q) — the finding-3 install race is open", holder)
+		t.Fatalf("a standing verify that raced an allow_terminal→false flip installed a SURVIVING writer (holder %q) - the finding-3 install race is open", holder)
 	}
 	if stub.gen.Load() != 0 {
 		t.Fatalf("this test must exercise the allow_terminal leg, not the generation leg (gen moved to %d)", stub.gen.Load())
@@ -474,11 +477,11 @@ func TestSingleUseAllowTerminalFlipDuringConsumeCannotInstallWriter(t *testing.T
 	adapter, mgr, handle := newStandingExecAdapterGate(t, stub, stub.allowTerm.Load)
 	// A one-time credential (NOT a standing secret — no prefix) routes to the
 	// single-use Authorize path.
-	req := dashboard.RemoteWriterRequest{Handle: handle, DeviceSessionID: "dev", RemoteExposed: true}
+	req := dashapi.RemoteWriterRequest{Handle: handle, DeviceSessionID: "dev", RemoteExposed: true}
 	req.CapabilityToken = "one" + "time" // any non-standing credential; consumeOK ignores its value
 	req.Confirm = "conf" + "irm"
 	_, err := adapter.AcquireWriterRemote(req)
-	requireControlDenial(t, err, dashboard.ControlDenialTerminalDisabled)
+	requireControlDenial(t, err, dashapi.ControlDenialTerminalDisabled)
 	if _, held := mgr.WriterHolder(handle); held {
 		t.Fatal("single-use acquire that raced an allow_terminal→false flip left a surviving writer")
 	}

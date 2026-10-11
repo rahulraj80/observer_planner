@@ -44,24 +44,24 @@ func TestWarnMissingDefaultsFromAllowList_NamesEveryGap(t *testing.T) {
 		mustOmit []string // substrings the WARN log line must NOT contain
 	}{
 		{
-			name:     "fresh install — empty allow-list — no warning",
+			name:     "fresh install - empty allow-list - no warning",
 			allow:    nil,
 			wantWarn: false,
 		},
 		{
-			name:     "every default present — no warning",
+			name:     "every default present - no warning",
 			allow:    []string{"claude-code", "cowork", "codex"},
 			wantWarn: false,
 		},
 		{
-			name:     "one missing — names that one",
+			name:     "one missing - names that one",
 			allow:    []string{"claude-code", "codex"},
 			wantWarn: true,
 			mustHave: []string{"cowork", "enabled_adapters", "config.toml"},
 			mustOmit: []string{"\"missing\":\"claude-code\"", "\"missing\":\"codex\""},
 		},
 		{
-			name:     "one missing — names the exact remedy command",
+			name:     "one missing - names the exact remedy command",
 			allow:    []string{"claude-code", "codex"},
 			wantWarn: true,
 			mustHave: []string{
@@ -71,13 +71,13 @@ func TestWarnMissingDefaultsFromAllowList_NamesEveryGap(t *testing.T) {
 			},
 		},
 		{
-			name:     "multiple missing — names all in stable order",
+			name:     "multiple missing - names all in stable order",
 			allow:    []string{"codex"},
 			wantWarn: true,
 			mustHave: []string{"claude-code", "cowork", "observer config adopt-defaults"},
 		},
 		{
-			name:     "user list has extra unknown tool — only reports missing-from-defaults",
+			name:     "user list has extra unknown tool - only reports missing-from-defaults",
 			allow:    []string{"claude-code", "cowork", "codex", "future-tool"},
 			wantWarn: false,
 		},

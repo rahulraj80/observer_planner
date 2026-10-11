@@ -228,7 +228,7 @@ func (e *GovernanceRefusedError) Is(target error) bool { return target == ErrGov
 // governanceRefusal returns the pin's refusal, or nil when nothing pins
 // pricing (no provider, a dormant posture, or a section left editable).
 func governanceRefusal(eff govern.Effective) error {
-	if !eff.Active {
+	if !eff.VisibilityActive() {
 		return nil
 	}
 	if eff.IsSettingsSectionHidden(SettingsSection) || eff.IsSettingsSectionReadOnly(SettingsSection) {

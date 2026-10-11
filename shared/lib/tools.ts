@@ -343,6 +343,10 @@ const TOOLS: Record<string, ToolMeta> = {
   },
 };
 
+// KNOWN_TOOL_KEYS is every registered tool key, in registry order: the
+// option list for a picker of AI tool ids (e.g. a disallowed-tools policy).
+export const KNOWN_TOOL_KEYS: readonly string[] = Object.keys(TOOLS);
+
 // BROWSER_TOOLS is the *-web rail set — the "Browser chatbots" dashboard
 // grouping. Ordered for stable rendering.
 export const BROWSER_TOOLS: string[] = [

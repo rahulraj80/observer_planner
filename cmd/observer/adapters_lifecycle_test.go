@@ -56,7 +56,7 @@ func TestRenderAdapterMatrixCarriesLifecycleColumn(t *testing.T) {
 	}
 	// Capture is never gated on lifecycle: a dead row still renders.
 	if !strings.Contains(out, "gone") {
-		t.Error("a dead row is missing from the matrix — rows are never hidden, only un-advertised")
+		t.Error("a dead row is missing from the matrix - rows are never hidden, only un-advertised")
 	}
 }
 

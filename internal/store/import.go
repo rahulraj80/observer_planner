@@ -145,6 +145,10 @@ func (s *Store) ImportFrom(ctx context.Context, foreignPath string, opts ImportO
 // into the FTS5 search table. Runs on the pinned (still-attached)
 // connection to find the imported set; the writes go through the
 // Indexer's own handle (local tables only).
+//
+// The "already indexed" probe reads the FTS5 shadow table's c0 (action_id)
+// through migration 147's index: the same predicate on the virtual table
+// is a scan of every excerpt per imported action (T-412).
 func (s *Store) indexImportedExcerpts(ctx context.Context, conn *sql.Conn, ix *indexing.Indexer) (int64, error) {
 	rows, err := conn.QueryContext(ctx, `
 		SELECT a.id, COALESCE(a.raw_tool_name, ''), COALESCE(a.target, ''),
@@ -153,7 +157,7 @@ func (s *Store) indexImportedExcerpts(ctx context.Context, conn *sql.Conn, ix *i
 		  JOIN src.actions sa
 		    ON sa.source_file = a.source_file AND sa.source_event_id = a.source_event_id
 		 WHERE COALESCE(a.raw_tool_output, '') != ''
-		   AND NOT EXISTS (SELECT 1 FROM action_excerpts e WHERE e.action_id = a.id)`)
+		   AND NOT EXISTS (SELECT 1 FROM main.action_excerpts_content e WHERE e.c0 = a.id)`)
 	if err != nil {
 		return 0, fmt.Errorf("select imported outputs: %w", err)
 	}

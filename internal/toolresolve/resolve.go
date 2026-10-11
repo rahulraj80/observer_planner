@@ -63,7 +63,7 @@ const (
 // fabricated command — so the launcher stderr (FormatVerdict), `observer
 // doctor <tool>` (internal/diag) and the dashboard install dialog must all say
 // exactly this, from here, rather than each spelling their own near-copy.
-const NoGroundedInstallMsg = "no grounded install command — see the vendor's docs"
+const NoGroundedInstallMsg = "no grounded install command - see the vendor's docs"
 
 // shebangHeadBytes bounds the interpreter sniff: a "#!" line is the first line
 // of the file and is far shorter than this, so reading more would only cost I/O
@@ -101,6 +101,10 @@ type Resolution struct {
 	Notes         []string
 	LoginOnlyDirs []string
 	Interpreter   string
+	// InterpreterMissing is the structured twin of the "not found anywhere on
+	// the merged PATH" note: Interpreter is needed and nothing provides it, so
+	// the child would fail at startup. Set at the same site as that note.
+	InterpreterMissing bool
 }
 
 // Env is the injected I/O surface. Every field is data or a func so the
@@ -387,8 +391,9 @@ func applyInterpreterNote(res *Resolution, env Env, merged []pathEntry, probeDir
 			return
 		}
 	}
+	res.InterpreterMissing = true
 	res.Notes = append(res.Notes, fmt.Sprintf(
-		"%s is a #!/usr/bin/env %s shim; %s is not found anywhere on the merged PATH — "+
+		"%s is a #!/usr/bin/env %s shim; %s is not found anywhere on the merged PATH - "+
 			"the child will fail at startup until %s is installed or added to PATH",
 		filepath.Base(res.Bin), interp, interp, interp,
 	))
@@ -511,7 +516,7 @@ func classify(considered []Candidate) Resolution {
 			Shadowing: shadow,
 		}
 		res.Notes = append(res.Notes, fmt.Sprintf(
-			"%s resolved from %s, which is not on PATH — add it to PATH to silence this note",
+			"%s resolved from %s, which is not on PATH - add it to PATH to silence this note",
 			filepath.Base(chosen.Path), filepath.Dir(chosen.Path),
 		))
 		if len(shadow) > 0 {

@@ -1,0 +1,40 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].description": "VerifiedOfficial",
+    "[].html_url": "VerifiedOfficial",
+    "[].id": "VerifiedOfficial",
+    "[].members_url": "VerifiedOfficial",
+    "[].name": "VerifiedOfficial",
+    "[].node_id": "VerifiedOfficial",
+    "[].notification_setting": "VerifiedOfficial",
+    "[].parent": "VerifiedOfficial",
+    "[].permission": "VerifiedOfficial",
+    "[].privacy": "VerifiedOfficial",
+    "[].repositories_url": "VerifiedOfficial",
+    "[].slug": "VerifiedOfficial",
+    "[].url": "VerifiedOfficial"
+  },
+  "fixture_sha256": "e49ac4f794ed698d4dcc5193f4eda1a83dc9d586876c28bbc37c68706f08e07d",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/orgs/{org}/teams",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /orgs/{org}/teams (operationId teams/list). Last page: same body, no Link rel=\"next\" header (the documented terminal condition).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.org.teams"
+}

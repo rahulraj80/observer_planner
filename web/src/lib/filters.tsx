@@ -51,6 +51,9 @@ export type Filters = {
   customRange: CustomRange;
   tool: string;
   project: string;
+  // Global Model filter ("all" = unfiltered). Spend surfaces narrow to the
+  // model's own turns; session / action surfaces keep sessions that used it.
+  model: string;
   // Global free-text search, set by FilterBar's "Search anything…"
   // input. Pages opt-in by reading `query` and filtering whatever
   // makes sense for that surface (Sessions filters by id/project,
@@ -66,6 +69,7 @@ type FilterCtx = Filters & {
   setCustomRange: (r: CustomRange) => void;
   setTool: (t: string) => void;
   setProject: (p: string) => void;
+  setModel: (m: string) => void;
   setQuery: (q: string) => void;
   setGran: (g: GranChoice) => void;
 };
@@ -134,6 +138,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [customRange, setCustomRangeState] = useState<CustomRange>(init.customRange);
   const [tool, setTool] = useState<string>(init.tool);
   const [project, setProject] = useState<string>(init.project);
+  const [model, setModel] = useState<string>(init.model);
   const [query, setQuery] = useState<string>(init.query);
   const [gran, setGran] = useState<GranChoice>(init.gran);
   // urlQuery is the debounced copy of `query` that the URL carries.
@@ -176,7 +181,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const lastLocationKey = useRef<string | null>(null);
   useEffect(() => {
     // What the URL should carry right now (the query debounced).
-    const projected: UrlFilters = { win, customRange, tool, project, query: urlQuery, gran };
+    const projected: UrlFilters = { win, customRange, tool, project, model, query: urlQuery, gran };
     if (lastLocationKey.current !== location.key) {
       lastLocationKey.current = location.key;
       // A location change: back/forward restores from the URL; any other
@@ -194,6 +199,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
         setCustomRangeState(next.customRange);
         setTool(next.tool);
         setProject(next.project);
+        setModel(next.model);
         setGran(next.gran);
         if (next.query !== urlQuery) {
           setQuery(next.query);
@@ -210,7 +216,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
         { replace: true, state: location.state },
       );
     }
-  }, [location, navType, navigate, win, customRange, tool, project, urlQuery, gran]);
+  }, [location, navType, navigate, win, customRange, tool, project, model, urlQuery, gran]);
 
   const value = useMemo(
     () => ({
@@ -218,16 +224,18 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       customRange,
       tool,
       project,
+      model,
       query,
       gran,
       setWin,
       setCustomRange,
       setTool,
       setProject,
+      setModel,
       setQuery,
       setGran,
     }),
-    [win, customRange, tool, project, query, gran, setWin, setCustomRange],
+    [win, customRange, tool, project, model, query, gran, setWin, setCustomRange],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

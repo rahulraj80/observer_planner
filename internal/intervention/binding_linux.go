@@ -157,7 +157,8 @@ func bindInstalledCandidate(ctx context.Context, spec integration.InterventionSu
 		if !spec.Binding.Invocation.AllowsCLI() {
 			return nil, []BindingReason{ReasonInvocationUnknown}
 		}
-		if !declaredUnixLauncherName(spec.Binary.Names.Unix, filepath.Base(launcher.Path)) {
+		if resolved := filepath.Base(launcher.Path); !declaredUnixLauncherName(spec.Binary.Names.Unix, resolved) &&
+			!declaredUnixLauncherName(spec.Binding.NativeNames, resolved) {
 			return nil, []BindingReason{ReasonGenericProcessHost}
 		}
 		if forbiddenNativeTarget(ctx, launcher, candidate.Interpreters) {
@@ -436,6 +437,16 @@ func discoverDeclaredWorkers(ctx context.Context, launcherPath string, specs []i
 				}
 				paths = append(paths, filepath.Join(launcherDir, entry.Name()))
 			}
+		case integration.WorkerVersionedDirectory:
+			found, ok, unsafe := versionedDirectoryWorkers(launcherDir, spec)
+			if !ok {
+				invalid = true
+				continue
+			}
+			if unsafe {
+				generic = true
+			}
+			paths = found
 		default:
 			invalid = true
 			continue
@@ -460,6 +471,13 @@ func discoverDeclaredWorkers(ctx context.Context, launcherPath string, specs []i
 					generic = true
 					continue
 				}
+			case integration.WorkerVersionedDirectory:
+				// The declared path must BE the file: a symlink anywhere on
+				// it could point the binding at an unrelated native program.
+				if worker.Path != filepath.Clean(path) {
+					generic = true
+					continue
+				}
 			}
 			if forbiddenNativeTarget(ctx, worker, interpreters) {
 				generic = true
@@ -470,6 +488,73 @@ func discoverDeclaredWorkers(ctx context.Context, launcherPath string, specs []i
 		}
 	}
 	return appendUniqueTargets(nil, targets...), seen, invalid, generic
+}
+
+// versionedDirectoryWorkers lists Relative/<version>/Inner for every
+// version-named, real (non-symlink) subdirectory of the launcher-relative
+// Relative directory. ok is false for a malformed declaration or an
+// unreadable directory. unsafe reports a symlinked version directory, which is
+// refused rather than followed. A missing Relative directory, or a version
+// directory that does not carry this Inner layout (absent, or a regular file
+// where Inner needs a directory), contributes nothing: the shim's own layout
+// probe accepts more than one shape, and only the shape actually installed
+// is a target.
+func versionedDirectoryWorkers(launcherDir string, spec integration.WorkerDiscoverySpec) ([]string, bool, bool) {
+	if !cleanRelative(spec.Relative, true) || !cleanRelative(spec.Inner, false) {
+		return nil, false, false
+	}
+	root := filepath.Join(launcherDir, filepath.FromSlash(spec.Relative))
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil, true, false
+	}
+	if err != nil {
+		return nil, false, false
+	}
+	var paths []string
+	unsafe := false
+	for _, entry := range entries {
+		if !validVersionSuffix(entry.Name()) {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			unsafe = true
+			continue
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name(), filepath.FromSlash(spec.Inner))
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths, true, unsafe
+}
+
+// cleanRelative accepts a non-empty relative slash path. Parent steps are
+// allowed only at the start and only when allowParent is set (a launcher-
+// relative directory); an inner path may never climb out of its version
+// directory.
+func cleanRelative(rel string, allowParent bool) bool {
+	if rel == "" || filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") {
+		return false
+	}
+	climbing := true
+	for _, part := range strings.Split(rel, "/") {
+		switch part {
+		case "", ".":
+			return false
+		case "..":
+			if !allowParent || !climbing {
+				return false
+			}
+		default:
+			climbing = false
+		}
+	}
+	return !climbing
 }
 
 func validVersionSuffix(s string) bool {

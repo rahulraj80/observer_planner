@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -372,7 +374,7 @@ func TestTerminalDeniedFrameCoalesced(t *testing.T) {
 		t.Fatalf("denied frames were NOT coalesced: %d rows for %d frames", rowCount, flood)
 	}
 	if rowCount > flood/deniedFrameBatch+3 {
-		t.Fatalf("too many denied-frame rows (%d) for %d frames — coalescing is too weak", rowCount, flood)
+		t.Fatalf("too many denied-frame rows (%d) for %d frames - coalescing is too weak", rowCount, flood)
 	}
 	if sum != flood {
 		t.Fatalf("coalesced counts sum to %d, want exactly %d (no dropped frame uncounted)", sum, flood)

@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && !sbo_omit_processobs
 
 package main
 

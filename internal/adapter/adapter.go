@@ -92,7 +92,8 @@ const (
 	// `store.db` LOOKS like a member (it stores the system prompt and
 	// prompt budget, not activity) but demonstrably emits action rows
 	// — 104 of them across 20 files on the measurement host — so
-	// declaring it here would have suppressed a real signal.
+	// declaring it here would have suppressed a real signal. It declares
+	// FileCursorSemantics.ZeroActionsPossible instead (T-585).
 	CursorNoActions
 )
 
@@ -203,6 +204,32 @@ type FileCursorSemantics struct {
 	// new file PAST the stale cursor between two passes is not
 	// detectable from sizes alone; the adapter's own backfill covers it.
 	RewindsOnTruncate bool
+	// ChunkedTail declares that a parse of this file honours the per-call
+	// read limit on its context (ParseByteLimit, parselimit.go): it reads
+	// at most that many bytes past fromOffset and stops at the last
+	// complete record inside the window. The watcher then reads an
+	// over-cap tail in bounded windows instead of skipping the file.
+	// Meaningful only together with StreamsFromCursor on a byte-count
+	// cursor (TailChunkable). The zero value keeps the skip.
+	ChunkedTail bool
+	// ZeroActionsPossible declares a file that CAN emit action rows but
+	// for which emitting none is also a designed outcome, so a cursor at
+	// EOF with zero actions is not the misroute fingerprint. It differs
+	// from CursorNoActions, which says the file NEVER emits actions: Cursor's
+	// per-chat store.db emits system-prompt, prompt-budget and todo rows
+	// when the store holds them, and only a model name (which upgrades
+	// sessions.model, not an action) when it does not (T-585). The zero
+	// value keeps the fingerprint every adapter had before this field
+	// existed.
+	ZeroActionsPossible bool
+}
+
+// ActionsExpected reports whether a non-trivial file with these semantics
+// SHOULD have produced at least one action row: the kind's answer, unless
+// the adapter declared ZeroActionsPossible for the file. This is the
+// predicate the watcher-health misroute count consults.
+func (s FileCursorSemantics) ActionsExpected() bool {
+	return s.Kind.ActionsExpected() && !s.ZeroActionsPossible
 }
 
 // DeltaGateMeaningful reports whether the watcher's oversize DoS guard

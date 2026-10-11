@@ -7,24 +7,10 @@
 // as text nodes only — never dangerouslySetInnerHTML — so the copy can
 // never become an injection surface.
 
-export type TourPlacement = "top" | "bottom" | "left" | "right" | "auto";
+// The step type is shared with the org dashboard's tour (T-447).
+import type { TourStep } from "@shared/lib/tour";
 
-export type TourStep = {
-  // Stable id (used as a React key + for debugging).
-  id: string;
-  // CSS selector of the anchor element. Omit for a centered card.
-  target?: string;
-  // Route to navigate to before showing the step (if not already there).
-  path?: string;
-  // Preferred bubble placement relative to the target. Default "bottom".
-  placement?: TourPlacement;
-  // Coach-mark heading.
-  title: string;
-  // Body copy — plain text, rendered as text nodes only.
-  body: string;
-  // Padding in px around the spotlight cutout. Default 6.
-  spotlightPadding?: number;
-};
+export type { TourPlacement, TourStep } from "@shared/lib/tour";
 
 export const TOUR_STEPS: TourStep[] = [
   {
@@ -73,8 +59,9 @@ export const TOUR_STEPS: TourStep[] = [
     placement: "right",
     title: "Cost",
     body:
-      "Exact token spend broken down by model, tool, and project - plus " +
-      "input/output and cache costs, with no estimates on proxied traffic.",
+      "Exact token spend, with no estimates on proxied traffic. The tabs " +
+      "break it down by model, track your budget, and print a monthly " +
+      "statement.",
   },
   {
     id: "cache",
@@ -93,9 +80,9 @@ export const TOUR_STEPS: TourStep[] = [
     placement: "right",
     title: "Terminals",
     body:
-      "Launch and attach agent terminals right in the dashboard. Each one now " +
+      "Launch and attach agent terminals right in the dashboard. Each one " +
       "has a Git tree and file explorer so you can see the project without " +
-      "leaving.",
+      "leaving. Launch settings and the model Arena are the other two tabs.",
   },
   {
     id: "security",
@@ -105,7 +92,8 @@ export const TOUR_STEPS: TourStep[] = [
     title: "Security",
     body:
       "Guardrails on your agents' own commands - dangerous-command policy, " +
-      "MCP pins, and taint tracking for your coding tools.",
+      "MCP pins, and taint tracking for your coding tools. Verdicts, rules, " +
+      "budgets, prompt guard and MCP each have their own tab.",
   },
   {
     id: "settings",
@@ -123,7 +111,9 @@ export const TOUR_STEPS: TourStep[] = [
     placement: "bottom",
     title: "One filter, and help anywhere",
     body:
-      "The date range and window up here scope the whole dashboard. Press ? " +
+      "The window, tool, project and model filters up here scope the whole dashboard; the " +
+      "model filter is always here and greys out on a page it cannot narrow. The bell beside " +
+      "Help collects what needs you. Press ? " +
       "on any screen to open contextual help. That's the tour - explore away.",
   },
 ];

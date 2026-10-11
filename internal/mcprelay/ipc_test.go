@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/attachsock"
+	"github.com/marmutapp/superbased-observer/internal/localipc"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay"
 )
 
@@ -46,7 +46,7 @@ func hello(secret, vserver string) []byte {
 }
 
 func TestIPCOwnerOnlyEndpointAndBootstrap(t *testing.T) {
-	if !attachsock.Supported() {
+	if !localipc.Supported() {
 		t.Skip("no owner-only transport on this platform")
 	}
 	dbPath := filepath.Join(t.TempDir(), "observer.db")
@@ -73,7 +73,7 @@ func TestIPCOwnerOnlyEndpointAndBootstrap(t *testing.T) {
 		}
 	}
 	// A second listener on the same DB is refused (live-daemon guard).
-	if _, _, err := mcprelay.ListenIPC(dbPath); !errors.Is(err, attachsock.ErrSocketLiveDaemon) {
+	if _, _, err := mcprelay.ListenIPC(dbPath); !errors.Is(err, localipc.ErrSocketLiveDaemon) {
 		t.Fatalf("second listener: %v", err)
 	}
 

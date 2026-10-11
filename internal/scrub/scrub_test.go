@@ -40,7 +40,8 @@ func TestScrubString(t *testing.T) {
 					t.Fatalf("secret leaked: %q still contains %q", got, forbidden)
 				}
 			}
-			if !strings.Contains(got, Redacted) && !strings.Contains(got, "[REDACTED]") {
+			// Bare "[REDACTED]" or a typed "[REDACTED:<type>]" marker.
+			if !strings.Contains(got, "[REDACTED") {
 				t.Fatalf("expected redaction marker, got %q", got)
 			}
 		})

@@ -1,83 +1,17 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
-
-// newTagTestServer seeds three sessions across one project so the
-// classification filters have something to discriminate. Each session carries a
-// distinct token/cost profile so the per-tag rollup is checkable.
-func newTagTestServer(t *testing.T) (*Server, *store.Store) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "tags.db")
-	database, err := openTestDB(context.Background(), db.Options{Path: path})
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	st := store.New(database)
-	root := t.TempDir()
-	base := time.Now().UTC().Add(-time.Hour)
-	var events []models.ToolEvent
-	var tokens []models.TokenEvent
-	for i, sid := range []string{"sess-a", "sess-b", "sess-c"} {
-		ts := base.Add(time.Duration(i) * time.Minute)
-		events = append(events, models.ToolEvent{
-			SourceFile: "f.jsonl", SourceEventID: sid + "-e1", SessionID: sid,
-			ProjectRoot: root, Timestamp: ts, Tool: models.ToolClaudeCode,
-			Model: "claude-opus-4-7", ActionType: models.ActionReadFile,
-			Target: "a.go", Success: true,
-		})
-		tokens = append(tokens, models.TokenEvent{
-			SourceFile: "f.jsonl", SourceEventID: sid + "-t1", SessionID: sid,
-			ProjectRoot: root, Timestamp: ts, Tool: models.ToolClaudeCode,
-			Model: "claude-opus-4-7", InputTokens: int64(1000 * (i + 1)),
-			OutputTokens: int64(100 * (i + 1)), Source: "jsonl", Reliability: "unreliable",
-		})
-	}
-	if _, err := st.Ingest(context.Background(), events, tokens, store.IngestOptions{}); err != nil {
-		t.Fatalf("seed Ingest: %v", err)
-	}
-
-	s, err := New(Options{DB: database, DBPath: path})
-	if err != nil {
-		t.Fatalf("dashboard.New: %v", err)
-	}
-	return s, st
-}
-
-func doJSON(t *testing.T, s *Server, method, path, body string) (int, map[string]any) {
-	t.Helper()
-	var rdr *strings.Reader
-	if body == "" {
-		rdr = strings.NewReader("")
-	} else {
-		rdr = strings.NewReader(body)
-	}
-	req := httptest.NewRequest(method, path, rdr)
-	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, req)
-	out := map[string]any{}
-	if rec.Code == http.StatusOK {
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatalf("%s %s: decode body %q: %v", method, path, rec.Body.String(), err)
-		}
-	}
-	return rec.Code, out
-}
 
 // TestSessionTagsMutationRoundTrip pins POST /api/session/<id>/tags: adds,
 // removes, the partial favorite/note semantics, the echoed post-state, and the
@@ -297,7 +231,7 @@ func TestSessionsFavoriteSort(t *testing.T) {
 
 	_, body := doJSON(t, s, http.MethodGet, "/api/sessions?limit=50&days=30&sort_by=favorite", "")
 	if body["sort_by"] != "favorite" {
-		t.Fatalf("sort_by echoed as %v — the allow-list dropped it", body["sort_by"])
+		t.Fatalf("sort_by echoed as %v - the allow-list dropped it", body["sort_by"])
 	}
 	rows := body["rows"].([]any)
 	if len(rows) != 3 {
@@ -331,7 +265,7 @@ func TestSessionsRatingSort(t *testing.T) {
 
 	_, body := doJSON(t, s, http.MethodGet, "/api/sessions?limit=50&days=30&sort_by=rating", "")
 	if body["sort_by"] != "rating" {
-		t.Fatalf("sort_by echoed as %v — the allow-list dropped it", body["sort_by"])
+		t.Fatalf("sort_by echoed as %v - the allow-list dropped it", body["sort_by"])
 	}
 	rows := body["rows"].([]any)
 	if len(rows) != 3 {
@@ -543,10 +477,10 @@ func TestSessionsTagsRollupChunksPastBindLimit(t *testing.T) {
 	}
 	// sess-a 1100 + sess-b 2200 + sess-c 3300 — the filler ids price to nothing.
 	if got := row["tokens"].(float64); got != 6600 {
-		t.Fatalf("bulk tokens = %v, want 6600 — the cost pass was dropped (bind-limit regression)", got)
+		t.Fatalf("bulk tokens = %v, want 6600 - the cost pass was dropped (bind-limit regression)", got)
 	}
 	if got := row["cost_usd"].(float64); got <= 0 {
-		t.Fatalf("bulk cost_usd = %v, want > 0 — the cost pass was dropped (bind-limit regression)", got)
+		t.Fatalf("bulk cost_usd = %v, want > 0 - the cost pass was dropped (bind-limit regression)", got)
 	}
 }
 
@@ -634,7 +568,7 @@ func TestSessionTagsRejectsBeforeAnyWrite(t *testing.T) {
 		t.Fatalf("SessionTags: %v", err)
 	}
 	if len(tags) != 0 {
-		t.Fatalf("tags = %v after a rejected request — the tag write was committed before the note was validated", tags)
+		t.Fatalf("tags = %v after a rejected request - the tag write was committed before the note was validated", tags)
 	}
 
 	// Symmetric case: a valid note alongside an INVALID tag must not write the

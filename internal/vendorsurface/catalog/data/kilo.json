@@ -1,0 +1,4701 @@
+{
+ "group": "kilo",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/kilo-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "kilo.account.data_export",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.account",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "snapshot",
+   "lookback_doc": "account lifetime",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "personal account data export, gzip JSONL; sources `microdollar_usage_metadata` (one row per billed request, `user_prompt_prefix`) and `system_prompt_prefix`; header with snapshotAt. Personal scope only; request steps undocumented",
+   "read_write_doc": "R (manual)",
+   "class_doc": "Content",
+   "grain_doc": "PerCall",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://blog.kilo.ai/p/data-export",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.account.session_share",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "undoc",
+   "per_user_doc": "per-session",
+   "mechanism_doc": "public share link /share/SHARE_ID (read-only copy) and fork; cloud sessions private per account",
+   "read_write_doc": "R (link)",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "PerSession",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/sessions-sharing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.analytics.breakdown",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "limit only"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "undoc",
+   "per_user_doc": "top-N per dimension",
+   "mechanism_doc": "GET /api/trpc/usageAnalytics.getBreakdown; metric cost, requests, tokens; dimension feature, model, mode, user, provider, project, organization; limit 1..1000 (default 15)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, Projects",
+   "grain_doc": "window x dimension",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "requests",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://app.kilo.ai/api/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Not built (lane ENTAPI-L16D, T-713, decision): a top-N list (limit at most 1000) of one dimension for one metric over the whole window, with percentages. It is a ranked subset of what kilo.analytics.table lands completely per day, so landing it adds no fact the table does not and would double count; the project and feature dimensions carry customer-named values.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.analytics.summary",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "bearer (undoc type)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams/Ent (undoc gating)"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "undoc",
+   "per_user_doc": "aggregate; filterable by userIds",
+   "mechanism_doc": "GET /api/trpc/usageAnalytics.getSummary",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, Adoption",
+   "grain_doc": "OrgDay..hour window total",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://app.kilo.ai/api/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Not built (lane ENTAPI-L16D, T-713, decision): a whole-window KPI card. Its additive members (cost, requests, tokens, errors) are the sums of kilo.analytics.table over the same window, and the rest are ratios and averages derived from those sums (errorRate, avgLatencyMs, cacheHitRatio and so on) or a window-wide distinct user count that is not additive across runs. Landing it would add a second copy of the table's numbers at a grain (the run's window) no fact key can hold. The latency totals are the one thing the table does not carry; they wait for a decision on a latency fact.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.analytics.table",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Kilo API key as Authorization: Bearer (OpenAPI securitySchemes bearerAuth)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "limit only (1..10000), no cursor: an answer at the limit is refused as possibly cut"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "undoc",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/trpc/usageAnalytics.getTable; groupBy up to 3 of feature, model, mode, user, provider, project; limit 1..10000 (default 1000); rows datetime, dimensions map, costMicrodollars, requestCount, inputTokens, outputTokens, cacheWriteTokens, cacheHitTokens, errorCount. Join key (datetime bucket, user id, model, project, mode, feature, provider). No request or session id. Backs the dashboard CSV export view",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "UserDay x model (groupBy user, model; granularity day)",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "usd_micros",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "user_hour",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://app.kilo.ai/api/openapi.json",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16D, T-713) for Usage and Cost: driver internal/vendorapi/kilo Table through the reviewed tRPC encoder: GET /api/trpc/usageAnalytics.getTable with granularity day, costSource cost, the organization from organization_id, viewAs org-wide, groupBy [user, model], limit 10000, no filter. Each row lands one fact per column (requests, input, output, cache write, cache read tokens, errors, cost) per UTC day under the Kilo user id (kind user_id: held until an admin links it) with the model as ModelRaw, for the reserved gateway attribution gateway:kilo. costMicrodollars lands as unit usd in micro-units, vendor reported, display only (never spend or a budget). At most 7 days per run; a row count at the limit (no cursor), another granularity, another dimension set or a repeated key is schema drift. Project, feature and mode dimensions are never asked (customer-named values). Synthetic only, no vendor response observed. assumption_tested: the dimensions map keys and value formats and the datetime format are Inferred.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16D: driver internal/vendorapi/kilo Table (the reviewed tRPC encoder), synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Kilo Code OpenAPI securitySchemes bearerAuth (type http, scheme bearer)"
+   },
+   "status": "synthetic, awaiting live validation",
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "app.kilo.ai",
+     "port": 443
+    }
+   ]
+  },
+  {
+   "id": "kilo.analytics.timeseries",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Kilo API key as Authorization: Bearer (OpenAPI securitySchemes bearerAuth)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "undoc",
+   "lookback_doc": "undoc",
+   "per_user_doc": "per-user via splitBy=user",
+   "mechanism_doc": "GET /api/trpc/usageAnalytics.getTimeseries; metric cost, requests, tokens, inputTokens, outputTokens, errorRate, avgLatencyMs, avgGenerationTimeMs, costPerRequest, tokensPerRequest, cacheHitRatio, outputInputRatio; splitBy feature, model, mode, user, provider, project",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "UserHour..month buckets (splitBy user)",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_hour",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_hour",
+     "unit": "requests",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "app.kilo.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://app.kilo.ai/api/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710) for Usage: driver internal/vendorapi/kilo Timeseries through the package's one reviewed tRPC encoder (closed input DTO, JSON in the single input query parameter, never caller text) and unwrapper (result.data): GET /api/trpc/usageAnalytics.getTimeseries with granularity day, costSource cost, the organization from the connection parameter organization_id (a UUID), viewAs org-wide, metric tokens, no filter and no split. Each daily bucket lands one org-level total_tokens fact (unit tokens) under the reserved gateway attribution gateway:kilo (Kilo Gateway traffic from any client, never one registry tool). An effective granularity other than day, a label, a fractional or negative value or a repeated day is schema drift. The cost metric is not landed (its unit is undocumented for the series). Synthetic only, no vendor response observed. assumption_tested: synthesized from the schema; the bucket datetime format is Inferred.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/kilo Timeseries (one reviewed tRPC encoder), synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Kilo Code OpenAPI securitySchemes bearerAuth (type http, scheme bearer)"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.app.trpc_unlisted",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.app",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "session / bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "other app.kilo.ai/api/trpc procedures used by the dashboard (and third parties, e.g. CodexBar sends X-KILOCODE-ORGANIZATIONID); spec exposes only an explicit allowlist, so the rest are undocumented and unstable",
+   "read_write_doc": "n/a",
+   "class_doc": "Usage, Cost, Policy",
+   "grain_doc": "varies",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://blog.kilo.ai/p/whats-new-for-enterprise-six-things",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/steipete/CodexBar/blob/main/docs/kilo.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.contract.retention_residency",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.contract",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "sales"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise / paid"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "marketing/legal: \"No data retention for AI prompts and outputs on paid plans\"; EU data residency and dedicated custom gateway (Enterprise); SOC 2 docs via Trust Center https://trust.kilo.ai/ ; 30-day data retention during payment suspension",
+   "read_write_doc": "n/a",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/security-and-compliance",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/enterprise/vs/opencode",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.adoption_score",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org view"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "All",
+   "per_user_doc": "org (personal toggle)",
+   "mechanism_doc": "UI: AI Adoption Score 0..100 = Frequency 40 / Depth 40 / Coverage 20; signals incl. autocomplete acceptance, AI-generated lines merged, retention rate of AI lines, % users weekly, 2+/4+ agents; week-over-week cards; feature checklist with one-click enable",
+   "read_write_doc": "R UI (+feature enable)",
+   "class_doc": "Adoption, LOC (internal input)",
+   "grain_doc": "OrgDay",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "org_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/adoption-dashboard/understanding-your-score",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.agent_env_profiles",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "org"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: Agent Environment Profiles owned by user or organization (env vars, secrets, startup commands), one default per owner",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/code-with-ai/platforms/cloud-agent",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.audit_logs",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owners (page also says Admins)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "UI"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "undoc",
+   "per_user_doc": "per-actor",
+   "mechanism_doc": "UI only: filters action, actor email, date range; fields time, action (`user.login`, `settings.change`...), actor, details; events org create / settings change / purchase credits, member remove / change role, user login / logout / invite send / accept / revoke, custom modes CRUD, SSO auto provision / set domain / remove domain. Model/provider changes appear in details",
+   "read_write_doc": "R UI",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/enterprise/audit-logs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.auto_topup",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: top-up when balance < $50, min top-up $100, pause on payment failure",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitOrg",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.billing_tab",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner / billing manager"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "undoc",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: available credits, downloadable invoices, payment history, purchase history (credits, seat changes, refunds, promo credits)",
+   "read_write_doc": "R UI",
+   "class_doc": "BillingExport, Cost",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "event",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/dashboard",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.cloud_agent_triggers",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "push_webhook_header_auth",
+   "transport": "webhook",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "owner of trigger (personal or org)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "100 requests",
+   "per_user_doc": "per-trigger",
+   "mechanism_doc": "UI Webhooks / Triggers: inbound HTTP webhook and scheduled (>= 10 min) triggers starting Cloud Agent sessions; request history, last 100 requests per trigger. Inbound only, not an export",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Sessions",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/code-with-ai/platforms/cloud-agent",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "webhook",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.code_reviews",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org admin (undoc role)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any (beta)"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-repo",
+   "mechanism_doc": "UI config in org dashboard: enable, model, style, repositories, focus areas, REVIEW.md; reviews post to GitHub/GitLab PRs; credits charged",
+   "read_write_doc": "W UI",
+   "class_doc": "Commits",
+   "grain_doc": "Event (per PR)",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Commits",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/automate/code-reviews/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.custom_modes_org",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Admins and Owners"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "next load",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: org custom modes (slug, role definition, instructions, available tools Read/Edit/Browser/Commands/MCP); loaded by CLI as \"organization modes\"",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/custom-modes-org",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.data_collection_controls",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI toggles: code training opt-out, usage analytics (internal tracking); gateway data collection policy allow / deny applied to all member requests (some free models need allow)",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Retention, Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/dashboard",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/gateway/usage-and-billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.groups_model_policy",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner write; billing manager read; member sees own group names"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user effective",
+   "mechanism_doc": "UI Groups: flat groups, many per member; default policies + group policies (All / Selected / None); effective = org ceiling AND (defaults + union of group grants); enforced in extension, CLI, autocomplete, Slack, Discord, Linear, GitHub",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Groups, Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/enterprise/groups",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.integrations",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "org"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: GitHub, GitLab, Bitbucket (org only), Jira, Slack, Linear, Discord; workspace access tokens recommended",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Policy, Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/automate/integrations",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://blog.kilo.ai/p/whats-new-for-enterprise-six-things",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.kilo_pass_org",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner, billing manager"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: org Kilo Pass, one pass per seat, pooled credits, allocation to direct child orgs, overallocation reconcile",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Cost, Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.min_balance_alert",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI config; email when balance below configured amount",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Limits",
+   "grain_doc": "Event (email)",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/usage-and-billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.model_access_controls",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owners only"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI Providers & Models: blocklist of models and providers (provider block covers future models); filters trains-on-data, retains-prompts, HQ/datacenter location; takes effect immediately; logged in audit",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/enterprise/model-access-controls",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.org_byok_keys",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner or billing manager"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: org-level BYOK provider keys for 24 providers (anthropic, bedrock, openai, google, ...), AES-256 at rest, no fallback to Kilo keys, cost recorded 0",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/authentication",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.organization_tab",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "UI: name, created, \"8 of 10 seats used\", members with last activity, pending invites, role distribution, data collection policy status",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Identity, Seats, Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/dashboard",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.per_user_daily_limit",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "realtime",
+   "lookback_doc": "daily",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "UI: max daily spend per member, resets 00:00 UTC, balance error when hit; visible across sub-orgs in Permissions",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/usage-and-billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.personal_api_key",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "UI: Your Profile on personal account (not in an org): JWT gateway API key",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/getting-started/setup-authentication",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.scim",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "listed (\"SCIM provisioning and deprovisioning\"), presumably via WorkOS directory sync; no doc page, no contract",
+   "read_write_doc": "W (IdP push)",
+   "class_doc": "Identity",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/security-and-compliance",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/about-plans",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.security_agent_audit_report",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "org owners, billing managers"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "query budget"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "90 d per query window",
+   "per_user_doc": "per-finding",
+   "mechanism_doc": "UI route /organizations/:organizationId/security-agent/audit-report: finding timeline (import, severity/status change, dismissal, analysis, remediation PR); filters severity, state, repository; max 90 inclusive days per report; all-or-nothing on timeout",
+   "read_write_doc": "R UI",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/deploy-secure/security-reviews",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.spend_alerts",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "org: owners, admins, billing managers"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any (org scope for orgs)"
+   },
+   "freshness_doc": "hourly",
+   "lookback_doc": "14 d baseline",
+   "per_user_doc": "org scope",
+   "mechanism_doc": "UI (web + mobile spend view): Spending limit over rolling 24h / 7d / 30d; Spend spike when one hour exceeds 1x..50x the prior-14-day hourly rate; per scope (personal or org)",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Limits",
+   "grain_doc": "Event (email, mobile push)",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/getting-started/cost-controls-and-usage-safeguards",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.sso_workos",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "request form, then WorkOS admin portal (IdP metadata, SP Entity ID / ACS URL); domain policy in WorkOS; IdP-initiated login unsupported",
+   "read_write_doc": "W UI",
+   "class_doc": "Identity, Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/enterprise/sso",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.sub_organizations",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "parent Owner/Admin/Billing Manager (create: Owner/Admin)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "selectable range",
+   "per_user_doc": "both",
+   "mechanism_doc": "UI sections Overview, People, Usage, Credits (balances, expirations, runway), Distribute funds, Models, Permissions (SSO policy, feature settings, daily spend limits, inherited access)",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Projects, Identity, Usage, Cost, Limits, Policy",
+   "grain_doc": "Snapshot + window",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/enterprise/sub-organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.subscriptions_seats",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "seat history",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI: seat count, utilization, seat history, add/remove seats (pro-rated), cancel",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.usage_tab",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owners and Admins see per-user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "\"real-time\" (claim)",
+   "lookback_doc": "All history",
+   "per_user_doc": "both",
+   "mechanism_doc": "UI: Total Spent, Requests, Avg Cost, Tokens, Active Users; By Day / By Model & Day / By Project; Only-my-usage toggle; 7d/30d/365d/All. Project = git `origin` repo name or `.kilo/config.json` project.id",
+   "read_write_doc": "R UI",
+   "class_doc": "Usage, Cost, Adoption, Projects",
+   "grain_doc": "UserDay (expand rows), ModelDay, ProjectDay",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "requests",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.dash.verified_domains",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.dash",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI Verified Domains card (WorkOS domain verification); matching users auto-join as Member; no SSO needed",
+   "read_write_doc": "R/W UI",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/collaborate/teams/team-management",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.gateway.chat_usage",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.gateway",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer JWT API key; optional X-KiloCode-OrganizationId, X-KiloCode-TaskId, X-KiloCode-Version, x-kilocode-mode"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "free models 200/h per IP; paid not gateway-limited"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-call",
+   "mechanism_doc": "POST https://api.kilo.ai/api/gateway/chat/completions; `usage` in body or last SSE chunk (prompt_tokens, completion_tokens, total_tokens); gateway tracks model, provider, input/output/cache_write/cache_hit tokens, cost_microdollars, time_to_first_token, is_byok. Observable by a proxy; not an admin pull",
+   "read_write_doc": "R (in-band)",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/usage-and-billing",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/gateway/api-reference",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.gateway.enforcement_errors",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.gateway",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-call",
+   "mechanism_doc": "HTTP 402 insufficient balance (metadata.buyCreditsUrl); 403 model not on allow list; 429 free-model rate limit; balance error on per-user daily limit",
+   "read_write_doc": "R (in-band)",
+   "class_doc": "Limits, RateLimits",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/usage-and-billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.gateway.fim_usage",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.gateway",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "as above"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-call",
+   "mechanism_doc": "POST https://api.kilo.ai/api/fim/completions (autocomplete FIM)",
+   "read_write_doc": "R (in-band)",
+   "class_doc": "Usage",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/api-reference",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.gateway.models_catalog",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.gateway",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "none / Bearer"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET https://api.kilo.ai/api/gateway/models (not documented to reflect org policy)",
+   "read_write_doc": "R",
+   "class_doc": "Policy (catalog only)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/models-and-providers",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.gateway.org_token",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.gateway",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer + org header"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "15 min",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "org-scoped tokens, 15 min expiry, header X-KiloCode-OrganizationId; enforce model allow list, provider restrictions, per-user limits",
+   "read_write_doc": "R",
+   "class_doc": "Credentials",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/authentication",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.gateway.providers_catalog",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.gateway",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "none / Bearer"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET https://api.kilo.ai/api/gateway/providers",
+   "read_write_doc": "R",
+   "class_doc": "Policy (catalog only)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/gateway/api-reference",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.internal.o11y",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.internal",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Kilo-internal `services/o11y`: API + session metrics ingestion, burn-rate alerts, R2 Parquet export for Snowflake. Not customer-facing",
+   "read_write_doc": "n/a",
+   "class_doc": "Telemetry",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "N",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/contributing/features/agent-observability",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/contributing/architecture/cloud-platform",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.local_retention",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "config / managed file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "config",
+   "per_user_doc": "node",
+   "mechanism_doc": "`retention` key in kilo.json: machine-wide session auto-cleanup (default 30 d, off by default); snapshot GC 7 d",
+   "read_write_doc": "W (file)",
+   "class_doc": "Retention (control)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/code-with-ai/features/checkpoints",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.local_session_api",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor (limit)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local retention",
+   "per_user_doc": "per-session",
+   "mechanism_doc": "local `kilo serve` server (KILO_SERVER_PASSWORD) session list/search/messages API + SDK; SQLite store",
+   "read_write_doc": "R",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/code-with-ai/agents/session-history",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.macos_managed_prefs",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "next start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "node",
+   "mechanism_doc": "`.mobileconfig` plist domain `ai.opencode.managed` at /Library/Managed Preferences/<user>/ or /Library/Managed Preferences/; highest config layer",
+   "read_write_doc": "W (MDM)",
+   "class_doc": "Policy (control)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/Kilo-Org/kilocode/main/packages/opencode/src/config/managed.ts",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.managed_config_dir",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "admin / MDM file write"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "next start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "node",
+   "mechanism_doc": "files `kilo.json` / `kilo.jsonc` in `/etc/kilo` (Linux), `/Library/Application Support/kilo` (macOS), `%ProgramData%\\kilo` (Windows); trusted source; overrides org cloud config; only macOS prefs and runtime flags beat it",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (control)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/Kilo-Org/kilocode/main/packages/opencode/src/config/managed.ts",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/contributing/architecture/cli-runtime",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.mcp_config",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "config / managed file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "next start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "node",
+   "mechanism_doc": "`mcp.<name>.enabled` true/false (pins or disables named servers; not an allow list)",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (control)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/automate/mcp/using-in-cli",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.org_modes",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "signed-in"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "per load",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "signed-in organization modes merged as agent config (source: row 29)",
+   "read_write_doc": "R (client)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/contributing/architecture/cli-runtime",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.org_remote_config",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "signed-in org token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent (undoc)"
+   },
+   "freshness_doc": "per load",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "active Kilo Cloud org config fetched from `${url}/api/config` (account active_org_id) and auth-record `.well-known/opencode`; trusted. No admin authoring doc for its content",
+   "read_write_doc": "R (client)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/Kilo-Org/kilocode/main/packages/opencode/src/config/config.ts",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/contributing/architecture/cli-runtime",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.org_selector",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "node",
+   "mechanism_doc": "`KILO_ORG_ID` env (highest) else persisted `/teams` pick in CLI auth file; `kilo cloud --org-id`",
+   "read_write_doc": "W (env)",
+   "class_doc": "Projects",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/code-with-ai/platforms/cli",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.otel_export",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local env"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "collector-defined",
+   "per_user_doc": "per-session",
+   "mechanism_doc": "CLI exports OTLP HTTP traces and logs when `OTEL_EXPORTER_OTLP_ENDPOINT` set; `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_RESOURCE_ATTRIBUTES`; request spans carry http.method, http.path, `session.id`, `message.id`, `opencode.*` params; opt out `experimental.openTelemetry=false`. No metric catalog",
+   "read_write_doc": "R (push)",
+   "class_doc": "Telemetry",
+   "grain_doc": "PerCall spans + logs",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/code-with-ai/platforms/cli",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.permission_config",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "config / managed file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "next start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "node",
+   "mechanism_doc": "`permission.*` allow/ask/deny per tool (bash patterns last-match-wins, edit, read path deny, task, webfetch, websearch, doom_loop); `agent.<name>.disable`, `agent.<name>.steps`",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (control)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ContentExclusion",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/getting-started/cost-controls-and-usage-safeguards",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://kilo.ai/docs/customize/custom-subagents",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.provider_allowlist",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "config / managed file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "next start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "node",
+   "mechanism_doc": "`enabled_providers` / `disabled_providers`",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (control)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/ai-providers",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.sandbox_config",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "config / managed file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "new sessions",
+   "lookback_doc": "n/a",
+   "per_user_doc": "node",
+   "mechanism_doc": "`sandbox.enabled`, `sandbox.network` deny/allow, `allowed_hosts`, `writable_paths` (global-only keys); Bubblewrap / Seatbelt; no Windows",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (control)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/getting-started/settings/sandboxing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.node.session_export",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "on demand",
+   "lookback_doc": "local",
+   "per_user_doc": "per-session",
+   "mechanism_doc": "`kilo export <sessionID>` JSON",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/code-with-ai/agents/session-history",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.org.members_list_public",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.org",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Kilo API key as Authorization: Bearer (OpenAPI securitySchemes bearerAuth)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams/Ent"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "GET /api/trpc/organizations.members.listPublic input {organizationId}; active rows id, name, email, role (owner, admin, member, billing_manager), status, inviteDate, imageUrl; invited rows email, role, inviteDate, emailStatus (pending, sending, delivered, failed); invite tokens and URLs omitted",
+   "read_write_doc": "R",
+   "class_doc": "Identity, Roles",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "app.kilo.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://app.kilo.ai/api/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): driver internal/vendorapi/kilo Members through the reviewed tRPC encoder: GET /api/trpc/organizations.members.listPublic with {organizationId}. Active members land as User/kilo.org_member/v1 keyed kilo.member = id: email, role (owner / admin / member / billing_manager), name as the display name; invited rows (no id) are counted, never landed; the image URL is never read. Unpaged, authoritative for the active members. Closed DTO (secret class may_return_secret kept: invite tokens are documented as omitted). Synthetic only, no vendor response observed. assumption_tested: synthesized from the schema.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/kilo Members (one reviewed tRPC encoder), synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Kilo Code OpenAPI securitySchemes bearerAuth (type http, scheme bearer)"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "kilo.proposal.enterprise_mcp_controls",
+   "vendor_group": "kilo",
+   "vendor": "kilo",
+   "plane": "kilo.proposal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "PROPOSAL only: `/organizations/:id/mcp-control`, org settings `mcp_controls_enabled`, member MCP config table; \"not documented as available APIs\"",
+   "read_write_doc": "n/a",
+   "class_doc": "Policy",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "N",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://kilo.ai/docs/contributing/features/enterprise-mcp-controls",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

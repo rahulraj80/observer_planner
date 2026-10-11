@@ -122,7 +122,7 @@ func marshalIndent(v any) ([]byte, error) {
 func readme(opts ClaudeCodeOptions, pkg string) string {
 	var b strings.Builder
 	b.WriteString("# Observer managed-settings for Claude Code\n\n")
-	b.WriteString("Two artifacts, two DIFFERENT jobs — deploy both:\n\n")
+	b.WriteString("Two artifacts, two DIFFERENT jobs - deploy both:\n\n")
 	if opts.IncludeMCP {
 		b.WriteString(fmt.Sprintf(
 			"- **managed-mcp.json** pins Observer's MCP server (`%s`) for in-session\n"+
@@ -145,7 +145,7 @@ func readme(opts ClaudeCodeOptions, pkg string) string {
 	if strings.TrimSpace(opts.AnthropicBaseURL) != "" {
 		b.WriteString(fmt.Sprintf(
 			"- **managed-settings.json** (env block) also sets `ANTHROPIC_BASE_URL=%s`,\n"+
-				"  routing Claude Code's traffic through that endpoint — either a node's\n"+
+				"  routing Claude Code's traffic through that endpoint - either a node's\n"+
 				"  Observer proxy (`%s` by default) or, in Gateway-Mode thin deployments, a\n"+
 				"  direct org AI Gateway URL. Switching between the two is a pure base-URL\n"+
 				"  swap: no other tool/MCP registration changes.\n\n",

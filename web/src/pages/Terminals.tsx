@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
-import { LayoutGrid, SlidersHorizontal, Swords } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { LayoutGrid, SlidersHorizontal, Swords, type LucideIcon } from "lucide-react";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import {
+  TERMINALS_TABS,
+  defaultTab,
+  terminalsHashTab,
+  type TerminalsTab,
+} from "@/lib/nodePageTabs";
 import {
   ChartShell,
   EmptyState,
@@ -8,9 +16,15 @@ import {
   InlineLoading,
   PageHeader,
   Pill,
-  SegmentedControl,
-  type Segment,
+  ComboChip,
+  type ComboOption,
+  SinglePicker,
   SuccessCheck,
+  TabPanel,
+  TabStrip,
+  panelDomId,
+  tabDomId,
+  type TabDef,
   ConfirmButton,
   Table,
   Tooltip,
@@ -21,6 +35,7 @@ import { Summary } from "@/components/Summary";
 import { navIcon } from "@/lib/nav";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
+import { ConfigSaveCancelled, saveConfigEdit } from "@/lib/configSectionSave";
 import { fmtClock, fmtRelative, fmtShortId } from "@/lib/format";
 import type {
   ProjectRow,
@@ -36,6 +51,7 @@ import {
 } from "@/components/useTerminalStatuses";
 import { WorkspaceGrid } from "@/components/workspace/WorkspaceGrid";
 import { ArenaTab } from "@/components/arena/ArenaTab";
+import { RemoteSystemsCard } from "@/components/RemoteSystemsCard";
 
 async function postConfirmJSON<T>(
   path: string,
@@ -77,6 +93,9 @@ type TerminalPolicy = {
   // launchers), so it needs its own conscious toggle. See
   // internal/config's TerminalLaunchConfig.AllowShell.
   allow_shell: boolean;
+  // [terminal.launch].allow_install: the guided install / uninstall switch
+  // (default true; read live). Optional so an older daemon round-trips.
+  allow_install?: boolean;
   restart_required_on_save: boolean;
   // Runtime bounds — live-applied by POST /api/terminal/limits (no restart),
   // read-only on this GET.
@@ -126,28 +145,79 @@ function rootSeenHint(p: ProjectRow): string {
   return `${sess} · last seen ${fmtRelative(p.last_seen)}`;
 }
 
+// putPolicy previews the launch-policy write and saves it at the previewed
+// etag (REVIEW-3 P3-18), through the same dialog every config save uses. A
+// cancelled preview rejects with ConfigSaveCancelled and writes nothing.
 async function putPolicy(
   confirmToken: string,
   body: unknown,
 ): Promise<{ saved: boolean; restart_required: boolean }> {
-  return fetchJSON("/api/terminal/policy", undefined, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Observer-Confirm": confirmToken,
-    },
-    body: JSON.stringify(body),
-  });
+  return saveConfigEdit(
+    "/api/terminal/policy",
+    "terminal.launch",
+    body,
+    { "X-Observer-Confirm": confirmToken },
+    { title: "Save launch policy" },
+  );
 }
 
-type TerminalsTab = "workspace" | "settings" | "arena";
+// The page's three views (`?tab=`, page tabs since the platform tabs plan),
+// each with its own glyph, and the one-line description the header shows
+// for the active view.
+const TERMINALS_TAB_ICONS: Record<TerminalsTab, LucideIcon> = {
+  workspace: LayoutGrid,
+  settings: SlidersHorizontal,
+  arena: Swords,
+};
+const TERMINALS_TAB_DEFS: TabDef<TerminalsTab>[] = TERMINALS_TABS.ids.map((id) => ({
+  id,
+  label: TERMINALS_TABS.labels[id],
+  icon: TERMINALS_TAB_ICONS[id],
+}));
 
-// The page's three views, each with its own glyph, and the one-line
-// description the header shows for the active view.
-const TERMINALS_TABS: Segment<TerminalsTab>[] = [
-  { value: "workspace", label: "Workspace", icon: LayoutGrid },
-  { value: "settings", label: "Settings", icon: SlidersHorizontal },
-  { value: "arena", label: "Arena", icon: Swords },
+// Sandbox home / network modes: the mode name on the first line (what the
+// config stores), the long explanation as the row's second line instead of
+// one native <option> that overflowed narrow screens.
+const SANDBOX_HOME_OPTIONS: ComboOption[] = [
+  {
+    value: "tmpfs",
+    label: <span><span className="font-mono">tmpfs</span> <span className="text-fg-3">(recommended)</span></span>,
+    detail: "Hide the real home.",
+    searchable: "tmpfs hide the real home recommended",
+  },
+  {
+    value: "readonly",
+    label: <span className="font-mono">readonly</span>,
+    detail: "Expose the real home read-only.",
+    searchable: "readonly expose the real home read-only",
+  },
+];
+
+const SANDBOX_EGRESS_OPTIONS: ComboOption[] = [
+  {
+    value: "internet",
+    label: <span><span className="font-mono">internet</span> <span className="text-fg-3">(recommended)</span></span>,
+    detail: "Own network; model API via the proxy, internet via the egress gateway.",
+    searchable: "internet own network model api proxy egress gateway recommended",
+  },
+  {
+    value: "proxy_only",
+    label: <span className="font-mono">proxy_only</span>,
+    detail: "Own network; only the model API proxy.",
+    searchable: "proxy_only own network only the model api proxy",
+  },
+  {
+    value: "none",
+    label: <span className="font-mono">none</span>,
+    detail: "Own network; nothing reachable.",
+    searchable: "none own network nothing reachable",
+  },
+  {
+    value: "host",
+    label: <span className="font-mono">host</span>,
+    detail: "Share the host network (the dashboard stays reachable from inside).",
+    searchable: "host share the host network dashboard reachable",
+  },
 ];
 
 const TERMINALS_TAB_SUBS: Record<TerminalsTab, string> = {
@@ -177,33 +247,46 @@ export function TerminalsPage() {
 
   // Workspace vs Settings tab (dock-grid design D1): the grid IS the page;
   // the policy/remote/standing/status/history content moves behind Settings.
-  const [tab, setTab] = useState<TerminalsTab>("workspace");
-  // Deep-link: /terminals?tab=workspace|settings (the provider's requestDock
-  // navigates here so a queued "Add to grid" always lands on the grid, even
-  // if this page was left on the Settings tab).
+  // `?tab=workspace|settings|arena` is the source of truth (useUrlTab: a
+  // cold deep link renders that tab, a click pushes so Back walks tabs).
+  // The provider's requestDock navigates to ?tab=workspace so a queued
+  // "Add to grid" always lands on the grid, even if this page was left on
+  // the Settings tab.
+  // The tabs the organization left visible on this machine (T-132).
+  const pageTabs = usePageTabs("terminals", TERMINALS_TABS);
+  const [urlTab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
   const location = useLocation();
-  useEffect(() => {
-    const want = new URLSearchParams(location.search).get("tab");
-    if (want === "workspace" || want === "settings" || want === "arena") setTab(want);
-  }, [location.search]);
+  const navigate = useNavigate();
   // Hash deep-link: /terminals#launch-policy. The launch-policy card lives
   // behind the Settings tab, so a bare hash would land on the grid and scroll
-  // to nothing — select the tab FIRST, then scroll once the card has mounted.
+  // to nothing: the hash selects its tab (in the URL, keeping the hash, as a
+  // replace so Back does not bounce), then scrolls once the card has mounted.
   // The New-Terminal dialog's picker legend (DI-06) links here.
+  const linkedTab = terminalsHashTab(location.hash);
+  const hashTab = linkedTab && pageTabs.ids.includes(linkedTab) ? linkedTab : null;
+  const tab: TerminalsTab = hashTab ?? urlTab;
   useEffect(() => {
-    if (location.hash !== "#launch-policy") return;
-    setTab("settings");
+    if (!hashTab) return;
+    if (urlTab !== hashTab) {
+      const next = new URLSearchParams(location.search);
+      next.set("tab", hashTab);
+      navigate({ search: `?${next.toString()}`, hash: location.hash }, { replace: true });
+      return;
+    }
+    // The hash IS the card's element id (TERMINALS_SETTINGS_ANCHORS):
+    // #launch-policy, #folder-selection, #remote-systems.
     const id = window.setTimeout(() => {
       document
-        .getElementById("launch-policy")
+        .getElementById(location.hash.slice(1))
         ?.scrollIntoView({ block: "start", behavior: "smooth" });
     }, 0);
     return () => window.clearTimeout(id);
-  }, [location.hash]);
+  }, [hashTab, urlTab, location.search, location.hash, navigate]);
 
   // Local editable copy of the policy, seeded from the server.
   const [allowFresh, setAllowFresh] = useState(false);
   const [allowShell, setAllowShell] = useState(false);
+  const [allowInstall, setAllowInstall] = useState(true);
   const [tools, setTools] = useState<string[]>([]);
   const [roots, setRoots] = useState<string[]>([]);
   const [newRoot, setNewRoot] = useState("");
@@ -230,6 +313,7 @@ export function TerminalsPage() {
     if (p) {
       setAllowFresh(p.allow_fresh_agent);
       setAllowShell(p.allow_shell);
+      setAllowInstall(p.allow_install ?? true);
       setTools(p.allowed_tools ?? []);
       setRoots(p.allowed_project_roots ?? []);
       setMaxConcurrent(String(p.max_concurrent ?? 0));
@@ -298,12 +382,13 @@ export function TerminalsPage() {
         allowed_tools: tools,
         allowed_project_roots: roots,
         allow_shell: allowShell,
+        allow_install: allowInstall,
       });
       if (res.restart_required) markRestartPending("terminal-policy");
       setSaved(true);
       policy.reload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (!(e instanceof ConfigSaveCancelled)) setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -354,34 +439,48 @@ export function TerminalsPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
       <PageHeader
+        className="mb-4"
         title="Terminals"
         icon={navIcon("terminals")}
         sub={TERMINALS_TAB_SUBS[tab]}
-        right={
-          <SegmentedControl<TerminalsTab>
-            options={TERMINALS_TABS}
-            value={tab}
-            onChange={setTab}
-          />
-        }
       />
 
+      <TabStrip
+        tabs={TERMINALS_TAB_DEFS.filter((t) => pageTabs.ids.includes(t.id))}
+        value={tab}
+        onChange={setTab}
+        idPrefix="terminals"
+        ariaLabel="Terminals sections"
+        className="mb-4"
+      />
+
+      {/* The grid mounts only while its tab is shown (as before the tab
+          strip): live xterms and the grid layout measure their box, which a
+          display:none keep-alive panel would report as zero. */}
       {tab === "workspace" && (
-        <WorkspaceGrid
-          policyHint={
-            p && (!p.terminal_enabled || !p.allow_fresh_agent)
-              ? "Fresh launch is off - enable it in Settings → Fresh-agent launch policy."
-              : ""
-          }
-          onOpenSettings={() => setTab("settings")}
-        />
+        <div
+          id={panelDomId("terminals", "workspace")}
+          role="tabpanel"
+          aria-labelledby={tabDomId("terminals", "workspace")}
+        >
+          <WorkspaceGrid
+            policyHint={
+              p && (!p.terminal_enabled || !p.allow_fresh_agent)
+                ? "Fresh launch is off - enable it in Settings → Fresh-agent launch policy."
+                : ""
+            }
+            onOpenSettings={() => setTab("settings")}
+          />
+        </div>
       )}
 
-      {tab === "arena" && <ArenaTab />}
+      <TabPanel id="arena" active={tab} idPrefix="terminals">
+        <ArenaTab />
+      </TabPanel>
 
-      {tab === "settings" && (
+      <TabPanel id="settings" active={tab} idPrefix="terminals" className="space-y-6">
         <>
 
       {/* Launch policy editor (§E). The id is the deep-link target the
@@ -471,6 +570,28 @@ export function TerminalsPage() {
             </span>
           </label>
 
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={allowInstall}
+              disabled={!p?.config_writable}
+              onChange={(e) => {
+                setSaved(false);
+                setAllowInstall(e.target.checked);
+              }}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-medium text-fg-1">Allow guided install and uninstall</span>
+              <span className="block text-[11px] text-fg-3">
+                Lets New Terminal run a tool&apos;s grounded install (or the uninstall of one this dashboard
+                installed) in a local terminal. On by default; installing is not launching, so the launch
+                allow-list above does not gate it. Config key:{" "}
+                <code className="text-fg-2">[terminal.launch].allow_install</code>.
+              </span>
+            </span>
+          </label>
+
           <div>
             <div className="mb-1 text-[11px] text-fg-3">
               allowed tools (from the launchable set - a tool must be launchable in the capability registry)
@@ -522,11 +643,7 @@ export function TerminalsPage() {
               {busy ? "saving…" : "Save launch policy"}
             </button>
             {saved && <SuccessCheck label="Saved" className="!text-[11px]" />}
-            {p?.restart_required_on_save && (
-              <span className="text-[11px] text-fg-3">
-                Takes effect on the next daemon restart (the policy is read at start-up).
-              </span>
-            )}
+            <LaunchPolicyBindNote restartRequired={p?.restart_required_on_save} />
           </div>
         </div>
       </ChartShell>
@@ -543,6 +660,7 @@ export function TerminalsPage() {
           because the PUT handler (handleTerminalPolicyPut) overwrites all
           four fields unconditionally from the request body. A partial write
           from here would silently reset fresh-launch/tools/shell back off. */}
+      <div id="folder-selection" className="scroll-mt-6">
       <ChartShell
         title="Folder Selection"
         sub="The allow-list of project folders a fresh agent (or plain shell) may be launched into - from here, or from the folder picker in New Terminal. A folder's descendants are permitted too (adding /home/you/work also allow-lists /home/you/work/anything-under-it); the server re-canonicalizes and symlink-checks every entry on save."
@@ -593,15 +711,20 @@ export function TerminalsPage() {
                 </div>
               )}
               <div className="flex items-center gap-2 pt-1">
-                <input
+                {/* D-571: pick an observed project (or type another absolute
+                    path); "add" puts the pick on the list. */}
+                <SinglePicker
+                  className="flex-1"
+                  options={rootSuggestions
+                    .filter((proj) => !roots.includes(proj.root_path))
+                    .map((proj) => ({ id: proj.root_path, label: shortenPath(proj.root_path), sublabel: rootSeenHint(proj) }))}
                   value={newRoot}
                   disabled={!p?.config_writable}
-                  onChange={(e) => setNewRoot(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") addRoot();
-                  }}
-                  placeholder="/absolute/path/to/project"
-                  className="flex-1 rounded-2 border border-line-2 bg-bg-3 px-2 py-1 font-mono text-[11px] text-fg-1 outline-none focus:border-accent disabled:opacity-40"
+                  onChange={setNewRoot}
+                  allowFree
+                  freeLabel="Use path"
+                  placeholder="Pick a project, or type /absolute/path"
+                  ariaLabel="Project root to allow"
                 />
                 <button
                   type="button"
@@ -690,14 +813,15 @@ export function TerminalsPage() {
               {busy ? "saving…" : "Save folder allow-list"}
             </button>
             {saved && <SuccessCheck label="Saved" className="!text-[11px]" />}
-            {p?.restart_required_on_save && (
-              <span className="text-[11px] text-fg-3">
-                Takes effect on the next daemon restart (the policy is read at start-up).
-              </span>
-            )}
+            <LaunchPolicyBindNote restartRequired={p?.restart_required_on_save} />
           </div>
         </div>
       </ChartShell>
+      </div>
+
+      {/* Remote systems (T-488): the [[terminal.ssh.profiles]] editor the
+          New Terminal System picker links to (/terminals#remote-systems). */}
+      <RemoteSystemsCard />
 
       <SandboxSettingsCard />
 
@@ -861,8 +985,23 @@ export function TerminalsPage() {
         </div>
       </ChartShell>
         </>
-      )}
+      </TabPanel>
     </div>
+  );
+}
+
+// LaunchPolicyBindNote says when a launch-policy save takes effect. A daemon
+// that reads [terminal.launch] live (T-489) binds it on the next launch; an
+// older one, or an embedder without the live seam, still needs a restart, and
+// the note says whichever the daemon reported.
+function LaunchPolicyBindNote({ restartRequired }: { restartRequired?: boolean }) {
+  if (restartRequired === undefined) return null;
+  return (
+    <span className="text-[11px] text-fg-3">
+      {restartRequired
+        ? "Takes effect on the next daemon restart (this daemon reads the policy at start-up)."
+        : "Applies to the next launch - no restart needed."}
+    </span>
   );
 }
 
@@ -926,6 +1065,9 @@ type TerminalSandboxConfig = {
 type SandboxEgress = "internet" | "proxy_only" | "none" | "host";
 
 type TerminalSandboxConfigResponse = {
+  // The etag of the config.toml this card was read from; the save sends it
+  // back as base_etag (T-639).
+  config_etag?: string;
   confirm_token: ConfirmToken;
   config_writable: boolean;
   restart_required_on_save: boolean;
@@ -1046,7 +1188,7 @@ function SandboxSettingsCard() {
     try {
       const res = await fetchJSON<{ restart_required: boolean }>(
         "/api/terminal/sandbox/config",
-        undefined,
+        { base_etag: settings.data.config_etag ?? "" },
         {
           method: "PUT",
           headers: {
@@ -1186,18 +1328,20 @@ function SandboxSettingsCard() {
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <label className="space-y-1">
-                <span className="font-medium text-fg-1">Home isolation</span>
-                <select
+              <div className="space-y-1">
+                <span id="sandbox-home-label" className="block font-medium text-fg-1">Home isolation</span>
+                <ComboChip
+                  label="Home isolation"
+                  labelledBy="sandbox-home-label"
+                  hideTriggerLabel
+                  fullWidth
                   value={draft.home_mode}
                   disabled={!writable}
-                  onChange={(e) => update("home_mode", e.target.value as "tmpfs" | "readonly")}
-                  className="w-full rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-fg-1 disabled:opacity-50"
-                >
-                  <option value="tmpfs">tmpfs - hide the real home (recommended)</option>
-                  <option value="readonly">readonly - expose the real home read-only</option>
-                </select>
-              </label>
+                  onChange={(v) => update("home_mode", v as "tmpfs" | "readonly")}
+                  options={SANDBOX_HOME_OPTIONS}
+                  buttonValueRender={(o) => <span className="font-mono">{o?.value ?? draft.home_mode}</span>}
+                />
+              </div>
               <label className="space-y-1">
                 <span className="font-medium text-fg-1">Backend</span>
                 <input
@@ -1210,23 +1354,23 @@ function SandboxSettingsCard() {
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <label className="space-y-1">
-                <span className="font-medium text-fg-1">Network</span>
-                <select
+              <div className="space-y-1">
+                <span id="sandbox-network-label" className="block font-medium text-fg-1">Network</span>
+                <ComboChip
+                  label="Network"
+                  labelledBy="sandbox-network-label"
+                  hideTriggerLabel
+                  fullWidth
                   value={draft.egress ?? "internet"}
                   disabled={!writable}
-                  onChange={(e) => update("egress", e.target.value as SandboxEgress)}
-                  className="w-full rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-fg-1 disabled:opacity-50"
-                >
-                  <option value="internet">internet - own network; model API via the proxy, internet via the egress gateway (recommended)</option>
-                  <option value="proxy_only">proxy_only - own network; only the model API proxy</option>
-                  <option value="none">none - own network; nothing reachable</option>
-                  <option value="host">host - share the host network (the dashboard stays reachable from inside)</option>
-                </select>
+                  onChange={(v) => update("egress", v as SandboxEgress)}
+                  options={SANDBOX_EGRESS_OPTIONS}
+                  buttonValueRender={(o) => <span className="font-mono">{o?.value ?? draft.egress ?? "internet"}</span>}
+                />
                 <span className="block text-[11px] text-fg-3">
                   Every mode except host keeps a sandboxed agent away from this dashboard and other local services. The internet mode also refuses private addresses (your LAN, the Windows host on WSL2, Docker containers) unless you list them below.
                 </span>
-              </label>
+              </div>
               <label className="flex items-start gap-2 rounded-2 border border-warn/30 bg-warn/5 p-3">
                 <input
                   type="checkbox"

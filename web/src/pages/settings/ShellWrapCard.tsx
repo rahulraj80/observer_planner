@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pill } from "@/components/primitives";
+import { Pill, SegmentedControl } from "@/components/primitives";
 import { fetchJSON } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { HONESTY_TONE, selectionKey, stateLabel } from "@/lib/shellWrap";
+import {
+  HONESTY_TONE,
+  selectionKey,
+  sideLabel,
+  stateLabel,
+  statusParams,
+  targetApiId,
+  targetOptions,
+  unavailableRows,
+  type ShellWrapTargetChoice,
+} from "@/lib/shellWrap";
 import type {
   ShellWrapOutcome,
   ShellWrapShell,
+  ShellWrapStatus,
   ShellWrapStatusResponse,
   ShellWrapTool,
 } from "@/lib/types";
@@ -26,6 +37,9 @@ import type {
 //   - Undo is one click and restores each start-up file byte-for-byte.
 //   - Each row says honestly what wrapping buys (from the registry's
 //     WrappedCommandFor seam, never a per-tool guess).
+//   - Inside WSL a second target appears: the Windows shells of the same
+//     machine (T-419). Each target keeps its own recorded choice; switching
+//     drops the selection and any preview, so Apply never crosses targets.
 
 const STATUS = "/api/shell-wrap/status";
 
@@ -36,9 +50,11 @@ const PRIMARY_BTN =
   "rounded-2 border border-accent/50 bg-accent/15 px-3 py-1 text-[12px] font-medium text-accent hover:bg-accent/25 disabled:opacity-50";
 
 export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
-  const res = useApi<ShellWrapStatusResponse>(STATUS);
+  const [target, setTarget] = useState<ShellWrapTargetChoice>("native");
+  const res = useApi<ShellWrapStatusResponse>(STATUS, statusParams(target));
   const st = res.data?.status ?? null;
   const token = res.data?.confirm_token ?? "";
+  const targets = useMemo(() => targetOptions(res.data?.targets), [res.data?.targets]);
 
   const [tools, setTools] = useState<string[]>([]);
   const [shells, setShells] = useState<string[]>([]);
@@ -48,23 +64,44 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Seed the checkboxes once from the RECORDED choice.
+  // The response on screen may still be the previous target's while the new
+  // one loads (the cache keeps the previous data for the same path).
+  const forTarget = (res.data?.target ?? "") === targetApiId(target);
+
+  // Seed the checkboxes once per target from its RECORDED choice.
   useEffect(() => {
-    if (!st || seeded) return;
+    if (!st || seeded || !forTarget) return;
     setTools((st.tools ?? []).filter((t) => t.selected).map((t) => t.id));
     setShells(st.enabled ? (st.planned_shells ?? []) : []);
     setSeeded(true);
-  }, [st, seeded]);
+  }, [st, seeded, forTarget]);
 
-  const key = selectionKey(tools, shells);
+  const key = target + "|" + selectionKey(tools, shells);
   const previewCurrent = preview !== null && preview.key === key;
 
   const cli = useMemo(() => (st?.tools ?? []).filter((t) => t.kind === "terminal"), [st]);
   const gui = useMemo(() => (st?.tools ?? []).filter((t) => t.kind === "gui"), [st]);
 
+  function switchTarget(t: ShellWrapTargetChoice) {
+    if (t === target || busy) return;
+    setTarget(t);
+    setTools([]);
+    setShells([]);
+    setSeeded(false);
+    setPreview(null);
+    setResult(null);
+    setErr(null);
+  }
+
+  const switcher =
+    targets.length > 0 ? (
+      <SegmentedControl<ShellWrapTargetChoice> options={targets} value={target} onChange={switchTarget} size="sm" />
+    ) : null;
+
   if (res.error) {
     return (
       <Shell badge={<Pill variant="neutral">unavailable</Pill>}>
+        {switcher}
         <p className="text-[11px] text-fg-3">
           Command wrapping is managed from this machine only (it edits your shell start-up
           files). {res.error.message}
@@ -104,14 +141,14 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
 
   const doPreview = () =>
     run(async () => {
-      const out = await post("/api/shell-wrap/apply", { tools, shells, dry_run: true });
+      const out = await post("/api/shell-wrap/apply", { target: targetApiId(target), tools, shells, dry_run: true });
       setPreview({ key, out });
       setResult(null);
     });
 
   const doApply = () =>
     run(async () => {
-      const out = await post("/api/shell-wrap/apply", { tools, shells, dry_run: false });
+      const out = await post("/api/shell-wrap/apply", { target: targetApiId(target), tools, shells, dry_run: false });
       setResult(out);
       setPreview(null);
       res.reload();
@@ -119,7 +156,7 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
 
   const doDisable = () =>
     run(async () => {
-      const out = await post("/api/shell-wrap/disable", { dry_run: false });
+      const out = await post("/api/shell-wrap/disable", { target: targetApiId(target), dry_run: false });
       setResult(out);
       setPreview(null);
       res.reload();
@@ -132,6 +169,8 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
 
   return (
     <Shell badge={<Pill variant={badge.tone}>{badge.text}</Pill>}>
+      {switcher}
+      {st.bridge && <BridgeNote st={st} />}
       <p className="text-[11.5px] leading-relaxed text-fg-2">
         Make typing a tool&rsquo;s own command run its observer-wrapped form - for example{" "}
         <code className={CODE}>claude</code> runs <code className={CODE}>observer claude</code>.
@@ -149,6 +188,7 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
 
       <ToolList
         title="Command-line tools"
+        st={st}
         tools={cli}
         selected={tools}
         onToggle={(id) => toggle(tools, setTools, id)}
@@ -162,11 +202,14 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
         <ToolList
           title="IDEs and desktop apps"
           note="Only a bare launch or a single folder is wrapped (code, code .). Anything else - a file, a flag - runs the real command, and so does the command inside the app's own terminal."
+          st={st}
           tools={gui}
           selected={tools}
           onToggle={(id) => toggle(tools, setTools, id)}
         />
       )}
+
+      <UnavailableList st={st} />
 
       <div className="space-y-1">
         <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">Shells</div>
@@ -195,14 +238,14 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={BTN} onClick={doPreview} disabled={busy}>
+        <button type="button" className={BTN} onClick={doPreview} disabled={busy || !forTarget}>
           {busy && !previewCurrent ? "working…" : "Preview changes"}
         </button>
         <button
           type="button"
           className={PRIMARY_BTN}
           onClick={doApply}
-          disabled={busy || readOnly || !previewCurrent}
+          disabled={busy || readOnly || !previewCurrent || !forTarget}
           title={previewCurrent ? undefined : "Preview this selection first"}
         >
           Apply
@@ -243,9 +286,56 @@ export function ShellWrapCard({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
+// UnavailableList shows the advertised tools that have no command to wrap on
+// this target, each with the server's reason and, when one exists, the
+// wrapped launch that still works. Nothing is dropped silently (T-492).
+function UnavailableList({ st }: { st: ShellWrapStatus }) {
+  const rows = unavailableRows(st);
+  if (rows.length === 0) return null;
+  return (
+    <details className="space-y-1.5">
+      <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">
+        Not wrappable here ({rows.length})
+      </summary>
+      <ul className="mt-1.5 divide-y divide-line-1 rounded-2 border border-line-1">
+        {rows.map((u) => (
+          <li key={`${u.kind}/${u.id}`} className="space-y-0.5 px-3 py-1.5 text-[12px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-fg-1">{u.label}</span>
+              <Pill variant="neutral">{u.kind === "gui" ? "IDE or desktop app" : "command line"}</Pill>
+            </div>
+            <div className="text-[11px] text-fg-3">{u.reason}</div>
+            {u.hint && (
+              <div className="text-[11px] text-fg-3">
+                Still works: <code className={CODE}>{u.hint}</code>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+// BridgeNote explains the Windows target: what runs where, and how the shims
+// reach the daemon.
+function BridgeNote({ st }: { st: ShellWrapStatus }) {
+  const distro = st.bridge?.distro ?? "";
+  return (
+    <p className="rounded-2 border border-line-2 bg-bg-3/40 px-3 py-2 text-[11px] leading-relaxed text-fg-2">
+      These are the commands you type in <strong>Windows</strong> PowerShell. A tool with a Windows
+      build keeps running as Windows: its shim asks observer in WSL ({distro}) for the routing it
+      applies, through <code className={CODE}>wsl.exe</code>, then runs the Windows program. A tool
+      with no Windows build runs inside WSL. If the daemon does not answer, the Windows program runs
+      unrouted. For cmd.exe, add <code className={CODE}>{st.shim_dir}</code> to your PATH yourself.
+    </p>
+  );
+}
+
 function ToolList({
   title,
   note,
+  st,
   tools,
   selected,
   onToggle,
@@ -253,6 +343,7 @@ function ToolList({
 }: {
   title: string;
   note?: string;
+  st: ShellWrapStatus;
   tools: ShellWrapTool[];
   selected: string[];
   onToggle: (id: string) => void;
@@ -279,6 +370,11 @@ function ToolList({
                 runs <code className={CODE}>{t.wrapped}</code>
               </span>
               <Pill variant={HONESTY_TONE[t.honesty]}>{t.honesty_text}</Pill>
+              {sideLabel(st, t) && (
+                <span title={t.where} className="text-[10.5px] text-fg-3">
+                  {sideLabel(st, t)}
+                </span>
+              )}
               {t.installed === false && <Pill variant="neutral">not installed</Pill>}
               {active && <Pill variant={stale ? "warn" : "info"}>{stale ? "active - stale" : "active"}</Pill>}
               {!active && t.selected && <Pill variant="warn">chosen, not applied</Pill>}

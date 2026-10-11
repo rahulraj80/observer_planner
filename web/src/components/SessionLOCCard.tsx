@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { ChartState } from "@/components/ChartState";
 import { Icon, Table, Tooltip } from "@/components/primitives";
 import { vocabIcon } from "@shared/lib/vocabIcons";
@@ -89,10 +90,10 @@ function UncountedBlock() {
   return (
     <div className="mt-2 rounded-2 border border-line-2 bg-bg-1 px-3 py-2.5 text-[10.5px] leading-relaxed text-fg-3">
       Line counts have not been computed for this session. Either it predates
-      line tracking or it changed no files. Run{" "}
-      <code className="rounded-1 bg-bg-2 px-1 py-0.5 font-mono text-[10px] text-fg-2">
-        observer backfill --loc
-      </code>{" "}
+      line tracking or it changed no files. Run the{" "}
+      <Link to="/settings?section=backfill" className="font-medium text-accent hover:text-accent-strong">
+        loc backfill in Settings &rarr; Backfill
+      </Link>{" "}
       to populate history, then reopen this session.
     </div>
   );

@@ -317,7 +317,7 @@ function NextTurnCostCard({
           ×{est.mid.turns.toFixed(1)} turns
         </Pill>
       }
-      sub={`${fmtUSD(est.low.message_usd)} – ${fmtUSD(est.high.message_usd)} per message · ${tierLabel}`}
+      sub={`${fmtUSD(est.low.message_usd)} - ${fmtUSD(est.high.message_usd)} per message · ${tierLabel}`}
     />
   );
 }

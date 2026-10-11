@@ -104,12 +104,67 @@ type governancePinnableKey struct {
 	Enum      []any
 	Direction string
 	Safe      any
+	// Min / Max are an int row's inclusive bounds (both zero = unbounded).
+	Min, Max int64
+	// Hot mirrors nodegov.PinnableKey.Hot (the daemon also applies the key
+	// live, so it is excluded from the pending_restart comparison).
+	Hot bool
 }
 
 const (
 	governanceDirFree            = "free"
 	governanceDirRestrictiveOnly = "restrictive_only"
+	// governanceDirLoweringOnly is the numeric CEILING direction for an int
+	// row: the org value applies unless the node's own value is already
+	// lower (govern.LowerInt's rule, restated here because internal/config
+	// must not import the policy layer).
+	governanceDirLoweringOnly = "lowering_only"
 )
+
+// GovernanceHotKey reports whether a pinnable key is applied live by the
+// daemon (see governancePinnableKey.Hot). cmd/observer uses it to keep hot
+// keys out of the pending_restart comparison.
+func GovernanceHotKey(key string) bool {
+	row, ok := governancePinnableByKey[key]
+	return ok && row.Hot
+}
+
+// GovernanceLowerInt composes a node's own int value with an org CEILING:
+// a positive local value below the org's wins, anything else takes the org's
+// value. Zero/negative org means "no directive" and returns local. It is the
+// one definition the config overlay AND the daemon's live re-application use,
+// so the restart-time and the hot value can never disagree.
+func GovernanceLowerInt(local, org int64) int64 {
+	if org <= 0 {
+		return local
+	}
+	if local > 0 && local < org {
+		return local
+	}
+	return org
+}
+
+// GovernancePinnedPushInterval returns the org's push-interval ceiling from a
+// resolved pinned map, or 0 when the map carries none (or a value outside the
+// row's bounds). It is the daemon's hot-apply read: the push loop composes it
+// with its own configured interval through GovernanceLowerInt.
+func GovernancePinnedPushInterval(pinned map[string]any) int64 {
+	const key = "org_client.push_interval_seconds"
+	raw, ok := pinned[key]
+	if !ok {
+		return 0
+	}
+	row := governancePinnableByKey[key]
+	norm, err := coerceGovernanceValue(row.Kind, raw)
+	if err != nil {
+		return 0
+	}
+	n, _ := norm.(int64)
+	if n < row.Min || n > row.Max {
+		return 0
+	}
+	return n
+}
 
 // governancePinnableKeys is the mirror. Order is irrelevant (it is indexed
 // below); the SET and each row's Kind/Enum/Direction/Safe are what the sync
@@ -131,6 +186,10 @@ var governancePinnableKeys = []governancePinnableKey{
 	// budget is enforced by govern.LowerFloat/LowerInt, not by this row).
 	{Key: "guard.budget.hard", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: true},
 	{Key: "guard.budget.from_org", Kind: "bool", Direction: governanceDirFree},
+	// guard.budget.fail_closed (D-502): the org's explicit opt-in to B-625
+	// refusing traffic while no verified budget is in hand. Restrictive-only,
+	// Safe=true: the org may turn blocking ON, never force it off.
+	{Key: "guard.budget.fail_closed", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: true},
 	{Key: "observer.secrets.enable_scrubbing", Kind: "bool", Direction: governanceDirRestrictiveOnly, Safe: true},
 	{Key: "compression.conversation.enabled", Kind: "bool", Direction: governanceDirFree},
 	{Key: "codeintel.enabled", Kind: "bool", Direction: governanceDirFree},
@@ -146,6 +205,10 @@ var governancePinnableKeys = []governancePinnableKey{
 	// is NOT here — it stays on the separate signed org routing-policy body,
 	// gated by govern.Effective.GrantsRoutingEnforcement (enforce.routing).
 	{Key: "routing.enabled", Kind: "bool", Direction: governanceDirFree},
+	// org_client.push_interval_seconds mirrors nodegov.PinnableKeys' row
+	// (2026-10-02 budget-latency arc): an int CEILING, lowering-only, bounded
+	// 30..3600, hot.
+	{Key: "org_client.push_interval_seconds", Kind: "int", Direction: governanceDirLoweringOnly, Min: 30, Max: 3600, Hot: true},
 }
 
 var governancePinnableByKey = func() map[string]governancePinnableKey {
@@ -204,6 +267,29 @@ type GovernanceOutcome struct {
 	// org-push seam (§2.4) and features are display-only (§3).
 	Share    map[string]any
 	Features map[string]bool
+	// HotLocal holds, for every HOT key the overlay touched, the node's own
+	// value BEFORE the overlay (see governancePinnableKey.Hot).
+	HotLocal map[string]any
+	// Excepted maps each pinned key a feature-access grant lifted in THIS
+	// Load onto the grant id (request-grants G8). The key kept the node's
+	// own value.
+	Excepted map[string]int64
+}
+
+// HotLocalInt returns the node's own pre-governance value of a hot int key,
+// or fallback when the overlay never touched it (in which case the loaded
+// config already carries the node's own value).
+func (o GovernanceOutcome) HotLocalInt(key string, fallback int64) int64 {
+	switch v := o.HotLocal[key].(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case int32:
+		return int64(v)
+	default:
+		return fallback
+	}
 }
 
 // Governed reports whether the returned Config actually carries org pins.
@@ -235,6 +321,17 @@ func readGovernanceSidecar(cfg Config, override string, now time.Time) (*sidecar
 	return f, out
 }
 
+// governancePinsInForce returns the sidecar's pins minus every key a
+// feature-access exception lifts at now (request-grants G8), and the lifted
+// keys' grant ids. The exceptions come from their OWN file beside the
+// sidecar (sidecar.ExceptionsPath), honoured only while it is bound to this
+// sidecar's effective hash; any failure reading it leaves every pin in
+// force.
+func governancePinsInForce(f *sidecar.File, sidecarPath string, now time.Time) (map[string]any, map[string]int64) {
+	exceptions, _ := sidecar.ReadExceptions(sidecar.ExceptionsPath(sidecarPath), f.EffectiveHash)
+	return sidecar.PinsInForce(f.Pinned, exceptions, now)
+}
+
 // applyGovernancePins writes the sidecar's pinned map onto cfg, skipping —
 // never failing on — any key the mirror does not recognise or whose value
 // does not satisfy its row. Per-key skipping is the §1.3 table: "that key
@@ -264,10 +361,40 @@ func applyGovernancePins(cfg *Config, pinned map[string]any, out *GovernanceOutc
 			out.skip(key, "this key is restrictive-only and may only be set to its safe value")
 			continue
 		}
+		if n, isInt := norm.(int64); isInt && (row.Min != 0 || row.Max != 0) && (n < row.Min || n > row.Max) {
+			out.skip(key, "value outside the key's permitted range")
+			continue
+		}
 		fv, ok := resolveGovernanceField(root, key)
 		if !ok || !fv.CanSet() {
 			out.skip(key, "the key does not resolve in this build's config")
 			continue
+		}
+		if row.Hot && fv.CanInterface() {
+			// Record the node's OWN value before the overlay, so the daemon's
+			// live re-application composes against it rather than against an
+			// already-lowered number (which would ratchet: a raised org
+			// ceiling could then never be released without a restart).
+			if out.HotLocal == nil {
+				out.HotLocal = map[string]any{}
+			}
+			out.HotLocal[key] = fv.Interface()
+		}
+		if row.Direction == governanceDirLoweringOnly {
+			// A CEILING, never a raise: keep the node's own value when it is
+			// already lower (the org value is still "in force" as the bound,
+			// so the key is reported Applied either way).
+			n, isInt := norm.(int64)
+			switch fv.Kind() {
+			case reflect.Int, reflect.Int32, reflect.Int64:
+			default:
+				isInt = false
+			}
+			if !isInt {
+				out.skip(key, "lowering-only applies to whole numbers only")
+				continue
+			}
+			norm = GovernanceLowerInt(fv.Int(), n)
 		}
 		if !setGovernanceField(fv, norm) {
 			out.skip(key, "the config field has an unexpected type")

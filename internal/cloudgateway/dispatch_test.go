@@ -128,7 +128,7 @@ func TestDispatchLeaseRefusalNeverDispatches(t *testing.T) {
 func TestCohortBenchmarkingIsNotEvidenceUploadable(t *testing.T) {
 	ok, reason := EvidenceUploadable(cloudcontract.PurposeCohortBenchmarking)
 	if ok {
-		t.Fatal("community_cohort_benchmarking is evidence-uploadable — a grant for one number could send a session body")
+		t.Fatal("community_cohort_benchmarking is evidence-uploadable - a grant for one number could send a session body")
 	}
 	if !strings.Contains(reason, "derived per-window contribution") {
 		t.Errorf("the refusal must say what the purpose DOES authorize: %q", reason)

@@ -9,9 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/budgetwarnfile"
+	"github.com/marmutapp/superbased-observer/internal/config"
+
 	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/guard/mcpsec"
+	"github.com/marmutapp/superbased-observer/internal/guardposture"
 	"github.com/marmutapp/superbased-observer/internal/mcp/locate"
+	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -33,6 +38,65 @@ type guardSummaryResponse struct {
 	Counts7d  guardCounts `json:"counts_7d"`
 
 	Chain guardChainStatus `json:"chain"`
+
+	// UserPolicy is set only when the configured user guard-policy.toml
+	// exists and does NOT load (T-323): the guard dropped it, so its
+	// rules are off while built-ins and the org bundle stay in force.
+	// The Security page renders it as a read-only banner. Derived by
+	// guard.CheckUserPolicy, the same check `observer doctor` and the
+	// daemon's user_policy_invalid guard event use.
+	UserPolicy *guardUserPolicyJSON `json:"user_policy,omitempty"`
+
+	// HookFailure is what a failing gate hook does, per gate family
+	// (T-346): "closed" blocks the call, "open" lets it run unevaluated.
+	// Absent when the daemon wired no seam (guardhookfailure.go).
+	HookFailure *guardHookFailureJSON `json:"hook_failure,omitempty"`
+
+	// ToolGates is, per hook_block tool, whether its tool-gate hook holds
+	// on THIS node and the channel it falls back to when not
+	// (guardtoolgates.go). Absent when the daemon wired no seam.
+	ToolGates []guardToolGateJSON `json:"tool_gates,omitempty"`
+}
+
+// guardUserPolicyJSON is the invalid-user-policy banner payload.
+type guardUserPolicyJSON struct {
+	Path  string `json:"path"`
+	Line  int    `json:"line,omitempty"`
+	Error string `json:"error"`
+	// FailClosed is the organization's T-327 choice in force on this node
+	// (D-221): the daemon's verified guard posture says the enforced gated
+	// hooks fail closed while this file does not load, so they are BLOCKED
+	// now, not merely missing the developer's rules.
+	FailClosed bool `json:"fail_closed,omitempty"`
+}
+
+// userPolicyProblem reports the on-disk user policy's load failure, or
+// nil when it loads, is absent, or the config cannot be read (the
+// summary must never fail on this advisory field).
+func (s *Server) userPolicyProblem() *guardUserPolicyJSON {
+	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
+	if err != nil {
+		return nil
+	}
+	home, _ := os.UserHomeDir()
+	st := guard.CheckUserPolicy(cfg.Guard, home, os.ReadFile)
+	if !st.Invalid() {
+		return nil
+	}
+	return &guardUserPolicyJSON{Path: st.Path, Line: st.Line, Error: st.Error, FailClosed: s.userPolicyFailClosed()}
+}
+
+// userPolicyFailClosed reads the organization's fail_closed choice off the
+// daemon's own verified guard posture: the same file every hook on this node
+// acts on, so the banner can never claim a block the hooks do not apply. An
+// absent or unverifiable posture reads as not fail-closed.
+func (s *Server) userPolicyFailClosed() bool {
+	resolved, err := config.ResolveGlobalPath(s.opts.ConfigPath)
+	if err != nil {
+		return false
+	}
+	ld := guardposture.Load(guardposture.PosturePath(resolved), guardposture.KeyPath(resolved))
+	return ld.State == guardposture.StateValid && ld.Posture.Enforced && ld.Posture.UserPolicyFailClosed
 }
 
 // guardCounts mirrors store.GuardEventSummary for the wire.
@@ -89,6 +153,9 @@ func (s *Server) handleGuardSummary(w http.ResponseWriter, r *http.Request) {
 			OK: report.OK, Checked: report.Checked,
 			DivergenceID: report.FirstDivergenceID, Detail: report.Detail,
 		},
+		UserPolicy:  s.userPolicyProblem(),
+		HookFailure: s.hookFailure(),
+		ToolGates:   s.toolGates(),
 	})
 }
 
@@ -422,13 +489,34 @@ func (s *Server) handleGuardBudget(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// The token windows on the same substrate (T-204): the node's token caps
+	// ([guard.budget] *_tokens) are what a developer under the token-usage
+	// cost display reads and edits, so the card needs their usage too.
+	tok, err := st.GuardBudgetTokens(r.Context(), "", now.Truncate(24*time.Hour), weekStart, monthStart)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	util5h, util7d, _, _ := st.LatestLimitWindows(r.Context())
 	writeJSON(w, map[string]any{
-		"session_usd":     cfg.Guard.Budget.SessionUSD,
-		"daily_usd":       cfg.Guard.Budget.DailyUSD,
-		"weekly_usd":      cfg.Guard.Budget.WeeklyUSD,
-		"monthly_usd":     cfg.Guard.Budget.MonthlyUSD,
-		"hard":            cfg.Guard.Budget.Hard,
+		"session_usd": cfg.Guard.Budget.SessionUSD,
+		"daily_usd":   cfg.Guard.Budget.DailyUSD,
+		"weekly_usd":  cfg.Guard.Budget.WeeklyUSD,
+		"monthly_usd": cfg.Guard.Budget.MonthlyUSD,
+		"hard":        cfg.Guard.Budget.Hard,
+		// The token-denominated caps, one for one with the dollar caps above.
+		"session_tokens":     cfg.Guard.Budget.SessionTokens,
+		"daily_tokens":       cfg.Guard.Budget.DailyTokens,
+		"weekly_tokens":      cfg.Guard.Budget.WeeklyTokens,
+		"monthly_tokens":     cfg.Guard.Budget.MonthlyTokens,
+		"usage_today_tokens": tok.DailyTokens,
+		"usage_week_tokens":  tok.WeeklyTokens,
+		"usage_month_tokens": tok.MonthlyTokens,
+		// The ORG's composed windows (budgetstatus.go): the numbers above are
+		// the node's own config, which on an org-budgeted node is usually
+		// all zeros - showing only those read as "no budget" (2026-10-02
+		// finding).
+		"org_budget":      budgetStatusPayload(budgetwarnfile.StatusPath(cfg.Observer.DBPath), nil),
 		"spend_today_usd": spend.DailyUSD,
 		"spend_week_usd":  spend.WeeklyUSD,
 		"spend_month_usd": spend.MonthlyUSD,
@@ -517,9 +605,16 @@ func (s *Server) handleGuardApprovals(w http.ResponseWriter, r *http.Request) {
 		// local exception. Refused at CREATION with the reason, so the
 		// register never fills with grants that applyApprovals would
 		// silently ignore. No bundle = no gate.
+		//
+		// One exception (request-grants G3): when the organization issued a
+		// SOFTEN grant for the rule, the approval IS the developer's per-call
+		// confirmation the grant asks for, so it is allowed; the guard only
+		// lets it act while that grant also covers the call.
 		if _, orgLocked := s.orgOverrideFor(r.Context(), req.RuleID); orgLocked {
-			http.Error(w, "locked by org policy: "+req.RuleID, http.StatusForbidden)
-			return
+			if _, softened := orgclient.SoftenGrantForRule(r.Context(), store.New(s.opts.DB), req.RuleID, s.now()); !softened {
+				http.Error(w, "locked by org policy: "+req.RuleID, http.StatusForbidden)
+				return
+			}
 		}
 		now := s.now()
 		row := store.GuardApprovalRow{

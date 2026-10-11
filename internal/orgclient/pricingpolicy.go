@@ -671,7 +671,8 @@ func (c *Client) FetchPricingPolicy(ctx context.Context) (PricingFetchOutcome, e
 	if err := c.pricingIdentityStillCurrent(ctx, identity); err != nil {
 		return c.rejectPricingIdentity(ctx, identity, authoritative, err)
 	}
-	classification := classifyPricingResponse(resp.StatusCode)
+	// An older server's page answers as 404 = not_supported (railreply.go).
+	classification := classifyPricingResponse(c.railStatus(pricingPolicyRail, resp))
 	if classification.notModified {
 		return c.publishCurrentPricingOutcome(ctx, identity, authoritative, "", nil)
 	}

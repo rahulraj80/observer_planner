@@ -1,0 +1,33 @@
+-- 159_org_enrolment_grant_initial_components.sql - modular packaging P4
+-- (lane MP-GOV, plan 5.6.1 and 6.2 row 9; the next contiguous agent number
+-- per the migration steward, D-417).
+--
+-- WHY. A managed enrolment grant may carry a signed initial component set
+-- (orgcontract.EnrolmentGrant.InitialComponents): the components the node
+-- runs until its organization publishes a node.components policy, so there
+-- is no fail-open window between enrolment and the first policy fetch. The
+-- set is bound into the grant's signing message, so a node that stores a
+-- grant carrying it must store it too, or the stored row stops verifying
+-- (observer doctor's grant re-verification, the daemon's identity refresh).
+-- A node only receives the field after advertising
+-- orgcontract.EnrolCapabilityInitialComponents; the org server shapes the
+-- grant with GrantForNode before signing.
+--
+-- SHAPE. JSON {"catalog_version": N, "ids": [...]} exactly as signed. NULL
+-- means the grant carried no set (every pre-modular grant, an old server, a
+-- grant without components.govern): the node is then pinned to the compiled
+-- set it runs until a policy arrives (nodecomponents SourceLegacyPinned). A
+-- present set with no ids means core only.
+--
+-- A grant REPLACEMENT (store.ReplaceEnrolmentGrant) leaves this column as
+-- it was: the replacement document does not carry the set, and clearing it
+-- would widen the node to its whole compiled set.
+--
+-- NODE-LOCAL control-plane state, like the rest of this table:
+-- org_enrolment_grant is in tests/invariant/privacy_test.go's
+-- forbiddenCacheTables (migration 082), so an additive column needs no
+-- privacy-test edit (the 083 / 094 precedent). Nullable and additive, and
+-- every reader lists explicit columns, so an older binary on this database
+-- and this binary on an older one both work. NO server pair.
+
+ALTER TABLE org_enrolment_grant ADD COLUMN initial_components_json TEXT;

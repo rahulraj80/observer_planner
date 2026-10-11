@@ -90,6 +90,13 @@ func TestVerifyStoredGrant(t *testing.T) {
 	replAsEnrolment := replDoc
 	replAsEnrolment.ReplacementGeneration = 0
 
+	// REVIEW-4 P4-10 / MODPKG-17 (1): a replacement row holding a set beside
+	// the replacement's PRIMARY signature (set-less message). The node holds
+	// that signature (its own push response carries it), so this row must
+	// not verify whatever the set says.
+	replWithForeignSet := replDoc
+	replWithForeignSet.InitialComponents = &InitialComponentSet{CatalogVersion: 1, IDs: []string{"remote", "terminals"}}
+
 	cases := []struct {
 		name    string
 		doc     StoredGrantDocument
@@ -109,6 +116,7 @@ func TestVerifyStoredGrant(t *testing.T) {
 		{name: "signature stripped", doc: signatureStripped, key: pub, wantErr: true},
 		{name: "replacement generation bumped", doc: replGenBumped, key: pub, wantErr: true},
 		{name: "replacement relabelled as an enrolment grant", doc: replAsEnrolment, key: pub, wantErr: true},
+		{name: "set-less replacement signature beside a set", doc: replWithForeignSet, key: pub, wantErr: true},
 		{name: "no key material is unchecked, not invalid", doc: clean, key: nil, wantErr: true, wantUncheckable: true},
 	}
 	for _, tc := range cases {

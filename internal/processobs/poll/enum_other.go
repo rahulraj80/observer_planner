@@ -11,10 +11,6 @@ func platformEnumerate() ([]ProcInfo, error) {
 	return nil, ErrUnsupported
 }
 
-// platformBootID has no source on non-Linux yet; "" is acceptable because
-// platformEnumerate fails first and no events are produced.
-func platformBootID() string { return "" }
-
 // platformSessionToken has no env-read implementation on this OS (§5.5 P-B6
 // env-token is Windows-only; Linux uses the direct pidbridge seed). "" disables
 // EV here — platformEnumerate fails first anyway, so no events are produced.

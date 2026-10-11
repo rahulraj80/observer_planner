@@ -32,6 +32,8 @@ func newDoctorCmd() *cobra.Command {
 		configPath string
 		jsonOut    bool
 		probeHook  bool
+		hooksOut   bool
+		probeGate  string
 		integrity  bool
 	)
 	cmd := &cobra.Command{
@@ -49,12 +51,18 @@ func newDoctorCmd() *cobra.Command {
 			"doctor skips it above [observer.db].integrity_check_max_gb (the same\n" +
 			"gate as the daemon's startup check); both say so. `observer doctor db`\n" +
 			"or --integrity runs it on demand regardless of size.\n\n" +
-			"--probe-hook fires a synthetic, obviously-fake secret through the\n" +
-			"REGISTERED prompt-submit hook command exactly as the host tool\n" +
-			"would invoke it, and reports whether it actually got blocked —\n" +
-			"the live counterpart of the PromptLane=hook registry claim. With\n" +
-			"a tool argument, probes just that tool; without one, probes every\n" +
-			"PromptLane=hook tool.",
+			"--probe-hook fires a synthetic call through each REGISTERED gate\n" +
+			"hook command exactly as the host tool would invoke it, and reports\n" +
+			"whether it was blocked: an obviously-fake secret for prompt gates,\n" +
+			"a write to a fake credential path for tool gates. Nothing is\n" +
+			"executed (the receiver is called directly); each probe records one\n" +
+			"guard verdict under an observer-doctor-probe session id. --gate\n" +
+			"prompt|tool narrows it. With a tool argument, probes just that\n" +
+			"tool; without one, every tool with a wired gate.\n\n" +
+			"--hooks reports each hook binding of the tool (or every hooked\n" +
+			"adapter) on this machine: registered in the vendor's config,\n" +
+			"trusted by the host where the host asks for trust (Codex), and,\n" +
+			"with --probe-hook, the probe result of each wired gate.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
@@ -68,84 +76,38 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 
-			if probeHook {
-				var tools []string
+			if probeHook || hooksOut {
+				// Hook-parity Lane G: per-binding registration / trust
+				// (--hooks) and the synthetic gate probes (--probe-hook,
+				// prompt and tool gates, --gate selects), hookdoctor.go.
+				tool := ""
 				if len(args) == 1 {
-					tools = []string{args[0]}
-				} else {
-					tools = probeHookToolCandidates()
+					tool = args[0]
 				}
-				var checks []diag.Check
-				for _, tool := range tools {
-					checks = append(checks, runProbeHook(cmd.Context(), binary, configPath, tool))
-				}
-				report := diag.Report{Checks: checks}
-				if jsonOut {
-					body, _ := json.MarshalIndent(report, "", "  ")
-					fmt.Fprintln(cmd.OutOrStdout(), string(body))
-				} else {
-					printReport(cmd.OutOrStdout(), report)
-				}
-				if report.Failed() {
-					return errors.New("one or more probes failed")
-				}
-				return nil
+				return runHookDoctor(cmd.Context(), cmd.OutOrStdout(), hookDoctorOptions{
+					Binary: binary, ConfigPath: configPath, Tool: tool,
+					Bindings: hooksOut, Probe: probeHook, Gate: probeGate, JSON: jsonOut,
+					Lookup: storeGuardEventLookup(store.New(database)),
+				})
 			}
 
 			var scope string
 			if len(args) == 1 {
 				scope = args[0]
 			}
-			report := diag.Run(cmd.Context(), diag.DoctorOptions{
+			// One builder for the CLI and the dashboard's per-tool "Run
+			// checks" (T-421 item 3, doctor_report.go), so both render the
+			// same checks for the same scope.
+			report, err := buildDoctorReport(cmd.Context(), doctorReportInput{
 				Config:         cfg,
 				DB:             database,
-				BinaryPath:     binary,
+				Binary:         binary,
+				ConfigPath:     configPath,
 				Scope:          scope,
 				ForceIntegrity: integrity,
-				// Fold the obs-plane admission health checks (judge
-				// reachability + audit-chain verify) into doctor, built in the
-				// one obs wiring file so diag never imports internal/obs.
-				ExtraChecks: append(
-					obsAdmissionDoctorChecks(cmd.Context(), cfg, database, slog.Default()),
-					oversizeCaptureCheck(cmd.Context(), cfg, database),
-					otlpIngressPostureCheck(cfg),
-				),
 			})
-			if len(args) == 1 {
-				// A known adapter name gets a focused, per-adapter capture
-				// check (detection + watch path + proxy-routing for the
-				// routable ones). Otherwise fall back to a substring filter
-				// over the general checks (org, hooks, db, …).
-				if c, ok := diag.CheckAdapter(args[0], cfg); ok {
-					// General checks that name this tool (e.g. the
-					// cursor.hooks registration health check) ride along:
-					// the adapter capture check alone cannot see a hook
-					// registration that points at a dead receiver.
-					general := report.Filter(args[0]).Checks
-					report = diag.Report{Checks: []diag.Check{c}}
-					// Control coverage (2026-09-22 investigation,
-					// internal/controlcoverage): "what actually controls
-					// this developer's use of this tool" — the tool-call
-					// block channel, the prompt-submit channel, and the
-					// budget channel + route proof — is a separate
-					// question from the capture-health notes CheckAdapter
-					// already prints, so it lands as its own check rather
-					// than another Details line. Always StatusOK: this is
-					// informational, never a capture defect.
-					if line, ok := controlCoverageLine(args[0]); ok {
-						report.Checks = append(report.Checks, diag.Check{
-							Name:    args[0] + ".control-coverage",
-							Status:  diag.StatusOK,
-							Message: line,
-						})
-					}
-					report.Checks = append(report.Checks, general...)
-				} else {
-					report = report.Filter(args[0])
-					if report.Matched() == 0 {
-						return fmt.Errorf("no doctor checks or adapters match %q (adapters: claude-code, codex, opencode, cursor, cline, copilot, gemini-cli, …; checks: org, hooks, db, mcp, governance)", args[0])
-					}
-				}
+			if err != nil {
+				return err
 			}
 			if jsonOut {
 				body, _ := json.MarshalIndent(report, "", "  ")
@@ -162,7 +124,9 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit machine-readable JSON instead of formatted output")
 	cmd.Flags().BoolVar(&integrity, "integrity", false, "Run the whole-database PRAGMA quick_check even for a per-tool doctor or a DB over [observer.db].integrity_check_max_gb")
-	cmd.Flags().BoolVar(&probeHook, "probe-hook", false, "Fire a synthetic secret through the registered prompt-submit hook and report whether it actually blocked")
+	cmd.Flags().BoolVar(&probeHook, "probe-hook", false, "Fire a synthetic call through each registered gate hook (a fake secret prompt for prompt gates, a fake credential-path write for tool gates; nothing is executed) and report whether it blocked")
+	cmd.Flags().BoolVar(&hooksOut, "hooks", false, "Report each hook binding on this machine: registered in the vendor config, trusted by the host, and (with --probe-hook) the gate probe result")
+	cmd.Flags().StringVar(&probeGate, "gate", probeGateAll, "Which gate probes --probe-hook runs: all, prompt or tool")
 	return cmd
 }
 
@@ -226,7 +190,7 @@ func newTailCmd() *cobra.Command {
 			if sinceMinutes > 0 {
 				opts.Since = time.Now().UTC().Add(-time.Duration(sinceMinutes) * time.Minute)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "tail running — ctrl-c to stop")
+			fmt.Fprintln(cmd.OutOrStdout(), "tail running - ctrl-c to stop")
 			if err := diag.Tail(ctx, database, cmd.OutOrStdout(), opts); err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
@@ -332,7 +296,7 @@ func runStartupDBMaintenance(ctx context.Context, configPath string) {
 	started := time.Now()
 	if skip, sizeBytes := dbIntegrityCheckShouldSkip(cfg); skip {
 		logger.Info(fmt.Sprintf(
-			"database integrity check skipped (DB > %d GB) — run `observer doctor db` to verify on demand",
+			"database integrity check skipped (DB > %d GB) - run `observer doctor db` to verify on demand",
 			cfg.Observer.DB.IntegrityCheckMaxGB,
 		),
 			"db_bytes", sizeBytes)
@@ -348,7 +312,7 @@ func runStartupDBMaintenance(ctx context.Context, configPath string) {
 		if errors.Is(err, context.Canceled) {
 			return
 		}
-		logger.Error("db startup maintenance failed — POSSIBLE CORRUPTION; run `observer doctor`",
+		logger.Error("db startup maintenance failed - POSSIBLE CORRUPTION; run `observer doctor`",
 			"err", err, "elapsed_ms", time.Since(started).Milliseconds())
 		return
 	}
@@ -364,11 +328,10 @@ func runStartupDBMaintenance(ctx context.Context, configPath string) {
 // `[ingest.otel].allow_non_loopback = true` is the posture that needs saying
 // out loud: it opens the listener to the network AND, because that same flag is
 // what tells the receiver it is no longer a same-machine channel, it turns the
-// Host guard off. The node path has no receiver-token option at all
-// (otlp.Options.RequireToken is edge-only; `observer start` never sets it), so
-// the resulting listener is unauthenticated by construction — anyone who can
-// reach the port can inject spans, drive a billable judge, or fabricate
-// telemetry.
+// Host guard off. Since T-475 (closing SR27-B5) `observer start` then REQUIRES
+// the receiver token on every request (otlp.Options.RequireToken, the token
+// kept 0600 as otlp-ingest-token beside the DB), so the WARN names the
+// exposure and where the token lives rather than an unauthenticated port.
 //
 // WARN, never FAIL: it is a legitimate deliberate deployment (a host collecting
 // from containers on a private bridge), it is off by default, and doctor's
@@ -396,13 +359,14 @@ func otlpIngressPostureCheck(cfg config.Config) diag.Check {
 	return diag.Check{
 		Name:    name,
 		Status:  diag.StatusWarn,
-		Message: "OTLP receiver is bound non-loopback with NO authentication",
+		Message: "OTLP receiver is bound non-loopback; every request must carry the receiver token",
 		Details: []string{
 			fmt.Sprintf("grpc=%s http=%s", cfg.Ingest.OTel.GRPCAddr, cfg.Ingest.OTel.HTTPAddr),
 			"[ingest.otel].allow_non_loopback = true opens the receiver to the network",
 			"it also disables the Host-header loopback guard (a non-loopback receiver must serve real host names)",
-			"the node receiver has no token option — anything that can reach the port can inject telemetry",
-			"set allow_non_loopback = false, or restrict the port with a host firewall",
+			fmt.Sprintf("receiver token required: send header %s with the value in %s (exporters: OTEL_EXPORTER_OTLP_HEADERS)", "X-Observer-Edge-Token", otlpIngestTokenPath(cfg)),
+			"the token is plaintext over http: put TLS in front of the port, or keep it on a private network",
+			"set allow_non_loopback = false to return to a loopback-only receiver",
 		},
 	}
 }
@@ -509,6 +473,11 @@ func oversizeCaptureCheck(ctx context.Context, cfg config.Config, database *sql.
 		if !watcher.OversizeSkipped(info.Size(), e.ByteOffset, maxBytes, streams) {
 			continue
 		}
+		if watcher.OversizeChunked(sem) {
+			// The daemon reads this tail in bounded windows (T-413):
+			// behind, but not stalled.
+			continue
+		}
 		blocked := info.Size()
 		if streams {
 			blocked = watcher.OversizeUnreadDelta(info.Size(), e.ByteOffset)
@@ -525,7 +494,7 @@ func oversizeCaptureCheck(ctx context.Context, cfg config.Config, database *sql.
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].blocked > list[j].blocked })
 	check.Status = diag.StatusWarn
-	check.Message = fmt.Sprintf("%d tracked session file(s) skipped by the %d MB oversize gate%s — transcript capture is stalled on them", len(list), capMB, suffix)
+	check.Message = fmt.Sprintf("%d tracked session file(s) skipped by the %d MB oversize gate%s - transcript capture is stalled on them", len(list), capMB, suffix)
 	for i, s := range list {
 		if i == maxOversizeDetails {
 			check.Details = append(check.Details, fmt.Sprintf("… and %d more", len(list)-i))

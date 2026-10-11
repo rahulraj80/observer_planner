@@ -1,3 +1,5 @@
+//go:build !sbo_omit_org_update
+
 package main
 
 import (

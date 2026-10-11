@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package main
 
 import (
@@ -7,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/termcore"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/remotenotify"
@@ -63,4 +67,25 @@ func newRemoteNotifier(cfg config.Config, logger *slog.Logger) *remotenotify.Not
 		URL:     nc.URL,
 		Events:  nc.Events,
 	}, sender)
+}
+
+// newSessionFinishedNotifier is the func seam attach_standalone.go calls on a
+// terminal session's exit: it sends the session-finished event through the
+// notifier, or is nil when the rail is disabled. remotenotify_omit.go answers
+// nil in a build without the remote component.
+func newSessionFinishedNotifier(cfg config.Config, logger *slog.Logger) func(context.Context, termcore.SessionExit) error {
+	notifier := newRemoteNotifier(cfg, logger)
+	if notifier == nil {
+		return nil
+	}
+	return func(ctx context.Context, se termcore.SessionExit) error {
+		return notifier.Notify(ctx, remotenotify.Event{
+			Type:       remotenotify.EventSessionFinished,
+			SessionID:  se.SessionID,
+			Tool:       se.Subcommand,
+			Subcommand: se.Subcommand,
+			ExitCode:   se.ExitCode,
+			Time:       se.At,
+		})
+	}
 }

@@ -1,19 +1,33 @@
 """SuperBased Observer — Hermes Agent plugin bridge.
 
-Fires `observer hook hermes <event>` as a fire-and-forget subprocess on each
-relevant Hermes lifecycle hook so the observer daemon can ingest Hermes
-activity in real time.
+Fires `observer hook hermes <event>` on each relevant Hermes hook so the
+observer daemon can ingest Hermes activity in real time, and gates every
+tool call through Observer's guard (pre_tool_call).
 
 Design constraints:
 
-- 0.5 s subprocess timeout (TIMEOUT_SECONDS below). The Hermes plugin loader
-  catches all exceptions raised by callbacks (hermes_cli/plugins.py line
-  1565) but a hung subprocess could still introduce perceptible latency
-  inside the host CLI; the explicit timeout caps it.
-- Exceptions are caught and ignored — observer being absent / down / slow
-  is NOT an error condition. The hook returns immediately and Hermes
-  continues normally.
-- stdout from the subprocess is captured but ignored.
+- Capture events are fire-and-forget: 0.5 s subprocess timeout
+  (TIMEOUT_SECONDS below), every exception swallowed, stdout ignored.
+  Observer being absent / down / slow never affects a capture event.
+- pre_tool_call is a GATE (hook-parity audit 2026-10-02, Lane A7; operator
+  decision 2026-10-02 reversed the old "never block" invariant for this one
+  hook). Observer answers in its plugin dialect ({"decision": "allow" |
+  "deny" | "ask", "reason", "enforced"}); deny becomes Hermes'
+  {"action": "block", "message"} (the message becomes the tool result) and
+  ask becomes {"action": "approve", "message"} (Hermes' own human-approval
+  prompt). Observer is told to finish below GATE_TIMEOUT_SECONDS
+  (--max-runtime), so its own fail-closed answer wins. When Observer does
+  not answer at all (missing, hung, garbage), the call is blocked with a
+  reason ONLY while guard enforcement is in force, and proceeds otherwise.
+  "In force" is read only to TIGHTEN: a recent reply's `enforced: true`
+  hint, or the daemon's guard-posture.json while it is FRESH (written
+  within the posture window, not dated in the future, not older than
+  config.toml: the T-050 rule the Go hook applies), so a stopped daemon
+  cannot keep failures closed forever and an `enforced: false` hint never
+  opens what the posture closes. Either way the failure is appended to
+  guard-hookfail.jsonl for the daemon with its outcome (fail_closed or
+  fail_open, T-049). Hermes itself fails a pre_tool_call that outlives
+  plugins.hook_callback_timeout (30 s default) CLOSED.
 
 Environment overrides (read at plugin load time):
 - OBSERVER_BIN     Path to the observer binary. `observer init --hermes`
@@ -45,16 +59,158 @@ docs/hermes-adapter-plan.md §17.1.F for the rationale on each pick):
                       post_api_request is the right capture surface.
 - subagent_stop     — captures sub-agent completion (duration, status,
                       summary) for cross-thread analytics.
+- pre_tool_call     — the guard tool gate (see Design constraints).
 """
 
 import json
 import os
+import re
 import subprocess
 import time
+from datetime import datetime, timedelta, timezone
 
 OBSERVER_BIN = os.environ.get("OBSERVER_BIN", "{{OBSERVER_BIN_DEFAULT}}")
 OBSERVER_CONFIG = os.environ.get("OBSERVER_CONFIG", "")
 TIMEOUT_SECONDS = 0.5
+
+# pre_tool_call gate budget: the plugin's own deadline, and the margin
+# observer is told to finish inside (--max-runtime).
+GATE_TIMEOUT_SECONDS = 10.0
+GATE_MARGIN_SECONDS = 1.5
+FAIL_TIMEOUT = ("Observer could not evaluate this call in time; it is blocked because guard "
+                "enforcement is on. Retry, or ask your admin if this repeats.")
+FAIL_ERROR = ("Observer could not evaluate this call because of an internal error; it is blocked "
+              "because guard enforcement is on. Retry, or ask your admin if this repeats.")
+POSTURE_SCHEMA = 1
+# Posture freshness (T-050): guardposture.MaxAge and MaxFutureSkew. A Go
+# test (embed_test.go) pins these to the Go constants.
+POSTURE_MAX_AGE_SECONDS = 180
+POSTURE_SKEW_SECONDS = 60
+HINT_TTL_SECONDS = 600
+_ENFORCED_HINT = {}  # cap -> (enforced, monotonic time) from the last observer reply
+_RFC3339 = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
+
+
+def _observer_dir():
+    if OBSERVER_CONFIG:
+        return os.path.dirname(os.path.abspath(OBSERVER_CONFIG))
+    return os.path.join(os.path.expanduser("~"), ".observer")
+
+
+def _config_file():
+    if OBSERVER_CONFIG:
+        return os.path.abspath(OBSERVER_CONFIG)
+    return os.path.join(_observer_dir(), "config.toml")
+
+
+def _parse_rfc3339(s):
+    """Seconds since the epoch for an RFC 3339 time (any fraction length),
+    or None."""
+    m = _RFC3339.match(s or "") if isinstance(s, str) else None
+    if not m:
+        return None
+    try:
+        dt = datetime(*(int(m.group(i)) for i in range(1, 7)), tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    zone = m.group(8)
+    if zone != "Z":
+        sign = 1 if zone[0] == "+" else -1
+        dt -= sign * timedelta(hours=int(zone[1:3]), minutes=int(zone[4:6]))
+    return dt.timestamp() + float(m.group(7) or 0)
+
+
+def _posture_fresh(p):
+    """The T-050 rule: written within the window, not dated in the future,
+    not older than config.toml."""
+    at = _parse_rfc3339(p.get("written_at"))
+    if at is None:
+        return False
+    now = time.time()
+    if now - at > POSTURE_MAX_AGE_SECONDS or at - now > POSTURE_SKEW_SECONDS:
+        return False
+    try:
+        if os.stat(_config_file()).st_mtime > at:
+            return False
+    except OSError:
+        pass  # no config file: nothing changed after the posture was written
+    return True
+
+
+def _posture_closed(cap):
+    """True when the daemon's guard-posture.json says cap fails closed and
+    is FRESH. Read only to TIGHTEN a failure (never to open one): its MAC is
+    not checked here, observer's own answer (which does check it) wins."""
+    try:
+        with open(os.path.join(_observer_dir(), "guard-posture.json"), encoding="utf-8") as f:
+            p = json.load(f)
+        return (isinstance(p, dict) and p.get("schema") == POSTURE_SCHEMA and p.get("enforced") is True
+                and isinstance(p.get("gate_caps"), list) and cap in p["gate_caps"]
+                and _posture_fresh(p))
+    except (OSError, ValueError):
+        return False
+
+
+def _fails_closed(cap):
+    """Tighten only: a recent enforced:true hint closes, and so does a fresh
+    posture; an enforced:false hint opens nothing."""
+    hint = _ENFORCED_HINT.get(cap)
+    if hint is not None and hint[0] and time.monotonic() - hint[1] < HINT_TTL_SECONDS:
+        return True
+    return _posture_closed(cap)
+
+
+def _spool(event, cap, session_id, kind, outcome):
+    try:
+        line = json.dumps({
+            "tool": "hermes", "event": event[:256], "cap": cap, "session_id": (session_id or "")[:256],
+            "kind": kind, "at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "outcome": outcome,
+        })
+        fd = os.open(os.path.join(_observer_dir(), "guard-hookfail.jsonl"),
+                     os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, (line + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
+    except (OSError, ValueError):
+        pass
+
+
+def _gate(event, cap, payload):
+    """Run the observer gate for event; return its decision dict
+    ({"decision", "reason"}), applying the failure rule when observer gives
+    no answer."""
+    cmd = [OBSERVER_BIN, "hook", "hermes", event,
+           "--max-runtime", "%dms" % int((GATE_TIMEOUT_SECONDS - GATE_MARGIN_SECONDS) * 1000)]
+    if OBSERVER_CONFIG:
+        cmd.extend(["--config", OBSERVER_CONFIG])
+    kind = "unparseable"
+    try:
+        proc = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True,
+                              timeout=GATE_TIMEOUT_SECONDS, check=False)
+        for line in reversed((proc.stdout or "").splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                reply = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(reply, dict):
+                if isinstance(reply.get("enforced"), bool):
+                    _ENFORCED_HINT[cap] = (reply["enforced"], time.monotonic())
+                return reply
+    except subprocess.TimeoutExpired:
+        kind = "timeout"
+    except (FileNotFoundError, OSError, ValueError):
+        kind = "crash"
+    if _fails_closed(cap):
+        _spool(event, cap, payload.get("session_id"), kind, "fail_closed")
+        return {"decision": "deny", "reason": FAIL_TIMEOUT if kind == "timeout" else FAIL_ERROR}
+    # T-049: a fail-open failure is a guard event too.
+    _spool(event, cap, payload.get("session_id"), kind, "fail_open")
+    return {"decision": "allow"}
 
 
 def _fire(event_name, payload):
@@ -74,9 +230,9 @@ def _fire(event_name, payload):
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError, ValueError):
         # ValueError covers json.dumps failures on non-serialisable payload
         # parts (rare but possible for tool args that wrap third-party
-        # objects); the rest cover subprocess + env failures. Observer being
-        # absent / slow / mis-configured MUST NEVER block the host Hermes
-        # tool, so every exception class lands in the same swallow.
+        # objects); the rest cover subprocess + env failures. A capture event
+        # never affects the host Hermes tool (only the pre_tool_call gate
+        # can), so every exception class lands in the same swallow.
         pass
 
 
@@ -203,8 +359,31 @@ def register(ctx):
             "telemetry_schema_version": kwargs.get("telemetry_schema_version", ""),
         })
 
+    def pre_tool_call(tool_name=None, args=None, task_id=None, session_id=None,
+                      tool_call_id=None, **kwargs):
+        if not tool_name:
+            return None
+        verdict = _gate("pre_tool_call", "tool_gate", {
+            "host": "hermes",
+            "event": "pre_tool_call",
+            "session_id": session_id or "",
+            "cwd": os.getcwd(),
+            "pid": os.getpid(),
+            "tool_name": tool_name,
+            "tool_input": _safe_json(args) or {},
+            "call_id": tool_call_id or "",
+        })
+        decision = str(verdict.get("decision") or "").lower()
+        reason = verdict.get("reason") or "Blocked by the SuperBased Observer guard."
+        if decision in ("deny", "block"):
+            return {"action": "block", "message": reason}
+        if decision == "ask":
+            return {"action": "approve", "message": reason}
+        return None
+
     ctx.register_hook("on_session_start", on_session_start)
     ctx.register_hook("on_session_end", on_session_end)
     ctx.register_hook("post_tool_call", post_tool_call)
     ctx.register_hook("post_api_request", post_api_request)
     ctx.register_hook("subagent_stop", subagent_stop)
+    ctx.register_hook("pre_tool_call", pre_tool_call)

@@ -8,8 +8,9 @@ import (
 
 // CursorSemanticsFor implements adapter.CursorSemantics. Cursor's
 // per-conversation store.db and agent-transcript JSONL both use a
-// genuine byte-offset cursor (the default, so they fall through to
-// the zero-value FileCursorSemantics below); state.vscdb does not —
+// genuine byte-offset cursor (the transcript falls through to the
+// zero-value FileCursorSemantics below; store.db additionally declares
+// ZeroActionsPossible); state.vscdb does not:
 // see stateDBWatermarkSQL's doc comment (statedb.go) for why a
 // MAX(rowid) watermark over cursorDiskKV is used instead of a byte
 // offset into the shared file.
@@ -36,6 +37,18 @@ func (a *Adapter) CursorSemanticsFor(path string) adapter.FileCursorSemantics {
 		// parseCLIUsageLog seeks to the persisted offset and reads
 		// line by line through a bounded reader (cli_usage.go).
 		return adapter.FileCursorSemantics{Kind: adapter.CursorNoActions, StreamsFromCursor: true, Detail: "Cursor CLI debug log carries reported token usage and, for turns that never finished, evidence rows only - not activity"}
+	}
+	if matchesStoreDBShape(path) {
+		// A genuine byte-offset cursor (NewOffset = file size), but
+		// zero actions is a designed outcome, not a misroute: the store
+		// emits system-prompt, prompt-budget and todo rows only when it
+		// holds them, and a store that only names the answering model
+		// upgrades sessions.model without any action row (T-585). It
+		// still emits rows elsewhere, so it is NOT CursorNoActions.
+		return adapter.FileCursorSemantics{
+			ZeroActionsPossible: true,
+			Detail:              "Cursor chat store.db: system-prompt, prompt-budget and todo rows appear only when the store holds them; a store that only names the answering model emits no activity rows by design",
+		}
 	}
 	switch filepath.Base(path) {
 	case "state.vscdb":

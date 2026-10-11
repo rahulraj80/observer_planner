@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // §R19.4 org rollup aggregation. This file — NOT orgpush.go — owns the
@@ -37,7 +37,7 @@ func (s *Store) SelectRoutingSummaries(ctx context.Context) ([]orgcontract.Routi
 	}
 	defer func() { _ = rows.Close() }()
 
-	tiers := routing.NewTierResolver().Table()
+	tiers := routingcore.NewTierResolver().Table()
 	agg := map[orgcontract.RoutingSummaryRow]*orgcontract.RoutingSummaryRow{}
 	var order []orgcontract.RoutingSummaryRow
 	for rows.Next() {

@@ -1,0 +1,14 @@
+{
+  "custom_agents": [
+    {
+      "name": "Security Reviewer",
+      "file_path": "agents/security_reviewer.md",
+      "url": "https://github.com/my-org/.github-private/blob/main/agents/security_reviewer.md"
+    },
+    {
+      "name": "Code Documenter",
+      "file_path": "agents/code_documenter.md",
+      "url": "https://github.com/my-org/.github-private/blob/main/agents/code_documenter.md"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "service_user_id": "service_user_synth03",
+      "name": "billing-export",
+      "expires_at": null,
+      "deleted_at": null,
+      "role_assignments": []
+    }
+  ],
+  "has_next_page": false,
+  "end_cursor": null,
+  "total": 3
+}

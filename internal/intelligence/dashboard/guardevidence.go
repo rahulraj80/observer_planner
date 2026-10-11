@@ -115,13 +115,21 @@ func (s *Server) handleGuardEvidence(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `kind must be one of "report", "export", "verify-audit"`, http.StatusBadRequest)
 		return
 	}
+	s.startGuardJob(w, jobID, req.Kind, args, outFile)
+}
+
+// startGuardJob registers one guard:<kind> job in the shared registry, runs
+// `observer <args> [--config <path>]` in the background and answers with the
+// job id. Every guard job route (evidence, policy tools, MCP tools) starts
+// its jobs here, so they poll, time out and download alike.
+func (s *Server) startGuardJob(w http.ResponseWriter, jobID, kind string, args []string, outFile string) {
 	if s.opts.ConfigPath != "" {
 		args = append(args, "--config", s.opts.ConfigPath)
 	}
 
 	job := &backfillJob{
 		ID:        jobID,
-		Mode:      "guard:" + req.Kind,
+		Mode:      "guard:" + kind,
 		Status:    "running",
 		StartedAt: time.Now().UTC(),
 		OutFile:   outFile,
@@ -172,7 +180,7 @@ func (s *Server) handleGuardEvidenceDownload(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if snap.Status == "running" {
-		http.Error(w, "job still running — poll /api/backfill/jobs/"+id, http.StatusConflict)
+		http.Error(w, "job still running - poll /api/backfill/jobs/"+id, http.StatusConflict)
 		return
 	}
 	if snap.OutFile != "" {

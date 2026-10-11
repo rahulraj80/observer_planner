@@ -168,6 +168,16 @@ func LoginArgv(isRoot bool) []string {
 // is unversioned upstream (no stable digest to pin), and the trust root is
 // already the same TLS PKI the pinned digest would be fetched over. See
 // docs/security.md.
+//
+// Stated exception to "Observer never runs sudo" (D-051, amended by the
+// operator ruling D-273, 2026-10-04): the Tailscale guided setup is the ONE
+// place Observer starts a `sudo` command. It covers this function,
+// OperatorGrantArgv and the non-root LoginArgv, and holds only while all three
+// conditions do: the route is Local (never served to a remote dashboard
+// session), the spawn is behind a confirm token, and the user types the
+// password into the in-dashboard PTY (the daemon never sees, stores or pipes
+// it). Install prerequisites and every other setup terminal still show a
+// copyable command instead. Ledger row TAILNET-SUDO-1 in docs/security.md.
 func InstallArgv() []string {
 	return []string{"sudo", "sh", "-c", "curl -fsSL --proto '=https' --tlsv1.2 https://tailscale.com/install.sh | sh"}
 }

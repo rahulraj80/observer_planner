@@ -390,7 +390,7 @@ echo started > "`+marker+`"
 		Tool:       "codex",
 		BranchName: "arena/keep-admission/codex",
 	}
-	_, err := r.judgeMergeKeep(context.Background(), row, repo, JudgeSpec{Tool: "claude-code"})
+	_, err := r.judgeMergeKeep(context.Background(), row, repo, JudgeSpec{Tool: "claude-code"}, "usd")
 	if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), "judge drive failed before landing") {
 		t.Fatalf("judgeMergeKeep error = %v, want wrapped admission refusal", err)
 	}

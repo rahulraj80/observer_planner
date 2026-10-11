@@ -29,4 +29,36 @@ type ShellWrapConfig struct {
 	// ShimDir overrides the shim directory. Empty (default) =
 	// ~/.observer/shims.
 	ShimDir string `toml:"shim_dir"`
+	// Windows is the recorded choice for the WSL bridge target (T-419):
+	// Windows shells on the machine whose WSL distro runs this daemon. Same
+	// keys, same opt-in rule; only meaningful when the daemon runs inside
+	// WSL. Zero value = off.
+	Windows ShellWrapTargetConfig `toml:"windows"`
+}
+
+// ShellWrapTargetConfig is one shell-wrap target's recorded choice. The
+// native target's keys live directly in [shell_wrap] (ShellWrapConfig.Native);
+// the WSL bridge target's in [shell_wrap.windows].
+type ShellWrapTargetConfig struct {
+	// Enabled records that the wrap is applied on this target.
+	Enabled bool `toml:"enabled"`
+	// Tools maps a registry tool key or IDE launch id to whether its command
+	// is wrapped on this target.
+	Tools map[string]bool `toml:"tools"`
+	// Shells maps a shell name to whether its start-up file is managed.
+	// Empty = auto-detect.
+	Shells map[string]bool `toml:"shells"`
+	// ShimDir overrides this target's shim directory (in the target OS's own
+	// path notation). Empty = <home>/.observer/shims on that target.
+	ShimDir string `toml:"shim_dir"`
+}
+
+// Native returns the native target's recorded choice as a target view.
+func (c ShellWrapConfig) Native() ShellWrapTargetConfig {
+	return ShellWrapTargetConfig{Enabled: c.Enabled, Tools: c.Tools, Shells: c.Shells, ShimDir: c.ShimDir}
+}
+
+// SetNative writes a native-target view back into [shell_wrap].
+func (c *ShellWrapConfig) SetNative(v ShellWrapTargetConfig) {
+	c.Enabled, c.Tools, c.Shells, c.ShimDir = v.Enabled, v.Tools, v.Shells, v.ShimDir
 }

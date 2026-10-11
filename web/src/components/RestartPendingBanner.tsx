@@ -3,6 +3,7 @@ import { useApi } from "@/lib/useApi";
 import type { StatusSnapshot } from "@/lib/types";
 import { useDaemonRestart } from "@/lib/useDaemonRestart";
 import { RestartOverlay } from "@/components/RestartOverlay";
+import { RestartPendingBar } from "@shared/primitives/RestartOverlay";
 import {
   RESTART_PENDING_EVENT,
   clearRestartPending,
@@ -71,10 +72,10 @@ export function RestartPendingBanner() {
 
   if (!pending) return null;
   return (
-    <div className="flex items-center gap-2 border-b border-warn/30 bg-warn-soft px-4 py-1.5 text-[11.5px] text-fg-2">
-      <span className="font-semibold text-warn">Restart pending</span>
-      <span className="min-w-0 truncate">
-        {pending.keys && pending.keys.length > 0 ? (
+    <RestartPendingBar
+      error={restartErr}
+      message={
+        pending.keys && pending.keys.length > 0 ? (
           <>
             {pending.keys.length} setting{pending.keys.length === 1 ? "" : "s"} apply on
             restart:{" "}
@@ -89,24 +90,26 @@ export function RestartPendingBanner() {
             <span className="font-mono">{pending.sections.join(", ")}</span> apply
             on the next daemon start
           </>
-        )}
-        {restartErr && <span className="ml-2 text-danger">- {restartErr}</span>}
-      </span>
-      <div className="flex-1" />
-      <button
-        type="button"
-        onClick={onRestart}
-        className="shrink-0 rounded-2 border border-accent/50 bg-accent/15 px-2 py-0.5 text-accent hover:bg-accent/25"
-      >
-        Restart now
-      </button>
-      <button
-        type="button"
-        onClick={clearRestartPending}
-        className="shrink-0 rounded-2 border border-line-2 bg-bg-2 px-2 py-0.5 text-fg-2 hover:bg-bg-3"
-      >
-        dismiss
-      </button>
-    </div>
+        )
+      }
+      actions={
+        <>
+          <button
+            type="button"
+            onClick={onRestart}
+            className="shrink-0 rounded-2 border border-accent/50 bg-accent/15 px-2 py-0.5 text-accent hover:bg-accent/25"
+          >
+            Restart now
+          </button>
+          <button
+            type="button"
+            onClick={clearRestartPending}
+            className="shrink-0 rounded-2 border border-line-2 bg-bg-2 px-2 py-0.5 text-fg-2 hover:bg-bg-3"
+          >
+            dismiss
+          </button>
+        </>
+      }
+    />
   );
 }

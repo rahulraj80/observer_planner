@@ -171,6 +171,10 @@
       "category": "meta",
       "label": "Task complete"
     },
+    "task_event": {
+      "category": "meta",
+      "label": "Task event"
+    },
     "todo_update": {
       "category": "meta",
       "label": "Todo update"

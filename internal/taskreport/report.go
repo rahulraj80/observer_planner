@@ -151,7 +151,7 @@ type SessionTaskReport struct {
 	CostNote string `json:"cost_note,omitempty"`
 }
 
-const taskCostNote = "Costs are list pricing at each token row's own timestamp — never a billed amount."
+const taskCostNote = "Costs are list pricing at each token row's own timestamp - never a billed amount."
 
 // LoadSessionTaskReport builds the complete Phase-2 report for one
 // session: taskflow.LoadTaskItems' lifecycle rows, joined with
@@ -580,6 +580,14 @@ type TaskRollup struct {
 // that function's doc comment for why it is an explicit parameter
 // rather than read off st.
 func LoadTaskRollup(ctx context.Context, st *store.Store, costEngine *cost.Engine, since, until time.Time, projectID int64, projectRoot, tool string, opts taskflow.Options) (TaskRollup, error) {
+	return LoadTaskRollupScoped(ctx, st, costEngine, since, until, store.TaskScope{ProjectID: projectID, ProjectRoot: projectRoot, Tool: tool}, opts)
+}
+
+// LoadTaskRollupScoped is LoadTaskRollup with the full store.TaskScope,
+// including the dashboard's global Model filter (sessions that used the
+// model; each session's task report stays whole-session).
+func LoadTaskRollupScoped(ctx context.Context, st *store.Store, costEngine *cost.Engine, since, until time.Time, scope store.TaskScope, opts taskflow.Options) (TaskRollup, error) {
+	projectID, projectRoot, tool := scope.ProjectID, scope.ProjectRoot, scope.Tool
 	rollup := TaskRollup{ProjectID: projectID, ProjectRoot: projectRoot, Tool: tool}
 	if !since.IsZero() {
 		u := since.Unix()
@@ -590,7 +598,7 @@ func LoadTaskRollup(ctx context.Context, st *store.Store, costEngine *cost.Engin
 		rollup.UntilUnix = &u
 	}
 
-	refs, err := st.SessionsWithTasksInWindow(ctx, since, until, projectID, projectRoot, tool)
+	refs, err := st.SessionsWithTasksInScope(ctx, since, until, scope)
 	if err != nil {
 		return rollup, fmt.Errorf("taskreport.LoadTaskRollup: %w", err)
 	}

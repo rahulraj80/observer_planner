@@ -150,10 +150,10 @@ func (c *Client) UploadStructural(ctx context.Context, req StructuralUploadReque
 	// developer agreed to, and shipping it "so the upload succeeds" would be the
 	// consent check failing open. Refuse here, before anything leaves.
 	if req.ConsentGeneration < 1 {
-		return StructuralUploadResponse{}, fmt.Errorf("%s: consent generation %d is not positive — a standing-grant upload must carry the grant's generation", pfx, req.ConsentGeneration)
+		return StructuralUploadResponse{}, fmt.Errorf("%s: consent generation %d is not positive - a standing-grant upload must carry the grant's generation", pfx, req.ConsentGeneration)
 	}
 	if req.DataDictionaryDigest == "" {
-		return StructuralUploadResponse{}, fmt.Errorf("%s: empty data-dictionary digest — a standing-grant upload must carry the schema digest the grant bound", pfx)
+		return StructuralUploadResponse{}, fmt.Errorf("%s: empty data-dictionary digest - a standing-grant upload must carry the schema digest the grant bound", pfx)
 	}
 
 	idem := structuralIdempotencyKey(c.dev.thumbprint, req.Period, req.PeriodRuleVersion,

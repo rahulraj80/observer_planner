@@ -500,9 +500,9 @@ func TestLoadOverviewEvents_FiltersScopeRows(t *testing.T) {
 		q    cacheOverviewQuery
 		want int
 	}{
-		{"no filter — full corpus", cacheOverviewQuery{}, 5},
+		{"no filter - full corpus", cacheOverviewQuery{}, 5},
 		{"days=7 only", cacheOverviewQuery{Days: 7}, 3},
-		{"days=7 + offset=7 (events 2–14d ago excluded if <2d, included if 2–14d)", cacheOverviewQuery{Days: 7, PeriodOffsetDays: 7}, 0},
+		{"days=7 + offset=7 (events 2-14d ago excluded if <2d, included if 2-14d)", cacheOverviewQuery{Days: 7, PeriodOffsetDays: 7}, 0},
 		{"days=30 + offset=30 (40d-old event sits in [30d, 60d) window)", cacheOverviewQuery{Days: 30, PeriodOffsetDays: 30}, 1},
 		{"days=30 (excludes 40+100 day-old events)", cacheOverviewQuery{Days: 30}, 3},
 		{"tool=claude-code", cacheOverviewQuery{Tool: "claude-code"}, 4},
@@ -650,7 +650,7 @@ func TestLoadCacheEntryStates_GroupsByState(t *testing.T) {
 	insert("unverified", 2)
 	insert("expired", 1)
 
-	rows, total, err := loadCacheEntryStates(ctx, database)
+	rows, total, err := loadCacheEntryStates(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -712,7 +712,7 @@ func TestLoadCacheHealthSummary_HeadlineSignals(t *testing.T) {
 	// denominator per cachetrack.MispredictRateGraded post-C9 fix).
 	insert("mispredict", "unknown", "hit", 50, 0)
 
-	summary, err := loadCacheHealthSummary(ctx, database)
+	summary, err := loadCacheHealthSummary(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +801,7 @@ func TestLoadCacheHealthSummary_UntrackedProvider(t *testing.T) {
 	insertAPITurn("s-claude-1", "anthropic", 4*time.Hour) // excluded
 	insertAPITurn("s-codex-1", "openai", 10*24*time.Hour) // outside 7d window
 
-	summary, err := loadCacheHealthSummary(ctx, database)
+	summary, err := loadCacheHealthSummary(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -938,7 +938,7 @@ func TestLoadCacheHealthSummary_ImplicitCache(t *testing.T) {
 	// 1 Anthropic hit so the gate has Anthropic data to grade.
 	insert("hit", "suffix_growth", "hit", 1000, 0)
 
-	summary, err := loadCacheHealthSummary(ctx, database)
+	summary, err := loadCacheHealthSummary(ctx, database, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -974,7 +974,7 @@ func TestLoadCacheHealthSummary_ImplicitCache(t *testing.T) {
 	// sees ONLY the 1 anthropic hit event. Implicit events MUST
 	// NOT enter GradedEvents / Mispredicts / Rate / BucketMispredicts.
 	if summary.GradedEvents != 1 {
-		t.Errorf("GradedEvents = %d, want 1 (the lone anthropic hit) — implicit events leaked into the gate", summary.GradedEvents)
+		t.Errorf("GradedEvents = %d, want 1 (the lone anthropic hit) - implicit events leaked into the gate", summary.GradedEvents)
 	}
 	if summary.Mispredicts != 0 {
 		t.Errorf("Mispredicts = %d, want 0", summary.Mispredicts)
@@ -983,7 +983,7 @@ func TestLoadCacheHealthSummary_ImplicitCache(t *testing.T) {
 		t.Errorf("Rate = %v, want 0.0", summary.Rate)
 	}
 	if summary.BucketMispredicts != 0 {
-		t.Errorf("BucketMispredicts = %d, want 0 — implicit predicted_kind mismatches MUST NOT count against the Anthropic G2 gate", summary.BucketMispredicts)
+		t.Errorf("BucketMispredicts = %d, want 0 - implicit predicted_kind mismatches MUST NOT count against the Anthropic G2 gate", summary.BucketMispredicts)
 	}
 }
 

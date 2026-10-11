@@ -9,6 +9,12 @@
 
 export type FieldKind = "text" | "select" | "bool" | "int" | "list";
 
+// OptionSourceId names a roster a picker field reads from the daemon:
+// adapters (GET /api/tools/status), action_types (the shared action
+// registry), project_roots (GET /api/projects), guard_rules (the guard rule
+// catalog), priced_models (GET /api/config/pricing/defaults).
+export type OptionSourceId = "adapters" | "action_types" | "project_roots" | "guard_rules" | "priced_models";
+
 export type FieldDef = {
   id: string;
   label: string;
@@ -21,6 +27,15 @@ export type FieldDef = {
   // `options`; `options` stays as the static fallback for daemons
   // that don't serve the field yet.
   optionsFrom?: "profile_names";
+  // For `list` and `text`: offer a picker instead of a free-text box
+  // (D-571, a known set is picked, never typed). A `list` with `options`
+  // picks several of that closed set; `optionSource` names a roster the
+  // daemon serves (resolved in StructuredConfigSection). `allowFree` keeps
+  // the honest escape hatch for a value the list cannot carry (a path the
+  // daemon has not seen yet, a custom rule id, a model the pricing table
+  // does not list yet).
+  optionSource?: OptionSourceId;
+  allowFree?: boolean;
   // For `int`: bounds + step.
   min?: number;
   max?: number;
@@ -70,6 +85,18 @@ export type SectionGroup = {
   description?: string;
   fields: FieldDef[];
 };
+
+// COMPRESS_TYPES is the conversation compressor's content-type vocabulary
+// (internal/compression/conversation: json, logs, code, tools).
+export const COMPRESS_TYPES = ["json", "logs", "code", "tools"];
+
+// GUARD_DIALECT_TARGETS mirrors internal/guard/compile.Targets(): the native
+// permission dialects [guard.dialects].targets filters on.
+export const GUARD_DIALECT_TARGETS = ["claude-code", "opencode", "cursor", "windsurf", "amp", "gemini", "codex"];
+
+// MCP_RETRIEVAL_TOOLS are the four conditional retrieval tools the
+// [mcp].features allow-list filters (internal/mcp).
+export const MCP_RETRIEVAL_TOOLS = ["get_file", "get_symbols", "get_relations", "retrieve_stashed"];
 
 // BUILTIN_PROFILE_NAMES mirrors config.ProfileNames(): "default" +
 // the embedded recipes (pinned by recipes_test.go). Since P3.4/D11
@@ -134,7 +161,8 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         id: "EnabledAdapters",
         label: "Enabled adapters",
         kind: "list",
-        help: "Comma-separated adapter names - claude-code, codex, cursor, cline, copilot, cowork, antigravity, opencode, openclaw, pi, gemini.",
+        optionSource: "adapters",
+        help: "The AI tools whose sessions the watcher captures. Pick from the tools this build knows; detected ones are listed first.",
       },
     ],
   },
@@ -486,7 +514,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         min: 0,
         max: 1,
         step: 0.05,
-        help: "Suggestions below this confidence floor are hidden everywhere (0–1). Default 0.5.",
+        help: "Suggestions below this confidence floor are hidden everywhere (0-1). Default 0.5.",
       },
       {
         id: "MinSavingsUSD",
@@ -550,46 +578,46 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
     id: "tasks",
     path: ["Tasks"],
     description:
-      "Session-level todo/plan checklist tracking (docs/task-tracking.md) — decodes claude-code TaskCreate/TaskUpdate/TodoWrite, codex update_plan, kiro-cli todo_list, copilot manage_todo_list, and similar tool calls already captured in actions.raw_tool_input into a per-task lifecycle + cost report (the Tasks tab, and the Analysis page's Tasks section). No new capture surface, no adapter change. A change here needs a daemon restart to take effect — [tasks] has no hot-reload path yet (SetTasksEnabled/SetTasksOptions bind once at daemon startup, the same posture every section except pricing/profiles has).",
+      "Session-level todo/plan checklist tracking (docs/task-tracking.md) - decodes claude-code TaskCreate/TaskUpdate/TodoWrite, codex update_plan, kiro-cli todo_list, copilot manage_todo_list, and similar tool calls already captured in actions.raw_tool_input into a per-task lifecycle + cost report (the Tasks tab, and the Analysis page's Tasks section). No new capture surface, no adapter change. A change here needs a daemon restart to take effect - [tasks] has no hot-reload path yet (SetTasksEnabled/SetTasksOptions bind once at daemon startup, the same posture every section except pricing/profiles has).",
     fields: [
       {
         id: "Enabled",
         label: "Enabled",
         kind: "bool",
-        help: "Decode todo/plan tool calls into task_items/task_transitions as they're captured. Default on. Disabling makes the task-tracking ingest pass a pure no-op; historical rows already decoded stay in the DB. Retrofit history after enabling with `observer backfill --tasks`.",
+        help: "Decode todo/plan tool calls into task_items/task_transitions as they're captured. Default on. Disabling makes the task-tracking ingest pass a pure no-op; historical rows already decoded stay in the DB. Retrofit history after enabling with Settings > Backfill > tasks.",
       },
       {
         id: "MatchMode",
         label: "Match mode",
         kind: "select",
         options: ["exact", "normalized"],
-        help: "How whole-list-rewrite tools (no vendor item id) are matched across consecutive snapshot calls. `exact` (default) matches the trimmed content string verbatim — a fuzzy match would trade a known, countable loss for an unknown, silent mis-join. `normalized` additionally lowercases and collapses whitespace, tolerating cosmetic re-wording at the cost of possibly merging two different items whose text happens to normalize the same.",
+        help: "How whole-list-rewrite tools (no vendor item id) are matched across consecutive snapshot calls. `exact` (default) matches the trimmed content string verbatim - a fuzzy match would trade a known, countable loss for an unknown, silent mis-join. `normalized` additionally lowercases and collapses whitespace, tolerating cosmetic re-wording at the cost of possibly merging two different items whose text happens to normalize the same.",
       },
       {
         id: "ConcurrentAttribution",
         label: "Concurrent attribution",
         kind: "select",
         options: ["shared", "none"],
-        help: "How a token/action row is bucketed when two or more tasks are in_progress at once. `shared` (default) buckets the row into a per-session `shared` total rather than splitting it evenly or picking a dominant task — either would invent a precision the data doesn't contain. `none` drops the row from every task's total instead (still counted overall, just not attributed to a specific task) for an operator who'd rather under-report than see a shared bucket.",
+        help: "How a token/action row is bucketed when two or more tasks are in_progress at once. `shared` (default) buckets the row into a per-session `shared` total rather than splitting it evenly or picking a dominant task - either would invent a precision the data doesn't contain. `none` drops the row from every task's total instead (still counted overall, just not attributed to a specific task) for an operator who'd rather under-report than see a shared bucket.",
       },
       {
         id: "IncludeSidechains",
         label: "Include sidechains",
         kind: "bool",
-        help: "Fold a spawned sub-agent's own token/action rows into whichever task happened to be open in the PARENT session at the same wall-clock time. Default off — sub-agent usage is reported as its own separate `sidechain` total instead, since a TaskUpdate's owner field is free text and can't be resolved to the actual spawned session.",
+        help: "Fold a spawned sub-agent's own token/action rows into whichever task happened to be open in the PARENT session at the same wall-clock time. Default off - sub-agent usage is reported as its own separate `sidechain` total instead, since a TaskUpdate's owner field is free text and can't be resolved to the actual spawned session.",
       },
       {
         id: "BackfillOnStart",
         label: "Backfill on start",
         kind: "bool",
-        help: "Re-derive task_items/task_transitions from historical actions rows once at daemon startup (the same work as `observer backfill --tasks`, run automatically). Default off — run the CLI flag by hand after enabling this section on a daemon with historical task-tool traffic. Idempotent.",
+        help: "Re-derive task_items/task_transitions from historical actions rows once at daemon startup (the same work as Settings > Backfill > tasks, run automatically). Default off - run that backfill once after enabling this section on a daemon with historical task-tool traffic. Idempotent.",
       },
       {
         id: "RetentionDays",
         label: "Retention (days)",
         kind: "int",
         min: 0,
-        help: "Days to keep task_items/task_transitions rows. 0 = never prune (the default — no pruning sweep ships yet; this field exists so one has a home without a future config-shape change).",
+        help: "Days to keep task_items/task_transitions rows. 0 = never prune (the default - no pruning sweep ships yet; this field exists so one has a home without a future config-shape change).",
       },
     ],
   },
@@ -732,6 +760,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             id: "CompressTypes",
             label: "Compress types",
             kind: "list",
+            options: COMPRESS_TYPES,
             help: "Role-types eligible for compression. Empty = all.",
           },
         ],
@@ -795,12 +824,16 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             id: "SummaryModel",
             label: "Anthropic summary model",
             kind: "text",
+            optionSource: "priced_models",
+            allowFree: true,
             help: "Default: claude-haiku-4-5.",
           },
           {
             id: "OpenAISummaryModel",
             label: "OpenAI summary model",
             kind: "text",
+            optionSource: "priced_models",
+            allowFree: true,
             help: "Default: gpt-5-nano.",
           },
         ],
@@ -934,7 +967,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
     // touch it (test-pinned).
     path: ["OrgClient"],
     description:
-      "What this node shares with your organisation's SuperBased server - and only when enrolled ([org_client] enabled via `observer enroll`; see the Enrolment section). The privacy default is metadata-only: sha256 hashes and counts, never raw commands, prose, or paths. Raw-content sharing (full_content) is node opt-in only - the org admin has no remote switch for it. The reporting-tier shares below (routing_summary, obs.summary, etc.) are node opt-in, or can be raised by the org on a managed node via node governance policy.",
+      "What this node shares with your organization's SuperBased server - and only when enrolled ([org_client] enabled by enrolling in the Enrolment section). The privacy default is metadata-only: sha256 hashes and counts, never raw commands, prose, or paths. Raw-content sharing (full_content) is node opt-in only - the org admin has no remote switch for it. The reporting-tier shares below (routing_summary, obs.summary, etc.) are node opt-in, or can be raised by the org on a managed node via node governance policy.",
     fields: [
       {
         id: "PushIntervalSeconds",
@@ -969,6 +1002,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             id: "TargetActionAllowlist",
             label: "Per-action target allowlist",
             kind: "list",
+            optionSource: "action_types",
             help: "Cautious middle ground: ship the raw target column ONLY for these action types (e.g. read_file, edit_file, write_file) while withholding commands and prose. Empty = no exception.",
           },
         ],
@@ -984,12 +1018,16 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             id: "ProjectRootAllowlist",
             label: "Project allowlist",
             kind: "list",
+            optionSource: "project_roots",
+            allowFree: true,
             help: "When non-empty, ONLY these project roots push. Empty = all projects.",
           },
           {
             id: "ProjectRootDenylist",
             label: "Project denylist",
             kind: "list",
+            optionSource: "project_roots",
+            allowFree: true,
             help: "These project roots never push.",
           },
         ],
@@ -1000,7 +1038,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
     id: "otel",
     path: ["Exporter", "OTel"],
     description:
-      "Agent-side OpenTelemetry exporter: one gen_ai.client span per proxied API turn to any OTLP/HTTP collector. Off by default - when disabled the daemon makes zero exporter network calls. OTEL_* environment variables override these file values.",
+      "Agent-side OpenTelemetry exporter: one gen_ai.client span per proxied API turn to any OTLP/HTTP collector. Off by default - when disabled the daemon makes zero exporter network calls. OTEL_* environment variables override these file values. This section also holds this node's own OTLP receiver ([ingest.otel] under More settings: enabled, http_addr, allow_non_loopback), which a tool's Telemetry export step in Connected tools sends to; it binds at daemon start.",
     fields: [
       {
         id: "Enabled",
@@ -1093,6 +1131,8 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             id: "Disable",
             label: "Disabled rule IDs",
             kind: "list",
+            optionSource: "guard_rules",
+            allowFree: true,
             help: "Rule IDs turned off entirely (e.g. R-151). Prefer a scoped approval or a policy override first - disables are global and unconditional.",
           },
           {
@@ -1284,19 +1324,20 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         label: "Native dialects",
         path: ["Guard", "Dialects"],
         description:
-          "Compilation of the effective policy into AI-client-native permission config (claude-code permissions.deny/ask, …) at `observer init --guard`.",
+          "Compilation of the effective policy into AI-client-native permission config (claude-code permissions.deny/ask, …). Write it or check it for drift from Security > Rules > Apply policy changes (the CLI twin is observer init --guard).",
         fields: [
           {
             id: "Compile",
             label: "Compile on init",
             kind: "bool",
-            help: "Write compiled native rules during observer init. Drift later raises R-204; `observer guard compile --diff` shows it.",
+            help: "Allow the compiled native rules to be written (Security > Rules > Write native rules, or observer init --guard). Drift later raises R-204; Check for drift on the same card shows it.",
           },
           {
             id: "Targets",
             label: "Targets",
             kind: "list",
-            help: "Client names to compile for. Empty = all detected clients.",
+            options: GUARD_DIALECT_TARGETS,
+            help: "Client dialects to compile for. Empty = all detected clients.",
           },
         ],
       },
@@ -1318,7 +1359,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             label: "Global mode",
             kind: "select",
             options: ["off", "warn", "ask-once", "block", "redact"],
-            help: "Default verdict for any detector with no override below. ask-once interrupts the FIRST occurrence of a finding set; an identical resend within the reconsider window goes through. This is a FLOOR — a stricter per-detector override below still wins.",
+            help: "Default verdict for any detector with no override below. ask-once interrupts the FIRST occurrence of a finding set; an identical resend within the reconsider window goes through. This is a FLOOR - a stricter per-detector override below still wins.",
           },
           {
             id: "HookLane",
@@ -1330,7 +1371,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             id: "ProxyLane",
             label: "Proxy lane",
             kind: "bool",
-            help: "Evaluate the latest user turn on outbound proxy requests — the fallback for clients with no hook channel, or a second net on ones that have it. Only engages for traffic routed through the proxy. Default on.",
+            help: "Evaluate the latest user turn on outbound proxy requests - the fallback for clients with no hook channel, or a second net on ones that have it. Only engages for traffic routed through the proxy. Default on.",
           },
           {
             id: "EnforceIndependent",
@@ -1362,7 +1403,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
             id: "Allow",
             label: "Allow patterns",
             kind: "list",
-            help: "RE2 regexes matched against a finding's MATCHED VALUE (never the whole prompt) — a match is dropped entirely. Test fixtures, known-fake keys.",
+            help: "RE2 regexes matched against a finding's MATCHED VALUE (never the whole prompt) - a match is dropped entirely. Test fixtures, known-fake keys.",
           },
         ],
       },
@@ -1371,7 +1412,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         label: "Prompt-submit detector overrides",
         path: ["Guard", "Prompt", "Detectors"],
         description:
-          "Per-detector mode overrides for the most common secret + PII detectors — a stricter override here always wins over the global mode above; a looser one clamps up to it. The full detector vocabulary (GET /api/guard/prompt/detectors) is larger; less common ids stay config-file-only ([guard.prompt.detectors] in config.toml) to keep this list from growing unbounded.",
+          "Per-detector mode overrides for the most common secret + PII detectors - a stricter override here always wins over the global mode above; a looser one clamps up to it. The full detector vocabulary (GET /api/guard/prompt/detectors) is larger; less common ids stay config-file-only ([guard.prompt.detectors] in config.toml) to keep this list from growing unbounded.",
         fields: [
           {
             id: "credit_card",
@@ -1588,6 +1629,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
         id: "Features",
         label: "Tool allow-list",
         kind: "list",
+        options: MCP_RETRIEVAL_TOOLS,
         help: "Optional allow-list for the four retrieval tools (get_file, get_symbols, get_relations, retrieve_stashed). Empty = no filter, per-tool toggles below decide alone. A per-tool enabled=false always wins over this list.",
       },
     ],

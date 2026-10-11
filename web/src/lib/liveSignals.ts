@@ -67,10 +67,13 @@ export const TRANSPORT_DOT: DotTable = {
 };
 
 // CAPTURE_DOT - the proxy capture state (TopBar capture pill, Sidebar
-// watcher line): active captures now; paused is a warn state, not motion.
+// watcher line): active captures now; paused is a warn state, not motion;
+// absent means there is nothing to route (the tool is not installed, or the
+// status is still loading), which is neither good nor bad news.
 export const CAPTURE_DOT: DotTable = {
   active: { tone: "success" },
   paused: { tone: "warn", still: true },
+  absent: { tone: "idle", still: true },
 };
 
 // ACTIVITY_DOT - recency of the newest captured activity (TopBar "last

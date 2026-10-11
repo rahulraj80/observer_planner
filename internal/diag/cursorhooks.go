@@ -10,6 +10,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/cursorusage"
 	"github.com/marmutapp/superbased-observer/internal/hook"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // checkCursorHooks reports whether Cursor's hooks.json — the native
@@ -90,13 +91,16 @@ func checkCursorHooks(homeDir, homeOverride string) Check {
 	if len(droppedFrom) > 0 {
 		details = append(details,
 			"fix: restart the daemon so auto-register heals the orphaned entries on its own "+
-				"(no --force needed), or run `observer init --cursor --force` yourself",
+				"(no --force needed), or run "+remedy.Quote(remedy.Of(remedy.InitToolForce, "cursor"))+" yourself",
 		)
 		return Check{
 			Name:   name,
 			Status: StatusFail,
+			Remediations: []remedy.Remediation{
+				remedy.Of(remedy.RestartDaemon, ""), remedy.Of(remedy.InitToolForce, "cursor"),
+			},
 			Message: fmt.Sprintf(
-				"Cursor events from %s are being dropped — hooks.json still carries the orphaned "+
+				"Cursor events from %s are being dropped - hooks.json still carries the orphaned "+
 					"observer HTTP-hook shape from a lost build (this build serves no /api/cursor/hook/ route; "+
 					"the dashboard's SPA fallback answers it with HTML)",
 				strings.Join(droppedFrom, ", "),
@@ -110,7 +114,7 @@ func checkCursorHooks(homeDir, homeOverride string) Check {
 		return Check{
 			Name:    name,
 			Status:  StatusWarn,
-			Message: "some Cursor hook events have no observer entry — run `observer init --cursor` to register them",
+			Message: "some Cursor hook events have no observer entry - run `observer init --cursor` to register them",
 			Details: details,
 		}
 	}

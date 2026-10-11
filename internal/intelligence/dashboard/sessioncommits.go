@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/loc"
 	"github.com/marmutapp/superbased-observer/internal/projectroi"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -87,7 +88,7 @@ func (s *Server) handleSessionCommits(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	if s.opts.Governance != nil {
-		if eff := s.opts.Governance(r.Context()); eff.Active && eff.IsNavSectionHidden(string(SectionProjects)) {
+		if eff := s.opts.Governance(r.Context()); eff.VisibilityActive() && eff.IsNavSectionHidden(string(SectionProjects)) {
 			writeGovernanceRefusal(w, http.StatusNotFound, "governance_hidden", string(SectionProjects), eff,
 				"This page is managed by your organization and is not available on this machine.")
 			return
@@ -127,7 +128,7 @@ func (s *Server) handleSessionCommits(w http.ResponseWriter, r *http.Request, id
 
 	since, until := store.SessionOwnershipSpan(win, linkWindow, now)
 	res, err := st.LoadCommitOwnership(ctx, win.ProjectID, since, until, linkWindow, store.OwnershipCaps{
-		Prompts: promptLinkCap, Edits: editLinkCap, Commits: commitLinkCap,
+		Prompts: dashapi.PromptLinkCap, Edits: dashapi.EditLinkCap, Commits: dashapi.CommitLinkCap,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -171,7 +172,7 @@ func buildSessionCommitRows(sessionID string, res store.CommitOwnershipResult) [
 		c := byID[sc.CommitID]
 		con := sc.Contribution
 		out = append(out, apiSessionCommitRow{
-			ID: c.ID, SHA: c.SHA, Subject: c.Subject, CommittedAt: fmtProjectTime(c.CommittedAt),
+			ID: c.ID, SHA: c.SHA, Subject: c.Subject, CommittedAt: dashapi.FmtProjectTime(c.CommittedAt),
 			Reachable: c.Reachable, IsMerge: c.IsMerge,
 			Owner: sc.Owner, OwnerSessionID: sc.OwnerSessionID, Reason: sc.Reason, ShareBasis: sc.ShareBasis,
 			Share: con.Share, Files: con.Files, CodeLines: con.CodeLines, CommentLines: con.CommentLines,

@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.message": "Inferred",
+    "error.type": "VerifiedOfficial",
+    "request_id": "VerifiedOfficial",
+    "type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "e07ad4f90a81b50de045a5b5e3893b55a24664718b6fbdb495153d6a78841800",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/analytics/users",
+    "status": 401
+  },
+  "notes": "Error envelope and error types are official (errors.md); the message text is synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "errors reference page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "3a1d8016033e3772f6605b6acc94a129b00cb9f21770ee3d79ee705b7c1e9da2",
+  "source_url": "https://platform.claude.com/docs/en/api/errors.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.analytics.users"
+}

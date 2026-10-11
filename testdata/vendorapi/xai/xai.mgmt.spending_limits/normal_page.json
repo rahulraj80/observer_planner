@@ -1,0 +1,16 @@
+{
+  "spendingLimits": {
+    "hardSlAuto": {
+      "val": "22500"
+    },
+    "effectiveHardSl": {
+      "val": "22500"
+    },
+    "softSl": {
+      "val": "20000"
+    },
+    "effectiveSl": {
+      "val": "20000"
+    }
+  }
+}

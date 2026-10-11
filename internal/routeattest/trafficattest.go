@@ -42,7 +42,7 @@ func AttestByTraffic(tool string, traffic TrafficSource) (Verdict, string) {
 	case native > 0 && proxied > 0:
 		return VerdictAttestedByTraffic, fmt.Sprintf("native activity (%d) and proxied/gateway turns (%d) both observed in window", native, proxied)
 	case native > 0:
-		return VerdictBypassSuspect, fmt.Sprintf("native activity (%d) observed with zero proxied/gateway turns — possible bypass", native)
+		return VerdictBypassSuspect, fmt.Sprintf("native activity (%d) observed with zero proxied/gateway turns - possible bypass", native)
 	default:
 		return VerdictUnrouted, "no native session activity observed in window"
 	}

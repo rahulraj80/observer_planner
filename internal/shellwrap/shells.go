@@ -67,7 +67,14 @@ type Host struct {
 	DocumentsDir string
 	// Exists reports whether a path exists. nil = nothing exists.
 	Exists func(p string) bool
+	// Bridge, with GOOS "windows", is the WSL bridge target: Windows shells
+	// on the machine whose WSL distro runs the daemon (bridge.go). nil = a
+	// native target.
+	Bridge *WSLBridge
 }
+
+// Join joins path elements with the target OS's separator.
+func (h Host) Join(elem ...string) string { return h.join(elem...) }
 
 func (h Host) exists(p string) bool { return h.Exists != nil && h.Exists(p) }
 

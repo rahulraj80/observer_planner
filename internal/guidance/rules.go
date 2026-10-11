@@ -70,6 +70,14 @@ type Rule struct {
 	Scope       Scope
 	Frontmatter string
 	Note        string
+	// Personal marks a project-scope file the tool's own convention keeps
+	// OUT of version control: a per-developer overlay such as
+	// CLAUDE.local.md, which the vendor tells you to gitignore. It lives
+	// in the project tree but is not shared with the team, so a consumer
+	// must never describe editing it as "commits with the repo". Every
+	// project-scope glob whose file name carries a ".local." segment is
+	// personal (TestLocalOverlaysArePersonal).
+	Personal bool
 }
 
 // agentsMDReaders lists the tools whose only project-root convention is
@@ -110,14 +118,14 @@ func buildRules() []Rule {
 	out := []Rule{
 		// ---- claude-code -------------------------------------------------
 		{Tool: "claude-code", Glob: "CLAUDE.md", Kind: KindInstructions, Scope: ScopeProject, Frontmatter: FrontmatterNone},
-		{Tool: "claude-code", Glob: "CLAUDE.local.md", Kind: KindInstructions, Scope: ScopeProject, Frontmatter: FrontmatterNone, Note: "gitignored personal overlay"},
+		{Tool: "claude-code", Glob: "CLAUDE.local.md", Kind: KindInstructions, Scope: ScopeProject, Frontmatter: FrontmatterNone, Note: "gitignored personal overlay", Personal: true},
 		{Tool: "claude-code", Glob: ".claude/CLAUDE.md", Kind: KindInstructions, Scope: ScopeProject, Frontmatter: FrontmatterNone},
 		{Tool: "claude-code", Glob: "**/CLAUDE.md", Kind: KindInstructions, Scope: ScopeProject, Frontmatter: FrontmatterNone, Note: "sub-directory memory, depth-capped"},
 		{Tool: "claude-code", Glob: ".claude/skills/*/SKILL.md", Kind: KindSkill, Scope: ScopeProject, Frontmatter: FrontmatterYAML},
 		{Tool: "claude-code", Glob: ".claude/agents/*.md", Kind: KindAgent, Scope: ScopeProject, Frontmatter: FrontmatterYAML},
 		{Tool: "claude-code", Glob: ".claude/commands/**/*.md", Kind: KindCommand, Scope: ScopeProject, Frontmatter: FrontmatterYAML},
 		{Tool: "claude-code", Glob: ".claude/settings.json", Kind: KindConfig, Scope: ScopeProject, Frontmatter: FrontmatterJSON},
-		{Tool: "claude-code", Glob: ".claude/settings.local.json", Kind: KindConfig, Scope: ScopeProject, Frontmatter: FrontmatterJSON},
+		{Tool: "claude-code", Glob: ".claude/settings.local.json", Kind: KindConfig, Scope: ScopeProject, Frontmatter: FrontmatterJSON, Personal: true},
 		{Tool: "claude-code", Glob: "~/.claude/CLAUDE.md", Kind: KindInstructions, Scope: ScopeUser, Frontmatter: FrontmatterNone},
 		{Tool: "claude-code", Glob: "~/.claude/skills/*/SKILL.md", Kind: KindSkill, Scope: ScopeUser, Frontmatter: FrontmatterYAML},
 		{Tool: "claude-code", Glob: "~/.claude/agents/*.md", Kind: KindAgent, Scope: ScopeUser, Frontmatter: FrontmatterYAML},

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_org_update
+
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"text/tabwriter"
@@ -20,6 +23,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/quiesce"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/update"
@@ -92,8 +96,8 @@ target advances the database schema, a snapshot), swap atomically, and watch
 the new binary until it passes its self-check.
 
 Any doubt at any step aborts and leaves the running binary untouched. If the
-new binary fails, exits or hangs, the OLD process — which is still alive
-precisely for this — restores the previous binary and reports rolled_back.
+new binary fails, exits or hangs, the OLD process - which is still alive
+precisely for this - restores the previous binary and reports rolled_back.
 
 --force ignores the local maintenance window and, inside an admin maintenance
 window, permits an apply while a dashboard terminal is live. It never
@@ -116,7 +120,7 @@ func newUpdateRollbackCmd() *cobra.Command {
 		Use:   "rollback",
 		Short: "Restore the previous binary (and its database snapshot when the schema advanced)",
 		Long: `observer update rollback restores the binary this node ran before its last
-apply, and — when that apply advanced the database schema — the pre-apply
+apply, and - when that apply advanced the database schema - the pre-apply
 snapshot taken alongside it.
 
 Restoring the snapshot DISCARDS every row ingested since it was taken. That
@@ -158,7 +162,7 @@ func newUpdateHistoryCmd() *cobra.Command {
 		Use:   "history",
 		Short: "Print this node's update ledger (local only, no network)",
 		Long: `observer update history prints every apply, rollback and refusal this node
-has recorded, newest first, with the reason for each — including the
+has recorded, newest first, with the reason for each - including the
 timestamp of any pre-apply database snapshot, so the operator can see exactly
 which data window a rollback discarded.
 
@@ -224,12 +228,56 @@ func runUpdateVerb(cmd *cobra.Command, req updateApplyRequest) error {
 		return printUpdateResponse(out, resp)
 	}
 
+	// REVIEW-4 P4-09: "nothing answered the dashboard address" is not "no
+	// daemon". A daemon built without ui.dashboard (or started with
+	// --no-dashboard, or on another address) still holds the database and the
+	// proxy. Applying or rolling back here would swap its binary, or rename a
+	// snapshot over its open database, with no drain and nobody watching the
+	// successor. The start lock beside the database is in every build, so it
+	// decides. A dry run changes nothing and still runs.
+	if lock, live := liveDaemonFor(cfg.Observer.DBPath); live && !req.DryRun {
+		addr := resolveDashboardAddr("", cfg.Dashboard.Addr, "127.0.0.1:8081")
+		msg := updateUnderDaemonRefusal(lock, cfg.Observer.DBPath, addr, req.Rollback)
+		fmt.Fprintln(out, msg)
+		return fmt.Errorf("observer update: refused: a running daemon (pid %d) holds this database", lock.PID)
+	}
+
 	fmt.Fprintln(out, "No running daemon answered on the dashboard address, so this apply runs")
 	fmt.Fprintln(out, "in the CLI process. There are no listeners to hand over, so the")
 	fmt.Fprintln(out, "fork-exec-and-watch handshake does not apply: the --version probe of the")
 	fmt.Fprintln(out, "staged binary is the acceptance gate, and the previous binary is still")
 	fmt.Fprintln(out, "preserved for `observer update rollback`.")
 	return runUpdateLocally(ctx, out, cfg, req)
+}
+
+// updateUnderDaemonRefusal is the one reason an update verb prints when a
+// daemon holds this database but did not answer the update endpoint
+// (REVIEW-4 P4-09). Refusing is the D-514 data-safety exception, so it names
+// the cause and the fix: the daemon's own update loop for an apply, or stop
+// the daemon (route off first) and run the verb again.
+func updateUnderDaemonRefusal(lock diag.LockInfo, dbPath, addr string, rollback bool) string {
+	verb, effect := "apply", "swap the binary"
+	if rollback {
+		verb, effect = "rollback", "restore the previous binary (and, when the schema advanced, rename the database snapshot over the open database)"
+	}
+	cause := fmt.Sprintf("it serves no dashboard on %s (started with --no-dashboard, or listening on another address)", addr)
+	if note := dashboardNotInBuildNote(); note != "" {
+		cause = note + ", so the daemon serves no update endpoint"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "observer update %s refused: an observer daemon (pid %d, lock %s) is running on this database, but %s.\n",
+		verb, lock.PID, diag.LockPath(filepath.Dir(dbPath), lock.PID), cause)
+	fmt.Fprintf(&b, "Running the %s in this process would %s underneath it, with no drain and no handshake.\n", verb, effect)
+	b.WriteString("Fix:\n")
+	if !rollback {
+		b.WriteString("  - let the daemon apply it itself: its update loop applies an eligible update when [update].auto_apply is on; or\n")
+	}
+	if dashboardInBuild {
+		b.WriteString("  - if the daemon serves its dashboard on another address, point this command at it with OBSERVER_DASHBOARD_ADDR; or\n")
+	}
+	fmt.Fprintf(&b, "  - stop that daemon (take any tool's proxy route off first: docs/daemon-restart-runbook.md), run `observer update %s` again, then start it.\n", verb)
+	b.WriteString("If that pid is not an observer daemon, the lock is stale: remove the lock file and run this again.")
+	return b.String()
 }
 
 // askDaemonToUpdate posts the request to the running daemon.
@@ -261,7 +309,7 @@ func askDaemonToUpdate(ctx context.Context, cfg config.Config, req updateApplyRe
 		// applying underneath it, which would swap the binary of a running
 		// process with nobody watching the successor.
 		return updateApplyResponse{}, false, fmt.Errorf(
-			"observer update: a daemon is running on %s but does not serve %s — stop it, or upgrade it first",
+			"observer update: a daemon is running on %s but does not serve %s - stop it, or upgrade it first",
 			addr, updateAPIPath)
 	}
 	var out updateApplyResponse

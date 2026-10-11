@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // attrState is the attribution unit as it lands in / reads back from
-// process_runs: the five columns processobs.Attribution owns, which the
+// process_runs: the five columns procmodel.Attribution owns, which the
 // §9.2.5 MAX-upgrade guard moves together or not at all.
 type attrState struct {
 	sessionID  string
 	projectID  int64
 	tool       string
-	source     processobs.AttributionSource
-	confidence processobs.Confidence
+	source     procmodel.AttributionSource
+	confidence procmodel.Confidence
 }
 
 // readAttr reads the stored attribution unit for one process_key. A NULL
@@ -43,14 +43,14 @@ func readAttr(t *testing.T, s *Store, key string) attrState {
 	got.sessionID = sessionID.String
 	got.projectID = projectID.Int64
 	got.tool = tool.String
-	got.source = processobs.AttributionSource(source)
-	got.confidence = processobs.Confidence(conf)
+	got.source = procmodel.AttributionSource(source)
+	got.confidence = procmodel.Confidence(conf)
 	return got
 }
 
 // runWithAttr builds a minimal persistable run carrying one attribution unit.
-func runWithAttr(key string, a attrState, started time.Time) processobs.ProcessRun {
-	return processobs.ProcessRun{
+func runWithAttr(key string, a attrState, started time.Time) procmodel.ProcessRun {
+	return procmodel.ProcessRun{
 		ProcessKey:     key,
 		BootID:         "boot",
 		PID:            4242,
@@ -59,7 +59,7 @@ func runWithAttr(key string, a attrState, started time.Time) processobs.ProcessR
 		ExeBasename:    "node",
 		StartedAt:      started,
 		LastSeenAt:     started,
-		Attribution: processobs.Attribution{
+		Attribution: procmodel.Attribution{
 			SessionID:  a.sessionID,
 			ProjectID:  a.projectID,
 			Tool:       a.tool,
@@ -93,12 +93,12 @@ func TestPersistRunsAttributionMaxUpgrade(t *testing.T) {
 	const sessB = "sess-proc-2"
 	mustSession(t, s, sessB, projectID, "codex")
 
-	unattributed := attrState{source: processobs.AttrNone, confidence: processobs.ConfNone}
-	low := attrState{sessionID: sessA, projectID: projectID, tool: "codex", source: processobs.AttrHeuristic, confidence: processobs.ConfLow}
-	mediumA := attrState{sessionID: sessA, projectID: projectID, tool: "codex", source: processobs.AttrCrossOSCorrelation, confidence: processobs.ConfMedium}
-	mediumB := attrState{sessionID: sessB, projectID: projectID, tool: "codex", source: processobs.AttrCrossOSCorrelation, confidence: processobs.ConfMedium}
-	highA := attrState{sessionID: sessA, projectID: projectID, tool: "claude-code", source: processobs.AttrBridge, confidence: processobs.ConfHigh}
-	highB := attrState{sessionID: sessB, projectID: projectID, tool: "claude-code", source: processobs.AttrEnvToken, confidence: processobs.ConfHigh}
+	unattributed := attrState{source: procmodel.AttrNone, confidence: procmodel.ConfNone}
+	low := attrState{sessionID: sessA, projectID: projectID, tool: "codex", source: procmodel.AttrHeuristic, confidence: procmodel.ConfLow}
+	mediumA := attrState{sessionID: sessA, projectID: projectID, tool: "codex", source: procmodel.AttrCrossOSCorrelation, confidence: procmodel.ConfMedium}
+	mediumB := attrState{sessionID: sessB, projectID: projectID, tool: "codex", source: procmodel.AttrCrossOSCorrelation, confidence: procmodel.ConfMedium}
+	highA := attrState{sessionID: sessA, projectID: projectID, tool: "claude-code", source: procmodel.AttrBridge, confidence: procmodel.ConfHigh}
+	highB := attrState{sessionID: sessB, projectID: projectID, tool: "claude-code", source: procmodel.AttrEnvToken, confidence: procmodel.ConfHigh}
 
 	tests := []struct {
 		name     string
@@ -135,7 +135,7 @@ func TestPersistRunsAttributionMaxUpgrade(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// One key per case so the sub-cases are independent.
 			key := "pk-upgrade-" + tt.name
-			if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{runWithAttr(key, tt.stored, started)}); err != nil {
+			if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{runWithAttr(key, tt.stored, started)}); err != nil {
 				t.Fatalf("PersistRuns insert: %v", err)
 			}
 			if got := readAttr(t, s, key); got != tt.stored {
@@ -143,7 +143,7 @@ func TestPersistRunsAttributionMaxUpgrade(t *testing.T) {
 			}
 			in := runWithAttr(key, tt.incoming, started)
 			in.LastSeenAt = started.Add(time.Duration(i+1) * time.Second)
-			if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{in}); err != nil {
+			if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{in}); err != nil {
 				t.Fatalf("PersistRuns conflict: %v", err)
 			}
 			if got := readAttr(t, s, key); got != tt.want {
@@ -165,8 +165,8 @@ func TestPersistRunsFirstInsertAcceptsNone(t *testing.T) {
 	run := runWithAttr("pk-first-none", attrState{}, time.Unix(1_700_000_100, 0).UTC())
 	// Deliberately EMPTY source/confidence (not even "none") — orNone /
 	// orNoneConf default them at the boundary.
-	run.Attribution = processobs.Attribution{}
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{run}); err != nil {
+	run.Attribution = procmodel.Attribution{}
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{run}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 	var sessionID sql.NullString
@@ -180,7 +180,7 @@ func TestPersistRunsFirstInsertAcceptsNone(t *testing.T) {
 	if sessionID.Valid {
 		t.Errorf("session_id: got %q, want NULL on a genuinely unattributed first insert", sessionID.String)
 	}
-	if source != string(processobs.AttrNone) || conf != string(processobs.ConfNone) {
+	if source != string(procmodel.AttrNone) || conf != string(procmodel.ConfNone) {
 		t.Errorf("got source=%q confidence=%q, want none/none", source, conf)
 	}
 }
@@ -220,7 +220,7 @@ func TestPersistRunsDoesNotClobberCorrelatedAttribution(t *testing.T) {
 
 	// STEP 1 — the process observer captures the codex root UNATTRIBUTED
 	// (the cross-OS bridge holds no seed for it), running in the project cwd.
-	exec := processobs.ProcessRun{
+	exec := procmodel.ProcessRun{
 		ProcessKey:     key,
 		BootID:         "boot",
 		PID:            9100,
@@ -230,15 +230,15 @@ func TestPersistRunsDoesNotClobberCorrelatedAttribution(t *testing.T) {
 		CWD:            root,
 		StartedAt:      sessionStart.Add(5 * time.Second),
 		LastSeenAt:     sessionStart.Add(5 * time.Second),
-		Attribution:    processobs.Attribution{Source: processobs.AttrNone, Confidence: processobs.ConfNone},
-		MetricSamples: []processobs.MetricSample{
+		Attribution:    procmodel.Attribution{Source: procmodel.AttrNone, Confidence: procmodel.ConfNone},
+		MetricSamples: []procmodel.MetricSample{
 			{T: sessionStart.Add(5 * time.Second), CPUMs: 10, WorkingSet: 2048},
 		},
 	}
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{exec}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{exec}); err != nil {
 		t.Fatalf("step 1 PersistRuns: %v", err)
 	}
-	if got := readAttr(t, s, key); got.sessionID != "" || got.confidence != processobs.ConfNone {
+	if got := readAttr(t, s, key); got.sessionID != "" || got.confidence != procmodel.ConfNone {
 		t.Fatalf("step 1: expected an unattributed row, got %+v", got)
 	}
 
@@ -255,8 +255,8 @@ func TestPersistRunsDoesNotClobberCorrelatedAttribution(t *testing.T) {
 		sessionID:  sessionID,
 		projectID:  projectID,
 		tool:       "codex",
-		source:     processobs.AttrCrossOSCorrelation,
-		confidence: processobs.ConfMedium,
+		source:     procmodel.AttrCrossOSCorrelation,
+		confidence: procmodel.ConfMedium,
 	}
 	if correlated != want {
 		t.Fatalf("step 2: got %+v want %+v", correlated, want)
@@ -273,8 +273,8 @@ func TestPersistRunsDoesNotClobberCorrelatedAttribution(t *testing.T) {
 	exit.DurationMs = 85_000
 	exit.CPUUserMs = 1234
 	exit.MetricSamples = append(exit.MetricSamples,
-		processobs.MetricSample{T: exit.ExitedAt, CPUMs: 1234, WorkingSet: 4096})
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{exit}); err != nil {
+		procmodel.MetricSample{T: exit.ExitedAt, CPUMs: 1234, WorkingSet: 4096})
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{exit}); err != nil {
 		t.Fatalf("step 3 PersistRuns: %v", err)
 	}
 	if got := readAttr(t, s, key); got != want {
@@ -311,19 +311,19 @@ func TestPersistRunsMetricSamplesUnaffectedByAttributionGuard(t *testing.T) {
 	sessionID, projectID := mustProjectAndSession(t, s)
 	started := time.Unix(1_700_000_200, 0).UTC()
 
-	ring := func(n int64) []processobs.MetricSample {
-		return []processobs.MetricSample{{T: started, CPUMs: n, WorkingSet: 1024}}
+	ring := func(n int64) []procmodel.MetricSample {
+		return []procmodel.MetricSample{{T: started, CPUMs: n, WorkingSet: 1024}}
 	}
-	medium := attrState{sessionID: sessionID, projectID: projectID, tool: "codex", source: processobs.AttrCrossOSCorrelation, confidence: processobs.ConfMedium}
-	high := attrState{sessionID: sessionID, projectID: projectID, tool: "codex", source: processobs.AttrBridge, confidence: processobs.ConfHigh}
-	none := attrState{source: processobs.AttrNone, confidence: processobs.ConfNone}
+	medium := attrState{sessionID: sessionID, projectID: projectID, tool: "codex", source: procmodel.AttrCrossOSCorrelation, confidence: procmodel.ConfMedium}
+	high := attrState{sessionID: sessionID, projectID: projectID, tool: "codex", source: procmodel.AttrBridge, confidence: procmodel.ConfHigh}
+	none := attrState{source: procmodel.AttrNone, confidence: procmodel.ConfNone}
 
 	tests := []struct {
 		name        string
 		stored      attrState
-		storedRing  []processobs.MetricSample
+		storedRing  []procmodel.MetricSample
 		incoming    attrState
-		incomingRng []processobs.MetricSample
+		incomingRng []procmodel.MetricSample
 		wantCPU     int64 // CPUMs of the single sample expected afterwards
 	}{
 		{"blocked downgrade still refreshes the ring", medium, ring(1), none, ring(2), 2},
@@ -336,12 +336,12 @@ func TestPersistRunsMetricSamplesUnaffectedByAttributionGuard(t *testing.T) {
 			key := "pk-ring-" + tt.name
 			first := runWithAttr(key, tt.stored, started)
 			first.MetricSamples = tt.storedRing
-			if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{first}); err != nil {
+			if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{first}); err != nil {
 				t.Fatalf("PersistRuns insert: %v", err)
 			}
 			second := runWithAttr(key, tt.incoming, started)
 			second.MetricSamples = tt.incomingRng
-			if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{second}); err != nil {
+			if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{second}); err != nil {
 				t.Fatalf("PersistRuns conflict: %v", err)
 			}
 			var raw string

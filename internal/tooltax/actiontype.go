@@ -46,6 +46,7 @@ const (
 	ActionConfigChange        = "config_change"
 	ActionWorktreeCreate      = "worktree_create"
 	ActionWorktreeRemove      = "worktree_remove"
+	ActionTaskEvent           = "task_event"
 	ActionRateLimit           = "rate_limit"
 	ActionUnknown             = "unknown"
 )
@@ -209,6 +210,7 @@ var actionTypes = map[string]ActionTypeMeta{
 	ActionPermissionMode:   {CategoryMeta, "Permission mode"},
 	ActionWorktreeCreate:   {CategoryMeta, "Worktree create"},
 	ActionWorktreeRemove:   {CategoryMeta, "Worktree remove"},
+	ActionTaskEvent:        {CategoryMeta, "Task event"},
 	ActionSchedule:         {CategoryMeta, "Schedule"},
 	ActionToolSearch:       {CategoryMeta, "Tool search"},
 	ActionHarnessCall:      {CategoryMeta, "Harness call"},

@@ -1,5 +1,11 @@
 package aggregatesvc
 
+// imports_test.go carries no build tag on purpose (D-535): it reads the
+// package's source files from disk, so it runs (and still guards svc.go)
+// in a -tags sbo_omit_egress_aggregate_share build too, where it is the
+// package's only compiled file and keeps `go test` from failing setup with
+// "build constraints exclude all Go files".
+
 import (
 	"go/parser"
 	"go/token"

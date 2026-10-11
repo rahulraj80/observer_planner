@@ -40,7 +40,7 @@ func (*outputCompositionTool) Description() string {
 		"that came through. Use to gauge whether a session leaned toward producing " +
 		"code or prose. Read-only; node-local; byte counts only (never content). " +
 		"When authored_captured is false the session has code-authoring actions " +
-		"whose byte length was not measured yet — run `observer backfill`."
+		"whose byte length was not measured yet - run `observer backfill`."
 }
 
 func (*outputCompositionTool) InputSchema() map[string]any {

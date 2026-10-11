@@ -673,6 +673,17 @@ func applyPaddleActivate(ctx context.Context, tx pgx.Tx, s *Store, ev PaddleEven
 		}
 		plan = PaddlePlan{Name: pName, Version: pVer}
 	}
+	// A price (or a stored subscription row) naming an OLDER version of the
+	// plan the account already holds never moves it back down: plan-version
+	// migrations (0039, 0041) move in-force assignments forward, and a renewal
+	// event re-asserting the pre-migration version would otherwise read as a
+	// downgrade and schedule the account back onto the stale allowance at the
+	// next cycle boundary (D-299).
+	current, err := resolvePlanTx(ctx, tx, account, now)
+	if err != nil {
+		return BillingIntake{}, fmt.Errorf("resolve current plan: %w", err)
+	}
+	plan = paddlePlanNotOlderThan(plan, current)
 	// Read the row's EXISTING status/trial_ends_at BEFORE the upsert -
 	// resolveActivateStatus needs to know whether this subscription is
 	// already trialing (to preserve it) or has no row yet (to decide whether
@@ -1106,6 +1117,19 @@ func (s *Store) AccountSubscription(ctx context.Context, accountID string) (Padd
 		out.ManagementURLs = m
 	}
 	return out, nil
+}
+
+// paddlePlanNotOlderThan floors a Paddle-mapped plan at the version of the
+// SAME plan the account currently holds. A different plan name, or a mapped
+// version at or above the current one, passes through unchanged; only a
+// same-name OLDER version is raised to the current version (D-299: the
+// assignment a plan-version migration moved forward must survive a renewal
+// whose price still maps to the version it moved off). Pure.
+func paddlePlanNotOlderThan(mapped PaddlePlan, current Plan) PaddlePlan {
+	if current.Name == mapped.Name && current.Version > mapped.Version {
+		mapped.Version = current.Version
+	}
+	return mapped
 }
 
 // priceMap is the compiled-in Paddle price → plan mapping, overridable at

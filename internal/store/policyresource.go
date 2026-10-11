@@ -600,3 +600,30 @@ func casUpsertPolicyResourceState(ctx context.Context, conn *sql.Conn, orgKey, f
 	}
 	return nil
 }
+
+// ListPolicyResourceStates returns every durable family state row (any org
+// key), newest change first: what the node notification bell reads to say
+// "your org changed a policy on this machine" (D-323). A plain read.
+func (s *Store) ListPolicyResourceStates(ctx context.Context) ([]PolicyResourceState, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT org_key, family, generation, floor_version, last_version, body_hash, msg_digest, updated_at
+		  FROM org_policy_resource_state
+		 ORDER BY updated_at DESC
+		 LIMIT 100`)
+	if err != nil {
+		return nil, fmt.Errorf("store.ListPolicyResourceStates: %w", err)
+	}
+	defer rows.Close()
+	var out []PolicyResourceState
+	for rows.Next() {
+		var st PolicyResourceState
+		var ts string
+		if err := rows.Scan(&st.OrgKey, &st.Family, &st.Generation, &st.FloorVersion, &st.LastVersion,
+			&st.BodyHash, &st.MsgDigest, &ts); err != nil {
+			return nil, fmt.Errorf("store.ListPolicyResourceStates: scan: %w", err)
+		}
+		st.UpdatedAt = parseStamp(ts)
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}

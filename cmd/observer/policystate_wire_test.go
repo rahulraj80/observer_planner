@@ -255,7 +255,7 @@ func TestReporter_SlowPostDoesNotDelayFetchLoops(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("recordGuard blocked — it must not call report synchronously")
+		t.Fatal("recordGuard blocked - it must not call report synchronously")
 	}
 	if fp.callCount() != 0 {
 		t.Fatalf("poster called %d times from a sink, want 0", fp.callCount())
@@ -439,7 +439,7 @@ func TestGuardCachedVersion_CorruptFileErrors(t *testing.T) {
 
 	missing := filepath.Join(dir, "does-not-exist.json")
 	if v, err := guardCachedVersionFromFile(missing)(); err != nil || v != 0 {
-		t.Fatalf("missing file = (%d, %v), want (0, nil) — first-install path", v, err)
+		t.Fatalf("missing file = (%d, %v), want (0, nil) - first-install path", v, err)
 	}
 
 	if v, err := guardCachedVersionFromFile("")(); err != nil || v != 0 {
@@ -894,7 +894,7 @@ func TestReporter_PostsSixRowSnapshot(t *testing.T) {
 				t.Fatalf("family = %q, want node.governance", row.Family)
 			}
 			if row.Status != orgcontract.StatusNone || row.Reason != orgcontract.ReasonNoPolicy {
-				t.Fatalf("ungoverned node reported %s/%s, want none/no_policy — an ungoverned node must say so, not be omitted",
+				t.Fatalf("ungoverned node reported %s/%s, want none/no_policy - an ungoverned node must say so, not be omitted",
 					row.Status, row.Reason)
 			}
 		}
@@ -1045,7 +1045,7 @@ func TestReporter_Gen2ProbedBeforeGen1AtFullDepth(t *testing.T) {
 
 	rep.report(context.Background())
 	if got := fp.snapshotSizes(); len(got) != 2 || got[0] != 6 || got[1] != 6 {
-		t.Fatalf("posted %v, want [6 6] (gen2 @ full depth rejected, then gen1 @ full depth accepted — same depth, no narrowing)", got)
+		t.Fatalf("posted %v, want [6 6] (gen2 @ full depth rejected, then gen1 @ full depth accepted - same depth, no narrowing)", got)
 	}
 	first, second := fp.call(0), fp.call(1)
 	if first.MachineIdentity == "" {
@@ -1072,7 +1072,7 @@ func TestReporter_Gen2ProbedBeforeGen1AtFullDepth(t *testing.T) {
 		t.Fatalf("latched=%v latchGen1=%v, want a gen1 latch", rep.latched.Load(), rep.latchGen1.Load())
 	}
 	if want := int32(len(policystate.OptionalPoints)); rep.latchDepth.Load() != want {
-		t.Fatalf("latchDepth = %d, want %d (full depth — the server only rejected gen2 content, not an optional point)",
+		t.Fatalf("latchDepth = %d, want %d (full depth - the server only rejected gen2 content, not an optional point)",
 			rep.latchDepth.Load(), want)
 	}
 
@@ -1102,7 +1102,7 @@ func TestReporter_SkipsGen1ProbeWhenNothingToStrip(t *testing.T) {
 	// very next attempt is the depth-1 rung (5 rows), not a repeated 6-row
 	// gen1 probe.
 	if got := fp.snapshot(); len(got) != 2 || got[0] != 6 || got[1] != 5 {
-		t.Fatalf("posted %v, want [6 5] (gen1 probe skipped — no gen2 content to strip)", got)
+		t.Fatalf("posted %v, want [6 5] (gen1 probe skipped - no gen2 content to strip)", got)
 	}
 }
 

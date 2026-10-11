@@ -2,24 +2,14 @@ import clsx from "clsx";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ChevronRight, Eye, LayoutDashboard, Lock, MonitorSmartphone, ShieldCheck } from "lucide-react";
-import { Aurora } from "@shared/primitives/Motion";
-import { BrandMark } from "@shared/primitives/BrandMark";
+import { AuthShell as SharedAuthShell, type AuthWidth } from "@shared/components/auth/AuthShell";
 import { Icon } from "@shared/primitives/Icon";
 
-// AuthShell - the ONE backdrop and card recipe for the portal's two
-// pre-app screens, SignIn and ConsentSetup (design-kit WS10). Before this
-// they drifted: an accent-soft wash on a bg-1 card with the lockup vs a
-// brand-soft wash on a bg-2 card with the bare glyph. Now both draw:
-//
-//   - a decorative backdrop (aria-hidden): the shared Aurora, a Blueprint
-//     wash and the illustrations' dot grid, tokens only (styles.css
-//     .auth-backdrop / .auth-grid);
-//   - the BrandMark badge + "superbased" wordmark lockup over the title;
-//   - one card surface (bg-1, raised with shadow-2), the fill SignIn
-//     already used, so the shared Input (bg-2) reads as a step off it;
-//   - the "device -> preview -> portal" strip and the trust row under it.
-//
-// Purely presentational: no fetch, no state, no routing.
+// The portal's pre-app screens (SignIn, ConsentSetup) on the ONE shared
+// sign-in recipe (shared/components/auth/AuthShell.tsx: backdrop, lockup,
+// raised card; the same one the org dashboard uses). What stays here is
+// portal CONTENT under the card: the "device -> preview -> portal" strip and
+// the trust row. Purely presentational: no fetch, no state, no routing.
 
 /** A step of the upload flow the strip explains. */
 export type AuthStep = "device" | "preview" | "portal";
@@ -104,10 +94,6 @@ export function TrustRow() {
   );
 }
 
-// WIDTH: the card's max width per screen. Sign-in is a short form; the
-// consent screen carries seven sentence-length rows.
-const WIDTH = { narrow: "max-w-[420px]", wide: "max-w-[540px]" } as const;
-
 export function AuthShell({
   title,
   intro,
@@ -120,37 +106,22 @@ export function AuthShell({
   intro?: ReactNode;
   /** The step of the flow this screen is, highlighted in the strip. */
   step?: AuthStep;
-  width?: keyof typeof WIDTH;
+  width?: AuthWidth;
   children: ReactNode;
 }) {
   return (
-    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-bg-0 px-4 py-10">
-      <div aria-hidden="true" className="auth-backdrop">
-        <Aurora />
-        <span className="auth-wash" />
-        <span className="auth-grid" />
-      </div>
-
-      <main className={clsx("relative flex w-full flex-col gap-5", WIDTH[width])}>
-        <section className="rounded-3 border border-line-2 bg-bg-1 p-6 shadow-2 sm:p-8">
-          <div className="flex flex-col items-center gap-3 text-center">
-            <span className="brand">
-              <span className="auth-badge">
-                <BrandMark variant="badge" size={34} />
-              </span>
-              <span className="brand-word mono">superbased</span>
-            </span>
-            <h1 className="text-[19px] font-semibold leading-tight tracking-[-0.02em] text-fg-0">
-              {title}
-            </h1>
-            {intro && <div className="text-[12.5px] leading-relaxed text-fg-2">{intro}</div>}
-          </div>
-          <div className="mt-6">{children}</div>
-        </section>
-
-        <StepStrip current={step} />
-        <TrustRow />
-      </main>
-    </div>
+    <SharedAuthShell
+      title={title}
+      intro={intro}
+      width={width}
+      below={
+        <>
+          <StepStrip current={step} />
+          <TrustRow />
+        </>
+      }
+    >
+      {children}
+    </SharedAuthShell>
   );
 }

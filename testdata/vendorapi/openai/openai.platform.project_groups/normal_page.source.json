@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].group_id": "VerifiedOfficial",
+    "data[].group_name": "VerifiedOfficial",
+    "data[].group_type": "VerifiedOfficial",
+    "data[].object": "VerifiedOfficial",
+    "data[].project_id": "VerifiedOfficial",
+    "has_more": "Inferred",
+    "next": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "a92057d9dc2c098215d88f5f36dda322546b9f250adb607baa54db69ebfb2340",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/projects/{project_id}/groups",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId list-project-groups. The official example is itself a terminal page, so this first page is that example with the paging flag set to \"more\" (has_more graded Inferred); last_page is the verbatim example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.project_groups"
+}

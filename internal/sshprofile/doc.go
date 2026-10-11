@@ -28,8 +28,10 @@
 // directly (exec.Command with an argv slice) and never hand it to a shell.
 //
 // Module shape (CLAUDE.md "Module Boundaries" #1): pure. No database/sql, no
-// net/http, no os/exec, no fsnotify, and no observer-internal imports — pinned
-// by imports_test.go. The one filesystem touch is os.Stat behind
+// net/http, no os/exec, no fsnotify, and no observer-internal imports except
+// internal/sshspec (the neutral Profile model and validation, split out in
+// modular packaging phase PB so internal/config does not import this package)
+// - pinned by imports_test.go. The one filesystem touch is os.Stat behind
 // ValidateWithFS, mirroring the allowance internal/sandbox makes for its
 // readiness probe.
 package sshprofile

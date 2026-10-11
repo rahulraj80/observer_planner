@@ -62,6 +62,28 @@ type PromptPhaseScanner interface {
 	ScanRequestAfterPrompt(ctx context.Context, provider string, body []byte, sessionID string) GuardRequestResult
 }
 
+// guardClientToolKey carries the client tool the proxy resolved for a
+// request into the guard scanner's context (WithGuardClientTool).
+type guardClientToolKey struct{}
+
+// WithGuardClientTool returns ctx carrying the client tool id the proxy
+// resolved at its boundary (the pid bridge, else the request-header
+// signature table) for the prompt-lane scan. The scanner interface stays
+// unchanged; an adapter that cares reads it with GuardClientTool.
+func WithGuardClientTool(ctx context.Context, tool string) context.Context {
+	if tool == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, guardClientToolKey{}, tool)
+}
+
+// GuardClientTool returns the client tool WithGuardClientTool stored on
+// ctx, "" when the proxy could not resolve one.
+func GuardClientTool(ctx context.Context) string {
+	v, _ := ctx.Value(guardClientToolKey{}).(string)
+	return v
+}
+
 // GuardRequestResult is the §8.2 egress decision the proxy acts on.
 type GuardRequestResult struct {
 	// Action is "" or "allow" (forward unchanged), "mask" (forward

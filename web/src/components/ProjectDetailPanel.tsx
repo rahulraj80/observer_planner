@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useUrlTab } from "@/lib/useUrlTab";
 import {
+  Activity,
   BookOpen,
   DollarSign,
   GitCommitHorizontal,
@@ -10,7 +13,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  SegmentedControl,
   SlideOver,
   TabStrip,
   TruncatedPath,
@@ -18,7 +20,9 @@ import {
 } from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
 import { useApi } from "@/lib/useApi";
+import { costLabel, dollarsShown } from "@/lib/format";
 import type { ProjectDetail } from "@/lib/types";
+import { projectDrawerFilterNote, windowKey, type WindowParams } from "@/lib/projectDrawer";
 import { OverviewTab } from "@/components/projectdetail/OverviewTab";
 import { SpendTab } from "@/components/projectdetail/SpendTab";
 import { CommitsTab } from "@/components/projectdetail/CommitsTab";
@@ -29,18 +33,24 @@ import { SkillsTab } from "@/components/projectdetail/SkillsTab";
 
 // ProjectDetailPanel — the Projects-page list->detail drawer (plan
 // docs/plans/projects-page-roi-and-commit-alignment-plan-2026-09-21.md §3.5).
-// Mirrors SessionDetailPanel's shell shape (persistent header + window
-// picker, a TabStrip, per-tab components under components/projectdetail/)
-// but keeps the active tab in LOCAL state rather than the URL — this panel
-// is deep-linked only by `?project=<id>` (the Projects page's own route
-// state), and a second `?tab=` slot would collide with the one
-// SessionDetailPanel already owns should both ever be open at once via
-// cross-navigation. Each tab fetches its own data lazily (on first visit),
+// Mirrors SessionDetailPanel's shell shape (persistent header, a TabStrip,
+// per-tab components under components/projectdetail/). The window is the
+// page's global window (REVIEW-3 P3-25, T-485): every tab reads the same
+// since / until, hours or days the list does, so a closed range in the
+// filter bar bounds the drawer too. The routes are project-grain and do not
+// narrow by tool or model; a set Tool or Model filter is named in a note.
+// Each tab fetches its own data lazily (on first visit),
 // simple conditional rendering rather than SessionDetailPanel's
 // keep-mounted-hidden pattern — none of these tabs poll live, so losing
 // in-flight state on a tab flick costs nothing but one refetch.
 
-type TabId = "overview" | "spend" | "commits" | "prompts" | "tasks" | "guidance" | "skills";
+// The drawer's tab lives in `?dtab=` (platform tabs plan §2.2: "Projects
+// drawer tab to the URL"), beside the page's `?project=`: a REPLACE write
+// (a drawer tab is an in-place view, not navigation), the default is the
+// param's absence, and an unknown value falls back to Overview.
+const TAB_IDS = ["overview", "spend", "commits", "prompts", "tasks", "guidance", "skills"] as const;
+type TabId = (typeof TAB_IDS)[number];
+const TAB_PARAM = "dtab";
 
 // One glyph per project-detail tab. Tasks shares ListTodo with the session
 // drawer's Tasks tab on purpose: the same concept keeps the same icon.
@@ -66,39 +76,64 @@ const TABS: TabDef<TabId>[] = (
   ] as const
 ).map((t) => ({ ...t, icon: TAB_ICONS[t.id] }));
 
-const WINDOW_OPTIONS = [
-  { value: "7", label: "7d" },
-  { value: "30", label: "30d" },
-  { value: "90", label: "90d" },
-] as const;
+// viewTabs names the Spend tab under the developer cost display: in the
+// org's token-usage view (format.ts cost affordances) it shows turns and
+// counts only, so it is "Activity" with a non-dollar glyph. Resolved at
+// render: the display mode is set after this module loads.
+function viewTabs(): TabDef<TabId>[] {
+  if (dollarsShown()) return TABS;
+  return TABS.map((t) => (t.id === "spend" ? { ...t, label: costLabel("Spend", "Activity"), icon: Activity } : t));
+}
 
 export function ProjectDetailPanel({
   projectId,
   open,
   onClose,
+  win,
+  tool,
+  model,
 }: {
   projectId: number | null;
   open: boolean;
   onClose: () => void;
+  /** The page's global window (windowParams of the filter bar). */
+  win: WindowParams;
+  tool?: string;
+  model?: string;
 }) {
-  const [tab, setTab] = useState<TabId>("overview");
-  const [days, setDays] = useState(30);
+  const [tab, setTab] = useUrlTab(TAB_IDS, "overview", { param: TAB_PARAM, history: "replace" });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const hasTabParam = searchParams.has(TAB_PARAM);
 
-  // Reset to a clean landing state whenever a DIFFERENT project opens —
-  // otherwise closing project A on the Commits tab and opening project B
-  // would land straight on B's Commits tab.
+  // A clean landing state for every project: closing the drawer drops
+  // `?dtab=` (so opening project B after leaving A on Commits lands on
+  // Overview), and switching straight from one project to another resets it.
+  // A cold deep link (`?project=5&dtab=commits`) keeps its tab.
   useEffect(() => {
-    if (projectId != null) {
-      setTab("overview");
-    }
-  }, [projectId]);
+    if (open || !hasTabParam) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(TAB_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [open, hasTabParam, setSearchParams]);
+  const prevProject = useRef<number | null>(projectId);
+  useEffect(() => {
+    const prev = prevProject.current;
+    prevProject.current = projectId;
+    if (prev != null && projectId != null && prev !== projectId) setTab("overview");
+  }, [projectId, setTab]);
 
   const detail = useApi<ProjectDetail>(
     projectId != null ? `/api/project/${projectId}` : null,
-    { days },
-    [projectId, days],
+    { ...win },
+    [projectId, windowKey(win)],
   );
   const d = detail.data;
+  const filterNote = projectDrawerFilterNote(tool, model);
 
   return (
     <SlideOver
@@ -126,13 +161,8 @@ export function ProjectDetailPanel({
           <div className="text-[11px] text-fg-3">
             {d ? `${d.project.tools.join(", ") || "no tools recorded"}` : " "}
           </div>
-          <SegmentedControl
-            options={WINDOW_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-            value={String(days)}
-            onChange={(v) => setDays(Number(v))}
-            size="sm"
-          />
         </div>
+        {filterNote ? <div className="mb-3 text-[11px] text-fg-3">{filterNote}</div> : null}
 
         <ChartState
           loading={!detail.data && !detail.error && (detail.loading || projectId == null)}
@@ -151,7 +181,7 @@ export function ProjectDetailPanel({
         {d && (
           <>
             <TabStrip
-              tabs={TABS}
+              tabs={viewTabs()}
               value={tab}
               onChange={setTab}
               idPrefix="projectdetail"
@@ -160,12 +190,12 @@ export function ProjectDetailPanel({
 
             <div className="mt-5">
               {tab === "overview" && <OverviewTab d={d} />}
-              {tab === "spend" && <SpendTab projectId={d.project.id} days={days} />}
-              {tab === "commits" && <CommitsTab projectId={d.project.id} days={days} />}
-              {tab === "prompts" && <PromptsTab projectId={d.project.id} days={days} />}
-              {tab === "tasks" && <TasksTab projectId={d.project.id} days={days} />}
+              {tab === "spend" && <SpendTab projectId={d.project.id} win={win} />}
+              {tab === "commits" && <CommitsTab projectId={d.project.id} win={win} />}
+              {tab === "prompts" && <PromptsTab projectId={d.project.id} win={win} />}
+              {tab === "tasks" && <TasksTab projectId={d.project.id} win={win} />}
               {tab === "guidance" && <GuidanceTab root={d.project.root_path} />}
-              {tab === "skills" && <SkillsTab projectId={d.project.id} days={days} />}
+              {tab === "skills" && <SkillsTab projectId={d.project.id} win={win} />}
             </div>
           </>
         )}

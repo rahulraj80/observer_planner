@@ -52,7 +52,7 @@ func TestWatchSessionLifetimePositiveDeadlineUnfloored(t *testing.T) {
 		t.Fatal("viewer not cancelled at the short positive deadline")
 	}
 	if elapsed := time.Since(start); elapsed >= 400*time.Millisecond {
-		t.Fatalf("cancel took %v — a known positive deadline (20ms) must NOT be raised to the 1s floor", elapsed)
+		t.Fatalf("cancel took %v - a known positive deadline (20ms) must NOT be raised to the 1s floor", elapsed)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestWatchSessionLifetimeNonPositiveDeadlineFloored(t *testing.T) {
 		t.Fatal("viewer not cancelled after a non-positive deadline re-read")
 	}
 	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
-		t.Fatalf("non-positive deadline re-read after %v — the floor must throttle it to ~60ms", elapsed)
+		t.Fatalf("non-positive deadline re-read after %v - the floor must throttle it to ~60ms", elapsed)
 	}
 }
 

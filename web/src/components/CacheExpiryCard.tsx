@@ -1,5 +1,5 @@
 import { useApi } from "@/lib/useApi";
-import { fmtInt, fmtUSD } from "@/lib/format";
+import { dollarsShown, fmtInt, fmtUSD, maskDollarAmounts } from "@/lib/format";
 import { HelpInd } from "@/components/HelpInd";
 import { Icon, ModelId, ProgressRing } from "@/components/primitives";
 import type { CacheStatusResponse, CacheWindowStatus } from "@/lib/types";
@@ -83,17 +83,21 @@ function CacheExpiryRow({
           <ModelId model={w.window.model} mono={false} className="min-w-0" />
         </span>
         <span className="shrink-0 text-fg-3">{fmtInt(w.window.prefix_tokens)} tok</span>
-        <span
-          className={`shrink-0 font-medium ${
-            w.severity === "ok" ? "text-fg-2" : "text-warn"
-          }`}
-        >
-          {fmtUSD(w.value_at_risk_usd)}
-        </span>
+        {/* Value at risk is dollars only: dropped in the org's token-usage
+            view (format.ts cost affordances); the prefix tokens stay. */}
+        {dollarsShown() && (
+          <span
+            className={`shrink-0 font-medium ${
+              w.severity === "ok" ? "text-fg-2" : "text-warn"
+            }`}
+          >
+            {fmtUSD(w.value_at_risk_usd)}
+          </span>
+        )}
       </div>
       {adviceShown && (
         <div className="mt-0.5 pl-[7.25rem] text-[10px] text-info">
-          💡 {w.recommendation.rationale}
+          💡 {maskDollarAmounts(w.recommendation.rationale)}
         </div>
       )}
     </div>

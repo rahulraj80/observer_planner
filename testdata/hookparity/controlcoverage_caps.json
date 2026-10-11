@@ -1,0 +1,3332 @@
+{
+  "aider": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "antigravity": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "vendor_only",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "antigravity-cli": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "chatgpt-web": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": ""
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "claude-code": {
+    "compact_lifecycle": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "wired",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "native_compile"
+    },
+    "tool_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "wired",
+      "AltSeam": ""
+    }
+  },
+  "claude-web": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": ""
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "cline": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "probe_required",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "cline-cli": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "codex": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "registered",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "command-code": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "copilot": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "copilot-cli": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "copilot-web": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": ""
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "cowork": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "crush": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "cursor": {
+    "compact_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "registered",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "deepseek": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "devin": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "droid": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "freebuff": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "gemini-cli": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "wired",
+      "AltSeam": ""
+    }
+  },
+  "gemini-web": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": ""
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "goose": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "grok": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "grokbot": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "hermes": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "vendor_only",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "junie": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "kilo-code": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "vendor_only",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "kilo-code-cli": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "vendor_only",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "kimi-code": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "kiro-cli": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "probe_required",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "kiro-crew": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "mistral-code": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "muse": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "open-interpreter": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "probe_required",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "openclaw": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "vendor_only",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "opencode": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "vendor_only",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "native_compile"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "perplexity-web": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": ""
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "pi": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "vendor_only",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "poolside": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "prime-agent": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "vendor_only",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "qoder": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "qwen-code": {
+    "compact_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "proxy"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "proxy"
+    },
+    "session_lifecycle": {
+      "State": "wired",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": "proxy"
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "zcode": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "wired",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "wired",
+      "AltSeam": "sandbox"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "vendor_only",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  },
+  "zed": {
+    "compact_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "context_inject": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "environment_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "model_call_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "notification_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "permission_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "permission_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "prompt_gate": {
+      "State": "none",
+      "AltSeam": "capture_lane"
+    },
+    "session_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "stop_gate": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "subagent_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "task_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_failure_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_gate": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_observe": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "tool_rewrite": {
+      "State": "none",
+      "AltSeam": ""
+    },
+    "turn_lifecycle": {
+      "State": "none",
+      "AltSeam": "watcher"
+    },
+    "user_message": {
+      "State": "none",
+      "AltSeam": ""
+    }
+  }
+}

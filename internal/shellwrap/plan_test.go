@@ -158,6 +158,10 @@ func TestHonestyTable(t *testing.T) {
 		{integration.WrappedCommand{Routes: false, TrafficProven: true}, HonestyLaunchOnly},
 		{integration.WrappedCommand{Routes: true, TrafficProven: false}, HonestyProofOwed},
 		{integration.WrappedCommand{Routes: true, TrafficProven: true}, HonestyRouted},
+		// A gated route (copilot-cli's BYOK lane) is never shown as plainly
+		// routed: on the product's own sign-in it launches unrouted.
+		{integration.WrappedCommand{Routes: true, TrafficProven: true, RouteConditional: true}, HonestyConditional},
+		{integration.WrappedCommand{Routes: false, RouteConditional: true}, HonestyLaunchOnly},
 	}
 	for _, tc := range cases {
 		if got, text := HonestyFor(tc.w); got != tc.want || text == "" {

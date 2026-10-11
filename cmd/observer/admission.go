@@ -75,7 +75,7 @@ func newAdmissionVerifyCmd() *cobra.Command {
 		Short: "End-to-end self-check: policy lint, judge reachability, and audit-chain integrity",
 		Long: "Run a fast end-to-end health check of the admission gate: lint the\n" +
 			"policy, ping the configured judge endpoint with a trivial judgment\n" +
-			"(skipped when no judge is configured — the deterministic layers still\n" +
+			"(skipped when no judge is configured - the deterministic layers still\n" +
 			"work), and verify the tamper-evident audit chain. Prints a PASS/FAIL\n" +
 			"table and exits non-zero if any check fails. Records nothing.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -129,7 +129,7 @@ func runAdmissionVerify(ctx context.Context, cfg config.Config, database *sql.DB
 	}
 	switch {
 	case fatal:
-		rows = append(rows, admissionVerifyRow{"policy lint", "FAIL", fmt.Sprintf("%d fatal issue(s) — see below", len(fatalMsgs))})
+		rows = append(rows, admissionVerifyRow{"policy lint", "FAIL", fmt.Sprintf("%d fatal issue(s) - see below", len(fatalMsgs))})
 	case len(issues) > 0:
 		rows = append(rows, admissionVerifyRow{"policy lint", "PASS", fmt.Sprintf("no fatal issues (%d warning(s))", len(issues))})
 	default:
@@ -140,7 +140,7 @@ func runAdmissionVerify(ctx context.Context, cfg config.Config, database *sql.DB
 	probe := obsAdmissionProbeJudge(ctx, cfg)
 	switch {
 	case probe.Off:
-		rows = append(rows, admissionVerifyRow{"judge reachability", "SKIP", "no judge configured — deterministic layers only"})
+		rows = append(rows, admissionVerifyRow{"judge reachability", "SKIP", "no judge configured - deterministic layers only"})
 	case probe.Err != "":
 		rows = append(rows, admissionVerifyRow{"judge reachability", "FAIL", fmt.Sprintf("%s (%s) unreachable: %s", probe.Model, probe.Hosting, truncateVerifyErr(probe.Err))})
 	default:
@@ -160,9 +160,9 @@ func runAdmissionVerify(ctx context.Context, cfg config.Config, database *sql.DB
 	case info.Mode == "off":
 		// Service is nil: policy failed to compile (lint FAIL already covers the
 		// why) — nothing to verify.
-		rows = append(rows, admissionVerifyRow{"audit chain", "SKIP", "policy did not compile — fix lint issues first"})
+		rows = append(rows, admissionVerifyRow{"audit chain", "SKIP", "policy did not compile - fix lint issues first"})
 	case !info.ChainOK:
-		rows = append(rows, admissionVerifyRow{"audit chain", "FAIL", fmt.Sprintf("hash chain DIVERGED (%d rows) — tamper/corruption signal", info.ChainRows)})
+		rows = append(rows, admissionVerifyRow{"audit chain", "FAIL", fmt.Sprintf("hash chain DIVERGED (%d rows) - tamper/corruption signal", info.ChainRows)})
 	default:
 		rows = append(rows, admissionVerifyRow{"audit chain", "PASS", fmt.Sprintf("%d rows, hash chain intact", info.ChainRows)})
 	}
@@ -273,7 +273,7 @@ func newAdmissionBudgetStatusCmd() *cobra.Command {
 			fmt.Fprintf(out, "proxy header:   %s\n", st.UserHeader)
 			fmt.Fprintf(out, "breaches (24h): %d\n", st.Breaches24h)
 			if len(st.TopSpenders) == 0 {
-				fmt.Fprintln(out, "top spenders:   (none — no attributed end-user spend yet)")
+				fmt.Fprintln(out, "top spenders:   (none - no attributed end-user spend yet)")
 				return nil
 			}
 			fmt.Fprintln(out, "top spenders (by month-to-date):")
@@ -301,6 +301,7 @@ func capLabel(v float64) string {
 	if v <= 0 {
 		return "off"
 	}
+	// no-bare-usd:allow (Plane A admission caps, an admin-hosted app's authored dollar caps)
 	return fmt.Sprintf("$%.2f", v)
 }
 
@@ -407,7 +408,7 @@ func newAdmissionSetupCmd() *cobra.Command {
 			"(local/no-egress by default, or a hosted provider), adopt starter usage\n" +
 			"rules, and choose observe/enforce. Zero flags on a terminal runs the\n" +
 			"interactive wizard; pass flags (or redirect stdin) for scripted setup.\n" +
-			"Judge hosting is DERIVED from base_url — there is no hosting= field.",
+			"Judge hosting is DERIVED from base_url - there is no hosting= field.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path, err := resolveAdmissionConfigPath(configPath)
 			if err != nil {
@@ -485,11 +486,11 @@ func runBatchAdmissionSetup(out io.Writer, cfg config.Config, path string, ch ad
 		fmt.Fprintf(out, "lint: %s\n", is)
 	}
 	if fatal {
-		return fmt.Errorf("admission policy has fatal lint issues — not written")
+		return fmt.Errorf("admission policy has fatal lint issues - not written")
 	}
 	printAdmissionSummary(out, newCfg)
 	if !assumeYes {
-		fmt.Fprintf(out, "\ndry run — re-run with --yes to write %s\n", path)
+		fmt.Fprintf(out, "\ndry run - re-run with --yes to write %s\n", path)
 		return nil
 	}
 	if err := config.WriteToml(path, newCfg); err != nil {
@@ -529,7 +530,7 @@ func newAdmissionStatusCmd() *cobra.Command {
 				info.Decisions24h["allow"], info.Decisions24h["flag"], info.Decisions24h["ask"], info.Decisions24h["deny"])
 			chain := "ok"
 			if !info.ChainOK {
-				chain = "BROKEN — run `observer obs admission verify`"
+				chain = "BROKEN - run `observer obs admission verify`"
 			}
 			fmt.Fprintf(out, "audit chain:    %d rows, %s\n", info.ChainRows, chain)
 			return nil
@@ -597,7 +598,7 @@ func newAdmissionLintCmd() *cobra.Command {
 			issues, fatal := obsAdmissionLintCLI(cfg)
 			out := cmd.OutOrStdout()
 			if len(issues) == 0 {
-				fmt.Fprintln(out, "policy OK — no lint issues")
+				fmt.Fprintln(out, "policy OK - no lint issues")
 				return nil
 			}
 			for _, is := range issues {

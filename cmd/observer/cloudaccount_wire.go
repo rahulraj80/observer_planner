@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -12,14 +14,14 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/cloudcontract"
 	"github.com/marmutapp/superbased-observer/internal/cloudgateway"
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 )
 
 // cloudaccount_wire.go is the ONE seam between the node dashboard and the
 // Cloud Intelligence account lane (operator directive 2026-09-03: "the sign-in
 // button on the local dashboard should be there somewhere prominent").
 //
-// It injects three plain funcs into dashboard.Options.CloudAccount:
+// It injects three plain funcs into dashapi.Options.CloudAccount:
 //
 //   - the sign-in PROBE — the same local keychain read `observer cloud status`
 //     does (cloudgateway.WorkOSSignInPresent / APITokenPresent /
@@ -55,7 +57,7 @@ type cloudAccountWire struct {
 	spawn      cloudCommandSpawner
 
 	mu       sync.Mutex
-	cached   dashboard.CloudSignInState
+	cached   dashapi.CloudSignInState
 	cachedAt time.Time
 	cacheErr error
 }
@@ -66,9 +68,9 @@ type cloudCommandSpawner func(ctx context.Context, argv []string, out io.Writer)
 
 // newCloudAccountSeams builds the dashboard seams for the daemon (`observer
 // start`) and the standalone `observer dashboard` command.
-func newCloudAccountSeams(configPath string) *dashboard.CloudAccountSeams {
+func newCloudAccountSeams(configPath string) *dashapi.CloudAccountSeams {
 	w := &cloudAccountWire{configPath: configPath, spawn: defaultCloudCommandSpawner}
-	return dashboard.NewCloudAccountSeams(w.probe, w.run, cloudGrantableProbe)
+	return dashapi.NewCloudAccountSeams(w.probe, w.run, cloudGrantableProbe)
 }
 
 // cloudCommandArgs composes the child argv for a verb: `cloud <verb>` plus the
@@ -86,20 +88,20 @@ func cloudCommandArgs(verb string, args []string, configPath string) []string {
 	return out
 }
 
-// cloudGrantableProbe implements dashboard.CloudGrantableProbe: it reports
+// cloudGrantableProbe implements dashapi.CloudGrantableProbe: it reports
 // every FEATURE-lane purpose's standing-grant eligibility, mirroring
 // cloudconsent.go's cloudPrintGrantableHelp exactly (same skip of the
 // bootstrap lane, same two calls into internal/cloudgateway's purpose-rule
 // table). It is a pure lookup over cloudcontract's closed purpose vocabulary —
 // no config, no I/O — so it needs no receiver on cloudAccountWire.
-func cloudGrantableProbe() []dashboard.CloudGrantable {
-	var out []dashboard.CloudGrantable
+func cloudGrantableProbe() []dashapi.CloudGrantable {
+	var out []dashapi.CloudGrantable
 	for _, p := range cloudcontract.AllPurposes() {
 		if lane, ok := cloudgateway.LaneFor(p); !ok || lane == cloudgateway.LaneBootstrap {
 			continue
 		}
 		ok, reason := cloudgateway.StandingGrantable(p)
-		out = append(out, dashboard.CloudGrantable{Purpose: string(p), OK: ok, Reason: reason})
+		out = append(out, dashapi.CloudGrantable{Purpose: string(p), OK: ok, Reason: reason})
 	}
 	return out
 }
@@ -119,7 +121,7 @@ func defaultCloudCommandSpawner(ctx context.Context, argv []string, out io.Write
 }
 
 // probe reports the local sign-in state, cached for cloudAccountProbeTTL.
-func (w *cloudAccountWire) probe() (dashboard.CloudSignInState, error) {
+func (w *cloudAccountWire) probe() (dashapi.CloudSignInState, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if !w.cachedAt.IsZero() && time.Since(w.cachedAt) < cloudAccountProbeTTL {
@@ -134,16 +136,16 @@ func (w *cloudAccountWire) probe() (dashboard.CloudSignInState, error) {
 // from the dashboard a moment ago counts), resolve the same cloud host as the
 // login subprocess, and read its scoped credentials. Gateway construction and
 // presence checks are local; providing the host does not make a network call.
-func probeCloudSignIn(configPath string) (dashboard.CloudSignInState, error) {
+func probeCloudSignIn(configPath string) (dashapi.CloudSignInState, error) {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
 	if err != nil {
-		return dashboard.CloudSignInState{}, fmt.Errorf("load config: %w", err)
+		return dashapi.CloudSignInState{}, fmt.Errorf("load config: %w", err)
 	}
 	gw, err := openCloudGateway(cfg, resolveCloudBaseURL("", cfg), "", nil, nil)
 	if err != nil {
-		return dashboard.CloudSignInState{}, err
+		return dashapi.CloudSignInState{}, err
 	}
-	return dashboard.CloudSignInState{
+	return dashapi.CloudSignInState{
 		APITokenPresent:     gw.APITokenPresent(),
 		WorkOSSignInPresent: gw.WorkOSSignInPresent(),
 		CredentialBackend:   gw.CredentialBackend(),

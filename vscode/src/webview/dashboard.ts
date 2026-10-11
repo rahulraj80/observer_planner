@@ -22,10 +22,14 @@ export class DashboardPanel implements vscode.Disposable {
   private readonly daemon: DaemonManager;
   private readonly disposables: vscode.Disposable[] = [];
   private disposed = false;
+  // The dashboard route the iframe opens (the walkthrough's "Choose
+  // components" step opens /settings/components).
+  private route: string;
 
-  static createOrShow(daemon: DaemonManager): DashboardPanel {
+  static createOrShow(daemon: DaemonManager, route = '/'): DashboardPanel {
     const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.Active;
     if (DashboardPanel.current) {
+      DashboardPanel.current.route = dashboardRoute(route);
       DashboardPanel.current.panel.reveal(column);
       DashboardPanel.current.render();
       return DashboardPanel.current;
@@ -37,13 +41,14 @@ export class DashboardPanel implements vscode.Disposable {
       portMapping: [{ webviewPort: port, extensionHostPort: port }],
       localResourceRoots: [],
     });
-    DashboardPanel.current = new DashboardPanel(panel, daemon);
+    DashboardPanel.current = new DashboardPanel(panel, daemon, dashboardRoute(route));
     return DashboardPanel.current;
   }
 
-  private constructor(panel: vscode.WebviewPanel, daemon: DaemonManager) {
+  private constructor(panel: vscode.WebviewPanel, daemon: DaemonManager, route: string) {
     this.panel = panel;
     this.daemon = daemon;
+    this.route = route;
 
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
 
@@ -65,7 +70,7 @@ export class DashboardPanel implements vscode.Disposable {
     this.panel.webview.html =
       state.status === 'idle'
         ? renderIdleHtml(nonce, state)
-        : renderLiveHtml(nonce, state);
+        : renderLiveHtml(nonce, state, this.route);
   }
 
   private async handleMessage(msg: unknown): Promise<void> {
@@ -112,9 +117,17 @@ function buildCsp(nonce: string): string {
   ].join('; ');
 }
 
-function renderLiveHtml(nonce: string, state: DaemonState): string {
+// dashboardRoute keeps a requested route to a same-origin path: one leading
+// slash, no scheme or host, so a caller can never point the iframe elsewhere.
+export function dashboardRoute(route: string): string {
+  const r = (route || '/').trim();
+  if (!r.startsWith('/') || r.startsWith('//') || r.includes('\\')) return '/';
+  return r;
+}
+
+function renderLiveHtml(nonce: string, state: DaemonState, route = '/'): string {
   const csp = buildCsp(nonce);
-  const iframeSrc = `http://127.0.0.1:${state.dashboardPort}/`;
+  const iframeSrc = `http://127.0.0.1:${state.dashboardPort}${dashboardRoute(route)}`;
   return `<!doctype html>
 <html lang="en">
   <head>

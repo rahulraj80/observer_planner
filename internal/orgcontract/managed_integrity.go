@@ -105,7 +105,8 @@ func validCaptureRisk(label string) bool {
 		CaptureRiskHookBinaryMismatch,
 		CaptureRiskHookConfigMissing,
 		CaptureRiskCodexHookUntrusted,
-		CaptureRiskHookConfigChanged:
+		CaptureRiskHookConfigChanged,
+		CaptureRiskAgentConfigDrift:
 		return true
 	default:
 		return false

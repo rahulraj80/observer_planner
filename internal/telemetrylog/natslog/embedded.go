@@ -183,7 +183,7 @@ func ValidateEmbeddedAuth(listen string, o Options) error {
 		return nil
 	}
 	if hasUnenforcedCredentialFile(o) {
-		return fmt.Errorf("natslog: embedded_listen %q is not loopback and only a creds_file/nkey_seed_file is configured; the embedded engine does not wire those into its auth — set [log].token or [log].user + user password (password_env), or use engine = \"nats\" with an authenticated external server", listen)
+		return fmt.Errorf("natslog: embedded_listen %q is not loopback and only a creds_file/nkey_seed_file is configured; the embedded engine does not wire those into its auth - set [log].token or [log].user + user password (password_env), or use engine = \"nats\" with an authenticated external server", listen)
 	}
 	return fmt.Errorf("natslog: embedded_listen %q is not loopback and no credentials are configured; set [log].token/user or use engine = \"nats\" with an authenticated external server", listen)
 }

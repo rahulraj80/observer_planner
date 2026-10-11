@@ -16,14 +16,17 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/browserhost"
 	"github.com/marmutapp/superbased-observer/internal/browserhost/hostfiles"
+	"github.com/marmutapp/superbased-observer/internal/clientwire"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/guard/compile"
 	"github.com/marmutapp/superbased-observer/internal/hook"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/mcp"
+	"github.com/marmutapp/superbased-observer/internal/mcpregister"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/proxyroute"
+	"github.com/marmutapp/superbased-observer/internal/routeprov"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -83,6 +86,8 @@ func newInitCmd() *cobra.Command {
 		flagWinClaudeHome    string
 		flagWinCodexHome     string
 		flagWinCursorHome    string
+		flagOTLPExport       []string
+		flagComponents       initComponentFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -94,6 +99,12 @@ func newInitCmd() *cobra.Command {
 			}
 			resolvedConfig, err := resolveInitConfigPath(flagConfigPath)
 			if err != nil {
+				return err
+			}
+			// Component selection first (--components/--with/--without), so
+			// every wiring step below sees the operator's chosen set and
+			// never writes an inactive component's entries.
+			if err := flagComponents.apply(cmd.Context(), cmd.OutOrStdout(), resolvedConfig, flagDryRun); err != nil {
 				return err
 			}
 			// Validate the supplied extension id(s) up front (before any
@@ -122,6 +133,9 @@ func newInitCmd() *cobra.Command {
 			browserRequested := flagBrowser || flagBrowserExtID != ""
 			anyClassicFlagEarly := flagClaudeCode || flagCodex || flagCursor || flagCline
 			if browserRequested && !anyClassicFlagEarly && !flagAll && !flagHermes {
+				if !flagUninstall && !initGateFor(resolvedConfig).allow(cmd.OutOrStdout(), true, "browser", "capture.browser") {
+					return nil
+				}
 				winHomes, winDistro, newReg := productionWindowsBrowserInputs()
 				return runBrowserOnlyInit(cmd.OutOrStdout(), cmd.InOrStdin(), browserOnlyOptions{
 					BinaryPath:          binary,
@@ -142,19 +156,28 @@ func newInitCmd() *cobra.Command {
 			if cmd.Flags().NFlag() == 0 && stdinIsTerminal() && stdoutIsTerminal() {
 				winHomes, winDistro, newReg := productionWindowsBrowserInputs()
 				return runInteractiveInit(cmd.OutOrStdout(), cmd.InOrStdin(), interactiveInitOptions{
+					Components:          initChooserService(resolvedConfig),
 					BinaryPath:          binary,
 					ConfigPath:          resolvedConfig,
-					ProxyPort:           flagProxyPort,
+					ProxyPort:           initProxyPort(cmd.Flags().Changed("proxy-port"), flagProxyPort, resolvedConfig),
 					WindowsBrowserHomes: winHomes,
 					WSLDistro:           winDistro,
 					NewWindowsRegistry:  newReg,
 				})
 			}
 			out := cmd.OutOrStdout()
+			// Non-interactive: the defaults stay; one line says where to
+			// choose (modular packaging 7.1).
+			if !flagComponents.set() && !flagUninstall {
+				noteComponentChoice(out, resolvedConfig)
+			}
 			// Hermes lives on a separate install path (~/.hermes/plugins/) so
-			// it isn't enumerated by hook.Registry / mcp.Registrar today;
-			// handled out-of-band below. --all opts it in too.
-			runHermes := flagHermes || flagAll
+			// it isn't enumerated by hook.Registry / mcpregister.Registrar today;
+			// handled out-of-band below. --all opts it in only when Hermes
+			// is detected (its home exists, hook.Registry.InstalledOutOfBand),
+			// the same rule --all applies to every other tool; an explicit
+			// --hermes installs regardless.
+			runHermes := flagHermes || (flagAll && hermesDetected(binary))
 			// When the operator passes ONLY --hermes (no other per-tool flag,
 			// no --all), skip the classic wire entirely — they explicitly
 			// asked for hermes, not for "init everything detected plus
@@ -164,11 +187,18 @@ func newInitCmd() *cobra.Command {
 			// testing.
 			anyClassicFlag := flagClaudeCode || flagCodex || flagCursor || flagCline
 			hermesOnly := flagHermes && !anyClassicFlag && !flagAll
+			// --otlp-export alone (T-537) wires only the named tools'
+			// exporters, like --hermes alone: never "init everything".
+			if len(flagOTLPExport) > 0 && !anyClassicFlag && !flagAll && !flagHermes && !flagStatusline {
+				return runOTLPExportInit(out, resolvedConfig, flagOTLPExport, flagDryRun, flagUninstall)
+			}
 			if !hermesOnly {
 				winHomes, winDistro, newReg := productionWindowsBrowserInputs()
+				var wireReport WireReport
 				lines, claudeHint, codexHint, codexHooksHint, err := wireAIClients(WireAIClientsOptions{
+					RouteWriter:         routeprov.WriterInit,
 					ConfigPath:          resolvedConfig,
-					ProxyPort:           flagProxyPort,
+					ProxyPort:           initProxyPort(cmd.Flags().Changed("proxy-port"), flagProxyPort, resolvedConfig),
 					DryRun:              flagDryRun,
 					Force:               flagForce,
 					SkipHooks:           flagSkipHooks,
@@ -187,17 +217,23 @@ func newInitCmd() *cobra.Command {
 					WindowsBrowserHomes: winHomes,
 					WSLDistro:           winDistro,
 					NewWindowsRegistry:  newReg,
+					Report:              &wireReport,
 				})
 				if err != nil {
 					return err
 				}
-				// nil lines ⇔ wireAIClients selected no tools (it returns
-				// silently); the CLI keeps its explicit message. A single
-				// empty-string line means tools WERE selected but every
-				// registration was skipped or silent — print nothing,
-				// matching the pre-dedup inline loop.
-				if lines == nil && !runHermes {
-					fmt.Fprintln(out, "no tools selected and none auto-detected — pass --claude-code / --cursor / --codex / --hermes / --all")
+				// No tool selected: the CLI keeps its explicit message, after
+				// any component-gate notes (T-744: an inactive MCP component's
+				// "mcp skipped" note used to stand in for the whole answer, so
+				// `init --all` on a machine with no AI tool never said so). A
+				// single empty-string line means tools WERE selected but every
+				// registration was skipped or silent: print nothing, matching
+				// the pre-dedup inline loop.
+				if (lines == nil || wireReport.NoTools) && !runHermes {
+					for _, line := range lines {
+						fmt.Fprintln(out, line)
+					}
+					fmt.Fprintln(out, noToolsLine("wire", flagAll, "--claude-code / --cursor / --codex / --hermes / --all"))
 					return nil
 				}
 				if len(lines) != 1 || lines[0] != "" {
@@ -257,7 +293,10 @@ func newInitCmd() *cobra.Command {
 			// already computed (reusing initSelectedTools, the one place that
 			// selection logic lives) so `--codex --statusline` alone (claude-code
 			// neither requested nor detected) is correctly a no-op.
-			if flagStatusline {
+			// An inactive statusline component writes nothing (uninstall
+			// still runs: removing is always allowed).
+			statuslineAllowed := flagUninstall || initGateFor(resolvedConfig).allow(out, flagStatusline, "statusline", "integration.statusline")
+			if flagStatusline && statuslineAllowed {
 				selected := initSelectedTools(binary, resolvedConfig, flagAll, flagClaudeCode, flagCodex, flagCursor, flagCline)
 				if err := runStatuslineInit(out, hook.Options{
 					BinaryPath:        binary,
@@ -266,6 +305,12 @@ func newInitCmd() *cobra.Command {
 					Force:             flagForce,
 					WindowsClaudeHome: flagWinClaudeHome,
 				}, selected, flagUninstall); err != nil {
+					return err
+				}
+			}
+			// T-537: opt-in exporter wiring for the explicitly named tools.
+			if len(flagOTLPExport) > 0 {
+				if err := runOTLPExportInit(out, resolvedConfig, flagOTLPExport, flagDryRun, flagUninstall); err != nil {
 					return err
 				}
 			}
@@ -284,26 +329,28 @@ func newInitCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flagClaudeCode, "claude-code", false, "Register hooks + MCP for Claude Code")
 	cmd.Flags().BoolVar(&flagCodex, "codex", false, "Register MCP + hooks for OpenAI Codex (sets [features].hooks=true; per-hook trust approval still required via codex /hooks one-time)")
 	cmd.Flags().BoolVar(&flagCursor, "cursor", false, "Register hooks + MCP for Cursor")
-	cmd.Flags().BoolVar(&flagCline, "cline", false, "Register for Cline / Roo Code (no hooks; captured via file watcher)")
+	cmd.Flags().BoolVar(&flagCline, "cline", false, "Register for Cline / Roo Code (captured via file watcher; the ~/.cline/hooks PreToolUse guard belongs to the Cline CLI and is written by --all on macOS/Linux)")
 	cmd.Flags().BoolVar(&flagHermes, "hermes", false, "Register Python plugin + MCP entry for Nous Research's Hermes Agent (~/.hermes/plugins/superbased-observer/ + ~/.hermes/config.yaml)")
-	cmd.Flags().BoolVar(&flagStatusline, "statusline", false, "Register the observer statusline (writes Claude Code settings.json's top-level \"statusLine\" key to run `observer statusline`) — a one-line cost/session status; opt-in only, never implied by --all and never registered by `observer start`")
-	cmd.Flags().BoolVar(&flagUninstall, "uninstall", false, "Uninstall instead of install — honoured for --hermes and --statusline")
+	flagComponents.register(cmd)
+	cmd.Flags().BoolVar(&flagStatusline, "statusline", false, "Register the observer statusline (writes Claude Code settings.json's top-level \"statusLine\" key to run `observer statusline`) - a one-line cost/session status; opt-in only, never implied by --all and never registered by `observer start`")
+	cmd.Flags().BoolVar(&flagUninstall, "uninstall", false, "Uninstall instead of install - honoured for --hermes, --statusline and --otlp-export")
+	cmd.Flags().StringSliceVar(&flagOTLPExport, "otlp-export", nil, "Point these tools' own OpenTelemetry exporters at this node's OTLP receiver (comma-separated, e.g. qwen-code,codex; needs [ingest.otel] enabled). Opt-in only: never implied by --all and never written by `observer start`. Edits only the exporter keys of the tool's config (a credential in the same file is never read out or changed); --dry-run previews, --uninstall removes")
 	cmd.Flags().BoolVar(&flagAll, "all", false, "Select every detected tool")
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Print intended changes without writing any files")
 	cmd.Flags().BoolVar(&flagForce, "force", false, "Overwrite existing non-observer hook / MCP entries")
 	cmd.Flags().BoolVar(&flagSkipHooks, "skip-hooks", false, "Only register MCP, leave hooks alone")
 	cmd.Flags().BoolVar(&flagSkipMCP, "skip-mcp", false, "Only register hooks, leave MCP alone")
-	cmd.Flags().BoolVar(&flagSkipProxy, "skip-proxy-route", false, "Skip writing per-tool proxy routing config (e.g. codex base_url) — print a hint instead")
+	cmd.Flags().BoolVar(&flagSkipProxy, "skip-proxy-route", false, "Skip writing per-tool proxy routing config (e.g. codex base_url) - print a hint instead")
 	cmd.Flags().BoolVar(&flagSkipExtension, "skip-extension", false, "Skip writing the browser extension's per-browser native-messaging host manifest")
 	cmd.Flags().BoolVar(&flagBrowser, "browser", false, "Install ONLY the browser-capture native-messaging host + per-browser manifest (skips AI-tool hooks/MCP/proxy). Pair with --browser-extension-id for a complete manifest")
-	cmd.Flags().StringVar(&flagBrowserExtID, "browser-extension-id", "", "Chromium extension id(s) (32 lowercase a-p chars each from chrome://extensions after load-unpacked) to bake into the native-messaging host manifest allowed_origins. Comma-separate multiple ids — an unpacked extension's id is path-derived, so the same extension under WSL Chrome vs Windows Chrome needs both ids in one manifest")
+	cmd.Flags().StringVar(&flagBrowserExtID, "browser-extension-id", "", "Chromium extension id(s) (32 lowercase a-p chars each from chrome://extensions after load-unpacked) to bake into the native-messaging host manifest allowed_origins. Comma-separate multiple ids - an unpacked extension's id is path-derived, so the same extension under WSL Chrome vs Windows Chrome needs both ids in one manifest")
 	cmd.Flags().BoolVar(&flagGuard, "guard", true, "Compile guard policy into each selected tool's native permission rules (guard spec §13.2); --guard=false skips the guard side of init")
 	cmd.Flags().BoolVar(&flagSkipGuardDialect, "skip-guard-dialect", false, "Skip writing native guard permission rules into tool configs (narrower than --guard=false)")
-	cmd.Flags().IntVar(&flagProxyPort, "proxy-port", 8820, "Observer proxy port to wire into per-tool routing config")
-	cmd.Flags().StringVar(&flagConfigPath, "config", "", "Path to observer config.toml — when set, registered hook + MCP commands include --config so they read the same config as the proxy you'll run against this install")
+	cmd.Flags().IntVar(&flagProxyPort, "proxy-port", 8820, "Observer proxy port to wire into per-tool routing config (default: [proxy].port from the config, else 8820)")
+	cmd.Flags().StringVar(&flagConfigPath, "config", "", "Path to observer config.toml - when set, registered hook + MCP commands include --config so they read the same config as the proxy you'll run against this install")
 	cmd.Flags().StringVar(&flagWinClaudeHome, "windows-claude-home", "", "Windows user home (e.g. /mnt/c/Users/<you>) holding the .claude to route/hook when a WSL daemon can't safely auto-pick among several Windows homes (see `observer doctor`)")
 	cmd.Flags().StringVar(&flagWinCodexHome, "windows-codex-home", "", "Windows user home (e.g. /mnt/c/Users/<you>) holding the .codex to route when a WSL daemon can't safely auto-pick among several Windows homes")
-	cmd.Flags().StringVar(&flagWinCursorHome, "windows-cursor-home", "", "Windows user home (e.g. /mnt/c/Users/<you>) holding the .cursor to hook when a WSL daemon can't safely auto-pick among several Windows homes (cursor-windows is hooks-only — no proxy route)")
+	cmd.Flags().StringVar(&flagWinCursorHome, "windows-cursor-home", "", "Windows user home (e.g. /mnt/c/Users/<you>) holding the .cursor to hook when a WSL daemon can't safely auto-pick among several Windows homes (cursor-windows is hooks-only - no proxy route)")
 	return cmd
 }
 
@@ -313,11 +360,11 @@ func newInitCmd() *cobra.Command {
 // writes; any construction failure selects nothing — a detection
 // problem must never fail the init (the initGuardDialects contract).
 func initSelectedTools(binary, configPath string, all, cc, codex, cursor, cline bool) []string {
-	hookReg, err := hook.NewRegistry(hook.Options{BinaryPath: binary, DryRun: true, ConfigPath: configPath})
+	hookReg, err := hook.NewRegistry(hook.Options{BinaryPath: binary, DryRun: true, ConfigPath: configPath, Getenv: os.Getenv})
 	if err != nil {
 		return nil
 	}
-	mcpReg, err := mcp.NewRegistrar(mcp.RegisterOptions{BinaryPath: binary, DryRun: true, ConfigPath: configPath})
+	mcpReg, err := mcpregister.NewRegistrar(mcpregister.RegisterOptions{BinaryPath: binary, DryRun: true, ConfigPath: configPath})
 	if err != nil {
 		return nil
 	}
@@ -372,7 +419,7 @@ func initGuardDialects(ctx context.Context, out io.Writer, tools []string, confi
 			defer database.Close()
 			st = store.New(database)
 		} else {
-			fmt.Fprintf(out, "guard dialects: WARN observer DB unavailable (%v) — compiling without pinning\n", derr)
+			fmt.Fprintf(out, "guard dialects: WARN observer DB unavailable (%v) - compiling without pinning\n", derr)
 		}
 	}
 	r := newDialectRunner(configGuardDialects{
@@ -395,13 +442,23 @@ func initGuardDialects(ctx context.Context, out io.Writer, tools []string, confi
 			fmt.Fprintf(out, "guard dialect %s: wrote %d native entr%s (%d added, %d retired) → %s\n",
 				rep.Target.Dialect, rep.Entries, pluralIES(rep.Entries), len(rep.Added), len(rep.Removed), rep.Path)
 		default:
-			fmt.Fprintf(out, "guard dialect %s: already in sync (%d native entr%s) — %s\n",
+			fmt.Fprintf(out, "guard dialect %s: already in sync (%d native entr%s) - %s\n",
 				rep.Target.Dialect, rep.Entries, pluralIES(rep.Entries), rep.Path)
 		}
 		for _, issue := range rep.Issues {
 			fmt.Fprintf(out, "guard dialect: ISSUE: %s\n", issue)
 		}
 	}
+}
+
+// hermesDetected reports whether Hermes' vendor home exists (the
+// out-of-band detection `observer init --all` selects Hermes by).
+func hermesDetected(binary string) bool {
+	reg, err := hook.NewRegistry(hook.Options{BinaryPath: binary, DryRun: true, Getenv: os.Getenv})
+	if err != nil {
+		return false
+	}
+	return containsString("hermes", reg.InstalledOutOfBand())
 }
 
 // runHermesInit installs (or uninstalls when uninstall=true) the
@@ -489,11 +546,11 @@ func runStatuslineInit(out io.Writer, opts hook.Options, selected []string, unin
 	native := contains(selected, "claude-code")
 	windowsOnly := !native && contains(selected, "claude-code-windows")
 	if windowsOnly {
-		fmt.Fprintln(out, "statusline: claude-code was detected only on the Windows side of a cross-OS WSL setup — v1 scope is native-OS only, skipping (see docs/observer-statusline.md). Run `observer init --statusline` from the OS where Claude Code itself runs.")
+		fmt.Fprintln(out, "statusline: claude-code was detected only on the Windows side of a cross-OS WSL setup - v1 scope is native-OS only, skipping (see docs/observer-statusline.md). Run `observer init --statusline` from the OS where Claude Code itself runs.")
 		return nil
 	}
 	if !native {
-		fmt.Fprintln(out, "statusline: claude-code not selected/detected — nothing to register (pass --claude-code, or --all, or run this on a host with ~/.claude)")
+		fmt.Fprintln(out, "statusline: claude-code not selected/detected - nothing to register (pass --claude-code, or --all, or run this on a host with ~/.claude)")
 		return nil
 	}
 
@@ -509,7 +566,7 @@ func runStatuslineInit(out io.Writer, opts hook.Options, selected []string, unin
 		}
 		if res.Skipped {
 			if len(res.HooksKept) > 0 {
-				fmt.Fprintf(out, "statusline: %s has a non-observer \"statusLine\" entry — left untouched\n", res.ConfigPath)
+				fmt.Fprintf(out, "statusline: %s has a non-observer \"statusLine\" entry - left untouched\n", res.ConfigPath)
 			} else {
 				fmt.Fprintf(out, "statusline: nothing to remove in %s\n", res.ConfigPath)
 			}
@@ -538,7 +595,7 @@ func runStatuslineInit(out io.Writer, opts hook.Options, selected []string, unin
 	fmt.Fprintf(out, "statusline: %s claude-code \"statusLine\" -> %s statusline (in %s)\n", verb, opts.BinaryPath, res.ConfigPath)
 	// §4.2: the disclaimer is said ONCE, here, at registration time —
 	// never per-render (a one-line statusline has no room for it).
-	fmt.Fprintln(out, "statusline: dollar figures it prints are an estimated list price, not invoiced — see `observer statusline --help`")
+	fmt.Fprintln(out, "statusline: dollar figures it prints are an estimated list price, not invoiced - see `observer statusline --help`")
 	return nil
 }
 
@@ -549,12 +606,23 @@ func runStatuslineInit(out io.Writer, opts hook.Options, selected []string, unin
 // routing for every detected tool".
 type WireAIClientsOptions struct {
 	ConfigPath string // absolute path to observer config.toml; "" = legacy mode
-	ProxyPort  int    // observer proxy port to wire into per-tool routing (0 = 8820 default)
-	DryRun     bool
-	Force      bool
-	SkipHooks  bool
-	SkipMCP    bool
-	SkipProxy  bool
+	// RouteWriter records who is writing the proxy routes (routeprov):
+	// `observer init` or the enrolment's --wire-clients step. Leaving an
+	// organization removes only the routes the enrolment wrote.
+	RouteWriter routeprov.Writer
+	ProxyPort   int // observer proxy port to wire into per-tool routing (0 = 8820 default)
+	DryRun      bool
+	Force       bool
+	SkipHooks   bool
+	SkipMCP     bool
+	SkipProxy   bool
+	// BinaryPath is the observer binary the hook, MCP and native-host
+	// entries invoke. Empty = this process's own binary (absoluteBinaryPath),
+	// which is what `observer init` means. The enrolment's --wire-clients
+	// step sets it to the running daemon's binary (T-642,
+	// enrolWireBinary) so an enrol run from another build does not move the
+	// daemon's hooks.
+	BinaryPath string
 	// SkipExtension skips the 4th consent step — writing the browser
 	// extension's per-browser native-messaging host manifest. Default off
 	// (the step runs when a Chromium browser is detected), consistent with
@@ -571,6 +639,11 @@ type WireAIClientsOptions struct {
 	HomeDir string
 	// Restrict the wire to a specific subset. Empty = every detected tool.
 	OnlyClaudeCode, OnlyCodex, OnlyCursor, OnlyCline bool
+	// WindowsOnly keeps only the cross-OS "<tool>-windows" targets of the
+	// selection: the dashboard's Windows-home control (T-421 item 4) writes
+	// the Windows side the --windows-*-home flag disambiguates, not the
+	// native tool (which has its own setup wizard).
+	WindowsOnly bool
 	// All is a convenience flag matching --all on `observer init`.
 	All bool
 	// WindowsClaudeHome / WindowsCodexHome disambiguate the cross-OS route
@@ -600,6 +673,30 @@ type WireAIClientsOptions struct {
 	WindowsBrowserHomes []string
 	WSLDistro           string
 	NewWindowsRegistry  func() (browserhost.RegistryWriter, error)
+	// Report, when set, receives what the run actually changed, for a caller
+	// whose follow-up text depends on it (the enrolment's "Claude Code now
+	// routes through the proxy" warning, T-736).
+	Report *WireReport
+}
+
+// WireReport is what one wireAIClients run left in place.
+type WireReport struct {
+	// RoutesInPlace lists the tools whose proxy route points at the proxy
+	// after this run (written now, or already set). A tool whose route was
+	// skipped, failed, or was never selected is not listed.
+	RoutesInPlace []string
+	// NoTools is set when the run selected no AI tool at all (T-744): the
+	// lines it returned are then only the component-gate notes, and the
+	// caller still owes the "found no supported AI tool" line.
+	NoTools bool
+}
+
+// noteRoute records a route result in the report.
+func (r *WireReport) noteRoute(tool string, res proxyroute.RegistrationResult) {
+	if r == nil || res.Error != nil || !(res.Added || res.AlreadySet) {
+		return
+	}
+	r.RoutesInPlace = append(r.RoutesInPlace, tool)
 }
 
 // wireAIClients runs the same hook + MCP + proxy-route registration
@@ -611,19 +708,38 @@ type WireAIClientsOptions struct {
 // Used by both newInitCmd (batch mode delegates here — the M4.2
 // follow-up landed with the post-D18 dedup) and newEnrollCmd.
 func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, codexProxyHint string, codexHooksHint bool, err error) {
-	binary, err := absoluteBinaryPath()
-	if err != nil {
-		return nil, "", "", false, err
+	binary := opts.BinaryPath
+	if binary == "" {
+		var err error
+		if binary, err = absoluteBinaryPath(); err != nil {
+			return nil, "", "", false, err
+		}
 	}
 	port := opts.ProxyPort
 	if port == 0 {
 		port = 8820
 	}
+	// Component gate: an inactive component's write step is skipped as if
+	// its --skip flag were passed, with one line saying so. An empty
+	// ConfigPath is the default config, resolved like the daemon resolves it
+	// (T-730 / T-742), never the everything-active legacy snapshot.
+	gate := initGateForHome(opts.ConfigPath, opts.HomeDir)
+	var gateNotes strings.Builder
+	opts.SkipHooks = opts.SkipHooks || !gate.allow(&gateNotes, !opts.SkipHooks, "hooks", "integration.hooks")
+	opts.SkipMCP = opts.SkipMCP || !gate.allow(&gateNotes, !opts.SkipMCP, "mcp", "integration.mcp-server")
+	opts.SkipProxy = opts.SkipProxy || !gate.allow(&gateNotes, !opts.SkipProxy, "proxy route", "integration.proxy-route")
+	opts.SkipExtension = opts.SkipExtension || !gate.allow(&gateNotes, !opts.SkipExtension && anyExtensionSupported(), "browser", "capture.browser")
+	// U1 + U5 (FIX-UPGRADE): hooks and MCP entries invoke the one rendered
+	// command and --config argument `observer start` writes too
+	// (registration.go); the browser host below keeps the real binary.
+	regCommand := registrationCommand(binary)
+	regConfig := registrationConfigArg(opts.ConfigPath, opts.HomeDir)
 	hookReg, err := hook.NewRegistry(hook.Options{
-		BinaryPath:        binary,
+		Getenv:            os.Getenv,
+		BinaryPath:        regCommand,
 		DryRun:            opts.DryRun,
 		Force:             opts.Force,
-		ConfigPath:        opts.ConfigPath,
+		ConfigPath:        regConfig,
 		HomeDir:           opts.HomeDir,
 		WindowsClaudeHome: opts.WindowsClaudeHome,
 		WindowsCursorHome: opts.WindowsCursorHome,
@@ -632,12 +748,13 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 	if err != nil {
 		return nil, "", "", false, err
 	}
-	mcpReg, err := mcp.NewRegistrar(mcp.RegisterOptions{
-		BinaryPath: binary,
+	mcpReg, err := mcpregister.NewRegistrar(mcpregister.RegisterOptions{
+		BinaryPath: regCommand,
 		DryRun:     opts.DryRun,
 		Force:      opts.Force,
-		ConfigPath: opts.ConfigPath,
+		ConfigPath: regConfig,
 		HomeDir:    opts.HomeDir,
+		SelfBinary: binary,
 	})
 	if err != nil {
 		return nil, "", "", false, err
@@ -645,6 +762,7 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 	var routeReg *proxyroute.Registrar
 	if !opts.SkipProxy {
 		routeReg, err = proxyroute.NewRegistrar(proxyroute.RegisterOptions{
+			Writer:            opts.RouteWriter,
 			ProxyPort:         port,
 			DryRun:            opts.DryRun,
 			Force:             opts.Force,
@@ -667,16 +785,27 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 		installed = unionStrings(installed, routeReg.WindowsRouteTargets())
 	}
 	tools := selectToolsForInit(opts.All, opts.OnlyClaudeCode, opts.OnlyCodex, opts.OnlyCursor, opts.OnlyCline, installed)
+	if opts.WindowsOnly {
+		tools = windowsTargetsOnly(tools)
+	}
+	tools = gate.tools(tools, &gateNotes)
 	if len(tools) == 0 {
+		if opts.Report != nil {
+			opts.Report.NoTools = true
+		}
+		if gateNotes.Len() > 0 {
+			return strings.Split(strings.TrimRight(gateNotes.String(), "\n"), "\n"), "", "", false, nil
+		}
 		return nil, "", "", false, nil
 	}
 
 	// FIXED (B3, final-fix review): mirrors autoRegisterHooks'
 	// promptLaneEnabled gate (cmd/observer/start.go) — a mechanism
-	// whose ENTIRE hook surface is one prompt-submit event
-	// (integration.Capability.Hook.PromptLaneOnly: gemini-cli,
-	// qwen-code, droid, qoder, poolside, devin/cascade,
-	// command-code) has nothing useful to register when the
+	// whose ENTIRE wired hook surface is one prompt-submit event
+	// (since hook-parity Lane C2 computed by hookRegistrationWanted from
+	// the wired bindings: gemini-cli, droid, poolside, devin/cascade,
+	// command-code; qwen-code and qoder left the set when their
+	// lifecycle bindings went live) has nothing useful to register when the
 	// operator's own config says the prompt-submit engine won't
 	// evaluate the hook lane at all. None of these six vendors has a
 	// dedicated `--<tool>` selector flag (only claude-code/codex/
@@ -694,17 +823,21 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 	promptLaneEnabled := promptCfg.Guard.Prompt.Enabled && promptCfg.Guard.Prompt.HookLane
 
 	var buf strings.Builder
+	buf.WriteString(gateNotes.String())
 	registeredClaudeCode := false
 	registeredCodex := false
 	registeredCodexHooks := false
+	hooked := map[string]bool{}
 	for _, t := range tools {
-		promptLaneOnlyBlocked := false
-		if c, _, ok := advertisedCapability(t); ok && c.Hook.PromptLaneOnly && !promptLaneEnabled {
-			promptLaneOnlyBlocked = true
-		}
+		// Capability-shaped gate (hook-parity Lane C2): the same decision
+		// autoRegisterDecision makes, so init and start agree, except that
+		// init writes every Registered binding (a tool gate that still owes
+		// its live test included), so it counts them all (skip nil).
+		promptLaneOnlyBlocked := !hookRegistrationWanted(t, promptLaneEnabled, nil)
 		if !opts.SkipHooks && hookSupported(t) && !promptLaneOnlyBlocked {
 			res := hookReg.Register(t)
 			printHookResult(&buf, t, res, opts.DryRun)
+			hooked[t] = res.Error == nil && !res.Skipped && (len(res.HooksAdded) > 0 || len(res.AlreadySet) > 0)
 			if t == "codex" && res.Error == nil && len(res.HooksAdded) > 0 {
 				registeredCodexHooks = true
 			}
@@ -730,19 +863,23 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 			// writer — mirroring how the hook step handles claude-code-windows.
 			base, isWindows := strings.CutSuffix(t, "-windows")
 			ic, _ := integration.For(base)
+			var write func() proxyroute.RegistrationResult
 			switch ic.Proxy.Kind {
 			case integration.RouteConfigFile:
+				write = routeReg.RegisterCodex
 				if isWindows {
-					printProxyRouteResult(&buf, t, routeReg.RegisterCodexWindows(), opts.DryRun)
-				} else {
-					printProxyRouteResult(&buf, t, routeReg.RegisterCodex(), opts.DryRun)
+					write = routeReg.RegisterCodexWindows
 				}
 			case integration.RouteEnvSettings:
+				write = routeReg.RegisterClaudeCode
 				if isWindows {
-					printProxyRouteResult(&buf, t, routeReg.RegisterClaudeCodeWindows(), opts.DryRun)
-				} else {
-					printProxyRouteResult(&buf, t, routeReg.RegisterClaudeCode(), opts.DryRun)
+					write = routeReg.RegisterClaudeCodeWindows
 				}
+			}
+			if write != nil {
+				res := write()
+				printProxyRouteResult(&buf, t, res, opts.DryRun)
+				opts.Report.noteRoute(t, res)
 			}
 		}
 		if t == "claude-code" {
@@ -751,6 +888,11 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 		if t == "codex" {
 			registeredCodex = true
 		}
+	}
+	// T-034h: cursor-agent replays the Claude Code hooks, so a node with
+	// Observer's hooks in both files runs them twice per Cursor step.
+	if hooked["claude-code"] && hooked["cursor"] {
+		fmt.Fprintf(&buf, "%-12s note: %s\n", "cursor", diag.ClaudeReplayDoubleRunNote())
 	}
 
 	// Probe-route step: tools whose guarded, ADDITIVE config-lane writer
@@ -763,6 +905,9 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 	// --skip-proxy-route. Interactive init offers these per-consent instead.
 	if opts.All && !opts.SkipProxy && routeReg != nil {
 		for _, t := range probeRouteTools() {
+			if !gate.snap.AdapterActive(t) {
+				continue
+			}
 			writer, ok := probeRouteWriter(routeReg, t)
 			if !ok {
 				continue
@@ -772,6 +917,7 @@ func wireAIClients(opts WireAIClientsOptions) (lines []string, claudeProxyHint, 
 				continue // tool not installed/configured — nothing to route
 			}
 			printProxyRouteResult(&buf, t, res, opts.DryRun)
+			opts.Report.noteRoute(t, res)
 		}
 	}
 
@@ -859,7 +1005,7 @@ func printHookResult(out io.Writer, tool string, res hook.RegistrationResult, dr
 	}
 }
 
-func printMCPResult(out io.Writer, tool string, res mcp.RegistrationResult, dryRun bool) {
+func printMCPResult(out io.Writer, tool string, res mcpregister.RegistrationResult, dryRun bool) {
 	if res.Error != nil {
 		fmt.Fprintf(out, "%-12s mcp  ✗ %v\n", tool, res.Error)
 		return
@@ -899,7 +1045,7 @@ func printWiringSkip(out io.Writer, tool, kind, reason, advice string) {
 		advice = "nothing written; the plugin already provides it. " +
 			"Re-run with --force to register anyway (both fire, doubling every event)."
 	}
-	fmt.Fprintf(out, "%-12s %s skipped — %s\n", tool, kind, reason)
+	fmt.Fprintf(out, "%-12s %s skipped - %s\n", tool, kind, reason)
 	fmt.Fprintf(out, "%-12s %s   %s\n", "", kind, advice)
 }
 
@@ -934,7 +1080,7 @@ func printProxyRoutingHint(out io.Writer, port int) {
 // link-only — no fabricated social proof.
 func printCommunityFooter(out io.Writer) {
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "★ Observer is open source — a star helps others find it:")
+	fmt.Fprintln(out, "★ Observer is open source - a star helps others find it:")
 	fmt.Fprintln(out, "    https://github.com/marmutapp/superbased-observer")
 	fmt.Fprintln(out, "  issues + feedback: .../issues · contact@superbased.app")
 }
@@ -954,7 +1100,7 @@ func printProxyRouteResult(out io.Writer, tool string, res proxyroute.Registrati
 		// A deliberate, benign no-write that is NOT "tool not installed"
 		// (today: the cross-OS sandbox gate). Surfaced rather than silently
 		// swallowed with the other ConfigMissing skips.
-		fmt.Fprintf(out, "%-12s route skipped — %s\n", tool, res.SkipReason)
+		fmt.Fprintf(out, "%-12s route skipped - %s\n", tool, res.SkipReason)
 		return
 	}
 	if res.AlreadySet {
@@ -998,94 +1144,26 @@ func printProxyRouteResult(out io.Writer, tool string, res proxyroute.Registrati
 // ok is false for an unknown tool and for an unadvertised one; the caller then
 // answers false without inspecting any further capability shape.
 func advertisedCapability(tool string) (c integration.Capability, isWindows bool, ok bool) {
-	base, isWindows := strings.CutSuffix(tool, "-windows")
-	c, ok = integration.For(base)
-	if !ok || !c.Advertised() {
-		return integration.Capability{Tool: base}, isWindows, false
-	}
-	return c, isWindows, true
+	return clientwire.AdvertisedCapability(tool)
 }
 
-func hookSupported(tool string) bool {
-	c, isWindows, ok := advertisedCapability(tool)
-	if !ok || !c.Hook.AutoWired {
-		return false
-	}
-	switch c.Hook.Mechanism {
-	case integration.HookClaudeSettings, integration.HookCursor, integration.HookCodexConfig,
-		integration.HookGeminiSettings, integration.HookQwenSettings, integration.HookFactoryJSON,
-		// Part B item 2 (phase-3a): the documented long-tail vendors —
-		// all four handled by hook.Registry.Register like every other
-		// case here. zcode is NOT listed: its AutoWired stays false
-		// (no register* writer exists at all, gated on a liveness
-		// probe), so it never reaches this switch.
-		integration.HookQoderJSON, integration.HookPoolsideYAML, integration.HookCascadeJSON, integration.HookCommandCodeMod:
-		// handled by hook.Registry.Register
-	default:
-		return false // HermesPlugin → runHermesInit; ClineCLIJSONL → manual tailer
-	}
-	if isWindows {
-		return c.Hook.CrossOSBridge
-	}
-	return true
-}
+// hookSupported, hookRemovable, mcpSupported and routeSupported are the
+// init / uninstall spellings of internal/clientwire's predicates, the ONE
+// owner the dashboard's Connected tools panel reads too (T-421): a tool the
+// CLI can wire or remove is exactly a tool the dashboard can.
+func hookSupported(tool string) bool { return clientwire.HookSupported(tool) }
+
+// hookRemovable reports whether `observer uninstall` should ask the hook
+// registry to remove tool's registration (clientwire.HookRemovable).
+func hookRemovable(tool string) bool { return clientwire.HookRemovable(tool) }
 
 // mcpSupported reports whether `observer init` can write MCP server config
-// for tool via the mcp.Registrar. It is registry-driven (CLAUDE.md #3/#5):
-// the answer is the SHAPE of the tool's MCP capability, not its name. The
-// registrar handles the JSON {"mcpServers":{…}} object, Codex's
-// [mcp_servers] TOML table, and OpenCode's "mcp" object; Hermes' YAML
-// target is Implemented but written by its own runHermesInit path, so it's
-// excluded here by format, not by a tool branch. A new MCP-capable client
-// becomes a registry row + (if a new format) one writer — no edit to this
-// predicate.
-func mcpSupported(tool string) bool {
-	// Resolve the cross-OS "-windows" virtual target to its base adapter and
-	// gate on the registry's MCP.CrossOSBridge flag (mirrors hookSupported).
-	c, isWindows, ok := advertisedCapability(tool)
-	if !ok || c.MCP == nil || !c.MCP.Implemented {
-		return false
-	}
-	if isWindows && !c.MCP.CrossOSBridge {
-		return false
-	}
-	switch c.MCP.Format {
-	case integration.MCPServersJSON, integration.MCPCodexTOML, integration.MCPOpenCodeJSON:
-		return true
-	default:
-		return false
-	}
-}
+// for tool via the mcpregister.Registrar (clientwire.MCPSupported).
+func mcpSupported(tool string) bool { return clientwire.MCPSupported(tool) }
 
 // routeSupported reports whether `observer init` can PERSIST a proxy route
-// into a per-tool config file. Registry-driven (CLAUDE.md #3/#5): true only
-// for the persisted route kinds the proxyroute.Registrar writes —
-// RouteEnvSettings (claude-code → ~/.claude/settings.json "env") and
-// RouteConfigFile (codex → ~/.codex/config.toml openai_base_url).
-// RouteLauncher tools (opencode) are routed at exec time by their
-// `observer <x>` launcher, not persisted by init, so they're false here.
-// Proxy-exempt tools (Proxy == nil) are likewise false. A new routable
-// client is a registry row + (if a new kind) one writer.
-//
-// The cross-OS "-windows" virtual target (a WSL daemon writing the route
-// into a Windows-side .claude/.codex) is resolved to its base adapter and
-// gated on the registry's Proxy.CrossOSBridge flag — the exact template
-// hookSupported/mcpSupported use for their own "-windows" variants.
-func routeSupported(tool string) bool {
-	c, isWindows, ok := advertisedCapability(tool)
-	if !ok || c.Proxy == nil {
-		return false
-	}
-	if isWindows && !c.Proxy.CrossOSBridge {
-		return false
-	}
-	switch c.Proxy.Kind {
-	case integration.RouteEnvSettings, integration.RouteConfigFile:
-		return true
-	default:
-		return false
-	}
-}
+// into a per-tool config file (clientwire.RouteSupported).
+func routeSupported(tool string) bool { return clientwire.RouteSupported(tool) }
 
 // routeProbeSupported reports whether a GUARDED, ADDITIVE config-lane proxy
 // writer exists for tool but is NOT yet live-verified — the registry's
@@ -1166,7 +1244,7 @@ func splitExtensionIDs(raw string) []string {
 func resolveBrowserExtensionIDFlag(changed bool, raw string) (string, error) {
 	ids := splitExtensionIDs(raw)
 	if changed && len(ids) == 0 {
-		return "", fmt.Errorf("--browser-extension-id %q was supplied but contains no usable extension id after splitting on commas and trimming whitespace — pass at least one 32-character extension id, or omit the flag entirely", raw)
+		return "", fmt.Errorf("--browser-extension-id %q was supplied but contains no usable extension id after splitting on commas and trimming whitespace - pass at least one 32-character extension id, or omit the flag entirely", raw)
 	}
 	for _, id := range ids {
 		if !browserhost.ValidExtensionID(id) {
@@ -1262,7 +1340,7 @@ func runBrowserExtensionStep(buf *strings.Builder, p browserExtStepParams) error
 		// Native Windows daemon (same-host) still isn't wired — the registry
 		// rail here targets a WSL daemon. Say so plainly.
 		if runtime.GOOS == "windows" {
-			fmt.Fprintln(buf, "browser: same-host Windows native-messaging registration is not yet shipped; run the daemon under WSL to wire Windows browsers, or load the extension on a Linux/macOS profile — nothing was written.")
+			fmt.Fprintln(buf, "browser: same-host Windows native-messaging registration is not yet shipped; run the daemon under WSL to wire Windows browsers, or load the extension on a Linux/macOS profile - nothing was written.")
 		}
 		return nil // no Chromium browser (dir or Windows) — an honest no-op, not an error.
 	}
@@ -1287,7 +1365,7 @@ func runBrowserExtensionStep(buf *strings.Builder, p browserExtStepParams) error
 		fmt.Fprintf(buf, "browser: wrote native-messaging host → %s\n", launcherPath)
 	}
 	if nodeErr != nil {
-		fmt.Fprintln(buf, "browser: WARN node was not found on PATH — the native-messaging host runs under Node.js; install it (https://nodejs.org/) or captured turns won't reach observer.")
+		fmt.Fprintln(buf, "browser: WARN node was not found on PATH - the native-messaging host runs under Node.js; install it (https://nodejs.org/) or captured turns won't reach observer.")
 	}
 
 	// A1: per-browser manifest pointing at the installed launcher (dir-based
@@ -1318,7 +1396,7 @@ func runBrowserExtensionStep(buf *strings.Builder, p browserExtStepParams) error
 	// one we wrote a clearly-marked placeholder — print the PRECISE follow-up
 	// so batch/CI users can finish the one edit (A1).
 	if p.ExtensionID == "" && len(manifestPaths) > 0 {
-		fmt.Fprintf(buf, "browser: no extension id supplied — wrote the placeholder %q in allowed_origins.\n", browserhost.PlaceholderExtensionID)
+		fmt.Fprintf(buf, "browser: no extension id supplied - wrote the placeholder %q in allowed_origins.\n", browserhost.PlaceholderExtensionID)
 		fmt.Fprintln(buf, "  after `load-unpacked` in chrome://extensions, copy the extension id and either:")
 		fmt.Fprintln(buf, "    re-run: observer init --browser-extension-id <id>")
 		fmt.Fprintf(buf, "    or edit the \"allowed_origins\" field (replace %s) in:\n", browserhost.PlaceholderExtensionID)
@@ -1401,7 +1479,7 @@ func resolveWindowsBrowserTargets(buf *strings.Builder, p browserExtStepParams, 
 	// note and NEVER construct the (real) writer.
 	if distro == "" {
 		for _, home := range homesWithBrowser {
-			fmt.Fprintf(buf, "browser: found a Windows browser under %s but the WSL distro is unknown ($WSL_DISTRO_NAME empty) — can't build the wsl.exe bridge; run init from inside WSL. Nothing written for Windows.\n", home)
+			fmt.Fprintf(buf, "browser: found a Windows browser under %s but the WSL distro is unknown ($WSL_DISTRO_NAME empty) - can't build the wsl.exe bridge; run init from inside WSL. Nothing written for Windows.\n", home)
 		}
 		return nil
 	}
@@ -1413,12 +1491,12 @@ func resolveWindowsBrowserTargets(buf *strings.Builder, p browserExtStepParams, 
 	// absent from the trusted system path) FAILS CLOSED — an honest note,
 	// nothing written — rather than silently touching the real machine.
 	if p.NewWindowsRegistry == nil {
-		fmt.Fprintln(buf, "browser: a Windows browser was found but no registry writer was provided (internal wiring) — skipping Windows registration; nothing written.")
+		fmt.Fprintln(buf, "browser: a Windows browser was found but no registry writer was provided (internal wiring) - skipping Windows registration; nothing written.")
 		return nil
 	}
 	writer, err := p.NewWindowsRegistry()
 	if err != nil {
-		fmt.Fprintf(buf, "browser: %v — skipping Windows registration; nothing written.\n", err)
+		fmt.Fprintf(buf, "browser: %v - skipping Windows registration; nothing written.\n", err)
 		return nil
 	}
 
@@ -1570,7 +1648,7 @@ func runBrowserOnlyInit(out io.Writer, in io.Reader, opts browserOnlyOptions) er
 	}
 	extID := opts.ExtensionID
 	if extID == "" && opts.Interactive {
-		resolved, err := promptBrowserExtensionID(out, bufio.NewReader(in))
+		resolved, err := promptBrowserExtensionID(out, bufio.NewReader(in), discoverExtensionIDs(opts.HomeDir, opts.WindowsBrowserHomes))
 		if err != nil {
 			return err
 		}
@@ -1588,7 +1666,7 @@ func runBrowserOnlyInit(out io.Writer, in io.Reader, opts browserOnlyOptions) er
 		NewWindowsRegistry: opts.NewWindowsRegistry,
 	})
 	if buf.Len() == 0 && stepErr == nil {
-		fmt.Fprintln(out, "browser: no Chromium-family browser detected — install one and re-run, or load the extension elsewhere.")
+		fmt.Fprintln(out, "browser: no Chromium-family browser detected - install one and re-run, or load the extension elsewhere.")
 		return nil
 	}
 	fmt.Fprint(out, buf.String())
@@ -1599,12 +1677,64 @@ func runBrowserOnlyInit(out io.Writer, in io.Reader, opts browserOnlyOptions) er
 	return nil
 }
 
+// discoverExtensionIDs finds the unpacked SuperBased extensions the local
+// browsers have loaded (browserhost.DiscoverExtensionIDs), so the id is
+// picked instead of copied from chrome://extensions. home "" resolves the
+// user's home; winHomes are cross-mounted Windows profiles (WSL), read with
+// the Windows browser layout. An unresolvable home finds nothing there.
+func discoverExtensionIDs(home string, winHomes []string) []browserhost.ExtensionCandidate {
+	if home == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			home = h
+		}
+	}
+	var out []browserhost.ExtensionCandidate
+	seen := map[string]bool{}
+	add := func(cs []browserhost.ExtensionCandidate) {
+		for _, c := range cs {
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				out = append(out, c)
+			}
+		}
+	}
+	if home != "" {
+		add(browserhost.DiscoverExtensionIDs(home, runtime.GOOS))
+	}
+	for _, h := range winHomes {
+		add(browserhost.DiscoverExtensionIDs(h, "windows"))
+	}
+	return out
+}
+
 // promptBrowserExtensionID asks for the Chromium extension id on an
-// interactive terminal, re-asking on an invalid (obviously-wrong) value.
-// Blank input returns "" — the caller keeps the placeholder + follow-up
+// interactive terminal. When the local browsers have the extension loaded
+// unpacked (found), the id is picked from a numbered menu (D-571), with
+// "paste another id" and "skip" as the last rows; otherwise, or for
+// "paste", it is typed, re-asking on an invalid (obviously-wrong) value.
+// Blank input returns "": the caller keeps the placeholder + follow-up
 // instruction. EOF aborts cleanly (returns "" with no error so the manifest
 // is still written with the placeholder).
-func promptBrowserExtensionID(out io.Writer, r *bufio.Reader) (string, error) {
+func promptBrowserExtensionID(out io.Writer, r *bufio.Reader, found []browserhost.ExtensionCandidate) (string, error) {
+	if len(found) > 0 {
+		fmt.Fprintln(out, "browser: the SuperBased extension is loaded in:")
+		opts := make([]string, 0, len(found)+2)
+		for _, c := range found {
+			opts = append(opts, fmt.Sprintf("%s (%s)  %s", c.Browser, c.Profile, c.ID))
+		}
+		opts = append(opts, "paste another id", "skip (fill it in later)")
+		p := &setupPrompter{in: r, out: out}
+		i, err := p.choose("pick:", opts, 1)
+		if err != nil {
+			return "", nil // EOF: keep the placeholder, as for a blank answer.
+		}
+		switch {
+		case i < len(found):
+			return found[i].ID, nil
+		case i == len(found)+1:
+			return "", nil
+		}
+	}
 	for {
 		fmt.Fprintln(out, "browser: load the extension via `load-unpacked` in chrome://extensions, then paste its id.")
 		fmt.Fprint(out, "  extension id (32 lowercase a-p chars; blank to fill in later): ")
@@ -1674,6 +1804,18 @@ func hasProbeRouteWriter(tool string) bool {
 	return ok
 }
 
+// windowsTargetsOnly keeps the cross-OS "<tool>-windows" targets, sorted.
+func windowsTargetsOnly(tools []string) []string {
+	var out []string
+	for _, t := range tools {
+		if strings.HasSuffix(t, clientwire.WindowsSuffix) {
+			out = append(out, t)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func unionStrings(a, b []string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -1702,6 +1844,16 @@ func unionStrings(a, b []string) []string {
 // keep its pre-existing scope and never silently strip the Windows-side hooks
 // too. Uninstalling a Windows-side target stays reachable only via the explicit
 // mechanisms (e.g. --all, or a direct Windows-side uninstall path).
+// noToolsLine is the message for a run that selected no tool (D-553). With
+// --all it says that no supported AI tool was found, instead of telling the
+// operator to pass the --all they already passed.
+func noToolsLine(verb string, all bool, flags string) string {
+	if all {
+		return fmt.Sprintf("--all found no supported AI tool installed on this machine; nothing to %s", verb)
+	}
+	return fmt.Sprintf("no tools selected and none auto-detected - pass %s", flags)
+}
+
 func selectTools(all, cc, codex, cursor, cline bool, installed []string) []string {
 	return resolveTools(all, cc, codex, cursor, cline, installed, false)
 }
@@ -1796,9 +1948,9 @@ func resolveTools(all, cc, codex, cursor, cline bool, installed []string, crossO
 // zcode correctly stays excluded: its registry row deliberately sets
 // Hook.AutoWired=false pending a liveness probe (see internal/
 // integration's zcode row), so hookSupported already answers false
-// for it — no special-casing needed. hermes and cline-cli correctly
-// stay excluded too: their mechanisms (HermesPlugin, HookClineCLIJSONL)
-// and hermes' MCP format (YAML) are deliberately excluded from
+// for it — no special-casing needed. hermes correctly stays excluded
+// too: its mechanism (HermesPlugin) and MCP format (YAML) are
+// deliberately excluded from
 // hookSupported/mcpSupported's own switches (see those functions' doc
 // comments) — hermes is wired through its own --hermes path instead.
 func autoInitSupported(tool string) bool {

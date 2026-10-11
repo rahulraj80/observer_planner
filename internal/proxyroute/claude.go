@@ -81,6 +81,11 @@ func (r *Registrar) RegisterClaudeCode() RegistrationResult {
 // + the localhost URL + "claude-code-windows". Behaviour for the native
 // call is byte-identical to the pre-refactor method.
 func (r *Registrar) registerClaudeCodeAt(dir, want, toolLabel string) RegistrationResult {
+	return r.note(r.writeClaudeCodeAt(dir, want, toolLabel), want)
+}
+
+// writeClaudeCodeAt is registerClaudeCodeAt without the provenance record.
+func (r *Registrar) writeClaudeCodeAt(dir, want, toolLabel string) RegistrationResult {
 	path := filepath.Join(dir, "settings.json")
 	res := RegistrationResult{
 		Tool:       toolLabel,
@@ -272,6 +277,7 @@ func (r *Registrar) UnregisterClaudeCode() RegistrationResult {
 		res.Error = err
 		return res
 	}
+	res.ProvenanceError = r.forget("claude-code", path)
 	return res
 }
 

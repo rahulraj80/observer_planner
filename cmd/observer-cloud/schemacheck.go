@@ -34,7 +34,7 @@ const (
 func schemaCheckOutcome(embedded, deployed int) (message string, exitCode int) {
 	switch {
 	case deployed == embedded:
-		return fmt.Sprintf("observer-cloud: schema OK — embedded head=%d deployed=%d", embedded, deployed), schemaCheckExitMatch
+		return fmt.Sprintf("observer-cloud: schema OK - embedded head=%d deployed=%d", embedded, deployed), schemaCheckExitMatch
 	case deployed < embedded:
 		return fmt.Sprintf(
 			"observer-cloud: schema-check: deployed schema (%d) is BEHIND the embedded migration head (%d) — "+

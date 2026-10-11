@@ -234,8 +234,8 @@ func TestTerminalRepaintNudgeDecisionTable(t *testing.T) {
 		{"unknown geometry (all zero)", ptyGeometry{}, 40, 120, false, 0, false},
 		{"unknown rows only", ptyGeometry{rows: 0, cols: 120}, 40, 120, false, 0, false},
 		{"unknown cols only", ptyGeometry{rows: 40, cols: 0}, 40, 120, false, 0, false},
-		{"rows differ — real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 30, 120, false, 0, false},
-		{"cols differ — real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 40, 100, false, 0, false},
+		{"rows differ - real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 30, 120, false, 0, false},
+		{"cols differ - real SIGWINCH already", ptyGeometry{rows: 40, cols: 120}, 40, 100, false, 0, false},
 		{"both differ", ptyGeometry{rows: 40, cols: 120}, 30, 100, false, 0, false},
 		{"two-row terminal still shrinks", ptyGeometry{rows: 2, cols: 80}, 2, 80, false, 1, true},
 		{"one-row terminal bounces up (underflow guard)", ptyGeometry{rows: 1, cols: 80}, 1, 80, false, 2, true},
@@ -431,7 +431,7 @@ func TestTerminalRepaintNudgeReadsGeometryBeforeResize(t *testing.T) {
 	got := waitResizeSeq(t, w, 1)
 	want := [][2]uint16{{30, 100}}
 	if !sameSeq(got, want) {
-		t.Fatalf("resize sequence = %v, want %v — the geometry snapshot was read AFTER the resize, "+
+		t.Fatalf("resize sequence = %v, want %v - the geometry snapshot was read AFTER the resize, "+
 			"so the converged size misread as a no-op and a spurious nudge fired", got, want)
 	}
 	// The fake really did converge — otherwise the assertion above is vacuous.

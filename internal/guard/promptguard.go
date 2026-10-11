@@ -3,6 +3,7 @@ package guard
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -243,6 +244,12 @@ const (
 	// (guard_approvals, via applyApprovals) downgraded what would
 	// otherwise have blocked or asked.
 	PromptOutcomeApproved PromptOutcome = "approved"
+	// PromptOutcomeDetected: the POST-HOC capture lane
+	// (posthocprompt.go) found the finding in a prompt the watcher
+	// captured AFTER it was sent, and no pre-send lane (hook or proxy)
+	// had judged that prompt — recorded as a flag, never enforced.
+	// Letters only: the node dashboard parses "[outcome=X]" with [a-z]+.
+	PromptOutcomeDetected PromptOutcome = "detected"
 )
 
 // PromptVerdict is EvaluatePrompt's result — the prompt-submit
@@ -250,6 +257,14 @@ const (
 // smaller type (module-boundary discipline: this feature's shape does
 // not spread into the general hook-path result type).
 type PromptVerdict struct {
+	// GrantID is the org access grant that let this prompt through
+	// (orggrant.go; 0 = none). Carried onto the audit row's grant_id.
+	GrantID int64
+	// OrgLocked / RequestBase drive the org-locked request line on a
+	// blocked prompt (PromptRequestAccessHint, request-grants G4); derived
+	// state, stamped by EvaluatePrompt.
+	OrgLocked   bool
+	RequestBase string
 	// Verdict is the underlying policy evaluation (RuleID "R-190" or
 	// "R-172", Category, Severity, Reason, Source already carry the
 	// standard audit shape every other rule gets). Decision is
@@ -319,6 +334,93 @@ type PromptVerdict struct {
 	// When true, no mode/reconsider-once resolution ran — Verdict is
 	// whatever the failure-mode policy (Strict / fail-open) produced.
 	GuardError bool
+	// CaptureDigest is the pre-send mark (PromptPreSendDigest) the lane
+	// that built this verdict computed from the prompt text, "" when none
+	// is needed. EvaluatePrompt never sets it (it sees no text); the hook
+	// and proxy boundaries do. ActionVerdictFromPrompt carries it onto
+	// ActionInput.PromptDigest so the one guard_events writer records the
+	// mark (posthocprompt.go).
+	CaptureDigest string
+	// Action is what the developer experiences for this verdict on the
+	// seam that judged it (promptaction.go's one table), set by the lane
+	// via WithAction. ActionDegradedFrom is the action the decision
+	// wanted when the seam could not deliver it. Lane names the seam
+	// ("hook" | "proxy" | "capture" | "preinvocation"); all three are
+	// carried onto the guard_events reason so reporting can tell them
+	// apart without a migration.
+	Action             PromptAction
+	ActionDegradedFrom PromptAction
+	Lane               string
+	// OrgCapped is set when the org bundle's explicit `enforce = false`
+	// on this rule capped the decision at flag. A cap from another layer
+	// (user, trusted project) also warns, without this attribution.
+	OrgCapped bool
+	// WarnIndirect mirrors the seam's PromptSeamCaps.WarnIndirect (set by
+	// WithAction): a warn the developer does not see in band still toasts.
+	WarnIndirect bool
+}
+
+// promptDecision is the decision a prompt verdict asks of its seam: the
+// verdict's own decision after the org-granted override softening (an
+// overridable deny asks), the same softening ResolveEmission applies to
+// tool calls. A guard-error wrapper keeps its own decision.
+func promptDecision(v policy.Verdict) policy.Decision {
+	return emissionDecision(v)
+}
+
+// WithAction resolves pv's developer action on a seam with caps (the
+// ONE decision x capability table, promptaction.go) and stamps the
+// lane. An allow verdict gets PromptActionNone.
+func (pv PromptVerdict) WithAction(caps PromptSeamCaps, lane string) PromptVerdict {
+	pv.Lane = lane
+	pv.WarnIndirect = caps.WarnIndirect
+	if pv.redactWanted(caps) {
+		// The prompt goes through masked (promptaction.go redactWanted).
+		pv.Action, pv.ActionDegradedFrom, pv.Outcome = PromptActionRedact, "", PromptOutcomeWarned
+		return pv
+	}
+	// A confirmed resend or an operator grant RESOLVES an earlier action;
+	// the developer is not shown anything new for it.
+	if !pv.RecordWorthy() || pv.Verdict.Decision < policy.DecisionFlag ||
+		pv.Outcome == PromptOutcomeConfirmed || pv.Outcome == PromptOutcomeApproved {
+		pv.Action, pv.ActionDegradedFrom = PromptActionNone, ""
+		return pv
+	}
+	pv.Action, pv.ActionDegradedFrom = ResolvePromptAction(promptDecision(pv.Verdict), caps)
+	// The reconsider-once machine says "blocked" for a fresh ask, but on
+	// a seam that cannot stop the prompt (a warn-only hook) it went
+	// through: record what the developer got, not what was asked for.
+	if !pv.Action.Stops() && pv.Outcome == PromptOutcomeBlocked {
+		pv.Outcome = PromptOutcomeWarned
+	}
+	return pv
+}
+
+// PromptEmission is the Emission for a prompt verdict whose action is
+// resolved (WithAction): the wire permission and the enforced flag come
+// from the action, so every prompt lane reports exactly what the
+// developer got. re-enter and confirm are "ask", block is "deny",
+// everything else forwards ("allow").
+func PromptEmission(pv PromptVerdict) Emission {
+	reason := pv.Verdict.Reason
+	if pv.Verdict.Advice != "" {
+		reason += " " + pv.Verdict.Advice
+	}
+	// The capability degrade is recorded on the reason ("[wanted=...]",
+	// promptbridge.go), not in DegradedFrom, which keeps its existing
+	// engine/approval meaning.
+	em := Emission{Permission: "allow", Reason: reason}
+	switch pv.Action {
+	case PromptActionBlock:
+		em.Permission, em.Enforced = "deny", true
+	case PromptActionReenter, PromptActionConfirm:
+		em.Permission, em.Enforced = "ask", true
+	case PromptActionRedact:
+		// Forwarded, but the prompt WAS rewritten: enforced, like the proxy
+		// lane's redact-and-forward (ActionVerdictFromRedactedPrompt).
+		em.Enforced = true
+	}
+	return em
 }
 
 // RecordWorthy reports whether the verdict should persist as a
@@ -443,6 +545,17 @@ func (g *Guard) promptAllowed(value string) bool {
 // SpanLen/Hash shape in round-2 review B1, closing the gap that used
 // to force every ask-once/redact secret finding to degrade to block.
 func (g *Guard) BuildPromptFindings(text string) (secrets []policy.SecretFinding, pii []policy.PIIFinding, truncated bool) {
+	return g.buildPromptFindings(text, nil)
+}
+
+// buildPromptFindings is BuildPromptFindings with an optional extra
+// value filter: skip, when non-nil, drops a finding whose raw matched
+// value it reports true for. It runs in the same place the
+// [guard.prompt].allow filter does — the one place a raw value is read —
+// so the value still never survives this function. The post-hoc capture
+// lane (posthocprompt.go) uses it to drop a "match" whose value is the
+// storage scrubber's own redaction marker.
+func (g *Guard) buildPromptFindings(text string, skip func(value string) bool) (secrets []policy.SecretFinding, pii []policy.PIIFinding, truncated bool) {
 	opts := scrub.PromptDetectOptions{
 		MaxFindings:     g.cfg.Prompt.MaxFindings,
 		SuppressInCode:  g.cfg.Prompt.SuppressInCode,
@@ -450,7 +563,7 @@ func (g *Guard) BuildPromptFindings(text string) (secrets []policy.SecretFinding
 	}
 	findings, wasTruncated := scrub.DetectPromptFindings(text, opts)
 	for _, f := range findings {
-		if g.promptAllowed(f.Value) {
+		if g.promptAllowed(f.Value) || (skip != nil && skip(f.Value)) {
 			continue
 		}
 		hash := normalizedSpanHash(f.Class, f.Value)
@@ -628,7 +741,43 @@ type promptFindingRef struct {
 // and the Part-B MaybeAlert bridge read pv.Verdict.Severity AFTER this
 // runs, so neither needs its own copy of the rule.
 func (g *Guard) EvaluatePrompt(ev policy.Event) PromptVerdict {
-	return raisePromptSeverityOnDeny(g.evaluatePromptDecide(ev))
+	// An exhausted managed budget stops the prompt before anything is scanned
+	// (T-519): the prompt would spend against a cap that is already spent,
+	// whatever it contains. It is not an org-locked rule and takes no
+	// approval, so it returns before both of those stamps.
+	if bv, ok := g.hookBudgetVerdict(ev); ok {
+		return PromptVerdict{Verdict: bv, Outcome: PromptOutcomeBlocked}
+	}
+	pv := raisePromptSeverityOnDeny(g.evaluatePromptDecide(ev))
+	g.stampPromptOrgLock(&pv)
+	return pv
+}
+
+// stampPromptOrgLock stamps the org lock and the request link origin onto a
+// blocking prompt verdict (the prompt twin of stampOrgOverride). A prompt an
+// org grant let through is not "locked".
+func (g *Guard) stampPromptOrgLock(pv *PromptVerdict) {
+	if pv.Verdict.RuleID == "" || pv.GrantID != 0 {
+		return
+	}
+	pv.OrgLocked = orgLockedVerdict(pv.Verdict, g.orgLocksVerdictRule(g.set.Load(), pv.Verdict.RuleID))
+	pv.RequestBase = g.requestBase
+}
+
+// PromptRequestAccessHint is the request line for an org-locked prompt
+// BLOCK (a hard deny, not the ask-once confirm, which the developer can
+// answer by re-sending): the same sentence the tool gate leads with,
+// without the "observer: " prefix, because the prompt house message
+// already starts with it. "" when the prompt is not an org-locked block.
+func PromptRequestAccessHint(pv PromptVerdict, sessionID string) string {
+	if !pv.OrgLocked || pv.Outcome != PromptOutcomeBlocked || pv.Verdict.Decision != policy.DecisionDeny || pv.GuardError {
+		return ""
+	}
+	what, ok := blockedWhatByKind[policy.KindUserPrompt]
+	if !ok {
+		what = blockedWhatFallback
+	}
+	return strings.TrimPrefix(requestAccessLine(pv.Verdict.RuleID, what, pv.RequestBase, sessionID), "observer: ")
 }
 
 // raisePromptSeverityOnDeny implements the FIX-1 severity bump
@@ -657,10 +806,7 @@ func raisePromptSeverityOnDeny(pv PromptVerdict) PromptVerdict {
 // producers (evaluatePromptDecide's early exit, degradedScanVerdict's
 // mode=block branch) can never disagree about which posture is active.
 func (g *Guard) promptEnforceActive() bool {
-	if g.cfg.Prompt.EnforceIndependent {
-		return true
-	}
-	return g.cfg.Mode == "enforce"
+	return promptEnforceActiveFor(g.cfg)
 }
 
 // evaluatePromptDecide is EvaluatePrompt's actual decision logic,
@@ -749,6 +895,17 @@ func (g *Guard) evaluatePromptDecide(ev policy.Event) PromptVerdict {
 		verdict.Decision = policy.DecisionFlag
 		return PromptVerdict{Verdict: verdict, Outcome: PromptOutcomeWarned}
 	}
+	// Operator ruling 2026-10-02 / D-030: an override that writes
+	// `enforce = false` on this rule (the policy form's "Enforce
+	// (block/hold, not just flag)" checkbox OFF) caps the prompt rule at
+	// flag: the developer gets a warning, never a confirm or a block,
+	// whatever [guard.prompt].mode says locally. The cap is the engine's
+	// (Verdict.EnforceCappedBy), so it holds for every layer allowed to
+	// write it, the per-project ones included (Sol A2-06).
+	if verdict.EnforceCappedBy != "" {
+		verdict.Decision = policy.DecisionFlag
+		return PromptVerdict{Verdict: verdict, Outcome: PromptOutcomeWarned, OrgCapped: verdict.EnforceCappedBy == layerOrg}
+	}
 
 	switch worst {
 	case PromptModeWarn:
@@ -757,6 +914,9 @@ func (g *Guard) evaluatePromptDecide(ev policy.Event) PromptVerdict {
 
 	case PromptModeBlock:
 		verdict.Decision = policy.DecisionDeny
+		if pv, softened := g.promptSoftenBlock(es, ev, verdict, refs); softened {
+			return pv
+		}
 		pv := PromptVerdict{Verdict: verdict, Outcome: PromptOutcomeBlocked, DegradedFrom: promptBlockDegradedFrom(refs)}
 		return g.applyPromptApproval(pv, &ev)
 
@@ -817,7 +977,7 @@ func (g *Guard) degradedScanVerdict(ev policy.Event) (PromptVerdict, bool) {
 		Reason:   reason,
 		Source:   policy.SourceBuiltin,
 	}
-	if g.promptEnforceActive() && mode == PromptModeBlock {
+	if g.promptEnforceActive() && mode == PromptModeBlock && !g.set.Load().promptRuleFlagOnly(verdict.RuleID) {
 		verdict.Decision = policy.DecisionDeny
 		// FIX-5 (phase-2 review): "unscanned" distinguishes this from
 		// the operator's plain mode=block choice — the reason text
@@ -996,12 +1156,45 @@ func (g *Guard) promptStoreErrorVerdict(verdict policy.Verdict, requested Prompt
 // the same audited-exception semantics every other rule already gets.
 // A no-op for Allow/Flag verdicts (applyApprovals itself guards on
 // Decision >= DecisionAsk).
+//
+// An org access grant (orggrant.go) is layered the same way: an exempt
+// grant lifts the prompt to a warning (Outcome approved, degraded_from
+// org_grant, GrantID set); a soften grant on a block is handled before
+// this, by routing the prompt through the ask-once confirm
+// (promptSoftenBlock).
 func (g *Guard) applyPromptApproval(pv PromptVerdict, ev *policy.Event) PromptVerdict {
-	v, approved := g.applyApprovals(pv.Verdict, ev)
+	v, appr := g.applyApprovals(pv.Verdict, ev, OrgGrantLanePrompt)
 	pv.Verdict = v
-	if approved {
+	if appr.degradedFrom != "" && v.Decision < policy.DecisionAsk {
 		pv.Outcome = PromptOutcomeApproved
-		pv.DegradedFrom = "approved"
+		pv.DegradedFrom = appr.degradedFrom
 	}
+	pv.GrantID = appr.grantID
 	return pv
+}
+
+// promptSoftenBlock is the prompt gate's soften grant: a block-mode deny
+// covered by a soften grant goes through the ask-once confirm instead
+// (first send: ask, nothing counted; identical re-send: confirmed, and THAT
+// counts the grant's use). handled=false leaves the block to the caller.
+func (g *Guard) promptSoftenBlock(es *engineSet, ev policy.Event, deny policy.Verdict, refs []promptFindingRef) (PromptVerdict, bool) {
+	peek, ok := g.promptSoftenGrant(es, deny, &ev)
+	if !ok {
+		return PromptVerdict{}, false
+	}
+	pv := g.evaluatePromptAskOnce(ev, deny, PromptModeAskOnce, refs)
+	if pv.Outcome != PromptOutcomeConfirmed {
+		pv.Verdict.Reason += fmt.Sprintf(" [softened by G-%d: send the identical prompt again to confirm%s]", peek.GrantID, grantWindowNote(peek))
+		return pv, true
+	}
+	r, counted := g.claimPromptSoftenConfirm(es, deny, &ev)
+	if !counted {
+		// The grant was spent between the two sends: the block stands.
+		deny.Reason += grantNoteFor(r)
+		return PromptVerdict{Verdict: deny, Outcome: PromptOutcomeBlocked, DegradedFrom: promptBlockDegradedFrom(refs)}, true
+	}
+	pv.GrantID = r.GrantID
+	pv.DegradedFrom = DegradedFromOrgGrant
+	pv.Verdict.Reason += fmt.Sprintf(" [confirmed by you under G-%d%s]", r.GrantID, grantWindowNote(r))
+	return pv, true
 }

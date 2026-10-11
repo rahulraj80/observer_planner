@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -296,7 +298,7 @@ func TestRemoteViewAttachDeniedWhenViewOff(t *testing.T) {
 	})
 	if derr == nil {
 		if _, _, rerr := c.Read(ctx); rerr == nil {
-			t.Error("view-off remote WS streamed data — it must be refused")
+			t.Error("view-off remote WS streamed data - it must be refused")
 		}
 		_ = c.CloseNow()
 	}

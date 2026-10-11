@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -78,7 +80,7 @@ func runProcessBridgeConnect(ctx context.Context, addr, tokenFile string, opts p
 				// no amount of retrying changes it.
 				return terr
 			}
-			fmt.Fprintf(errOut, "process-bridge: %v — retrying in %s\n", terr, backoff)
+			fmt.Fprintf(errOut, "process-bridge: %v - retrying in %s\n", terr, backoff)
 			if !sleepProcessBridge(ctx, backoff) {
 				return nil
 			}
@@ -87,7 +89,7 @@ func runProcessBridgeConnect(ctx context.Context, addr, tokenFile string, opts p
 		}
 		conn, derr := dialProcessBridge(ctx, addr, token)
 		if derr != nil {
-			fmt.Fprintf(errOut, "process-bridge: connect to %s failed: %v — retrying in %s\n", addr, derr, backoff)
+			fmt.Fprintf(errOut, "process-bridge: connect to %s failed: %v - retrying in %s\n", addr, derr, backoff)
 			if !sleepProcessBridge(ctx, backoff) {
 				return nil
 			}
@@ -117,7 +119,7 @@ func runProcessBridgeConnect(ctx context.Context, addr, tokenFile string, opts p
 			// reconnecting cannot fix it — surface it instead of spinning.
 			return serr
 		}
-		fmt.Fprintf(errOut, "process-bridge: the daemon closed the stream — reconnecting to %s in %s\n", addr, backoff)
+		fmt.Fprintf(errOut, "process-bridge: the daemon closed the stream - reconnecting to %s in %s\n", addr, backoff)
 		if !sleepProcessBridge(ctx, backoff) {
 			return nil
 		}
@@ -167,7 +169,7 @@ func resolveProcessBridgeToken(path string) (string, error) {
 	if tok := strings.TrimSpace(os.Getenv(processBridgeTokenEnv)); tok != "" {
 		return tok, nil
 	}
-	return "", fmt.Errorf("process-bridge: --connect requires the daemon's shared token — pass --token-file <path> or set %s "+
+	return "", fmt.Errorf("process-bridge: --connect requires the daemon's shared token - pass --token-file <path> or set %s "+
 		"(there is deliberately no --token flag: argv is world-readable, and this tool captures argv)", processBridgeTokenEnv)
 }
 

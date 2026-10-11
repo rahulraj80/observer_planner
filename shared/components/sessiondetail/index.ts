@@ -78,3 +78,11 @@ export type {
 } from "../../lib/types";
 export { SESSION_TAB_ICONS, sessionTabIcon } from "./tabIcons";
 export { GaugeStat, type GaugeStatProps, type GaugeRing } from "./GaugeStat";
+
+// The request-class split ("Spend by request class"): node + org drawers, one
+// view model in lib/requestClassSplit.ts.
+export { RequestClassesPanel } from "./RequestClassesPanel";
+
+// Session lineage (fork / sub-agent parent and children): node + org drawers,
+// one view model in lib/sessionLineage.ts (T-449).
+export { LineageBanner, type LineageBannerProps } from "./LineageBanner";

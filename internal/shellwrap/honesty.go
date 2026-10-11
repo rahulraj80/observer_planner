@@ -17,6 +17,10 @@ const (
 	// HonestyLaunchOnly: the wrapped form launches the same thing; routing is
 	// unchanged (capture still rides the tool's own store / hooks).
 	HonestyLaunchOnly Honesty = "launch_only"
+	// HonestyConditional: the wrapped form routes only when the developer has
+	// configured the product's own provider key (a gated route); on the
+	// product's own sign-in it launches unrouted.
+	HonestyConditional Honesty = "conditional"
 )
 
 // honestyRule is one row of the ordered classification table (first match
@@ -29,6 +33,7 @@ type honestyRule struct {
 
 var honestyRules = []honestyRule{
 	{HonestyLaunchOnly, "launches, no routing", func(w integration.WrappedCommand) bool { return !w.Routes }},
+	{HonestyConditional, "routed only with your own provider key; otherwise launches unrouted", func(w integration.WrappedCommand) bool { return w.RouteConditional }},
 	{HonestyProofOwed, "wrapped, live proof owed", func(w integration.WrappedCommand) bool { return !w.TrafficProven }},
 	{HonestyRouted, "routed through the observer proxy", func(integration.WrappedCommand) bool { return true }},
 }

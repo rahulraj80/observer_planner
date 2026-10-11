@@ -141,9 +141,14 @@ func (s *Supervisor) now() time.Time {
 	return time.Now().UTC()
 }
 
+var (
+	errPolicyResolverUnavailable = errors.New("intervention: policy resolver unavailable")
+	errPolicyAuthorityExpired    = errors.New("intervention: policy authority missing or expired")
+)
+
 func (s *Supervisor) decision(ctx context.Context, w Workload) (PolicyDecision, error) {
 	if s.Decide == nil {
-		return PolicyDecision{}, errors.New("intervention: policy resolver unavailable")
+		return PolicyDecision{}, errPolicyResolverUnavailable
 	}
 	if err := ctx.Err(); err != nil {
 		return PolicyDecision{}, err
@@ -156,7 +161,7 @@ func (s *Supervisor) decision(ctx context.Context, w Workload) (PolicyDecision, 
 		return d, nil
 	}
 	if d.Authority == "" || !d.ValidUntil.After(s.now()) {
-		return PolicyDecision{}, errors.New("intervention: policy authority missing or expired")
+		return PolicyDecision{}, errPolicyAuthorityExpired
 	}
 	return d, ctx.Err()
 }
@@ -165,7 +170,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, w Workload) (out Outcome)
 	out.Workload = w
 	d, err := s.decision(ctx, w)
 	if err != nil {
-		out.Status, out.Err = "policy_unavailable", err
+		out.markPolicyUnavailable(err)
 		return out
 	}
 	if !d.Authorized {
@@ -210,7 +215,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, w Workload) (out Outcome)
 	result, termErr = observeSignaledExit(termCtx, h, result, termErr, attempted)
 	termCancel()
 	if !attempted {
-		out.Status, out.Err = unavailableActionStatus(termErr), termErr
+		out.markActionUnavailable(termErr)
 		return out
 	}
 	if result.Observed && termErr == nil {
@@ -243,7 +248,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, w Workload) (out Outcome)
 	result, err = observeSignaledExit(killCtx, h, result, err, attempted)
 	killCancel()
 	if !attempted {
-		out.Status, out.Err = unavailableActionStatus(err), err
+		out.markActionUnavailable(err)
 		return out
 	}
 	if result.Observed && err == nil {
@@ -302,6 +307,68 @@ func unavailableActionStatus(err error) string {
 		return "control_unavailable"
 	}
 	return "policy_unavailable"
+}
+
+// PolicyUnavailableRuleID is the rule a policy_unavailable outcome carries
+// when no decision supplied one (the decision itself failed): B-625, the
+// managed-budget availability rule, whose meaning is exactly "the budget
+// policy could not be evaluated". Every policy_unavailable audit row names a
+// rule and a reason (node 1 live test, 2026-10-03: an agy row at 05:01 UTC
+// had both empty).
+const PolicyUnavailableRuleID = "B-625"
+
+// policyUnavailableCauses maps why the policy could not be applied onto the
+// fixed text the audit reason carries, walked top-down; the last row is the
+// catch-all. Fixed text, never the error string: the reason lands in
+// guard_events and on the org wire.
+var policyUnavailableCauses = []struct {
+	err   error
+	cause string
+}{
+	{ErrInvalidIdentity, "the process binding could not be revalidated"},
+	{ErrBindingUnsupported, "process binding is not supported on this platform"},
+	{errPolicyResolverUnavailable, "the policy resolver is unavailable"},
+	{errPolicyAuthorityExpired, "the managed authority is missing or expired"},
+	{context.DeadlineExceeded, "the policy decision or its signal fence timed out"},
+	{context.Canceled, "the reconciliation was cancelled"},
+	{nil, "the policy decision could not be made"},
+}
+
+func policyUnavailableCause(err error) string {
+	for _, c := range policyUnavailableCauses {
+		if c.err == nil || errors.Is(err, c.err) {
+			return c.cause
+		}
+	}
+	return ""
+}
+
+// markPolicyUnavailable sets the policy_unavailable status and guarantees
+// the outcome names a rule and a reason: the decision's own rule when one
+// was recorded (PolicyUnavailableRuleID otherwise), and the decision's
+// reason followed by why no signal was sent (the cause alone otherwise).
+func (o *Outcome) markPolicyUnavailable(err error) {
+	o.Status, o.Err = "policy_unavailable", err
+	if o.RuleID == "" {
+		o.RuleID = PolicyUnavailableRuleID
+	}
+	cause := policyUnavailableCause(err)
+	if o.Reason == "" {
+		o.Reason = boundedInterventionText("policy unavailable: "+cause+"; the process was not signalled", 512)
+		return
+	}
+	o.Reason = boundedInterventionText(o.Reason+"; not signalled: "+cause, 512)
+}
+
+// markActionUnavailable records an action that was not attempted:
+// control_unavailable for a failed binding revalidation, otherwise
+// policy_unavailable with its rule and reason guaranteed.
+func (o *Outcome) markActionUnavailable(err error) {
+	if status := unavailableActionStatus(err); status != "policy_unavailable" {
+		o.Status, o.Err = status, err
+		return
+	}
+	o.markPolicyUnavailable(err)
 }
 
 func (s *Supervisor) act(ctx context.Context, w Workload, d PolicyDecision, action func(context.Context) (ExitResult, error)) (result ExitResult, err error, attempted bool) {

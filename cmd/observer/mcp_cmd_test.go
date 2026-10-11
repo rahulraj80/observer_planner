@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 import (
@@ -311,11 +313,13 @@ func TestMCPCmd_DisabledIsInert(t *testing.T) {
 	}
 }
 
-// TestMCPCmd_WrapUnwrapByteIdentical drives wrap -> status -> unwrap
-// through the CLI in a private HOME: the configs are rewritten through the
-// relay, status --json reports the projection in the mcp-relay shape, and
-// unwrap restores every config byte-identically.
-func TestMCPCmd_WrapUnwrapByteIdentical(t *testing.T) {
+// TestMCPCmd_WrapUnwrapRestores drives wrap -> status -> unwrap through
+// the CLI in a private HOME: the configs are rewritten through the relay,
+// status --json reports the projection in the mcp-relay shape, and unwrap
+// puts every relay-owned entry back (T-397: no whole-file backup exists, so
+// the restore is the surgical reversal: values equal, every byte the relay
+// did not own unchanged).
+func TestMCPCmd_WrapUnwrapRestores(t *testing.T) {
 	e := newMCPCLIEnv(t, true)
 	cursorPath := e.writeClient(t, ".cursor/mcp.json", projTestCursor)
 	opencodePath := e.writeClient(t, ".config/opencode/opencode.json", projTestOpenCode)
@@ -370,10 +374,18 @@ func TestMCPCmd_WrapUnwrapByteIdentical(t *testing.T) {
 	if !strings.Contains(out, "restored 2 client config(s), 0 failed") || !strings.Contains(out, "still enabled") {
 		t.Fatalf("unwrap report:\n%s", out)
 	}
-	for p, want := range map[string]string{cursorPath: projTestCursor, opencodePath: projTestOpenCode, codexPath: projTestCodex} {
-		if got := mcpReadFile(t, p); got != want {
-			t.Fatalf("%s not byte-identical after unwrap:\n%s", p, got)
+	for p, want := range map[string]string{cursorPath: projTestCursor, opencodePath: projTestOpenCode} {
+		var gv, wv any
+		got := mcpReadFile(t, p)
+		if err := json.Unmarshal([]byte(got), &gv); err != nil || json.Unmarshal([]byte(want), &wv) != nil || fmt.Sprint(gv) != fmt.Sprint(wv) {
+			t.Fatalf("%s values not restored after unwrap:\n%s", p, got)
 		}
+	}
+	if got := mcpReadFile(t, cursorPath); !strings.Contains(got, `"env": {"GITHUB_TOKEN": "ghp_SECRET"}`) || !strings.Contains(got, `"observer": {"command": "/usr/local/bin/observer", "args": ["serve"]}`) {
+		t.Fatalf("unwrap re-rendered bytes the relay did not own:\n%s", got)
+	}
+	if got := mcpReadFile(t, codexPath); got != projTestCodex {
+		t.Fatalf("codex (never wrapped) changed:\n%s", got)
 	}
 	// The stdio relay verb IS the mcp-relay wrap body: with the relay on it
 	// passes the pre-check and the wrapper's own validation answers.
@@ -603,14 +615,6 @@ func TestMCPCmd_DoctorFakeOrg(t *testing.T) {
 
 	// Each failure row, table-driven: break -> expect -> restore.
 	cursorBytes := mcpReadFile(t, cursorPath)
-	rows := journalRows(t, e)
-	var backup string
-	for _, r := range rows {
-		if r.Client == "cursor" {
-			backup = r.BackupPath
-		}
-	}
-	backupBytes := mcpReadFile(t, backup)
 	cases := []struct {
 		name    string
 		break_  func()
@@ -628,16 +632,20 @@ func TestMCPCmd_DoctorFakeOrg(t *testing.T) {
 			"sts.mint", mcpDoctorFail, "invalid_grant",
 		},
 		{
-			"backup tampered", func() { _ = os.WriteFile(backup, []byte("tampered"), 0o600) }, func() { _ = os.WriteFile(backup, []byte(backupBytes), 0o600) },
-			"journal.consistent", mcpDoctorFail, "hash mismatch",
-		},
-		{
 			"config removed", func() { _ = os.Remove(cursorPath) }, func() { _ = os.WriteFile(cursorPath, []byte(cursorBytes), 0o644) },
 			"client:cursor", mcpDoctorFail, "no longer exists",
 		},
 		{
-			"config edited", func() {
+			// An edit outside the relay-owned entries is not drift (T-397:
+			// only the owned part is verified).
+			"unrelated key edited", func() {
 				_ = os.WriteFile(cursorPath, []byte(strings.Replace(cursorBytes, `"theme": "dark"`, `"theme": "light"`, 1)), 0o644)
+			}, func() { _ = os.WriteFile(cursorPath, []byte(cursorBytes), 0o644) },
+			"client:cursor", mcpDoctorPass, "unchanged since",
+		},
+		{
+			"relay-owned entry edited", func() {
+				_ = os.WriteFile(cursorPath, []byte(strings.Replace(cursorBytes, `"--config"`, `"--config-edited"`, 1)), 0o644)
 			}, func() { _ = os.WriteFile(cursorPath, []byte(cursorBytes), 0o644) },
 			"client:cursor", mcpDoctorWarn, "edited since",
 		},
@@ -679,28 +687,6 @@ func TestMCPCmd_DoctorFakeOrg(t *testing.T) {
 		t.Fatalf("disabled status with a stranded journal: %v\n%s", err, out)
 	}
 }
-
-// journalRows lists the launch journal of the env's node DB.
-func journalRows(t *testing.T, e mcpCLIEnv) []mcpLaunchRow {
-	t.Helper()
-	_, database, cleanup, err := loadConfigAndDB(context.Background(), e.cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-	specs, err := record.NewSQLStore(database, "").ListLaunchSpecs(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := make([]mcpLaunchRow, 0, len(specs))
-	for _, s := range specs {
-		out = append(out, mcpLaunchRow{Client: s.Client, BackupPath: s.BackupPath})
-	}
-	return out
-}
-
-// mcpLaunchRow is the slice of a journal row the doctor test mutates.
-type mcpLaunchRow struct{ Client, BackupPath string }
 
 // TestMCPCmd_DoctorVerifyChainIdentities pins the record.chain probe's two
 // legitimate genesis identities: a chain begun BEFORE enrolment verifies

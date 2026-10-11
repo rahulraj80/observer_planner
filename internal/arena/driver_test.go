@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -21,11 +22,32 @@ import (
 func fakeBin(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	script := "#!/bin/sh\n" + body + "\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	if err := writeFakeBin(path, body); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// writeFakeBin writes the script at path and closes it before returning, all
+// under syscall.ForkLock held for reading (T-404). The Arena tests run in
+// parallel, so another goroutine can fork while this one holds the script's
+// write descriptor open; the forked child inherits that descriptor until its
+// own exec closes it (O_CLOEXEC), and an exec of the script in that window
+// fails with "text file busy" (ETXTBSY, golang/go#22315). os/exec takes
+// ForkLock for writing around every fork, so holding it for reading here
+// means no fork can happen while the descriptor is open.
+func writeFakeBin(path, body string) error {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString("#!/bin/sh\n" + body + "\n"); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func arenaTestStore(t *testing.T) *store.Store {

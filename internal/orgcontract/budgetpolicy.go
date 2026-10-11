@@ -38,6 +38,17 @@ import (
 // design §5.3): CLAUDE.md's node-side-opt-in rule governs whether raw CONTENT
 // crosses the wire, and nothing on this rail is content.
 
+// BudgetGrantCapability is the ?policy_caps token a node sends on
+// GET /api/agent/budget to say it understands BudgetPolicyCap's request-grant
+// fields (grant_id, base_cap_tokens, base_cap_usd, grant_expires_at_ns and
+// budget_id) and applies the offline revert at grant expiry (T-625). The
+// server stamps those fields only on a response to a request that carried it:
+// a populated field an agent does not know fails that agent's signature check.
+// A node that does not send it, and every server that predates it, behave
+// exactly as before (the granted number still arrives in cap_tokens /
+// cap_usd). Both ends read this one constant.
+const BudgetGrantCapability = "budget_grants.v1"
+
 // Budget policy period vocabulary. These are the SAME strings the org
 // server's `budgets.period` column stores (internal/orgserver/rollup's
 // BudgetPeriod* constants); they are re-declared here because orgcontract must
@@ -179,6 +190,38 @@ type BudgetPolicyCap struct {
 	// (BudgetPostureRow.OrgBaselineUnattributed) so an admin reading
 	// "over budget" can see the caveat instead of discovering it.
 	SpentIncludesUnattributed bool `json:"spent_includes_unattributed,omitempty"`
+
+	// ---- request-grants additions (design §3.3). APPEND-ONLY + omitempty,
+	// served only to a fetch that advertised BudgetGrantCapability.
+	//
+	// When an org budget-increase grant raised this cap, CapTokens / CapUSD
+	// are the EFFECTIVE (granted) numbers and these say how to drop back:
+	// once the node's clock passes GrantExpiresAtNs it enforces
+	// BaseCapTokens / BaseCapUSD without waiting for a fetch. GrantID names
+	// the grant for the banner. A perpetual grant has GrantExpiresAtNs 0 and
+	// never reverts locally.
+	GrantID          int64   `json:"grant_id,omitempty"`
+	BaseCapTokens    int64   `json:"base_cap_tokens,omitempty"`
+	BaseCapUSD       float64 `json:"base_cap_usd,omitempty"`
+	GrantExpiresAtNs int64   `json:"grant_expires_at_ns,omitempty"`
+	// BudgetID is the authored budget row that produced this cap's leading
+	// number (the row ResolvedScope names; for a per-developer template, the
+	// template row). It is what lets a developer name the budget a
+	// budget-increase request asks to raise; the approver can still change
+	// it. Same gate as the grant fields above.
+	BudgetID string `json:"budget_id,omitempty"`
+}
+
+// RevertExpiredGrant returns c with its grant overlay dropped when the grant
+// has expired at now (design §3.3): the node's offline revert. A cap with no
+// grant, or a perpetual one, is returned unchanged.
+func (c BudgetPolicyCap) RevertExpiredGrant(now time.Time) BudgetPolicyCap {
+	if c.GrantID == 0 || c.GrantExpiresAtNs <= 0 || now.UnixNano() < c.GrantExpiresAtNs {
+		return c
+	}
+	c.CapTokens, c.CapUSD = c.BaseCapTokens, c.BaseCapUSD
+	c.GrantID, c.BaseCapTokens, c.BaseCapUSD, c.GrantExpiresAtNs = 0, 0, 0, 0
+	return c
 }
 
 // SubjectKey returns this cap's normalized subject kind and id, and whether it
@@ -292,6 +335,16 @@ func BudgetPolicyFresh(issuedAt string, maxAge time.Duration, now time.Time) (bo
 	}
 	return true, ""
 }
+
+// BudgetGrantableScopePrefix is the ResolvedScope prefix of the one kind of
+// cap a budget-increase grant can raise: the caller's OWN member row (an
+// explicit member row or their instance of a per-developer template, with or
+// without a tool or model subject). Every other label ("org", "team:<id>",
+// "tool:<id>", "model:<id>") names a pool shared by several members, which a
+// grant for one member never raises (review row C156-07). The node's request
+// picker offers only these caps; budgetresolve's grant table is pinned to agree
+// with it (TestGrantableLabelsMatchTheGrantTable).
+const BudgetGrantableScopePrefix = "member:"
 
 // BudgetPolicyScopeNone is the ResolvedScope of a SIGNED EXPLICIT NONE: the
 // org has authored no budget covering this caller, and says so in a document

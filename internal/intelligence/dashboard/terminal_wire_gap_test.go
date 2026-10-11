@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -177,7 +179,7 @@ func TestTerminalSessions503IsJSONWithBothCauses(t *testing.T) {
 // tool has no guided install crosses the wire as install_note, and is OMITTED
 // when empty (so a tool with a real install command carries no dead copy).
 func TestTerminalPreflightCarriesInstallNote(t *testing.T) {
-	const note = "no Windows build exists — see the vendor's docs"
+	const note = "no Windows build exists - see the vendor's docs"
 	seam := func(tool string) (ToolPreflight, bool) {
 		switch tool {
 		case "muse":
@@ -251,7 +253,7 @@ func launchableToolInfoFromSessions(t *testing.T, h http.Handler) map[string]Lau
 		t.Fatal("launchable_tools must stay on the wire (existing clients decode it)")
 	}
 	if len(out.Info) != len(out.LaunchableTools) {
-		t.Fatalf("launchable_tool_info has %d rows, launchable_tools has %d — the sibling key must cover the same set",
+		t.Fatalf("launchable_tool_info has %d rows, launchable_tools has %d - the sibling key must cover the same set",
 			len(out.Info), len(out.LaunchableTools))
 	}
 	byTool := make(map[string]LaunchableTool, len(out.Info))
@@ -275,10 +277,10 @@ func TestTerminalSessionsAnnotatesLaunchableTools(t *testing.T) {
 		t.Fatalf("codex missing from launchable_tool_info: %v", info)
 	}
 	if !codex.Allowed {
-		t.Error("codex is in allowed_tools — allowed must be true")
+		t.Error("codex is in allowed_tools - allowed must be true")
 	}
 	if codex.Watched {
-		t.Error("codex is NOT in enabled_adapters — watched must be false (the DI-07 gap)")
+		t.Error("codex is NOT in enabled_adapters - watched must be false (the DI-07 gap)")
 	}
 
 	cc, ok := info["claude-code"]
@@ -286,10 +288,10 @@ func TestTerminalSessionsAnnotatesLaunchableTools(t *testing.T) {
 		t.Fatalf("claude-code missing from launchable_tool_info: %v", info)
 	}
 	if cc.Allowed {
-		t.Error("claude-code is not in allowed_tools — allowed must be false")
+		t.Error("claude-code is not in allowed_tools - allowed must be false")
 	}
 	if !cc.Watched {
-		t.Error("claude-code is in enabled_adapters — watched must be true")
+		t.Error("claude-code is in enabled_adapters - watched must be true")
 	}
 }
 

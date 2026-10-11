@@ -1,0 +1,53 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].actor": "VerifiedOfficial",
+    "data[].actor.deleted": "VerifiedOfficial",
+    "data[].actor.email": "VerifiedOfficial",
+    "data[].actor.email_address": "VerifiedOfficial",
+    "data[].actor.name": "VerifiedOfficial",
+    "data[].actor.type": "VerifiedOfficial",
+    "data[].actor.user_id": "VerifiedOfficial",
+    "data[].amount": "VerifiedOfficial",
+    "data[].claude_tag_category": "Inferred",
+    "data[].claude_tag_user_id": "Inferred",
+    "data[].context_window": "Inferred",
+    "data[].cost_type": "Inferred",
+    "data[].currency": "VerifiedOfficial",
+    "data[].ending_at": "Inferred",
+    "data[].inference_geo": "Inferred",
+    "data[].list_amount": "VerifiedOfficial",
+    "data[].model": "Inferred",
+    "data[].product": "VerifiedOfficial",
+    "data[].rbac_group_id": "Inferred",
+    "data[].requests": "VerifiedOfficial",
+    "data[].slack_channel_id": "Inferred",
+    "data[].speed": "Inferred",
+    "data[].starting_at": "Inferred",
+    "data[].token_type": "Inferred",
+    "data_refreshed_at": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial",
+    "organization_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "49d772a8555febc031b8b489969c033f7002b53b0a7b7240a9c91d2147928993",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/analytics/user_cost_report",
+    "query": {
+      "page": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Official 200 example of GET /v1/organizations/analytics/user_cost_report, adjusted to the request the driver sends (bucket_width=1d, group_by[]=product; lane ENTAPI-H, T-697). The verbatim example uses the placeholder 2019-12-27T18:11:19.117Z for starting_at and ending_at, which is not a daily bucket and which the reference says is null unless bucket_width is set; here they are one UTC day (2026-10-06T00:00:00Z to 2026-10-07T00:00:00Z). The reference says model, cost_type, token_type, context_window, inference_geo, speed, rbac_group_id, claude_tag_category, claude_tag_user_id and slack_channel_id are null unless grouped by them, so they are null here (keys kept). Those twelve fields are graded Inferred because their values are not the example's. Every other value is the verbatim example. Terminal page derived from the normal page: has_more false and next_page null; every other value is unchanged.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.analytics.user_cost_report"
+}

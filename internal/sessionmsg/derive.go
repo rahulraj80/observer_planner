@@ -49,6 +49,10 @@ import (
 //  6. foldTokenRows        — key resolution (turn_id > message_id >
 //     source_event_id) + keyless synthesis + row build/merge for the
 //     token rows the twin fold didn't already claim.
+//     6b. splitPromptShadows: when the tool's hook shadows its transcript's
+//     prompts (DeriveInput.PromptHookShadow), set each hook-captured prompt
+//     that has a transcript twin aside; aliasPromptShadows points its keys
+//     at the twin's row after stage 7 (promptshadow.go).
 //  7. foldActions          — user-row keying + bare-row synthesis for any
 //     action whose join key matched no token/proxy bucket. Status kinds
 //     (status.go: rate_limit) never become rows or tool calls — they fold
@@ -69,10 +73,16 @@ func Derive(in DeriveInput) []*Row {
 	proxyKeylessKeys := resolveKeylessProxyKeys(proxies, tokens, twinOf, in.Mode)
 	tokenKeylessKeys := resolveKeylessTokenKeys(tokens, in.Mode)
 
+	// Prompt-shadow fold (T-563): a hook-captured prompt with a transcript
+	// twin is set aside before the action fold and aliased onto its twin's
+	// row after it.
+	actions, shadows := splitPromptShadows(actions, in.PromptHookShadow)
+
 	state := newDeriveState()
 	foldProxyRows(state, proxies, tokens, twinOf, plan.proxyDropped, in.Mode, proxyKeylessKeys)
 	foldTokenRows(state, plan, in.Mode, tokenKeylessKeys, in.ReasoningDisjoint)
 	foldActions(state, actions, in.DefaultModel)
+	aliasPromptShadows(state, shadows)
 
 	out := finalizeOrder(state)
 	stampGapToNext(out)
@@ -1349,7 +1359,7 @@ func pickShadowPartner(tokens []TokenRow, s int, fulls []int, used map[int]bool)
 		switch {
 		case pick == -1, delta < bestDelta:
 			pick, bestDelta = f, delta
-		case delta == bestDelta && lessTokenCandidate(full, tokens[pick]):
+		case delta == bestDelta && lessTokenCandidate(full, tokens[pick]): //nolint:gosec // G602: the index is bounds-checked above
 			pick, bestDelta = f, delta
 		}
 	}

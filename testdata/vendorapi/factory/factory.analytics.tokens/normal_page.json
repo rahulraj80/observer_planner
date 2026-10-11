@@ -1,0 +1,27 @@
+{
+  "data": [
+    {
+      "date": "2026-01-15",
+      "group_key": "claude-sonnet-4-5-20250929",
+      "billable_tokens": 450000,
+      "input_tokens": 1200000,
+      "output_tokens": 85000,
+      "cache_read_tokens": 900000,
+      "cache_write_tokens": 40000
+    },
+    {
+      "date": "2026-01-15",
+      "group_key": "gpt-5-codex",
+      "billable_tokens": 120000,
+      "input_tokens": 300000,
+      "output_tokens": 20000,
+      "cache_read_tokens": null,
+      "cache_write_tokens": null
+    }
+  ],
+  "meta": {
+    "org_id": "org_01HPMQ8ABCDE7Y7PR3TTZY4KLM",
+    "start_date": "2026-01-15",
+    "end_date": "2026-01-15"
+  }
+}

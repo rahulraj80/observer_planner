@@ -201,7 +201,7 @@ func TestFeatureSendWithoutGrantMakesNoRequest(t *testing.T) {
 		t.Fatalf("want ErrNoLiveGrant, got %v", err)
 	}
 	if ran {
-		t.Fatal("the send callback ran without a live grant — the network handle escaped the check")
+		t.Fatal("the send callback ran without a live grant - the network handle escaped the check")
 	}
 }
 
@@ -481,7 +481,7 @@ func TestPurposeRulesCoverEveryPurpose(t *testing.T) {
 	for _, p := range cloudcontract.AllPurposes() {
 		rule, ok := purposeRules[p]
 		if !ok {
-			t.Errorf("purpose %q has no rule row — classify it deliberately", p)
+			t.Errorf("purpose %q has no rule row - classify it deliberately", p)
 			continue
 		}
 		if !rule.standingGrantable && rule.notYetReason == "" {
@@ -489,7 +489,7 @@ func TestPurposeRulesCoverEveryPurpose(t *testing.T) {
 		}
 	}
 	if len(purposeRules) != len(cloudcontract.AllPurposes()) {
-		t.Errorf("purposeRules has %d rows for %d purposes — the table must be exactly the vocabulary",
+		t.Errorf("purposeRules has %d rows for %d purposes - the table must be exactly the vocabulary",
 			len(purposeRules), len(cloudcontract.AllPurposes()))
 	}
 }
@@ -611,12 +611,12 @@ func TestFetchSessionCannotUpload(t *testing.T) {
 	if _, ok := read.(interface {
 		Upload(context.Context, UploadRequest) (UploadResult, error)
 	}); ok {
-		t.Error("ReadSession exposes Upload — a results fetch, authorized by ANY live grant, can now write")
+		t.Error("ReadSession exposes Upload - a results fetch, authorized by ANY live grant, can now write")
 	}
 	if _, ok := read.(interface {
 		UploadStructural(context.Context, StructuralUploadRequest) (StructuralUploadResult, error)
 	}); ok {
-		t.Error("ReadSession exposes UploadStructural — the fetch handle can write snapshots")
+		t.Error("ReadSession exposes UploadStructural - the fetch handle can write snapshots")
 	}
 
 	// The two write handles are narrow in the other direction too: neither can
@@ -625,7 +625,7 @@ func TestFetchSessionCannotUpload(t *testing.T) {
 	if _, ok := upload.(interface {
 		UploadStructural(context.Context, StructuralUploadRequest) (StructuralUploadResult, error)
 	}); ok {
-		t.Error("UploadSession exposes UploadStructural — an evidence grant now authorizes the standing rail")
+		t.Error("UploadSession exposes UploadStructural - an evidence grant now authorizes the standing rail")
 	}
 	if _, ok := upload.(interface {
 		Results(context.Context, string) (ResultsPage, error)
@@ -636,7 +636,7 @@ func TestFetchSessionCannotUpload(t *testing.T) {
 	if _, ok := structural.(interface {
 		Upload(context.Context, UploadRequest) (UploadResult, error)
 	}); ok {
-		t.Error("StructuralSession exposes Upload — a standing grant now authorizes a session-evidence body")
+		t.Error("StructuralSession exposes Upload - a standing grant now authorizes a session-evidence body")
 	}
 	if _, ok := structural.(interface {
 		Results(context.Context, string) (ResultsPage, error)
@@ -1111,6 +1111,6 @@ func TestOpenDerivesHostScopedCredStoreFromBaseURL(t *testing.T) {
 		t.Fatalf("Open (prod): %v", err)
 	}
 	if _, err := prod.cred.LoadAPIToken(); !errors.Is(err, cloudcred.ErrNotFound) {
-		t.Fatalf("prod-host gateway LoadAPIToken = %v, want ErrNotFound — must not see staging's token", err)
+		t.Fatalf("prod-host gateway LoadAPIToken = %v, want ErrNotFound - must not see staging's token", err)
 	}
 }

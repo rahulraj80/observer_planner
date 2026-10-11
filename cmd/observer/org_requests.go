@@ -19,7 +19,7 @@ import (
 // the admin always responds by editing policy on the existing policy rail;
 // these commands only carry the ask and show its recorded status.
 
-// newOrgRequestCmd posts a request/message to the enrolled organisation
+// newOrgRequestCmd posts a request/message to the enrolled organization
 // (POST /api/agent/requests via orgclient.PostOrgRequest).
 func newOrgRequestCmd() *cobra.Command {
 	var (
@@ -29,8 +29,8 @@ func newOrgRequestCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "request <message>",
-		Short: "Send a short typed ask to your organisation (e.g. enable a feature, raise a budget)",
-		Long: `Posts a short request/message to the enrolled organisation. This is the
+		Short: "Send a short typed ask to your organization (e.g. enable a feature, raise a budget)",
+		Long: `Posts a short request/message to the enrolled organization. This is the
 only ask channel a node has -- it does not change anything locally. The
 admin sees the ask in their Requests queue and responds by editing policy;
 that change reaches this node on the normal policy rail, not through this
@@ -61,7 +61,7 @@ Examples:
 				return errors.New("not enrolled; run `observer enroll <org-url> <token>` first")
 			}
 			if errors.Is(err, orgclient.ErrOrgRequestCapReached) {
-				return errors.New("you already have too many open requests to this organisation; wait for one to be resolved, or run `observer org requests` to review them")
+				return errors.New("you already have too many open requests to this organization; wait for one to be resolved, or run `observer org requests` to review them")
 			}
 			if err != nil {
 				return err
@@ -72,7 +72,7 @@ Examples:
 				fmt.Fprintf(out, ", target %s", got.Target)
 			}
 			fmt.Fprintln(out, ").")
-			fmt.Fprintln(out, "Your admin will respond by updating organisation policy; run `observer org requests` to check its status.")
+			fmt.Fprintln(out, "Your admin will respond by updating organization policy; run `observer org requests` to check its status.")
 			return nil
 		},
 	}
@@ -90,7 +90,7 @@ func newOrgRequestsCmd() *cobra.Command {
 	var configPath string
 	cmd := &cobra.Command{
 		Use:   "requests",
-		Short: "List the requests you've sent to your organisation and their status",
+		Short: "List the requests you've sent to your organization and their status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			b, err := buildOrgBundle(cmd.Context(), configPath)
@@ -108,7 +108,7 @@ func newOrgRequestsCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if len(reqs) == 0 {
-				fmt.Fprintln(out, "(no requests sent yet — use `observer org request \"<message>\"` to send one)")
+				fmt.Fprintln(out, "(no requests sent yet - use `observer org request \"<message>\"` to send one)")
 				return nil
 			}
 			for _, r := range reqs {

@@ -140,7 +140,7 @@ func TestContentCaptureBlockReason(t *testing.T) {
 			// Must also agree with the gate itself: a non-empty reason only
 			// when contentCapturePosture actually resolves to disabled.
 			if contentCapturePosture(tc.cfg).ShipsRawContent() {
-				t.Error("contentCaptureBlockReason returned non-empty but the gate is actually open — inconsistent with contentCapturePosture")
+				t.Error("contentCaptureBlockReason returned non-empty but the gate is actually open - inconsistent with contentCapturePosture")
 			}
 		})
 	}

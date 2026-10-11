@@ -24,10 +24,10 @@ func TestOrgClientShouldStart(t *testing.T) {
 		{"disabled, no url, no row", false, "", false, false},
 		{"disabled, url set, no row", false, "https://org.example", false, false},
 		{"disabled, url set, row exists", false, "https://org.example", true, false},
-		{"enabled, no url, no row — never enrolled", true, "", false, false},
-		{"enabled, no url, row exists — BLOCK-1 shape, must stay active", true, "", true, true},
-		{"enabled, url set, no row — enrolling now", true, "https://org.example", false, true},
-		{"enabled, url set, row exists — fully wired", true, "https://org.example", true, true},
+		{"enabled, no url, no row - never enrolled", true, "", false, false},
+		{"enabled, no url, row exists - BLOCK-1 shape, must stay active", true, "", true, true},
+		{"enabled, url set, no row - enrolling now", true, "https://org.example", false, true},
+		{"enabled, url set, row exists - fully wired", true, "https://org.example", true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

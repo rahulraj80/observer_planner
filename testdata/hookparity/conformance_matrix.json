@@ -1,0 +1,857 @@
+[
+  {
+    "Client": "aider",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "antigravity",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "antigravity-cli",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "top-level decision deny with reason; the deny reached the model live (agy 1.2.16, demo node 1, a shell command and a write to ~/.ssh). The allow is an EMPTY stdout: live, an empty object {} DENIED the call (decision is required), while an empty stdout leaves the call to agy's own permission flow (and decision:allow is documented to auto-approve past the developer's prompt). Ask is NOT listed: force_ask under --dangerously-skip-permissions ran the command (headless default mode auto-denied it), so an enforced ask is a deny that says how to confirm. camelCase payload: toolCall.{name,args} (args keys PascalCase, e.g. CommandLine), conversationId, workspacePaths; no cwd. The desktop app and the IDE read the same ~/.gemini/config/hooks.json. Windows: the vendor runs hooks through cmd /c; Observer writes no Windows target"
+  },
+  {
+    "Client": "antigravity-cli",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "claude-code",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "native ask via permissionDecision; payload carries cwd but no project root, so boundary rules defer to the watcher"
+  },
+  {
+    "Client": "claude-code",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "process exit code 2 with NO stdout reply; stderr is the user-visible reason and the prompt is erased (LIVE CORRECTION 2026-09-07: permissionDecision is PreToolUse-only and is silently ignored on this event). Allow/warn reply with the bare hookSpecificOutput envelope (+ additionalContext on warn)"
+  },
+  {
+    "Client": "claude-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "cline",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "probe_required: the installed cline 3.0.68 SDK (demo node 1, 2026-10-03) runs prompt_submit hooks DETACHED (detached: detachAsyncHooks ?? true) and also fires them after the user message is added, with payload {hookName:\"prompt_submit\", userPromptSubmit:{prompt, attachments}}; a cancel reply cannot stop the prompt there, so no dialect row (the VS Code extension's detach setting is unconfirmed). Observe-only until a host is shown to wait on the hook (hook-parity Lane B)"
+  },
+  {
+    "Client": "cline",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "cline-cli",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Observer writes ~/.cline/hooks/PreToolUse, a bash script that execs `observer hook cline-cli PreToolUse`, so Cline CLI gate verdicts are recorded under cline-cli (T-342: the CLI reads this directory, live 2026-10-04; a script an earlier version wrote for `observer hook cline` is recognised and rewritten). Live, Cline CLI 3.0.68 names tools in the CLI vocabulary (run_commands with a list or a bare string in commands, read_files with files[]); the cancel reply aborted the run before rm -rf ~/x ran and the CLI printed \"[abort] aborted by another client\". file-per-event executables: the SDK hook runtime reads ~/.cline/hooks/PreToolUse. A block is {\"cancel\":true,\"errorMessage\"}, which STOPS THE RUN (no per-call deny exists); exit codes are ignored; the allow is an empty stdout; no ask (review has no effect). Timeout 120 s, fail open. macOS/Linux only (Windows .ps1 detached hooks broken, cline/cline #14767): Observer writes no Windows target"
+  },
+  {
+    "Client": "cline-cli",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "codex",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "hookSpecificOutput.permissionDecision deny with a reason (Codex shows the model \"Command blocked by PreToolUse hook: \u003creason\u003e\"); covers Bash, apply_patch (every file in the patch) and MCP tools; no ask: Codex rejects permissionDecision:ask and fails open (openai/codex #28437), so an enforced ask is a deny that says how to confirm; unified_exec shell calls are only partly intercepted (#20204) and spawn_agent sub-agents bypass hooks (#49736)"
+  },
+  {
+    "Client": "codex",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "legacy {decision:block,reason} shown to the developer; prompt cannot be modified"
+  },
+  {
+    "Client": "codex",
+    "Channel": "hook:notify",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "observe-only notification channel - no documented deny semantics (Q4); enforcement comes from the native rules dialect once G11 compiles it"
+  },
+  {
+    "Client": "codex",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "command-code",
+    "Channel": "hook:beforeToolCall",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": true,
+    "Notes": "the same mod file (the one plugin shim, hook-parity Lane D): {block: true, additionalContext: \u003creason\u003e} on a deny; the payload is {toolCallId, toolName, input, state}, no session id, and no ask field is documented, so an ask is a deny with a reason"
+  },
+  {
+    "Client": "command-code",
+    "Channel": "hook:transformInput",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": true,
+    "Notes": "Part B item 2, phase-3a - live-fetched 2026-09-07 (commandcode.ai/docs/mods): a Mods-SDK TypeScript module (cmd.hooks({transformInput({text}){...}})), not a shell hook - registered as ~/.commandcode/mods/observer-guard.ts (go:embed template, hermesplugin precedent) that shells out to `observer hook command-code transformInput`. The ONLY documented field is `text` - there is no session/conversation id anywhere in the signature, so an ask-once finding here fails closed to a HARD, unconditional block (no resend override) per the engine's own documented empty-session-id rule. REDACT wired (hook-parity Lane B, 2026-10-03): under [guard.prompt] mode redact a secret-only prompt is answered with {action:'transform',text} (masking needs no session key)"
+  },
+  {
+    "Client": "command-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "copilot",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "copilot-cli",
+    "Channel": "hook:preToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "top-level permissionDecision deny|ask with permissionDecisionReason, in ~/.copilot/hooks/superbased-observer.json (version 1, the command in \"bash\"); toolArgs may arrive as a JSON-encoded string and is decoded. The allow is an empty object because permissionDecision:allow skips Copilot's own prompt. A crash or non-zero exit DENIES on the host side (a timeout fails open). A deny-not-blocking report exists (github/copilot-cli #3874, closed); camelCase and PascalCase event names are both accepted. Windows: yes via the handler's powershell field, which Observer does not write"
+  },
+  {
+    "Client": "copilot-cli",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "cowork",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "crush",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "the ONE crush.json hook event (global ~/.config/crush/crush.json): {\"decision\":\"deny\",\"reason\"}; the allow is an empty object because decision:allow would skip Crush's permission prompt; exit 49 halts the whole turn (never used); no ask; sub-agents bypass hooks by design (main agent only). Timeouts and other exits fail open. Windows: yes (embedded POSIX shell). Installed on demo node 1 (crush v0.97.1, 2026-10-07) but it has no provider configured and exposes no base-URL env knob, so a run needs a provider key or a hand-written crush.json: doc-grounded, `observer init` only"
+  },
+  {
+    "Client": "crush",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "cursor",
+    "Channel": "hook:beforeMCPExecution",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "permission JSON allow|deny|ask"
+  },
+  {
+    "Client": "cursor",
+    "Channel": "hook:beforeReadFile",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "permission JSON allow|deny|ask"
+  },
+  {
+    "Client": "cursor",
+    "Channel": "hook:beforeShellExecution",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "permission JSON allow|deny|ask; payload carries the workspace root, so boundary rules are active pre-execution"
+  },
+  {
+    "Client": "cursor",
+    "Channel": "hook:beforeSubmitPrompt",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "continue:false + user_message (NOT the permission field the shell/MCP/file channels use); prompt cannot be modified"
+  },
+  {
+    "Client": "cursor",
+    "Channel": "hook:preToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "permission allow|deny with user_message + agent_message; judges the classes the per-tool before* events do not (writes, edits, deletes, content search, web); ask is accepted but not enforced on this event (vendor docs), so an enforced ask is a deny that says how to confirm"
+  },
+  {
+    "Client": "cursor",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "deepseek",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "devin",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Devin CLI (T-478): Observer writes one Claude-shaped matcher group under \"hooks\" in the CLI's user config, ~/.config/devin/config.json (the devin folder under %APPDATA% on Windows), only when that directory exists (the CLI is installed); .devin/hooks.v1.json is project-only and never written. The reply is hookSpecificOutput.permissionDecision deny with permissionDecisionReason (Claude-shaped; the vendor also documents exit 2 and decision:block). The CLI can ALSO replay ~/.claude/settings.json (read_config_from.claude, default on), where Observer's Claude Code PreToolUse may be registered. Live on node 1 (devin 3000.11.3, 2026-10-07, after T-574): rm -rf ~/x was denied, the CLI reported \"Tool rejected\" with the rule reason and the fake target survived; ls ran; p95 deny 92 ms, allow 37 ms. Windows: not live-checked"
+  },
+  {
+    "Client": "devin",
+    "Channel": "hook:pre_mcp_tool_use",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Cascade: judged as the MCP call mcp__\u003ctool_info.mcp_server_name\u003e__\u003ctool_info.mcp_tool_name\u003e; exit 2 + stderr"
+  },
+  {
+    "Client": "devin",
+    "Channel": "hook:pre_read_code",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Cascade: judged as a read of tool_info.file_path; exit 2 + stderr"
+  },
+  {
+    "Client": "devin",
+    "Channel": "hook:pre_run_command",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Cascade: exit code 2 blocks and stderr (the reason, nothing else) is shown to the developer; no JSON reply, no ask, so an enforced ask is a deny that says how to confirm; any other exit lets the action proceed. The command is tool_info.command_line. Windows: the vendor runs `command` through PowerShell; Observer writes no Windows target for Cascade. Not installed on demo node 1: doc-grounded, `observer init` only"
+  },
+  {
+    "Client": "devin",
+    "Channel": "hook:pre_user_prompt",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Part B item 2, phase-3a - live-fetched 2026-09-07 (docs.devin.ai/desktop/cascade/hooks): Windsurf/Devin Desktop Cascade's pre_user_prompt, exit code 2 blocks, no JSON reply and no user-visible message channel at all (show_output does not apply to this event, so ask-once degrades to a hard block); no session_id field is documented either - trajectory_id (the conversation identifier) is used as the session-scoping key instead; registered at ~/.codeium/windsurf/hooks.json"
+  },
+  {
+    "Client": "devin",
+    "Channel": "hook:pre_write_code",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Cascade: judged as an edit of tool_info.file_path; exit 2 + stderr"
+  },
+  {
+    "Client": "devin",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "droid",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "hookSpecificOutput.permissionDecision deny with permissionDecisionReason (Claude-shaped); the deny reached the model live. Ask is NOT listed: the vendor documents permissionDecision ask, but live on droid 0.233.0 an ask under `droid exec --auto high` ran the command, so an enforced ask is a deny that says how to confirm. hooks.json keeps its events at the ROOT (a {\"hooks\":{}} wrapper is ignored by droid; Observer's writer repairs it)"
+  },
+  {
+    "Client": "droid",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "same legacy {decision:block,reason} shape as Codex; vendor docs state outright \"hook feedback goes to the user, not the agent\". Not live: on node 1 (2026-10-04) `droid exec` 0.233.0 fired PreToolUse from the same hooks.json but never UserPromptSubmit; the interactive TUI is not probed"
+  },
+  {
+    "Client": "droid",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "freebuff",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "gemini-cli",
+    "Channel": "hook:BeforeAgent",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "decision:deny discards the message; both reason and systemMessage are set (vendor docs call systemMessage user-visible in the terminal, and reason also renders when denying). Live (gemini 0.62.0, demo node 1): the block held with zero model requests and the developer saw \"Agent execution blocked: \u003creason\u003e\"; because the reply also exits 2, gemini additionally prints \"Hook(s) failed for event BeforeAgent\" beside the block"
+  },
+  {
+    "Client": "gemini-cli",
+    "Channel": "hook:BeforeTool",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "decision:deny with reason (sent to the agent as the tool error) and systemMessage (shown to the developer); ask is implemented but undocumented (google-gemini/gemini-cli #28046): deny-only until probed, so an enforced ask is a deny that says how to confirm"
+  },
+  {
+    "Client": "gemini-cli",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "goose",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "{\"decision\":\"block\",\"reason\"} from Observer's Open Plugin (~/.agents/plugins/superbased-observer: plugin.json + hooks/hooks.json, no trust step); the model gets \"Tool call denied by policy hook\"; the allow is an empty stdout; no ask. The cwd is working_dir. Host default on_failure is allow (fail open); no sub-agent events. Windows: not stated (commands run through sh -c)"
+  },
+  {
+    "Client": "goose",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "grok",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "top-level decision deny with reason, in ~/.grok/hooks/superbased-observer.json (always trusted); the deny reason reached the model live (grok 1.0.46, demo node 1). Ask is NOT listed: the vendor documents ask, but live an ask under --always-approve ran the command, so an enforced ask is a deny that says how to confirm. The allow {\"decision\":\"allow\"} only means not blocked (live, ls ran). Observer registers a 10 s timeout (the vendor default is 5 s); every hook failure fails open on the host side. Grok also replays ~/.claude/settings.json and ~/.cursor/hooks.json (audit section 4.4). Windows: not stated"
+  },
+  {
+    "Client": "grok",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "grokbot",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "hermes",
+    "Channel": "hook:plugin",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "observe-only audit-log plugin bridge - no documented deny semantics (Q4)"
+  },
+  {
+    "Client": "hermes",
+    "Channel": "hook:pre_tool_call",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "Observer's plugin subscribes (Lane A7, operator decision 2026-10-02): {\"action\": \"block\", \"message\"} denies, {\"action\": \"approve\", \"message\"} raises Hermes' own approval prompt; Hermes fails a timed-out pre_tool_call CLOSED at plugins.hook_callback_timeout (30 s default)"
+  },
+  {
+    "Client": "hermes",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "junie",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "CLI only: hooks do not run in ACP/IDE mode. Top-level decision deny|ask with reason in ~/.junie/config.json \"hooks\" (the reason reaches the model as an error); Observer registers a 10 s timeout because the PreToolUse default is 2 s; a timeout or crash lets the tool continue. Windows: yes (cmd /c). Installed on demo node 1 (junie 3579.5, 2026-10-07) but it needs a JetBrains account or JUNIE_API_KEY, and it refuses to start with HOME pointed at a throwaway dir: doc-grounded, `observer init` only"
+  },
+  {
+    "Client": "junie",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "kilo-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "kilo-code-cli",
+    "Channel": "hook:chat.message",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "modify-only seam: the plugin shim replaces the message text with the block reason before the model sees it, and tells the developer with the host's TUI toast (client.tui.showToast, @opencode-ai/sdk 1.18.31 / Kilo CLI 7.8.3; a headless `run` has no TUI, so no toast; the dashboard post-hoc toast still applies); the session id keys resend-to-confirm"
+  },
+  {
+    "Client": "kilo-code-cli",
+    "Channel": "hook:tool.execute.before",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "plugin shim at ~/.config/kilo/plugin/: throw = deny (OpenCode contract); no native ask"
+  },
+  {
+    "Client": "kilo-code-cli",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "kimi-code",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "exit 2 blocks and its stderr is the reason the model sees; exit 0 allows and any stdout is added to the model context, so the allow is silence (the JSON hookSpecificOutput.permissionDecision deny is the vendor's other documented block). Other exit codes, a timeout or a crash allow (fail-open by the vendor). T-378: registered as a [[hooks]] table {event, command, timeout = 30} in ~/.kimi-code/config.toml ($KIMI_CODE_HOME), a file that also holds plaintext provider keys, under the D-270 credential-file exception (only Observer's own tables are edited). No ask. Windows: implied by the vendor, shell not stated"
+  },
+  {
+    "Client": "kimi-code",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "dialect built from the installed 2.1.1 source (hook-parity Lane B) and live-captured (T-378): stdin {hook_event_name, session_id, cwd, client_type, prompt, is_steer} where prompt is the turn's content parts [{type: text, text}] (not a string); exit 2 blocks and its stderr is appended to the conversation as a \u003chook_result\u003e message the developer sees; exit-0 stdout is appended to the model context, so the allow is an empty stdout; timeout or crash is an allow. T-378: registered beside the PreToolUse gate in ~/.kimi-code/config.toml under the D-270 credential-file exception"
+  },
+  {
+    "Client": "kimi-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "kiro-cli",
+    "Channel": "hook:userPromptSubmit",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "probe_required: a shell-action non-zero exit is documented to block the submission, but the 2.x CLI reference documents exit codes for preToolUse only and no stdin field names, and kirodotdev/Kiro #11050 (open, Kiro IDE 1.0.337) reports the prompt is committed BEFORE the hook runs, so an exit 2 does not stop it. No dialect row until a live capture settles the payload and whether the block holds (hook-parity Lane B, 2026-10-03)"
+  },
+  {
+    "Client": "kiro-cli",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "kiro-crew",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "mistral-code",
+    "Channel": "hook:pre_tool",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "JSON decision only ({\"decision\":\"deny\",\"reason\"}, the reason becomes the tool error the model sees): exit 2 is NOT a block, it is a hook failure (a warning unless strict = true). Registered in ~/.vibe/hooks.toml with match \"*\", strict false and a 30 s timeout; no ask. Windows: not stated"
+  },
+  {
+    "Client": "mistral-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "muse",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Observer writes one Claude-shaped matcher group under \"hooks\" in ~/.config/muse/settings.json (and ensures \"schema_version\": 1); the reply is hookSpecificOutput.permissionDecision deny with permissionDecisionReason, which reached the model live as \"tool blocked by hook: \u003creason\u003e\". Ask is not listed (not probed headless). Muse's own approval reviewer runs separately and can still refuse a call the hook allowed. Plugin bundles (.muse-plugin, argv commands) are the other hook source; Observer writes none. No Windows build exists"
+  },
+  {
+    "Client": "muse",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "the top-level-block dialect (decision block with a reason): live, the run ended \"Cancelled\" before any model request (exit 2 did the same); muse exec printed no reason, so the developer-visible message is unproven and an enforced ask is a block"
+  },
+  {
+    "Client": "muse",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "open-interpreter",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "Codex shape under its OWN home: ~/.openinterpreter/hooks.json, hookSpecificOutput.permissionDecision deny. Ask is not listed (the vendor does not state it and Codex itself rejects ask). Per-definition trust like Codex: the entry runs only after the developer reviews it with /hooks, and [features] hooks = true must be set in ~/.openinterpreter/config.toml, which Observer never reads or rewrites (it can hold plaintext provider keys). Windows: not stated. Installed on demo node 1 (open-interpreter 0.0.56, 2026-10-07) and run against a loopback mock: the hooks.json Observer wrote did not fire, even with --enable hooks, because the entry was never trusted in /hooks (a TTY step); the vendor's own exec policy refused rm -rf on its own: doc-grounded, `observer init` only"
+  },
+  {
+    "Client": "open-interpreter",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "probe_required - open-interpreter is a rebadged Codex CLI Rust build (codex.NewOpenInterpreter retag); it plausibly inherits Codex's UserPromptSubmit hook under INTERPRETER_HOME, unconfirmed"
+  },
+  {
+    "Client": "open-interpreter",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "openclaw",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "opencode",
+    "Channel": "hook:chat.message",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "modify-only seam: the plugin shim replaces the message text with the block reason before the model sees it, and tells the developer with the host's TUI toast (client.tui.showToast, @opencode-ai/sdk 1.18.31 / Kilo CLI 7.8.3; a headless `run` has no TUI, so no toast; the dashboard post-hoc toast still applies); the session id keys resend-to-confirm"
+  },
+  {
+    "Client": "opencode",
+    "Channel": "hook:tool.execute.before",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "plugin shim: throw = deny; no native ask (an ask is a deny with a reason); sub-agent coverage disputed (#5894); the Desktop app never dispatches plugin hooks (#38604)"
+  },
+  {
+    "Client": "opencode",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "pi",
+    "Channel": "hook:tool_call",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "plugin shim at ~/.pi/agent/extensions/: {block, reason}; a handler failure blocks the tool (pi fail-safe); ask only via the TUI confirm, so an ask is a deny with a reason"
+  },
+  {
+    "Client": "pi",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "poolside",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "hook_specific_output.permission_decision deny with permission_decision_reason (snake_case); the reason reaches the model as the tool result; the allow is an empty stdout (no allow value is documented); no ask. Runs before Poolside's own approval prompt. Fails open on timeout / bad output (60 s default). Windows: the vendor runs hooks through cmd /c; Observer writes the poolside-windows bridge too. Not installed on demo node 1 (2026-10-07): the vendor installer asks to accept the Poolside EULA on a TTY, an operator step; doc-grounded, `observer init` only"
+  },
+  {
+    "Client": "poolside",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "Part B item 2, phase-3a - live-fetched 2026-09-07 (docs.poolside.ai/hooks): JSON decision shape ({\"decision\":\"block\",\"reason\",\"hook_specific_output\":{\"updated_prompt\",\"additional_context\"}}, snake_case); registered in ~/.config/poolside/settings.yaml. REDACT wired (hook-parity Lane B, 2026-10-03): under [guard.prompt] mode redact a secret-only prompt is answered with hook_specific_output.updated_prompt (the model receives the [REDACTED:type] text, the terminal keeps the typed prompt)"
+  },
+  {
+    "Client": "poolside",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "prime-agent",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "qoder",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "hookSpecificOutput.permissionDecision deny with permissionDecisionReason (Claude-shaped JSON on this event, unlike the exit-code-only UserPromptSubmit); the deny reached the model live. Ask is NOT listed: the vendor documents permissionDecision ask, but live on qodercli 1.1.65 an ask under --yolo ran the command without asking, so an enforced ask is a deny that says how to confirm"
+  },
+  {
+    "Client": "qoder",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "Part B item 2, phase-3a - live-fetched 2026-09-07 (docs.qoder.com/en/cli/hooks): exit code 2 blocks, plain-text stderr is the developer-visible reason (no JSON reply at all); ~/.qoder/settings.json shares Claude Code's exact hooks schema, so registration reuses registerGenericSettingsHooks"
+  },
+  {
+    "Client": "qoder",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "qwen-code",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "hookSpecificOutput.permissionDecision deny|ask with permissionDecisionReason (Claude-shaped); live (qwen 0.24.7 --yolo): the deny reason reached the model, {} let the call run, and an ask was NOT run headless (qwen showed the reason); the interactive ask prompt is not probed. The payload names the native tool (run_shell_command, read_file, glob, write_file) with tool_input"
+  },
+  {
+    "Client": "qwen-code",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "documented decision enum is allow|deny|block|ask; observer emits \"block\" (the verb every sibling top-level-block vendor's docs confirm) rather than guessing a semantic split between deny/block/ask the docs don't draw"
+  },
+  {
+    "Client": "qwen-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "roo-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "zcode",
+    "Channel": "hook:PreToolUse",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "hookSpecificOutput.permissionDecision deny|ask with permissionDecisionReason (Claude-shaped); registered in ~/.zcode/cli/config.json hooks.events with hooks.enabled set true (nothing runs without it). Liveness: zai-org/feedback #32 (closed) reported hooks never firing on the native agent; #841 (open, v3.14.3) reports PreToolUse firing for MAIN-session tool calls only, never for sub-agent or workflow-agent calls (main agent only). Windows: not stated by the vendor. Not installable on demo node 1: Z.ai ships no Linux CLI channel (zcode runs inside its desktop app); doc-grounded, `observer init` only"
+  },
+  {
+    "Client": "zcode",
+    "Channel": "hook:UserPromptSubmit",
+    "PreExecution": true,
+    "CanBlock": true,
+    "CanAsk": true,
+    "AskOnceKeyless": false,
+    "Notes": "Part B item 2, phase-3a - live-fetched 2026-09-07 (zcode.z.ai/en/docs/hooks): Claude-Code-shaped continue:false reply, ~/.zcode/cli/config.json registration. The dialect/receiver is built and tested; since hook-parity Lane A4 (2026-10-03) `observer init` registers it beside the PreToolUse gate, but zai-org/feedback #841 (open, v3.14.3) reports UserPromptSubmit never firing on the native agent (and #32 reported no hook firing at all), so prompt coverage there is unproven; doc-grounded, never written by `observer start`"
+  },
+  {
+    "Client": "zcode",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "zed",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  },
+  {
+    "Client": "zoo-code",
+    "Channel": "watcher",
+    "PreExecution": false,
+    "CanBlock": false,
+    "CanAsk": false,
+    "AskOnceKeyless": false,
+    "Notes": "post-hoc flagging only; sees results (file changes, outputs) hooks structurally miss"
+  }
+]

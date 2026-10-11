@@ -5,6 +5,7 @@ import { ChartState } from "@/components/ChartState";
 import { HelpInd } from "@/components/HelpInd";
 import { describeTruncation, TruncationBanner } from "@/components/projectdetail/TruncationBanner";
 import { fetchJSON } from "@/lib/api";
+import { windowKey, type WindowParams } from "@/lib/projectDrawer";
 import { useApi } from "@/lib/useApi";
 import { fmtInt, fmtRelative } from "@/lib/format";
 import type { VocabEntry } from "@shared/lib/vocabEntry";
@@ -50,12 +51,12 @@ const PROMPT_STATUS: Readonly<Record<ProjectPromptStatus, VocabEntry>> = {
 // is file-level, not verified line survival; reverts still count; merges
 // never do.
 
-export function PromptsTab({ projectId, days }: { projectId: number; days: number }) {
+export function PromptsTab({ projectId, win }: { projectId: number; win: WindowParams }) {
   const navigate = useNavigate();
   const prompts = useApi<ProjectPromptsResponse>(
     `/api/project/${projectId}/prompts`,
-    { days, limit: LIMIT },
-    [projectId, days],
+    { ...win, limit: LIMIT },
+    [projectId, windowKey(win)],
   );
   const [rows, setRows] = useState<ProjectPromptRow[] | null>(null);
   const effectiveRows = rows ?? prompts.data?.rows ?? [];

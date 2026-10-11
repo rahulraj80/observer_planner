@@ -2,12 +2,14 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -197,32 +199,27 @@ func TestRegistryRowlessTaxonomyToolsAreServedByAnotherAdapter(t *testing.T) {
 // CONSTANT, never the literal, so a source scan has to know its name.
 func modelsToolConstant(t *testing.T, tool string) string {
 	t.Helper()
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, "../models", func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	files, err := conformast.NonTestFiles("../models")
 	if err != nil {
 		t.Fatalf("parsing internal/models: %v", err)
 	}
 	want := strconv.Quote(tool)
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			for _, decl := range f.Decls {
-				gd, ok := decl.(*ast.GenDecl)
-				if !ok || gd.Tok != token.CONST {
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Names) != 1 || len(vs.Values) != 1 {
 					continue
 				}
-				for _, spec := range gd.Specs {
-					vs, ok := spec.(*ast.ValueSpec)
-					if !ok || len(vs.Names) != 1 || len(vs.Values) != 1 {
-						continue
-					}
-					lit, ok := vs.Values[0].(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING || lit.Value != want {
-						continue
-					}
-					return vs.Names[0].Name
+				lit, ok := vs.Values[0].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING || lit.Value != want {
+					continue
 				}
+				return vs.Names[0].Name
 			}
 		}
 	}
@@ -1019,6 +1016,9 @@ func TestModelSpecGrounded(t *testing.T) {
 			Known: []string{"opus", "sonnet", "fable"},
 		},
 		"codex": {Kind: integration.ModelArg, Flag: "--model", Known: []string{"o3"}},
+		// aider: --model grounded by the 2026-07-09 routed probe; consumed
+		// only by the Arena's headless drive (no launcher verb).
+		"aider": {Kind: integration.ModelArg, Flag: "--model"},
 	}
 	for tool, spec := range want {
 		c, ok := integration.For(tool)
@@ -1508,5 +1508,180 @@ func TestTranscriptTimedTools(t *testing.T) {
 	}
 	if !want["claude-code"] || !want["codex"] {
 		t.Errorf("claude-code and codex must be transcript-timed: %v", got)
+	}
+}
+
+// hookBindingHonestZeroRows are the rows whose vendor surface offers no hook
+// Observer could bind (hook-parity audit section 4.3): each carries a
+// HookSpec.Note instead of bindings.
+var hookBindingHonestZeroRows = map[string]bool{
+	"grokbot": true, "zed": true, "aider": true, "cowork": true, "freebuff": true,
+}
+
+// TestEveryRowDeclaresBindingsOrHonestZero: every registry row either lists
+// its vendor hook surface as bindings or names, in HookSpec.Note, why it has
+// none. The five hook-less rows are exactly the audit's list.
+func TestEveryRowDeclaresBindingsOrHonestZero(t *testing.T) {
+	for _, c := range integration.Capabilities() {
+		zero := hookBindingHonestZeroRows[c.Tool]
+		switch {
+		case zero && (len(c.Hook.Bindings) > 0 || c.Hook.Note == ""):
+			t.Errorf("%s: a hook-less row must carry a Note and no bindings (bindings=%d, note=%q)", c.Tool, len(c.Hook.Bindings), c.Hook.Note)
+		case !zero && len(c.Hook.Bindings) == 0:
+			t.Errorf("%s: no hook bindings and not on the honest-zero list", c.Tool)
+		case !zero && c.Hook.Note != "":
+			t.Errorf("%s: declares bindings AND an honest-zero note", c.Tool)
+		}
+	}
+}
+
+// hookParityRegisterTargets maps every hook.Registry.Register target to its
+// registry row.
+var hookParityRegisterTargets = map[string]string{
+	"claude-code": "claude-code", "claude-code-windows": "claude-code",
+	"cursor": "cursor", "cursor-windows": "cursor",
+	"codex": "codex", "codex-windows": "codex",
+	"gemini-cli": "gemini-cli", "gemini-cli-windows": "gemini-cli",
+	"qwen-code": "qwen-code", "qwen-code-windows": "qwen-code",
+	"droid": "droid", "droid-windows": "droid",
+	"qoder": "qoder", "qoder-windows": "qoder",
+	"poolside": "poolside", "poolside-windows": "poolside",
+	"devin":        "devin",
+	"command-code": "command-code", "command-code-windows": "command-code",
+	"antigravity-cli": "antigravity-cli",
+	// Hook-parity Lane A6 tool-gate targets.
+	"grok": "grok", "copilot-cli": "copilot-cli", "goose": "goose", "junie": "junie",
+	"crush": "crush", "open-interpreter": "open-interpreter", "zcode": "zcode",
+	"mistral-code": "mistral-code", "cline-cli": "cline-cli",
+	// Live-ground lane 2 (T-479).
+	"muse": "muse",
+	// Live-ground lane 3 (T-378).
+	"kimi-code": "kimi-code",
+}
+
+// TestRegisteredBindingsMatchRegisteredEvents: the Registered bindings of
+// each mechanism are exactly the events its writer registers today (the
+// step-1 golden testdata/hookparity/event_lists.json), native and -windows.
+// The only other rows with Registered bindings are transports Observer
+// writes as one plugin, not one config entry per event.
+func TestRegisteredBindingsMatchRegisteredEvents(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "hookparity", "event_lists.json"))
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	var golden map[string][]string
+	if err := json.Unmarshal(raw, &golden); err != nil {
+		t.Fatalf("parse golden: %v", err)
+	}
+	for target, tool := range hookParityRegisterTargets {
+		want, ok := golden["registered:"+target]
+		if !ok {
+			t.Errorf("golden has no entry for %s", target)
+			continue
+		}
+		c, _ := integration.For(tool)
+		got := c.Hook.RegisteredEvents()
+		sort.Strings(got)
+		if !c.Hook.AutoWired {
+			// A retired registration (Antigravity CLI's PreInvocation,
+			// node 1 live test 2026-10-03): the writer is kept for a
+			// re-enable after a live run and for its unregister half, but
+			// nothing registers it, so no binding may claim Registered.
+			if len(got) != 0 {
+				t.Errorf("%s: not auto-wired but Registered bindings %v", target, got)
+			}
+			continue
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: Registered bindings %v, writer registers %v", target, got, want)
+		}
+	}
+	targets := map[string]bool{}
+	for _, tool := range hookParityRegisterTargets {
+		targets[tool] = true
+	}
+	for _, c := range integration.Capabilities() {
+		if len(c.Hook.RegisteredEvents()) == 0 || targets[c.Tool] {
+			continue
+		}
+		if c.Hook.Mechanism.PerEventConfig() {
+			t.Errorf("%s: Registered bindings on a per-event-config mechanism with no Register target", c.Tool)
+		}
+	}
+}
+
+// bindingCount is one capability's row counts.
+type bindingCount struct {
+	VendorProvides         int `json:"vendor_provides"`
+	VendorProvidesInferred int `json:"vendor_provides_inferred_only"`
+	ObserverRegisters      int `json:"observer_registers"`
+	ObserverWires          int `json:"observer_wires"`
+}
+
+// TestBindingCountsGolden pins the per-capability row counts the bindings
+// produce (the audit section 4.3 summary, recomputed from data) so a later
+// lane changes them deliberately: update with -hookparity-update and name
+// the delta in the commit. For a gate capability "provides" means the
+// vendor documents a deny on it.
+func TestBindingCountsGolden(t *testing.T) {
+	counts := map[string]*bindingCount{}
+	for _, cp := range integration.HookCaps() {
+		counts[string(cp)] = &bindingCount{}
+	}
+	for _, c := range integration.Capabilities() {
+		type seen struct{ provides, inferredOnly, registers, wires bool }
+		per := map[integration.HookCap]*seen{}
+		for _, b := range c.Hook.Bindings {
+			s := per[b.Cap]
+			if s == nil {
+				s = &seen{inferredOnly: true}
+				per[b.Cap] = s
+			}
+			if b.Cap.IsGate() && !b.HasDecision(integration.HookDecisionDeny) && !b.Wired {
+				continue
+			}
+			s.provides = true
+			if b.Grounding.Kind != integration.GroundingInferred {
+				s.inferredOnly = false
+			}
+			s.registers = s.registers || b.Registered
+			s.wires = s.wires || b.Wired
+		}
+		for cp, s := range per {
+			if !s.provides {
+				continue
+			}
+			n := counts[string(cp)]
+			if s.inferredOnly {
+				n.VendorProvidesInferred++
+			} else {
+				n.VendorProvides++
+			}
+			if s.registers {
+				n.ObserverRegisters++
+			}
+			if s.wires {
+				n.ObserverWires++
+			}
+		}
+	}
+	got, err := json.MarshalIndent(counts, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+	path := filepath.Join("..", "..", "testdata", "hookparity", "binding_counts.json")
+	if *hookParityUpdate {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("binding counts changed:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }

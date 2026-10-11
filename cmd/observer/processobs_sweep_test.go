@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -267,7 +269,7 @@ func TestSweepActionCorrelationLinks(t *testing.T) {
 		t.Fatalf("sweepActionCorrelation (2nd): %v", err)
 	}
 	if sessions2 != 0 || linked2 != 0 {
-		t.Fatalf("second sweep = (%d, %d), want (0, 0) — watermark should have skipped it", sessions2, linked2)
+		t.Fatalf("second sweep = (%d, %d), want (0, 0) - watermark should have skipped it", sessions2, linked2)
 	}
 }
 
@@ -383,7 +385,7 @@ func TestSweepActionCorrelationRelinksLateRow(t *testing.T) {
 		t.Fatalf("second sweep: %v", err)
 	}
 	if linked != 1 {
-		t.Fatalf("late row linked=%d, want 1 — the count watermark must advance on the new unlinked row despite its earlier started_at", linked)
+		t.Fatalf("late row linked=%d, want 1 - the count watermark must advance on the new unlinked row despite its earlier started_at", linked)
 	}
 	var actionID sql.NullInt64
 	if err := database.QueryRowContext(ctx,

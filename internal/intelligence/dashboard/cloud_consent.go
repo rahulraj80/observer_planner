@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -87,33 +87,6 @@ func cloudCapHead(b []byte, max int) (string, bool) {
 	return string(b[:max]), true
 }
 
-// cloudStartupNoticePrefix marks the process-startup lines internal/config
-// prints to stderr (emitDeprecationOnce) when ~/.observer/config.toml still
-// uses deprecated key aliases. They precede the child's real output because
-// the runner captures stdout and stderr combined.
-const cloudStartupNoticePrefix = "config: deprecation: "
-
-// cloudStripStartupNotices drops the config-deprecation startup lines from a
-// child's combined output so the preview panel shows ONLY what `observer cloud
-// preview` printed about the session (the bytes, digests and summary) — the
-// notices are about this machine's config file, not about what would upload,
-// and the dashboard's Settings page already surfaces config migration. Every
-// other line, including a real error, is kept verbatim.
-func cloudStripStartupNotices(output string) string {
-	if !strings.Contains(output, cloudStartupNoticePrefix) {
-		return output
-	}
-	lines := strings.Split(output, "\n")
-	kept := lines[:0]
-	for _, l := range lines {
-		if strings.HasPrefix(l, cloudStartupNoticePrefix) {
-			continue
-		}
-		kept = append(kept, l)
-	}
-	return strings.Join(kept, "\n")
-}
-
 // cloudDecodeJSON decodes r's body into v, treating a missing/empty body as
 // "leave v at its zero value" (a bare POST with no body is a valid, if
 // pointless, request) rather than a decode error; a genuinely malformed body
@@ -130,44 +103,6 @@ func cloudDecodeJSON(r *http.Request, v any) error {
 	}
 	return nil
 }
-
-// runOnce runs one `observer cloud <verb> <args...>` synchronously, bounded by
-// timeout, and returns its combined output plus ok/exit_error — the shape
-// every synchronous action route in this file shares (preview, consent,
-// grant, revoke, delete-account).
-func (c *CloudAccountSeams) runOnce(ctx context.Context, verb string, args []string, timeout time.Duration) (output string, ok bool, exitError string) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	var buf bytes.Buffer
-	err := c.run(ctx, verb, args, &buf)
-	output = cloudStripStartupNotices(buf.String())
-	return output, err == nil, cloudChildError(output, err)
-}
-
-// cloudChildError renders a failed child's error for the JSON exit_error
-// field the way a person would read it: cobra prints the RunE error as an
-// "Error: <message>" line on stderr, and THAT message is the reason (e.g.
-// "bounded_context_enrichment" cannot be granted standing consent: …), while
-// exec's err is only "exit status 1". The last "Error: " line wins when one
-// exists; otherwise the exec error is returned verbatim; nil err ⇒ "".
-func cloudChildError(output string, err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := ""
-	for _, l := range strings.Split(output, "\n") {
-		if strings.HasPrefix(l, cloudChildErrorPrefix) {
-			msg = strings.TrimSpace(strings.TrimPrefix(l, cloudChildErrorPrefix))
-		}
-	}
-	if msg != "" {
-		return msg
-	}
-	return err.Error()
-}
-
-// cloudChildErrorPrefix is cobra's error-line prefix on stderr.
-const cloudChildErrorPrefix = "Error: "
 
 // --- preview -----------------------------------------------------------------
 
@@ -240,7 +175,7 @@ func (s *Server) handleCloudPreview(w http.ResponseWriter, r *http.Request) {
 	if req.ReceiptID != "" {
 		args = append(args, "--receipt-id", req.ReceiptID)
 	}
-	output, ok2, exitErr := c.runOnce(r.Context(), "preview", args, cloudPreviewTimeout)
+	output, ok2, exitErr := c.RunOnce(r.Context(), "preview", args, cloudPreviewTimeout)
 	uploadDigest := ""
 	if match := cloudPreviewDigestPattern.FindStringSubmatch(output); len(match) == 2 {
 		uploadDigest = match[1]
@@ -327,12 +262,12 @@ func (s *Server) handleCloudConsent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, cloudPurposeInvalidMessage(req.Purpose), http.StatusBadRequest)
 		return
 	}
-	if c.loginRunning() {
-		http.Error(w, "a sign-in is running — wait for it to finish (or time out) before recording consent", http.StatusConflict)
+	if c.LoginRunning() {
+		http.Error(w, "a sign-in is running - wait for it to finish (or time out) before recording consent", http.StatusConflict)
 		return
 	}
-	if c.syncRunning() {
-		http.Error(w, "a sync is running — wait for it to finish before recording consent", http.StatusConflict)
+	if c.SyncRunning() {
+		http.Error(w, "a sync is running - wait for it to finish before recording consent", http.StatusConflict)
 		return
 	}
 
@@ -349,7 +284,7 @@ func (s *Server) handleCloudConsent(w http.ResponseWriter, r *http.Request) {
 	if req.ExpectedUploadDigest != "" {
 		args = append(args, "--expected-upload-digest", req.ExpectedUploadDigest)
 	}
-	output, ok2, exitErr := c.runOnce(r.Context(), "consent", args, cloudConsentStepTimeout)
+	output, ok2, exitErr := c.RunOnce(r.Context(), "consent", args, cloudConsentStepTimeout)
 	writeJSON(w, CloudConsentResponse{OK: ok2, Output: output, ExitError: exitErr})
 }
 
@@ -409,21 +344,21 @@ func (s *Server) handleCloudConsentGrants(w http.ResponseWriter, r *http.Request
 			ID:        rr.ID,
 			Purpose:   rr.Purpose,
 			Mode:      mode,
-			CreatedAt: cloudRFC3339(rr.CreatedAt),
+			CreatedAt: dashapi.CloudRFC3339(rr.CreatedAt),
 			Live:      rr.InvalidatedAt == nil,
 		}
 		if rr.ReviewAt != nil {
-			view.ReviewAt = cloudRFC3339(*rr.ReviewAt)
+			view.ReviewAt = dashapi.CloudRFC3339(*rr.ReviewAt)
 		}
 		if rr.InvalidatedAt != nil {
-			iv := cloudRFC3339(*rr.InvalidatedAt)
+			iv := dashapi.CloudRFC3339(*rr.InvalidatedAt)
 			view.InvalidatedAt = &iv
 		}
 		receipts = append(receipts, view)
 	}
 	var grantable []CloudGrantable
-	if c.grantable != nil {
-		grantable = c.grantable()
+	if c.Grantable != nil {
+		grantable = c.Grantable()
 	}
 	if grantable == nil {
 		grantable = []CloudGrantable{}
@@ -485,11 +420,11 @@ func (s *Server) handleCloudPurposeAction(w http.ResponseWriter, r *http.Request
 		http.Error(w, "purpose is required", http.StatusBadRequest)
 		return
 	}
-	if c.syncRunning() {
-		http.Error(w, fmt.Sprintf("a sync is running — wait for it to finish before you %s this purpose", verbLabel), http.StatusConflict)
+	if c.SyncRunning() {
+		http.Error(w, fmt.Sprintf("a sync is running - wait for it to finish before you %s this purpose", verbLabel), http.StatusConflict)
 		return
 	}
-	output, ok2, exitErr := c.runOnce(r.Context(), "consent", argv(req.Purpose), cloudGrantRevokeTimeout)
+	output, ok2, exitErr := c.RunOnce(r.Context(), "consent", argv(req.Purpose), cloudGrantRevokeTimeout)
 	writeJSON(w, CloudActionResponse{OK: ok2, Output: output, ExitError: exitErr})
 }
 
@@ -515,12 +450,12 @@ func (s *Server) handleCloudDeleteAccount(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if c.loginRunning() {
-		http.Error(w, "a sign-in is running — wait for it to finish (or time out) before deleting the account", http.StatusConflict)
+	if c.LoginRunning() {
+		http.Error(w, "a sign-in is running - wait for it to finish (or time out) before deleting the account", http.StatusConflict)
 		return
 	}
-	if c.syncRunning() {
-		http.Error(w, "a sync is running — wait for it to finish before deleting the account", http.StatusConflict)
+	if c.SyncRunning() {
+		http.Error(w, "a sync is running - wait for it to finish before deleting the account", http.StatusConflict)
 		return
 	}
 	var req CloudDeleteAccountRequest
@@ -532,6 +467,6 @@ func (s *Server) handleCloudDeleteAccount(w http.ResponseWriter, r *http.Request
 	if req.LocalOnly {
 		args = append(args, "--local-only")
 	}
-	output, ok2, exitErr := c.runOnce(r.Context(), "delete-account", args, cloudDeleteAccountTimeout)
+	output, ok2, exitErr := c.RunOnce(r.Context(), "delete-account", args, cloudDeleteAccountTimeout)
 	writeJSON(w, CloudActionResponse{OK: ok2, Output: output, ExitError: exitErr})
 }

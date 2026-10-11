@@ -12,21 +12,24 @@ import (
 // Plan names seeded by migration 0012. Both are versioned; the version pinned
 // here is the one an unassigned account resolves to.
 const (
-	// PlanFree is the Signed-in Free plan (v2: 20/day, 100/month, concurrency 2,
-	// budget pool 'free', no pinned route - it resolves the feature default).
+	// PlanFree is the Signed-in Free plan (v3: 100/day, 3000/month,
+	// concurrency 2, budget pool 'free', pinned to the GPT-6 Luna route -
+	// migration 0041, operator ruling D-299).
 	PlanFree = "free"
-	// PlanPlusBeta is the paid Plus plan (v2: 25/day, 60/month, concurrency 4,
-	// its OWN budget pool 'plus_beta' - never the free pool - and its own
-	// pinned route). The monthly cap is a COST cap: Plus buys a more capable
-	// model with fewer runs, free buys more runs on the cheaper default route.
+	// PlanPlusBeta is the paid Plus plan (v3: 500/day, 15000/month - 5x free
+	// on both windows - concurrency 4, its OWN budget pool 'plus_beta' - never
+	// the free pool - pinned to the same GPT-6 Luna route as free). Plus buys
+	// volume, the weekly digest and the long hosted history; both plans run
+	// enrichment on the same model since 0041.
 	PlanPlusBeta = "plus_beta"
 	// DefaultFreePlanVersion is the free-plan version an account with NO
 	// account_plans row resolves to. Absence-means-free is what lets every
 	// pre-existing account keep working with no backfill. Bump this
 	// deliberately, in the same change that seeds a new free version — a silent
 	// "latest free version wins" would re-tier every unassigned account the
-	// moment a new version landed. v2 is migration 0039's row (daily 5 -> 20).
-	DefaultFreePlanVersion = 2
+	// moment a new version landed. v3 is migration 0041's row (daily 20 -> 100,
+	// monthly 100 -> 3000).
+	DefaultFreePlanVersion = 3
 	// FreeBudgetPool is the budget_pools key the free plan draws from. Moving
 	// OFF it is what makes an assignment an ACTIVATION rather than a downgrade
 	// (see assignPlanTx).

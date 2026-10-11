@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -37,16 +37,16 @@ func TestShouldCorrelateDebounce(t *testing.T) {
 	}
 }
 
-func dashProcRun(key, parent, sess string, pid int, exe, argv string, started time.Time) processobs.ProcessRun {
-	return processobs.ProcessRun{
+func dashProcRun(key, parent, sess string, pid int, exe, argv string, started time.Time) procmodel.ProcessRun {
+	return procmodel.ProcessRun{
 		ProcessKey:       key,
 		ParentProcessKey: parent,
 		BootID:           "boot",
 		PID:              pid,
 		StartTimeTicks:   int64(pid) * 100,
-		Attribution: processobs.Attribution{
+		Attribution: procmodel.Attribution{
 			SessionID: sess, Tool: "claude-code",
-			Source: processobs.AttrInherited, Confidence: processobs.ConfHigh,
+			Source: procmodel.AttrInherited, Confidence: procmodel.ConfHigh,
 		},
 		ExeBasename: exe,
 		ArgvPreview: argv,
@@ -76,7 +76,7 @@ func TestHandleSessionProcesses(t *testing.T) {
 	}
 
 	// Process tree sh → npm → node, spawned ~1s after the action.
-	runs := []processobs.ProcessRun{
+	runs := []procmodel.ProcessRun{
 		dashProcRun("k_sh", "", "sA", 100, "bash", "bash -c npm test", base.Add(time.Second)),
 		dashProcRun("k_npm", "k_sh", "sA", 200, "npm", "npm test", base.Add(time.Second)),
 		dashProcRun("k_node", "k_npm", "sA", 300, "node", "node x.js", base.Add(2*time.Second)),
@@ -89,12 +89,12 @@ func TestHandleSessionProcesses(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/session/sA/processes", nil)
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET processes: %d — %s", rr.Code, rr.Body.String())
+		t.Fatalf("GET processes: %d - %s", rr.Code, rr.Body.String())
 	}
 
 	var resp SessionProcessResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — %s", err, rr.Body.String())
+		t.Fatalf("decode: %v - %s", err, rr.Body.String())
 	}
 	if resp.SessionID != "sA" || resp.Total != 3 {
 		t.Fatalf("resp = %+v, want sA/3", resp)
@@ -128,18 +128,18 @@ func TestHandleProcessFindings(t *testing.T) {
 	st := store.New(s.db())
 
 	now := time.Now().UTC().Add(-10 * time.Minute)
-	mk := func(key string, pid int, exe, base string, uid, euid int) processobs.ProcessRun {
-		return processobs.ProcessRun{
+	mk := func(key string, pid int, exe, base string, uid, euid int) procmodel.ProcessRun {
+		return procmodel.ProcessRun{
 			ProcessKey: key, BootID: "boot", PID: pid, StartTimeTicks: int64(pid) * 100,
-			Attribution: processobs.Attribution{
+			Attribution: procmodel.Attribution{
 				SessionID: "sA", Tool: "claude-code",
-				Source: processobs.AttrBridge, Confidence: processobs.ConfHigh,
+				Source: procmodel.AttrBridge, Confidence: procmodel.ConfHigh,
 			},
 			ExePath: exe, ExeBasename: base, UID: uid, EUID: euid,
 			StartedAt: now, LastSeenAt: now,
 		}
 	}
-	runs := []processobs.ProcessRun{
+	runs := []procmodel.ProcessRun{
 		mk("p_norm", 100, "/usr/bin/node", "node", 1000, 1000),
 		mk("p_priv", 101, "/usr/bin/sudo", "sudo", 1000, 0),
 		mk("p_tmp", 102, "/tmp/x/payload", "payload", 1000, 1000),
@@ -153,19 +153,19 @@ func TestHandleProcessFindings(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/process/findings?hours=24", nil)
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET findings: %d — %s", rr.Code, rr.Body.String())
+		t.Fatalf("GET findings: %d - %s", rr.Code, rr.Body.String())
 	}
 	var resp ProcessFindingsResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — %s", err, rr.Body.String())
+		t.Fatalf("decode: %v - %s", err, rr.Body.String())
 	}
 	if resp.Total != 2 {
 		t.Fatalf("total findings = %d, want 2: %+v", resp.Total, resp.Findings)
 	}
-	if resp.ByRule[string(processobs.FindingPrivilegedExec)] != 1 || resp.ByRule[string(processobs.FindingExecutableFromTmp)] != 1 {
+	if resp.ByRule[string(procmodel.FindingPrivilegedExec)] != 1 || resp.ByRule[string(procmodel.FindingExecutableFromTmp)] != 1 {
 		t.Errorf("by_rule = %+v, want one each", resp.ByRule)
 	}
-	if resp.BySeverity[processobs.SeverityHigh] != 1 || resp.BySeverity[processobs.SeverityWarn] != 1 {
+	if resp.BySeverity[procmodel.SeverityHigh] != 1 || resp.BySeverity[procmodel.SeverityWarn] != 1 {
 		t.Errorf("by_severity = %+v, want high:1 warn:1", resp.BySeverity)
 	}
 
@@ -215,14 +215,14 @@ func TestHandleSessionProcessesEmpty(t *testing.T) {
 func TestHandleSessionProcessesDiagnosticsProxyOnly(t *testing.T) {
 	s, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := store.New(s.db()).PersistProcessEvents(ctx, []processobs.ProcessEvent{{
+	if _, err := store.New(s.db()).PersistProcessEvents(ctx, []procmodel.ProcessEvent{{
 		ProcessKey: "proxy:req123",
 		Timestamp:  time.Now().UTC(),
-		Type:       processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{
+		Type:       procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{
 			SessionID:  "sA",
-			Source:     processobs.AttrHeuristic,
-			Confidence: processobs.ConfMedium,
+			Source:     procmodel.AttrHeuristic,
+			Confidence: procmodel.ConfMedium,
 		},
 		TargetKind: "url",
 		Target:     "https://api.openai.com/v1/responses",

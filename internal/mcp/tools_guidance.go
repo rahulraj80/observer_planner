@@ -53,11 +53,11 @@ func (*getProjectGuidanceTool) Description() string {
 	return "List the agent-guidance files configured for a project: instruction files " +
 		"(CLAUDE.md, AGENTS.md, GEMINI.md, .goosehints), skills, sub-agent definitions, " +
 		"slash commands, and conditionally-applied rules (.cursor/rules, " +
-		".github/instructions) — for EVERY AI tool used in that project, not just this one. " +
+		".github/instructions) - for EVERY AI tool used in that project, not just this one. " +
 		"Returns each file's tool, kind, scope, relative path, name, description, size, " +
 		"and whether it still exists on disk. Pass include_content=true to also get the " +
 		"files' scrubbed bodies (capped). Use it to find guidance you are not currently " +
-		"loading — a skill that exists but was never invoked, or a rule another tool reads."
+		"loading - a skill that exists but was never invoked, or a rule another tool reads."
 }
 
 func (*getProjectGuidanceTool) InputSchema() map[string]any {
@@ -209,7 +209,7 @@ func (t *getProjectGuidanceTool) Invoke(ctx context.Context, raw json.RawMessage
 		Note:            note,
 	}
 	if len(out) == 0 && res.Note == "" {
-		res.Note = "no guidance files recorded for this project — either none exist or the daemon has not scanned it yet (`observer guidance scan --project " + root + "`)"
+		res.Note = "no guidance files recorded for this project - either none exist or the daemon has not scanned it yet (`observer guidance scan --project " + root + "`)"
 	}
 	return res, nil
 }
@@ -233,7 +233,7 @@ func (t *getProjectGuidanceTool) attachContent(
 		return
 	}
 	if *budget <= 0 {
-		f.ContentNote = "omitted — the response's 128KB content budget was already spent; narrow with tool= or kind="
+		f.ContentNote = "omitted - the response's 128KB content budget was already spent; narrow with tool= or kind="
 		return
 	}
 	anchor, rel, ok := guidanceReadAnchor(projectRoot, row)
@@ -251,7 +251,7 @@ func (t *getProjectGuidanceTool) attachContent(
 		return
 	}
 	if c.Binary {
-		f.ContentNote = "binary file — not guidance prose"
+		f.ContentNote = "binary file - not guidance prose"
 		return
 	}
 	body := scrubber.String(c.Data)
@@ -313,7 +313,7 @@ func resolveGuidanceRoot(requested string, known []string) (root, note string) {
 		}
 	}
 	if len(clean) == 0 {
-		return "", "no project has been scanned for guidance files yet — run `observer guidance scan --all` (or start the daemon, which scans every known project every 15 minutes)"
+		return "", "no project has been scanned for guidance files yet - run `observer guidance scan --all` (or start the daemon, which scans every known project every 15 minutes)"
 	}
 	if requested != "" {
 		want := filepath.Clean(requested)
@@ -338,7 +338,7 @@ func resolveGuidanceRoot(requested string, known []string) (root, note string) {
 		}
 	}
 	if best == "" {
-		return "", "the working directory is not inside any scanned project; pass project_root explicitly — scanned roots are: " + strings.Join(clean, ", ")
+		return "", "the working directory is not inside any scanned project; pass project_root explicitly - scanned roots are: " + strings.Join(clean, ", ")
 	}
 	return best, ""
 }

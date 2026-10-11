@@ -112,7 +112,7 @@ func tempWatchdogLoop(ctx context.Context, configPath string) {
 		if fdBytes < tempWatchdogThresholdBytes {
 			return
 		}
-		logger.Warn("large deleted-but-open file backing detected — likely an unindexed sort or a VACUUM temp spill; "+
+		logger.Warn("large deleted-but-open file backing detected - likely an unindexed sort or a VACUUM temp spill; "+
 			"see docs/audits/observer-disk-compute-exhaustion-audit-2026-08-26.md",
 			"deleted_open_fd_bytes", fdBytes,
 			"threshold_bytes", int64(tempWatchdogThresholdBytes))
@@ -172,10 +172,10 @@ func staleBinaryWarning() string {
 		return ""
 	}
 	if path == "" {
-		return "WARN running a replaced/deleted observer binary — restart the daemon on the current build (a live-replaced binary runs old code)\n"
+		return "WARN running a replaced/deleted observer binary - restart the daemon on the current build (a live-replaced binary runs old code)\n"
 	}
 	return fmt.Sprintf(
-		"WARN running a replaced/deleted observer binary (%s) — restart the daemon on the current build (a live-replaced binary runs old code)\n",
+		"WARN running a replaced/deleted observer binary (%s) - restart the daemon on the current build (a live-replaced binary runs old code)\n",
 		path,
 	)
 }

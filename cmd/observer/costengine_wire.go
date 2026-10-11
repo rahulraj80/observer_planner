@@ -12,7 +12,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/orgpricing"
 	"github.com/marmutapp/superbased-observer/internal/pricewire"
-	"github.com/marmutapp/superbased-observer/internal/pricingfeed"
+	"github.com/marmutapp/superbased-observer/internal/pricingfeedwire"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -246,7 +246,7 @@ func feedOrgRows(ctx context.Context, st *store.Store, logger *slog.Logger) (cos
 // multiplier - top-level fast_multiplier (projected with the rates), else in
 // its Economics object: a stated value applies (0 = no fast tier), an absent
 // one keeps the seed's - per history period as much as on the row itself.
-func feedRowsOf(in []pricingfeed.Row) []cost.OrgPrice {
+func feedRowsOf(in []pricingfeedwire.Row) []cost.OrgPrice {
 	rows := make([]orgcontract.PricingPolicyRow, 0, len(in))
 	for _, r := range in {
 		rows = append(rows, r.PricingPolicyRow)
@@ -264,7 +264,7 @@ func feedRowsOf(in []pricingfeed.Row) []cost.OrgPrice {
 // applyFeedFastMultiplier falls back to the Economics object's multiplier when
 // the row states none at top level (the 2026-09-30 contract moved it there;
 // the top-level value, projected by pricewire, wins when both are present).
-func applyFeedFastMultiplier(p *cost.OrgPrice, e *pricingfeed.Economics) {
+func applyFeedFastMultiplier(p *cost.OrgPrice, e *pricingfeedwire.Economics) {
 	if p.Set.FastMultiplier {
 		return
 	}

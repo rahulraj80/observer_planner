@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package dashboard
 
 import (

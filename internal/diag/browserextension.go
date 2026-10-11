@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_browser
+
 package diag
 
 import (
@@ -42,7 +44,7 @@ func browserExtensionHealthNote(tool string, cfg config.Config, note func(Status
 	if ok, detail := browserManifestStatus(); ok {
 		note(StatusOK, detail)
 	} else {
-		note(StatusWarn, detail+" — run `observer init --browser` to write it")
+		note(StatusWarn, detail+" - run `observer init --browser` to write it")
 	}
 
 	ok, detail := browserHeartbeatStatus(tool, cfg)
@@ -160,12 +162,12 @@ var browserHealthNowFn = time.Now
 func browserHeartbeatStatus(tool string, cfg config.Config) (ok bool, detail string) {
 	dbPath := strings.TrimSpace(cfg.Observer.DBPath)
 	if dbPath == "" {
-		return false, "no observer DB path configured — cannot locate browser-health.json"
+		return false, "no observer DB path configured - cannot locate browser-health.json"
 	}
 	path := filepath.Join(filepath.Dir(dbPath), browserHealthFileName)
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is <observer dir>/browser-health.json, config-derived, not user input.
 	if err != nil {
-		return false, fmt.Sprintf("no browser-health.json found at %s yet — capture a chat turn on %s to confirm the extension is connected", path, tool)
+		return false, fmt.Sprintf("no browser-health.json found at %s yet - capture a chat turn on %s to confirm the extension is connected", path, tool)
 	}
 	var hf browserHealthFileMinimal
 	if err := json.Unmarshal(raw, &hf); err != nil {
@@ -173,7 +175,7 @@ func browserHeartbeatStatus(tool string, cfg config.Config) (ok bool, detail str
 	}
 	e, found := hf.Sites[tool]
 	if !found {
-		return false, fmt.Sprintf("no capture activity recorded yet for %s in %s — capture a chat turn on the site to confirm the extension → daemon pipe is live", tool, path)
+		return false, fmt.Sprintf("no capture activity recorded yet for %s in %s - capture a chat turn on the site to confirm the extension → daemon pipe is live", tool, path)
 	}
 	age := browserHealthNowFn().Sub(time.UnixMilli(e.RecordedAt))
 	status := e.Status
@@ -183,10 +185,10 @@ func browserHeartbeatStatus(tool string, cfg config.Config) (ok bool, detail str
 	summary := fmt.Sprintf("browser-health.json: status=%s, last activity %s ago, ingested=%d, dropped=%d",
 		status, age.Round(time.Second), e.Ingested, e.Dropped)
 	if age > browserHeartbeatStaleAfter {
-		return false, summary + " — stale (no activity in over a week); confirm the extension is still installed and enabled for this site"
+		return false, summary + " - stale (no activity in over a week); confirm the extension is still installed and enabled for this site"
 	}
 	if status == "degraded" {
-		return false, summary + " — extension reports degraded status"
+		return false, summary + " - extension reports degraded status"
 	}
 	return true, summary
 }

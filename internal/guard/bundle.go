@@ -62,18 +62,18 @@ func (g *Guard) parseOrgBundle(path, pinHash string) (pf *policyFile, st PolicyS
 	}
 	var b orgcontract.PolicyBundle
 	if err := json.Unmarshal(raw, &b); err != nil {
-		return nil, PolicyState{}, fmt.Sprintf("org bundle %s: not a bundle envelope: %v — running without the org layer", path, err), false
+		return nil, PolicyState{}, fmt.Sprintf("org bundle %s: not a bundle envelope: %v - running without the org layer", path, err), false
 	}
 	pub, err := orgcontract.VerifyPolicyBundle(b)
 	if err != nil {
-		return nil, PolicyState{}, fmt.Sprintf("org bundle %s rejected: %v — running without the org layer", path, err), false
+		return nil, PolicyState{}, fmt.Sprintf("org bundle %s rejected: %v - running without the org layer", path, err), false
 	}
 	if pinHash != "" && orgcontract.PublicKeyPinHash(pub) != pinHash {
-		return nil, PolicyState{}, fmt.Sprintf("org bundle %s rejected: signing key does not match the enrolment pin — running without the org layer", path), false
+		return nil, PolicyState{}, fmt.Sprintf("org bundle %s rejected: signing key does not match the enrolment pin - running without the org layer", path), false
 	}
 	parsed, perr := parsePolicyFile([]byte(b.BundleTOML), layerOrg)
 	if perr != nil {
-		return nil, PolicyState{}, fmt.Sprintf("org bundle %s (version %d): %v — running without the org layer", path, b.Version, perr), false
+		return nil, PolicyState{}, fmt.Sprintf("org bundle %s (version %d): %v - running without the org layer", path, b.Version, perr), false
 	}
 	st = PolicyState{
 		Layer:       layerOrg,

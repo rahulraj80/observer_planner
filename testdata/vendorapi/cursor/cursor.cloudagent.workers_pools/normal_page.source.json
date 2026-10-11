@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "totalCount": "VerifiedOfficial",
+    "workers": "VerifiedOfficial",
+    "workers[]": "VerifiedOfficial",
+    "workers[].connectedAtMs": "VerifiedOfficial",
+    "workers[].isInUse": "VerifiedOfficial",
+    "workers[].name": "VerifiedOfficial",
+    "workers[].repoName": "VerifiedOfficial",
+    "workers[].repoOwner": "VerifiedOfficial",
+    "workers[].repoUrl": "VerifiedOfficial",
+    "workers[].serviceAccountId": "VerifiedOfficial",
+    "workers[].teamId": "VerifiedOfficial",
+    "workers[].userId": "VerifiedOfficial",
+    "workers[].workerId": "VerifiedOfficial",
+    "workers[].workspaceRootPath": "VerifiedOfficial"
+  },
+  "fixture_sha256": "710d0192268808ff6d13d152029fa447cc967bc3b224146fa38255b44745597a",
+  "http": {
+    "method": "GET",
+    "path": "/v0/private-workers",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Workers\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Cloud Agents API endpoints page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "606bb636970ab8de2e8d87bfff9c13ae972ebe4817cc88ced9a60882aab124ef",
+  "source_url": "https://cursor.com/docs/cloud-agent/api/endpoints.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.cloudagent.workers_pools"
+}

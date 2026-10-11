@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -12,7 +14,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/cloudcred"
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 )
 
 // TestCloudAccountProbeUsesResolvedHost exercises the real credential lookup:
@@ -117,7 +119,7 @@ func TestCloudAccountWireRunInvalidatesProbeCache(t *testing.T) {
 	// Seed a fresh cache entry BY HAND (never call the real probe here — it
 	// opens the host's credential store), then run: the run must clear it.
 	w.cachedAt = time.Now()
-	w.cached = dashboard.CloudSignInState{APITokenPresent: true}
+	w.cached = dashapi.CloudSignInState{APITokenPresent: true}
 	if st, _ := w.probe(); !st.APITokenPresent {
 		t.Fatal("a fresh cache entry must be served without re-probing")
 	}
@@ -146,7 +148,7 @@ func TestCloudAccountWireRunInvalidatesProbeCacheOnDeleteAccount(t *testing.T) {
 		spawn:      func(_ context.Context, _ []string, _ io.Writer) error { return nil },
 	}
 	w.cachedAt = time.Now()
-	w.cached = dashboard.CloudSignInState{APITokenPresent: true}
+	w.cached = dashapi.CloudSignInState{APITokenPresent: true}
 	if err := w.run(context.Background(), "delete-account", []string{"--yes", "--local-only"}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +165,7 @@ func TestCloudAccountWireRunInvalidatesProbeCacheOnDeleteAccount(t *testing.T) {
 // cloudconsent.go's cloudPrintGrantableHelp exactly.
 func TestCloudGrantableProbe(t *testing.T) {
 	rows := cloudGrantableProbe()
-	byPurpose := map[string]dashboard.CloudGrantable{}
+	byPurpose := map[string]dashapi.CloudGrantable{}
 	for _, r := range rows {
 		byPurpose[r.Purpose] = r
 	}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package store
 
 import (
@@ -137,7 +139,14 @@ func (s *Store) CodeIntelSaveFile(ctx context.Context, res codeintel.FileResult)
 	// is (project, file_id, ...) — project-FIRST — so a bare `file_id = ?`
 	// can't seek it and full-scans the table on EVERY file save. Pairing
 	// project + file_id lets the composite index seek.
+	//
+	// The FTS rows of the nodes being replaced go first, by rowid (an FTS
+	// rowid IS its node id), while those node ids still exist. This keeps
+	// the invariant CodeIntelBuildDerived relies on: every codeintel_fts row
+	// belongs to a live node, so the rebuild can clear a project by node id
+	// instead of by its UNINDEXED `project` column (T-415).
 	for _, del := range []string{
+		codeIntelFTSDeleteFileSQL,
 		`DELETE FROM codeintel_sites WHERE project = ? AND file_id = ?`,
 		`DELETE FROM codeintel_edges WHERE project = ? AND file_id = ?`,
 		`DELETE FROM codeintel_nodes WHERE project = ? AND file_id = ?`,
@@ -338,82 +347,6 @@ func clampExcerpt(s string) string {
 	return s
 }
 
-// CodeIntelDeleteProject removes every codeintel_* row for a project.
-//
-// It deletes each table explicitly by `project` rather than leaning on
-// ON DELETE CASCADE from codeintel_files. The cascade seeks child rows by
-// BARE file_id, but every file_id index is (project, file_id, ...) —
-// project-first — so SQLite can't use it for the cascade and full-scans
-// codeintel_{nodes,edges,sites} once PER deleted file: O(files × rows),
-// measured at 20+ minutes / 100% CPU on a ~40k-file project. The
-// per-`project` deletes here each ride a project-leading index instead, and
-// FK enforcement is disabled for the operation so the (now-redundant)
-// cascade machinery doesn't re-scan. Correctness is preserved because every
-// child table is deleted explicitly — including codeintel_fts, a virtual
-// table with NO foreign key that the old cascade-only delete leaked entirely.
-//
-// foreign_keys is toggled on a single pinned connection (the pragma is a
-// no-op inside a transaction and is per-connection) and always restored
-// before that connection returns to the pool.
-func (s *Store) CodeIntelDeleteProject(ctx context.Context, project string) error {
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("store.CodeIntelDeleteProject: conn: %w", err)
-	}
-	defer func() { _ = conn.Close() }()
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-		return fmt.Errorf("store.CodeIntelDeleteProject: disable fk: %w", err)
-	}
-	// Restore FK enforcement before the connection goes back to the pool,
-	// using a background context so a cancelled ctx can't skip the restore.
-	defer func() { _, _ = conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`) }()
-
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("store.CodeIntelDeleteProject: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := codeIntelDeleteProjectTx(ctx, tx, project); err != nil {
-		return fmt.Errorf("store.CodeIntelDeleteProject: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store.CodeIntelDeleteProject: commit: %w", err)
-	}
-	return nil
-}
-
-// codeIntelProjectDeletes is the per-project delete fan-out, child-to-parent.
-// It is a package-level list with exactly TWO callers — CodeIntelDeleteProject
-// and the archive-completion path in archive.go — so "one owner per table"
-// survives the arrival of cold storage: the archival move must not grow a
-// second, quietly divergent copy of this statement list. In particular
-// codeintel_fts is a virtual table with no foreign key, and a copy that
-// forgets it leaks the whole FTS index (the bug this list's explicitness was
-// introduced to fix).
-var codeIntelProjectDeletes = []string{
-	`DELETE FROM codeintel_fts WHERE project = ?`,
-	`DELETE FROM codeintel_embeddings WHERE project = ?`,
-	`DELETE FROM codeintel_minhash WHERE project = ?`,
-	`DELETE FROM codeintel_sites WHERE project = ?`,
-	`DELETE FROM codeintel_edges WHERE project = ?`,
-	`DELETE FROM codeintel_nodes WHERE project = ?`,
-	`DELETE FROM codeintel_files WHERE project = ?`,
-}
-
-// codeIntelDeleteProjectTx runs the fan-out inside a caller-owned transaction.
-// The caller is responsible for the foreign_keys=OFF pinning documented on
-// CodeIntelDeleteProject — without it, the cascade re-scan makes this O(files
-// × rows).
-func codeIntelDeleteProjectTx(ctx context.Context, tx *sql.Tx, project string) error {
-	for _, del := range codeIntelProjectDeletes {
-		if _, err := tx.ExecContext(ctx, del, project); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // CodeIntelDeleteProjectsUnder removes the code-intelligence index for
 // root AND every indexed project nested beneath it, returning the
 // project keys it deleted (root-first, then descendants in listing
@@ -440,45 +373,6 @@ func (s *Store) CodeIntelDeleteProjectsUnder(ctx context.Context, root string) (
 		}
 	}
 	return targets, nil
-}
-
-// CodeIntelPruneStaleProjects deletes every codeintel_* row for projects
-// whose most recent index pass (MAX(codeintel_files.indexed_at), unix
-// seconds) is older than retentionDays, returning the project keys it
-// deleted. This is the [codeintel].retention_days sweep (Ticket B,
-// docs/plans/claude-code-hook-stall-ticket-and-db-prune-plan-2026-07-12.md):
-// the index is rebuildable from the repo, so age-pruning is safe, and each
-// project deletes through the SAME CodeIntelDeleteProject path `observer
-// index delete -r` uses (one owner per table — no second delete SQL).
-//
-// Conservative by construction:
-//   - retentionDays ≤ 0 disables the sweep entirely (returns nil, nil).
-//   - A project with NO successful index pass yet (MAX(indexed_at) = 0 —
-//     e.g. freshly registered files still 'pending') is NEVER pruned; its
-//     zero watermark says "not indexed", not "indexed long ago".
-//   - An actively indexed project always carries a fresh indexed_at and
-//     is untouched.
-//
-// Idempotent: a second run within the same horizon finds no stale
-// projects and is a no-op.
-func (s *Store) CodeIntelPruneStaleProjects(ctx context.Context, retentionDays int) ([]string, error) {
-	candidates, err := s.CodeIntelStaleProjects(ctx, retentionDays)
-	if err != nil {
-		return nil, fmt.Errorf("store.CodeIntelPruneStaleProjects: %w", err)
-	}
-	stale := make([]string, 0, len(candidates))
-	for _, c := range candidates {
-		stale = append(stale, c.Project)
-	}
-	for _, p := range stale {
-		if err := s.CodeIntelDeleteProject(ctx, p); err != nil {
-			return nil, fmt.Errorf("store.CodeIntelPruneStaleProjects: %w", err)
-		}
-	}
-	if len(stale) == 0 {
-		return nil, nil
-	}
-	return stale, nil
 }
 
 // CodeIntelProjectStatus returns a count of files per status for a
@@ -1372,12 +1266,45 @@ func (s *Store) CodeIntelHasDerived(ctx context.Context, project string) (bool, 
 	return true, nil
 }
 
+// codeIntelFTSDeleteProjectSQL / codeIntelFTSDeleteFileSQL clear the FTS
+// rows of a project's (or one file's) nodes by rowid. codeintel_fts.rowid
+// IS the node id, and `project` is UNINDEXED in the fts5 table
+// (052_codeintel_search_semantic.sql), so the old
+// `DELETE FROM codeintel_fts WHERE project = ?` read EVERY row of the whole
+// table (770k rows on the operator node, 0.4 s in sqlite3, slower in
+// modernc) under the write lock on every derived rebuild, whatever the
+// project's size (T-415, the FTSSTALL class). Resolving the project's node
+// ids through codeintel_nodes' project-leading index and deleting by rowid
+// equality costs only the project's own rows.
+//
+// That is complete only if every FTS row belongs to a live node, which three
+// writers keep true: CodeIntelSaveFile clears a file's FTS rows before it
+// replaces the file's nodes, codeIntelFTSInsertSQL inserts a row only for a
+// node that still exists, and the project delete fan-out
+// (codeIntelProjectDeletes) keeps its by-`project` scan as the rare,
+// complete backstop that also removes any orphan an older binary left
+// behind. Pinned by TestCodeIntelFTSDeletesSeekByRowid.
+const (
+	codeIntelFTSDeleteProjectSQL = `DELETE FROM codeintel_fts
+	 WHERE rowid IN (SELECT id FROM codeintel_nodes WHERE project = ?)`
+	codeIntelFTSDeleteFileSQL = `DELETE FROM codeintel_fts
+	 WHERE rowid IN (SELECT id FROM codeintel_nodes WHERE project = ? AND file_id = ?)`
+	// codeIntelFTSInsertSQL inserts a node's FTS row only while the node
+	// exists (the final argument repeats the node id). The node list is read
+	// before the rebuild's transaction, so a file saved in between would
+	// otherwise leave an FTS row for a node id that no longer exists, which
+	// the by-node-id clear above would never find again.
+	codeIntelFTSInsertSQL = `INSERT INTO codeintel_fts(rowid, tokens, node_id, project, name, fqn, kind, lang, file, start_line, end_line)
+	 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+	  WHERE EXISTS (SELECT 1 FROM codeintel_nodes WHERE id = ?)`
+)
+
 // CodeIntelBuildDerived rebuilds the FTS / embedding / MinHash rows for a
 // project from its current nodes. Idempotent: clears the project's prior
 // derived rows first, so re-running after any index pass is correct.
 //
-// It is also EXPENSIVE and whole-project: the DELETE-by-project on the
-// fts5 table scans and rewrites the project's whole inverted index. Call
+// It is also EXPENSIVE and whole-project: the clear-and-reinsert rewrites
+// the project's whole slice of the inverted index. Call
 // it only when an index pass actually changed something (or when
 // CodeIntelHasDerived says the rows are missing) — see
 // index.IndexProject, which owns that decision.
@@ -1435,7 +1362,7 @@ func (s *Store) CodeIntelBuildDerived(ctx context.Context, project string) error
 	// CodeIntelSaveFile now (W3 body-shingle near-clone, computed at index
 	// time from the file body; the store sweep has no body to MinHash).
 	for _, del := range []string{
-		`DELETE FROM codeintel_fts WHERE project = ?`,
+		codeIntelFTSDeleteProjectSQL,
 		`DELETE FROM codeintel_embeddings WHERE project = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, del, project); err != nil {
@@ -1443,9 +1370,7 @@ func (s *Store) CodeIntelBuildDerived(ctx context.Context, project string) error
 		}
 	}
 
-	ftsStmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO codeintel_fts(rowid, tokens, node_id, project, name, fqn, kind, lang, file, start_line, end_line)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	ftsStmt, err := tx.PrepareContext(ctx, codeIntelFTSInsertSQL)
 	if err != nil {
 		return fmt.Errorf("store.CodeIntelBuildDerived: prepare fts: %w", err)
 	}
@@ -1459,7 +1384,7 @@ func (s *Store) CodeIntelBuildDerived(ctx context.Context, project string) error
 
 	for _, d := range ds {
 		if _, err := ftsStmt.ExecContext(ctx, d.id, d.tokens, d.id, project,
-			d.name, d.fqn, d.kind, d.lang, d.file, d.startLine, d.endLine); err != nil {
+			d.name, d.fqn, d.kind, d.lang, d.file, d.startLine, d.endLine, d.id); err != nil {
 			return fmt.Errorf("store.CodeIntelBuildDerived: insert fts: %w", err)
 		}
 		if d.embeddable {
@@ -1491,9 +1416,15 @@ func (s *Store) CodeIntelSearch(ctx context.Context, project, query string, limi
 	}
 	matchExpr := strings.Join(quoted, " OR ")
 
+	// The EXISTS hides an FTS row whose node is gone. The rebuild clears
+	// FTS rows by node id (codeIntelFTSDeleteProjectSQL), so an orphan an
+	// older binary left behind (a pass interrupted between a file save and
+	// its rebuild) is no longer swept by the next rebuild; it must not
+	// surface as a stale symbol. One primary-key probe per matched row.
 	q := `SELECT node_id, name, fqn, kind, file, lang, start_line, end_line
 	      FROM codeintel_fts
-	      WHERE codeintel_fts MATCH ?`
+	      WHERE codeintel_fts MATCH ?
+	        AND EXISTS (SELECT 1 FROM codeintel_nodes n WHERE n.id = codeintel_fts.rowid)`
 	args := []any{matchExpr}
 	if project != "" {
 		q += ` AND project = ?`

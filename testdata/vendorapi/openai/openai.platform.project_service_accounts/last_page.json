@@ -1,0 +1,15 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "organization.project.service_account",
+      "id": "svc_acct_abc",
+      "name": "Service Account",
+      "role": "owner",
+      "created_at": 1711471533
+    }
+  ],
+  "first_id": "svc_acct_abc",
+  "last_id": "svc_acct_xyz",
+  "has_more": false
+}

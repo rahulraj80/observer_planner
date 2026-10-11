@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/accessgrant"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/statusline"
@@ -242,12 +243,28 @@ type statuslineResult struct {
 type statuslineProgress struct {
 	mu    sync.Mutex
 	input statusline.Input
+	// display is the developer cost display known so far (the one the
+	// daemon recorded in the budget-status file), so the deadline branch
+	// never renders a dollar figure an org chose to hide.
+	display string
 }
 
 func (p *statuslineProgress) set(in statusline.Input) {
 	p.mu.Lock()
 	p.input = in
 	p.mu.Unlock()
+}
+
+func (p *statuslineProgress) setDisplay(d string) {
+	p.mu.Lock()
+	p.display = d
+	p.mu.Unlock()
+}
+
+func (p *statuslineProgress) getDisplay() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.display
 }
 
 func (p *statuslineProgress) get() statusline.Input {
@@ -297,9 +314,10 @@ func runStatusline(cmd *cobra.Command, deps statuslineDeps, opts statuslineRunOp
 			Color:    resolveStatuslineColor(deps, opts),
 			Segments: opts.segments,
 		}
-		line := statusline.Render(in, statusline.DaemonTile{}, renderOpts)
+		partial := statusline.DaemonTile{CostDisplay: progress.getDisplay()}
+		line := statusline.Render(in, partial, renderOpts)
 		if opts.jsonOut {
-			_ = writeStatuslineJSON(stdout, line, statusline.DaemonTile{}, in, "none")
+			_ = writeStatuslineJSON(stdout, line, partial, in, "none")
 		} else {
 			fmt.Fprintln(stdout, line)
 		}
@@ -354,12 +372,27 @@ func computeStatusline(ctx context.Context, cmd *cobra.Command, deps statuslineD
 		daemonLatency    time.Duration
 		daemonAttempted  bool
 		effectiveTimeout time.Duration
+		// budgetDBDir is the resolved DB directory the budget segment reads
+		// the daemon-owned status file from ("" with --no-daemon: that flag
+		// skips every resolution, so the segment is omitted).
+		budgetDBDir string
+		// fileDisplay is the developer cost display the daemon last recorded
+		// in the budget-status file: the fallback when the daemon tile does
+		// not answer (unreachable, or an older daemon).
+		fileDisplay string
 	)
 
 	if opts.noDaemon {
 		daemonReason = "skipped (--no-daemon)"
 	} else {
 		dbDir, daemonBase, resolveErr := deps.resolve()
+		if resolveErr == nil {
+			budgetDBDir = dbDir
+			if dbDir != "" {
+				fileDisplay = budgetStatusDisplay(budgetStatusPathInDir(dbDir))
+				progress.setDisplay(fileDisplay)
+			}
+		}
 		loopbackBase, loopbackOK := statuslineLoopbackAddr(daemonBase)
 		switch {
 		case resolveErr != nil || dbDir == "":
@@ -374,7 +407,7 @@ func computeStatusline(ctx context.Context, cmd *cobra.Command, deps statuslineD
 			// command to send a request (which carries session_id)
 			// off-machine in plaintext. Skip the daemon path entirely
 			// — never dial it, not even once.
-			daemonReason = "skipped (daemon addr not loopback — skipped)"
+			daemonReason = "skipped (daemon addr not loopback - skipped)"
 		default:
 			daemonAttempted = true
 			effectiveTimeout = clampStatuslineTimeout(opts.timeout)
@@ -396,6 +429,24 @@ func computeStatusline(ctx context.Context, cmd *cobra.Command, deps statuslineD
 		source = "daemon"
 	case hasStdinData:
 		source = "stdin"
+	}
+
+	// The org budget warning (statusline_budget.go) is read from the
+	// daemon-owned file beside the DB, not over HTTP, so it shows even when
+	// the dashboard is unreachable (but not with --no-daemon, which skips
+	// all resolution).
+	//
+	// The developer cost display (org display policy) comes from the daemon
+	// tile; when the daemon was unreachable it falls back to the display the
+	// daemon last recorded in that same file, so an org that chose token
+	// usage never gets Claude Code's stdin dollar figure on a daemon blip.
+	if tile.CostDisplay == "" {
+		tile.CostDisplay = fileDisplay
+	}
+	if budgetDBDir != "" {
+		if label := budgetStatuslineLabel(budgetStatusPathInDir(budgetDBDir), tile.CostDisplay); label != "" {
+			tile.Budget = &label
+		}
 	}
 
 	renderOpts := statusline.RenderOptions{
@@ -605,10 +656,15 @@ func statuslinePIDLooksLikeObserver(lock diag.LockInfo) bool {
 // the dashboard package itself would pull an unrelated, much larger
 // dependency graph into a small CLI command for the sake of one struct.
 type statuslineWireResponse struct {
-	TodayUSD              float64  `json:"today_usd"`
+	TodayUSD              *float64 `json:"today_usd"`
 	SessionUSD            *float64 `json:"session_usd"`
 	SessionCacheReadShare *float64 `json:"session_cache_read_share"`
 	GeneratedAt           string   `json:"generated_at"`
+	CostDisplay           string   `json:"cost_display"`
+	TodayTokens           *int64   `json:"today_tokens"`
+	SessionTokens         *int64   `json:"session_tokens"`
+	GrantsInForce         int      `json:"grants_in_force"`
+	NextGrantExpiryNs     int64    `json:"next_grant_expiry_ns"`
 }
 
 // fetchStatuslineTile makes the one bounded, loopback-only HTTP call
@@ -645,11 +701,32 @@ func fetchStatuslineTile(ctx context.Context, base string, timeout time.Duration
 		return false, err
 	}
 
-	today := body.TodayUSD
-	tile.TodayUSD = &today
+	tile.TodayUSD = body.TodayUSD
 	tile.SessionUSD = body.SessionUSD
 	tile.CacheReadShare = body.SessionCacheReadShare
+	tile.CostDisplay = body.CostDisplay
+	tile.TodayTokens = body.TodayTokens
+	tile.SessionTokens = body.SessionTokens
+	tile.Grants = statuslineGrantsText(body.GrantsInForce, body.NextGrantExpiryNs, time.Now())
 	return true, nil
+}
+
+// statuslineGrantsText renders the grants segment: how many org exceptions
+// are in force and how long the nearest one has left. nil when none.
+func statuslineGrantsText(n int, nextExpiryNs int64, now time.Time) *string {
+	if n <= 0 {
+		return nil
+	}
+	text := "1 exception"
+	if n > 1 {
+		text = strconv.Itoa(n) + " exceptions"
+	}
+	if nextExpiryNs > 0 {
+		if left := time.Unix(0, nextExpiryNs).Sub(now); left > 0 {
+			text += ", " + accessgrant.HumanDuration(left) + " left"
+		}
+	}
+	return &text
 }
 
 // resolveStatuslineColor decides ANSI color use: an explicit
@@ -880,6 +957,12 @@ type statuslineJSONOutput struct {
 	SessionUSD *float64 `json:"session_usd"`
 	Model      string   `json:"model"`
 	Source     string   `json:"source"`
+	// CostDisplay is "tokens" when the org chose token usage for developers;
+	// TodayUSD / SessionUSD are then null and TodayTokens / SessionTokens
+	// carry the figures. Omitted in dollar mode (the pre-change shape).
+	CostDisplay   string `json:"cost_display,omitempty"`
+	TodayTokens   *int64 `json:"today_tokens,omitempty"`
+	SessionTokens *int64 `json:"session_tokens,omitempty"`
 }
 
 // writeStatuslineJSON encodes the --json payload. SessionUSD prefers
@@ -898,6 +981,11 @@ func writeStatuslineJSON(out io.Writer, line string, tile statusline.DaemonTile,
 		SessionUSD: sessionUSD,
 		Model:      statuslineModelDisplay(in),
 		Source:     source,
+	}
+	if tile.CostDisplay == statusline.CostDisplayTokens {
+		payload.TodayUSD, payload.SessionUSD = nil, nil
+		payload.CostDisplay = statusline.CostDisplayTokens
+		payload.TodayTokens, payload.SessionTokens = tile.TodayTokens, tile.SessionTokens
 	}
 	enc := json.NewEncoder(out)
 	return enc.Encode(payload)

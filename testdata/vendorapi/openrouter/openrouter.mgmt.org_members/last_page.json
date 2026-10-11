@@ -1,0 +1,12 @@
+{
+  "data": [
+    {
+      "email": "lee.park@example.com",
+      "first_name": "Lee",
+      "id": "user_synth0000000000000000003",
+      "last_name": "Park",
+      "role": "org:member"
+    }
+  ],
+  "total_count": 3
+}

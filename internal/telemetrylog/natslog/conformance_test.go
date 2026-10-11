@@ -21,7 +21,7 @@ func TestNatslogConformance(t *testing.T) {
 		// EmbeddedTestOptions pins the small, explicit test-broker footprint;
 		// the 10 GiB production MaxBytes default cannot be backed by a small CI
 		// runner's disk and the broker refuses the stream outright.
-		l, err := natslog.Embedded(ctx, t.TempDir(), natslog.EmbeddedTestOptions(natslog.Options{
+		l, err := natslog.Embedded(ctx, natslog.TestStoreDir(t), natslog.EmbeddedTestOptions(natslog.Options{
 			MaxMessages:     int64(cfg.MaxMessages),
 			MaxMsgBytes:     int32(cfg.MaxMsgBytes),
 			DuplicateWindow: cfg.DuplicateWindow,

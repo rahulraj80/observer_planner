@@ -84,7 +84,7 @@ func (s *Server) handleSessionPredict(w http.ResponseWriter, r *http.Request, se
 	// empty one means there are no turn rows to observe. Honest empty.
 	if shape.Model == "" {
 		resp.Estimate = predict.EstimateResult{PrefixTokens: shape.PrefixTokens, Warnings: []predict.Warning{predict.WarnNoSessionHistory}}
-		resp.Reason = "no model observed for this session — route the client through the observer proxy (or send a message) to capture token/cost data"
+		resp.Reason = predictReasonNoModel
 		writeJSON(w, resp)
 		return
 	}
@@ -100,7 +100,7 @@ func (s *Server) handleSessionPredict(w http.ResponseWriter, r *http.Request, se
 	// "big-pickle" have no pricing row).
 	ctRates, priced := lookupRates(s.opts.CostEngine, shape.Model)
 	if !priced {
-		resp.Reason = fmt.Sprintf("model %q has no pricing entry — cannot estimate cost", shape.Model)
+		resp.Reason = predictReasonUnpriced(shape.Model)
 	}
 
 	young := s.opts.Predict.YoungSessionMessages
@@ -199,4 +199,17 @@ func loadSessionFastNow(ctx context.Context, db *sql.DB, sessionID string) bool 
 		return false
 	}
 	return fastCount > 0
+}
+
+// The Cost tab renders these reasons after "No cost estimate yet." as
+// sentences (T-374): each ends with a full stop and names a dashboard
+// control, never a CLI command, and never uses a dash as a separator.
+// The proxy-routing advice for a session with no model is the tab's own
+// line (it carries the setup link), so the reason does not repeat it.
+const predictReasonNoModel = "No model has been observed for this session yet."
+
+// predictReasonUnpriced is the reason for a model the cost engine cannot
+// price: the estimate keeps its token facts, only the dollars drop out.
+func predictReasonUnpriced(model string) string {
+	return fmt.Sprintf("Model %q has no pricing entry, so no dollar estimate is possible. Add a price for it in Settings > Pricing.", model)
 }

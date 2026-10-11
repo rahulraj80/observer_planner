@@ -1,0 +1,21 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "detail": "Inferred"
+  },
+  "fixture_sha256": "ef343fe4909c193ec8f90e8c651d8a59ccc5afd1857699c3bda03351352bba88",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/teams/{team_id}/members",
+    "status": 401
+  },
+  "notes": "The OpenAPI documents the 401 ('Authorization failed') with no body schema; the FastAPI detail body is Inferred.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "PI API 0.1.0 (openapi.json), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "4e5d854e34e8f2a4c0319ad724fba245984b98cfbb58a48748d10ff51d31515c",
+  "source_url": "https://api.primeintellect.ai/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "prime.teams.members"
+}

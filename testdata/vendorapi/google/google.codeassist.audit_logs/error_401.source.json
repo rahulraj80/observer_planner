@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial",
+    "error.status": "VerifiedOfficial"
+  },
+  "fixture_sha256": "96a124f534f3754a929e52fcc22d979daf28cbafda017eee448fea6e70101d50",
+  "http": {
+    "method": "POST",
+    "path": "/v2/entries:list",
+    "status": 401
+  },
+  "notes": "The documented JSON error envelope with status UNAUTHENTICATED (HTTP 401); the message is synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "Google API design guide, errors (google.rpc.Status JSON mapping), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "5e015d3ed3aa24166b1577c8d94dd3b4140cd3c1d1b6c1b98f8d4212a2f0b978",
+  "source_url": "https://cloud.google.com/apis/design/errors",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "google.codeassist.audit_logs"
+}

@@ -43,7 +43,7 @@ func TestNoForbiddenImports(t *testing.T) {
 			path := strings.Trim(imp.Path.Value, `"`)
 			for _, bad := range forbidden {
 				if path == bad || strings.HasPrefix(path, bad+"/") {
-					t.Errorf("%s imports forbidden %q — internal/handoff must stay pure (CLAUDE.md §1)", f, path)
+					t.Errorf("%s imports forbidden %q - internal/handoff must stay pure (CLAUDE.md §1)", f, path)
 				}
 			}
 		}

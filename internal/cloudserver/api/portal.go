@@ -79,7 +79,7 @@ func portalPrincipalFrom(ctx context.Context) (portalPrincipal, bool) {
 // never enters browser storage), SameSite=Strict, Path=/. Secure is on whenever
 // we use the __Host- name (required by the prefix).
 func (s *Server) setSessionCookie(w http.ResponseWriter, raw string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly and SameSite=Strict; Secure follows the deployment (always on with the __Host- name)
 		Name:     s.portalCookieName(),
 		Value:    raw,
 		Path:     "/",
@@ -92,7 +92,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, raw string, expires tim
 
 // clearSessionCookie expires the session cookie.
 func (s *Server) clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: HttpOnly and SameSite=Strict; Secure follows the deployment (always on with the __Host- name)
 		Name:     s.portalCookieName(),
 		Value:    "",
 		Path:     "/",

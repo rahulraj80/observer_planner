@@ -58,7 +58,7 @@ func TestWireAIClients_SandboxHomeNeverEscapes(t *testing.T) {
 	}
 	text := strings.Join(lines, "\n")
 	if strings.TrimSpace(text) == "" {
-		t.Fatalf("wire produced no output — the guard would be vacuous")
+		t.Fatalf("wire produced no output - the guard would be vacuous")
 	}
 
 	allowed := allowedSandboxRoots(t, sandbox)
@@ -71,7 +71,7 @@ func TestWireAIClients_SandboxHomeNeverEscapes(t *testing.T) {
 			if !underAnyRoot(p, allowed) {
 				t.Errorf("wireAIClients with a sandbox HomeDir reported a path OUTSIDE the sandbox: %q\n"+
 					"  line: %s\n  allowed roots: %v\n"+
-					"  a cross-OS target resolved its home outside the caller's sandbox — see "+
+					"  a cross-OS target resolved its home outside the caller's sandbox - see "+
 					"crossmount.AutoDetectSuppressed (incident 2026-07-31)", p, line, allowed)
 			}
 		}

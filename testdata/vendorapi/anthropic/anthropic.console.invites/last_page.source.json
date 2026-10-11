@@ -1,0 +1,38 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].accepted_at": "VerifiedOfficial",
+    "data[].email": "VerifiedOfficial",
+    "data[].expires_at": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].invited_at": "VerifiedOfficial",
+    "data[].rbac_group_ids": "VerifiedOfficial",
+    "data[].rbac_group_ids[]": "VerifiedOfficial",
+    "data[].role": "VerifiedOfficial",
+    "data[].status": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "last_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "5daa25a3e6111d63d2c99bbbdce35c7af26d539f1d71a15757498db460181a9b",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/invites",
+    "query": {
+      "after_id": "cursor-from-the-first-page"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/organizations/invites. Terminal page derived from the normal page: the paging flag is set to its documented terminal value (has_more false and next_page null, or hasNextPage false); every other value is unchanged.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.console.invites"
+}

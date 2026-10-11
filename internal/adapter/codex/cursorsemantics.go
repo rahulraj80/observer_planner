@@ -24,5 +24,8 @@ func (a *Adapter) CursorSemanticsFor(path string) adapter.FileCursorSemantics {
 	return adapter.FileCursorSemantics{
 		StreamsFromCursor: true,
 		Detail:            "append-only JSONL rollout, seek-and-stream from the persisted offset",
+		// The main read loop honours adapter.LimitTail, so the watcher
+		// reads an over-cap tail in bounded windows (T-413).
+		ChunkedTail: true,
 	}
 }

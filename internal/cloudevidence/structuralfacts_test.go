@@ -914,15 +914,25 @@ func TestActivityMixFoldsUnknownActionKinds(t *testing.T) {
 // "unclassified".
 func TestKnownActionKindsMirrorsModels(t *testing.T) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, filepath.Join("..", "models"), func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	dir := filepath.Join("..", "models")
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("parse internal/models: %v", err)
 	}
+	files := map[string]*ast.File{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+		if err != nil {
+			t.Fatalf("parse internal/models: %v", err)
+		}
+		files[e.Name()] = f
+	}
 	found := 0
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
+	for _, pkg := range []map[string]*ast.File{files} {
+		for _, file := range pkg {
 			for _, decl := range file.Decls {
 				gen, ok := decl.(*ast.GenDecl)
 				if !ok || gen.Tok != token.CONST {

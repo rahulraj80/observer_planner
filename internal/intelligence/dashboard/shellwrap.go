@@ -1,12 +1,13 @@
+//go:build !sbo_omit_integration_shell_wrap
+
 package dashboard
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/marmutapp/superbased-observer/internal/shellwrap"
 	"github.com/marmutapp/superbased-observer/internal/shellwrapsvc"
 )
 
@@ -15,18 +16,9 @@ import (
 // writes here exactly as it refuses the section's generic config writes.
 const shellWrapSettingsSection = "terminal"
 
-// ShellWrapService is the dashboard's seam onto the command-wrapping shell
-// integration (backlog item 7): cmd wires an *shellwrapsvc.Service, the ONE
-// writer of the shim directory and the shell start-up-file blocks. Nil = not
-// wired (the routes answer 501).
-type ShellWrapService interface {
-	Status(ctx context.Context) (shellwrap.Status, error)
-	Apply(ctx context.Context, req shellwrapsvc.Request) (shellwrapsvc.Outcome, error)
-	Disable(ctx context.Context, dryRun bool) (shellwrapsvc.Outcome, error)
-}
-
 // shellWrapApplyBody is the POST /api/shell-wrap/apply body.
 type shellWrapApplyBody struct {
+	Target string   `json:"target"`
 	Tools  []string `json:"tools"`
 	Shells []string `json:"shells"`
 	DryRun bool     `json:"dry_run"`
@@ -34,7 +26,15 @@ type shellWrapApplyBody struct {
 
 // shellWrapDisableBody is the POST /api/shell-wrap/disable body.
 type shellWrapDisableBody struct {
-	DryRun bool `json:"dry_run"`
+	Target string `json:"target"`
+	DryRun bool   `json:"dry_run"`
+}
+
+// shellWrapServiceError answers a refused apply / disable (a malformed start-
+// up file, an unavailable target, an unsafe path): a conflict with the
+// machine's state, never a server fault.
+func shellWrapServiceError(w http.ResponseWriter, prefix string, err error) {
+	http.Error(w, prefix+err.Error(), http.StatusConflict)
 }
 
 // handleShellWrapStatus serves GET /api/shell-wrap/status: the recorded
@@ -51,13 +51,27 @@ func (s *Server) handleShellWrapStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "command wrapping is not wired on this dashboard", http.StatusNotImplemented)
 		return
 	}
-	tok := setConfirmCookie(w, r)
-	st, err := s.opts.ShellWrap.Status(r.Context())
+	target, err := shellwrapsvc.ParseTarget(r.URL.Query().Get("target"))
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	tok := setConfirmCookie(w, r)
+	targets, err := s.opts.ShellWrap.Targets(r.Context())
+	if err != nil {
+		writeErr(w, fmt.Errorf("shell-wrap targets: %w", err))
+		return
+	}
+	st, err := s.opts.ShellWrap.StatusFor(r.Context(), target)
+	if err != nil {
+		if errors.Is(err, shellwrapsvc.ErrTargetUnavailable) {
+			shellWrapServiceError(w, "shell-wrap status: ", err)
+			return
+		}
 		writeErr(w, fmt.Errorf("shell-wrap status: %w", err))
 		return
 	}
-	writeJSON(w, map[string]any{"confirm_token": tok, "status": st})
+	writeJSON(w, map[string]any{"confirm_token": tok, "status": st, "target": target, "targets": targets})
 }
 
 // shellWrapGovernanceRefused applies the Settings-section pin to a write.
@@ -66,7 +80,7 @@ func (s *Server) shellWrapGovernanceRefused(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 	eff := s.opts.Governance(r.Context())
-	if !eff.Active {
+	if !eff.VisibilityActive() {
 		return false
 	}
 	if eff.IsSettingsSectionHidden(shellWrapSettingsSection) || eff.IsSettingsSectionReadOnly(shellWrapSettingsSection) {
@@ -94,22 +108,35 @@ func (s *Server) handleShellWrapApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "decode shell-wrap apply: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	target, err := shellwrapsvc.ParseTarget(body.Target)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if !body.DryRun && s.shellWrapGovernanceRefused(w, r) {
 		return
 	}
 	s.configWriteMu.Lock()
-	out, err := s.opts.ShellWrap.Apply(r.Context(), shellwrapsvc.Request{Tools: body.Tools, Shells: body.Shells, DryRun: body.DryRun})
+	out, err := s.opts.ShellWrap.Apply(r.Context(), shellwrapsvc.Request{Target: target, Tools: body.Tools, Shells: body.Shells, DryRun: body.DryRun})
 	s.configWriteMu.Unlock()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		shellWrapServiceError(w, "", err)
 		return
 	}
 	if !body.DryRun {
 		s.notifyConfigSaved()
-		s.recordManageAudit(r, "shell_wrap_apply", fmt.Sprintf("tools=%s shells=%s changes=%d",
-			strings.Join(body.Tools, ","), strings.Join(body.Shells, ","), len(out.Changes)))
+		s.recordManageAudit(r, "shell_wrap_apply", fmt.Sprintf("target=%s tools=%s shells=%s changes=%d",
+			shellWrapTargetLabel(target), strings.Join(body.Tools, ","), strings.Join(body.Shells, ","), len(out.Changes)))
 	}
 	writeJSON(w, out)
+}
+
+// shellWrapTargetLabel names a target in an audit row.
+func shellWrapTargetLabel(t shellwrapsvc.Target) string {
+	if t == shellwrapsvc.TargetNative {
+		return "native"
+	}
+	return string(t)
 }
 
 // handleShellWrapDisable serves POST /api/shell-wrap/disable: remove every
@@ -127,18 +154,23 @@ func (s *Server) handleShellWrapDisable(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "decode shell-wrap disable: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	target, err := shellwrapsvc.ParseTarget(body.Target)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	// No governance check: undo is never blocked - a pin must not leave a
 	// developer unable to take the shims back out of their own shell.
 	s.configWriteMu.Lock()
-	out, err := s.opts.ShellWrap.Disable(r.Context(), body.DryRun)
+	out, err := s.opts.ShellWrap.DisableFor(r.Context(), target, body.DryRun)
 	s.configWriteMu.Unlock()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		shellWrapServiceError(w, "", err)
 		return
 	}
 	if !body.DryRun {
 		s.notifyConfigSaved()
-		s.recordManageAudit(r, "shell_wrap_disable", fmt.Sprintf("changes=%d", len(out.Changes)))
+		s.recordManageAudit(r, "shell_wrap_disable", fmt.Sprintf("target=%s changes=%d", shellWrapTargetLabel(target), len(out.Changes)))
 	}
 	writeJSON(w, out)
 }

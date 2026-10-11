@@ -24,5 +24,5 @@ func execSelf() error {
 	if err != nil {
 		return err
 	}
-	return syscall.Exec(exe, os.Args, os.Environ())
+	return syscall.Exec(exe, os.Args, os.Environ()) //nolint:gosec // G702: re-execs this same binary with its own argv and env
 }

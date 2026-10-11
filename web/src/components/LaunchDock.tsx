@@ -13,12 +13,12 @@ import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { isRemoteView } from "@/lib/remote";
-import {
-  LaunchTerminal,
-  isLiveStatus,
-  policyStopMessage,
-} from "@/components/LaunchTerminal";
-import type { Status, PolicyStopInfo } from "@/components/LaunchTerminal";
+import { isLiveStatus, policyStopMessage } from "@/lib/launchStatus";
+import type { Status, PolicyStopInfo } from "@/lib/launchStatus";
+// The terminal itself comes from the component registry: a lazy component in
+// a distro that compiles terminals, null in one that does not, so this
+// always-loaded provider never pulls xterm into a bundle without terminals.
+import { LAUNCH_TERMINAL as LaunchTerminal } from "@/lib/components.gen";
 import { NewTerminalDialog } from "@/components/NewTerminalDialog";
 import type { NewTerminalDraft } from "@/components/NewTerminalDialog";
 import {
@@ -1068,7 +1068,8 @@ function TerminalHost({
         }
         onClick={(e) => e.stopPropagation()}
       />
-      {createPortal(
+      {LaunchTerminal && createPortal(
+        <Suspense fallback={null}>
         <LaunchTerminal
           token={session.token}
           tool={session.tool}
@@ -1085,7 +1086,8 @@ function TerminalHost({
           registerPaste={boundRegisterPaste}
           projectPanelEnabled={projectPanelEnabled}
           sessionPanelEnabled={sessionPanelEnabled}
-        />,
+        />
+        </Suspense>,
         hostEl,
       )}
     </div>
@@ -1124,7 +1126,7 @@ function Dock({
     <div
       ref={drag.ref}
       style={drag.style}
-      className="fixed bottom-4 right-4 z-[70] flex flex-col-reverse items-end gap-2"
+      className="sb-launch-dock fixed bottom-4 right-4 z-[70] flex flex-col-reverse items-end gap-2"
     >
       {/* When remoteBlocked the button is disabled and swallows pointer
           events, so hover would never fire — TooltipSpan wraps it in a

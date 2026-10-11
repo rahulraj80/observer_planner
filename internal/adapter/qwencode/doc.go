@@ -41,7 +41,10 @@
 // `total_token_count == input_token_count + output_token_count` (verified
 // against live turns 2026-07-09). [models.TokenEvent.InputTokens] must be
 // NET, so the adapter subtracts cached; cached lands in CacheReadTokens and
-// `thoughts_token_count` in ReasoningTokens. Per-turn model may be non-Qwen
+// `thoughts_token_count` in ReasoningTokens. Output and reasoning are kept
+// DISJOINT: on an OpenAI-shaped turn (total == input + output) the thoughts
+// already sit inside output_token_count and are netted out of OutputTokens
+// (T-542; see tokenBundle's reasoningRules). Per-turn model may be non-Qwen
 // (openai-compat providers; gpt-4o / GLM observed live) — never hardcoded.
 //
 // # Project root

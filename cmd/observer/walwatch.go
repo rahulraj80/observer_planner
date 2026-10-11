@@ -63,10 +63,10 @@ func walWatchdogLoop(ctx context.Context, configPath string) {
 		if fi.Size() < alertBytes {
 			return
 		}
-		logger.Warn("WAL file exceeds alert threshold — attempting TRUNCATE checkpoint (§1e)",
+		logger.Warn("WAL file exceeds alert threshold - attempting TRUNCATE checkpoint (§1e)",
 			"wal_bytes", fi.Size(),
 			"alert_mb", cfg.Observer.Retention.WALAlertMB,
-			"hint", "a busy result means a live reader (e.g. an old `observer serve`) holds a read txn — restart it")
+			"hint", "a busy result means a live reader (e.g. an old `observer serve`) holds a read txn - restart it")
 		var busy, logged, ckpt int64
 		if err := database.QueryRowContext(ctx,
 			`PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logged, &ckpt); err != nil {

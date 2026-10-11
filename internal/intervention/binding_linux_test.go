@@ -753,3 +753,185 @@ func writeExecutable(t *testing.T, path string, raw []byte) {
 		t.Fatal(err)
 	}
 }
+
+// TestBuildInstallManifestDiscoversJunieVersionedWorker pins T-693 against the
+// layout read on demo node 1 (junie 3579.5, 2026-10-08): ~/.local/bin/junie is
+// a bash shim, versions/<v>/junie a bash script, and the running process is
+// versions/<v>/junie-app/bin/junie. Only the ELF payload may become a target.
+func TestBuildInstallManifestDiscoversJunieVersionedWorker(t *testing.T) {
+	t.Parallel()
+
+	shim := []byte(`#!/bin/bash
+exec "$HOME/.local/share/junie/versions/x/junie" "$@"
+`)
+	script := []byte(`#!/bin/bash
+exec "$(dirname "$0")/junie-app/bin/junie" "$@"
+`)
+	type layout func(t *testing.T, versions string)
+	cases := []struct {
+		name    string
+		build   layout
+		state   BindingState
+		targets []string
+		reason  BindingReason
+	}{
+		{"jpackage payload", func(t *testing.T, versions string) {
+			writeExecutable(t, filepath.Join(versions, "3579.5", "junie"), script)
+			copyOwnExecutable(t, filepath.Join(versions, "3579.5", "junie-app", "bin", "junie"))
+		}, BindingReady, []string{"3579.5/junie-app/bin/junie"}, ""},
+		{"shim's other linux layout", func(t *testing.T, versions string) {
+			copyOwnExecutable(t, filepath.Join(versions, "1.0", "junie", "bin", "junie"))
+		}, BindingReady, []string{"1.0/junie/bin/junie"}, ""},
+		{"two installed versions", func(t *testing.T, versions string) {
+			copyOwnExecutable(t, filepath.Join(versions, "3579.4", "junie-app", "bin", "junie"))
+			writeExecutable(t, filepath.Join(versions, "3579.5", "junie"), script)
+			copyOwnExecutable(t, filepath.Join(versions, "3579.5", "junie-app", "bin", "junie"))
+		}, BindingReady, []string{"3579.4/junie-app/bin/junie", "3579.5/junie-app/bin/junie"}, ""},
+		{"not a version directory", func(t *testing.T, versions string) {
+			copyOwnExecutable(t, filepath.Join(versions, "staging", "junie-app", "bin", "junie"))
+		}, BindingUnsupported, nil, ReasonWorkerNotFound},
+		{"no versions directory", func(*testing.T, string) {}, BindingUnsupported, nil, ReasonWorkerNotFound},
+		{"payload is a script", func(t *testing.T, versions string) {
+			writeExecutable(t, filepath.Join(versions, "3579.5", "junie-app", "bin", "junie"), script)
+		}, BindingUnsupported, nil, ReasonWorkerInvalid},
+		{"symlinked version directory", func(t *testing.T, versions string) {
+			outside := filepath.Join(t.TempDir(), "elsewhere")
+			copyOwnExecutable(t, filepath.Join(outside, "junie-app", "bin", "junie"))
+			if err := os.MkdirAll(versions, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(versions, "3579.5")); err != nil {
+				t.Fatal(err)
+			}
+		}, BindingUnsupported, nil, ReasonGenericProcessHost},
+		{"symlinked payload", func(t *testing.T, versions string) {
+			if err := os.MkdirAll(filepath.Join(versions, "3579.5", "junie-app", "bin"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("/bin/sleep", filepath.Join(versions, "3579.5", "junie-app", "bin", "junie")); err != nil {
+				t.Fatal(err)
+			}
+		}, BindingUnsupported, nil, ReasonGenericProcessHost},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			launcher := filepath.Join(root, "bin", "junie")
+			writeExecutable(t, launcher, shim)
+			versions := filepath.Join(root, "share", "junie", "versions")
+			tc.build(t, versions)
+
+			manifest, err := BuildInstallManifest(context.Background(), []InstalledCandidate{{Tool: "junie", SurfaceID: "junie/cli", LauncherPath: launcher}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			surface := requireSurface(t, manifest, "junie/cli")
+			if surface.State != tc.state || len(surface.Targets) != len(tc.targets) {
+				t.Fatalf("junie surface = %+v, want state %s with %d targets", surface, tc.state, len(tc.targets))
+			}
+			for i, target := range surface.Targets {
+				if target.Kind != TargetNativeExecutable || target.Executable.Path != filepath.Join(versions, filepath.FromSlash(tc.targets[i])) {
+					t.Errorf("target %d = %+v, want %s", i, target, tc.targets[i])
+				}
+			}
+			if tc.reason != "" && !slices.Contains(surface.Reasons, tc.reason) {
+				t.Errorf("reasons = %v, want %s", surface.Reasons, tc.reason)
+			}
+		})
+	}
+}
+
+// TestBuildInstallManifestBindsNodeOneLayouts pins T-693 against the installed
+// layouts read on demo node 1 (2026-10-08): each row's PATH entry is the
+// vendor's own launcher and the target must be exactly the native payload it
+// starts, never the Node or shell launcher.
+func TestBuildInstallManifestBindsNodeOneLayouts(t *testing.T) {
+	t.Parallel()
+
+	node := []byte("#!/usr/bin/env node\n")
+	link := func(t *testing.T, target, at string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name   string
+		tool   string
+		build  func(t *testing.T, root string) (launcher, target string)
+		state  BindingState
+		reason BindingReason
+	}{
+		{"crush npm package", "crush", func(t *testing.T, root string) (string, string) {
+			pkg := filepath.Join(root, "lib", "node_modules", "@charmland", "crush")
+			writeExecutable(t, filepath.Join(pkg, "run-crush.js"), node)
+			copyOwnExecutable(t, filepath.Join(pkg, "bin", "crush"))
+			link(t, filepath.Join(pkg, "run-crush.js"), filepath.Join(root, "bin", "crush"))
+			return filepath.Join(root, "bin", "crush"), filepath.Join(pkg, "bin", "crush")
+		}, BindingReady, ""},
+		{"crush npm package without its worker", "crush", func(t *testing.T, root string) (string, string) {
+			pkg := filepath.Join(root, "lib", "node_modules", "@charmland", "crush")
+			writeExecutable(t, filepath.Join(pkg, "run-crush.js"), node)
+			link(t, filepath.Join(pkg, "run-crush.js"), filepath.Join(root, "bin", "crush"))
+			return filepath.Join(root, "bin", "crush"), ""
+		}, BindingUnsupported, ReasonWorkerNotFound},
+		{"cline npm cached worker", "cline-cli", func(t *testing.T, root string) (string, string) {
+			pkg := filepath.Join(root, "lib", "node_modules", "cline")
+			writeExecutable(t, filepath.Join(pkg, "bin", "cline"), node)
+			copyOwnExecutable(t, filepath.Join(pkg, "bin", ".cline"))
+			link(t, filepath.Join(pkg, "bin", "cline"), filepath.Join(root, "bin", "cline"))
+			return filepath.Join(root, "bin", "cline"), filepath.Join(pkg, "bin", ".cline")
+		}, BindingReady, ""},
+		{"cline npm platform package", "cline-cli", func(t *testing.T, root string) (string, string) {
+			pkg := filepath.Join(root, "lib", "node_modules", "cline")
+			writeExecutable(t, filepath.Join(pkg, "bin", "cline"), node)
+			worker := filepath.Join(pkg, "node_modules", "@cline", "cli-linux-x64", "bin", "cline")
+			copyOwnExecutable(t, worker)
+			link(t, filepath.Join(pkg, "bin", "cline"), filepath.Join(root, "bin", "cline"))
+			return filepath.Join(root, "bin", "cline"), worker
+		}, BindingReady, ""},
+		{"grok release asset", "grok", func(t *testing.T, root string) (string, string) {
+			asset := filepath.Join(root, "grok", "downloads", "grok-linux-x86_64")
+			copyOwnExecutable(t, asset)
+			link(t, asset, filepath.Join(root, "grok", "bin", "grok"))
+			link(t, filepath.Join(root, "grok", "bin", "grok"), filepath.Join(root, "bin", "grok"))
+			return filepath.Join(root, "bin", "grok"), asset
+		}, BindingReady, ""},
+		{"grok link to an undeclared name", "grok", func(t *testing.T, root string) (string, string) {
+			other := filepath.Join(root, "elsewhere", "editor")
+			copyOwnExecutable(t, other)
+			link(t, other, filepath.Join(root, "bin", "grok"))
+			return filepath.Join(root, "bin", "grok"), ""
+		}, BindingUnsupported, ReasonGenericProcessHost},
+		{"prime-agent versioned release", "prime-agent", func(t *testing.T, root string) (string, string) {
+			release := filepath.Join(root, "share", "prime-agent", "releases", "0.9.8-linux-x64", "prime-agent")
+			copyOwnExecutable(t, release)
+			link(t, release, filepath.Join(root, "bin", "prime-agent"))
+			return filepath.Join(root, "bin", "prime-agent"), release
+		}, BindingReady, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			launcher, target := tc.build(t, t.TempDir())
+			manifest, err := BuildInstallManifest(context.Background(), []InstalledCandidate{{Tool: tc.tool, SurfaceID: tc.tool + "/cli", LauncherPath: launcher}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			surface := requireSurface(t, manifest, tc.tool+"/cli")
+			if surface.State != tc.state {
+				t.Fatalf("%s surface = %+v, want %s", tc.tool, surface, tc.state)
+			}
+			if target != "" && (len(surface.Targets) != 1 || surface.Targets[0].Kind != TargetNativeExecutable || surface.Targets[0].Executable.Path != target) {
+				t.Fatalf("%s targets = %+v, want only %s", tc.tool, surface.Targets, target)
+			}
+			if tc.reason != "" && !slices.Contains(surface.Reasons, tc.reason) {
+				t.Errorf("reasons = %v, want %s", surface.Reasons, tc.reason)
+			}
+		})
+	}
+}

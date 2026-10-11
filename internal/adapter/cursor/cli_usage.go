@@ -38,26 +38,64 @@ func matchesCLIUsageLog(path string) bool {
 		cliLogName.MatchString(filepath.Base(norm))
 }
 
-func cliUsageRoots(homes []crossmount.HomeRoot) []string {
-	tempDirs := []string{os.TempDir()}
-	var roots []string
+// cliRootEnv is what cliUsageRootsFor reads about this process: the native
+// temp directory, the suffixes cursor-agent names the current user's log
+// directory with, and whether a path is owned by the current user.
+type cliRootEnv struct {
+	tempDir string
+	ids     []string
+	owned   func(path string) bool
+}
+
+// currentCLIRootEnv is the production cliRootEnv.
+func currentCLIRootEnv() cliRootEnv {
+	env := cliRootEnv{tempDir: os.TempDir(), owned: ownedByCurrentUser}
 	if u, err := user.Current(); err == nil {
-		id := u.Uid
-		if _, err := strconv.ParseUint(id, 10, 32); err != nil {
-			name := strings.ReplaceAll(u.Username, `\`, "/")
-			id = regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(filepath.Base(name), "_")
+		if _, err := strconv.ParseUint(u.Uid, 10, 32); err == nil {
+			env.ids = append(env.ids, u.Uid)
 		}
-		roots = append(roots, filepath.Join(os.TempDir(), "cursor-agent-logs-"+id))
+		name := strings.ReplaceAll(u.Username, `\`, "/")
+		if n := regexp.MustCompile(`[^A-Za-z0-9._-]`).ReplaceAllString(filepath.Base(name), "_"); n != "" && n != "." {
+			env.ids = append(env.ids, n)
+		}
+	}
+	return env
+}
+
+func cliUsageRoots(homes []crossmount.HomeRoot) []string {
+	return cliUsageRootsFor(homes, currentCLIRootEnv())
+}
+
+// cliUsageRootsFor lists the cursor-agent log directories to watch.
+//
+// The native temp directory can be shared by every user of the machine
+// (/tmp on Linux), so it is NEVER globbed (U10, lane FIX-UPGRADE): only the
+// current user's own cursor-agent-logs-<uid|username> is watched, and an
+// existing one only when the current user owns it. Another user's directory
+// is never read. A Windows home's AppData\Local\Temp is that user's own, so
+// its cursor-agent-logs-* entries are still discovered there.
+func cliUsageRootsFor(homes []crossmount.HomeRoot, env cliRootEnv) []string {
+	var roots []string
+	for i, id := range env.ids {
+		p := filepath.Join(env.tempDir, "cursor-agent-logs-"+id)
+		fi, err := os.Stat(p)
+		switch {
+		case err == nil && fi.IsDir():
+			if env.owned != nil && env.owned(p) {
+				roots = append(roots, p)
+			}
+		case err != nil && i == 0:
+			// Watch the canonical directory before the first CLI run.
+			roots = append(roots, p)
+		}
 	}
 	for _, h := range homes {
-		if h.OS == crossmount.OSWindows {
-			dir := filepath.Join(h.Path, "AppData", "Local", "Temp")
-			tempDirs = append(tempDirs, dir)
-			// Watch a known user's canonical directory before their first CLI run.
-			roots = append(roots, filepath.Join(dir, "cursor-agent-logs-"+filepath.Base(h.Path)))
+		if h.OS != crossmount.OSWindows {
+			continue
 		}
-	}
-	for _, dir := range tempDirs {
+		dir := filepath.Join(h.Path, "AppData", "Local", "Temp")
+		// Watch a known user's canonical directory before their first CLI run.
+		roots = append(roots, filepath.Join(dir, "cursor-agent-logs-"+filepath.Base(h.Path)))
 		matches, _ := filepath.Glob(filepath.Join(dir, "cursor-agent-logs-*"))
 		for _, path := range matches {
 			if fi, err := os.Stat(path); err == nil && fi.IsDir() {

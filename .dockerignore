@@ -16,7 +16,14 @@ model-pricing
 website
 design
 web
-web2
+# web/package.json stays: the npm workspace root lists web/ as a member, and
+# `npm ci` in Dockerfile.observer-org's web2 stage needs every member's
+# manifest. The rest of web/ is not in the context.
+!web/package.json
+# web2/ IS in the context: Dockerfile.observer-org builds the org dashboard
+# from source and syncs it into the embed (P3-07), so an image can never ship
+# a stale committed embed. Its build output is not.
+web2/dist
 vscode
 sdk
 npm

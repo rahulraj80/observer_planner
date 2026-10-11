@@ -1,3 +1,5 @@
+//go:build !sbo_omit_archive
+
 package main
 
 import (
@@ -59,7 +61,7 @@ func reclaimTestDB(t *testing.T, dir string) (string, *db.Footprint) {
 		t.Fatalf("close: %v", err)
 	}
 	if fp.FreelistPages == 0 {
-		t.Fatalf("fixture produced no freelist pages — there is nothing for the reclaim to reclaim")
+		t.Fatalf("fixture produced no freelist pages - there is nothing for the reclaim to reclaim")
 	}
 	return path, &fp
 }
@@ -153,7 +155,7 @@ func TestArchiveReclaimRunCompactsAndPreserves(t *testing.T) {
 		t.Errorf("database did not shrink: %d → %d (freelist held %d bytes)", sizeBefore, sizeAfter, fp.ReclaimableBytes)
 	}
 	if rep.BytesFreed != sizeBefore-sizeAfter {
-		t.Errorf("BytesFreed = %d, want %d — the report must describe the file, not an estimate",
+		t.Errorf("BytesFreed = %d, want %d - the report must describe the file, not an estimate",
 			rep.BytesFreed, sizeBefore-sizeAfter)
 	}
 	// Nothing is deleted. The whole safety posture rests on this.
@@ -161,7 +163,7 @@ func TestArchiveReclaimRunCompactsAndPreserves(t *testing.T) {
 		t.Fatal("no backup path reported")
 	}
 	if _, serr := os.Stat(rep.BackupPath); serr != nil {
-		t.Errorf("the original was not preserved at %s: %v — reclaim must never delete anything", rep.BackupPath, serr)
+		t.Errorf("the original was not preserved at %s: %v - reclaim must never delete anything", rep.BackupPath, serr)
 	}
 	if bs := fileSizeOrZero(rep.BackupPath); bs != sizeBefore {
 		t.Errorf("backup is %d bytes, want the original %d", bs, sizeBefore)

@@ -52,7 +52,7 @@ const (
 // requires — specific (tool, native) literals, then tool-specific globs,
 // then vocabulary aliases, then tool-less fallbacks, then the global
 // `mcp__*` glob last.
-var table = buildTable()
+var table = withOperands(buildTable())
 
 // toolAlias records a tool whose native vocabulary is a REBADGE of
 // another tool's — same binary lineage, same tool names, different

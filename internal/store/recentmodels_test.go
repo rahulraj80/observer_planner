@@ -208,3 +208,96 @@ func TestLoadRecentModelsForTool(t *testing.T) {
 		}
 	})
 }
+
+// TestLoadModelUsage pins the Arena picker's history query: most-used first
+// (count desc, then recency, then id), node-wide when tool is "", the tool
+// list per model, the window, the sentinel exclusion and the limit.
+func TestLoadModelUsage(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	seed := func(t *testing.T) (*Store, context.Context) {
+		t.Helper()
+		st, ctx, projectID := newRecentModelsTestStore(t)
+		if err := st.UpsertSession(ctx, models.Session{
+			ID: "sess-mu-codex", ProjectID: projectID, Tool: "codex",
+			StartedAt: now.Add(-2 * time.Hour),
+		}); err != nil {
+			t.Fatalf("UpsertSession: %v", err)
+		}
+		cx := func(id, model string, ts time.Time) models.TokenEvent {
+			e := ev(id, "codex", model, ts)
+			e.SessionID = "sess-mu-codex"
+			return e
+		}
+		if _, err := st.InsertTokenEvents(ctx, []models.TokenEvent{
+			// claude-sonnet: 3 turns (2 claude-code + 1 codex), oldest-ish.
+			ev("m1", "claude-code", "claude-sonnet-4-6", now.Add(-5*time.Hour)),
+			ev("m2", "claude-code", "claude-sonnet-4-6", now.Add(-4*time.Hour)),
+			cx("m3", "claude-sonnet-4-6", now.Add(-4*time.Hour)),
+			// gpt-5.5: 2 turns, most recent.
+			cx("m4", "gpt-5.5", now.Add(-1*time.Hour)),
+			cx("m5", "gpt-5.5", now.Add(-30*time.Minute)),
+			// claude-opus: 2 turns, older than gpt-5.5 -> ranks after it.
+			ev("m6", "claude-code", "claude-opus-4-8", now.Add(-3*time.Hour)),
+			ev("m7", "claude-code", "claude-opus-4-8", now.Add(-2*time.Hour)),
+			// excluded: sentinel and out-of-window.
+			ev("m8", "claude-code", "<synthetic>", now.Add(-1*time.Hour)),
+			ev("m9", "claude-code", "claude-old", now.Add(-72*time.Hour)),
+		}); err != nil {
+			t.Fatalf("InsertTokenEvents: %v", err)
+		}
+		return st, ctx
+	}
+
+	type row struct {
+		model string
+		count int
+		tools string
+	}
+	cases := []struct {
+		name  string
+		tool  string
+		limit int
+		want  []row
+	}{
+		{name: "node-wide most-used first", tool: "", limit: 10, want: []row{
+			{"claude-sonnet-4-6", 3, "claude-code,codex"},
+			{"gpt-5.5", 2, "codex"},
+			{"claude-opus-4-8", 2, "claude-code"},
+		}},
+		{name: "one tool", tool: "claude-code", limit: 10, want: []row{
+			{"claude-opus-4-8", 2, "claude-code"},
+			{"claude-sonnet-4-6", 2, "claude-code"},
+		}},
+		{name: "limit", tool: "", limit: 1, want: []row{
+			{"claude-sonnet-4-6", 3, "claude-code,codex"},
+		}},
+		{name: "unknown tool", tool: "aider", limit: 10, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			st, ctx := seed(t)
+			got, err := st.LoadModelUsage(ctx, tc.tool, 24*time.Hour, tc.limit)
+			if err != nil {
+				t.Fatalf("LoadModelUsage: %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+			for i, w := range tc.want {
+				g := got[i]
+				tools := ""
+				for j, tl := range g.Tools {
+					if j > 0 {
+						tools += ","
+					}
+					tools += tl
+				}
+				if g.Model != w.model || g.Count != w.count || tools != w.tools || g.LastUsed == "" {
+					t.Errorf("row %d = %+v, want %+v", i, g, w)
+				}
+			}
+		})
+	}
+}

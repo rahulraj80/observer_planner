@@ -323,7 +323,7 @@ func (c *Client) FetchPolicyBundle(ctx context.Context, cachePath string) (Polic
 // before the deferred body Close, which does not invalidate the already-parsed
 // header map).
 func (c *Client) receiveBundle(ctx context.Context, gc *gen.ClientWithResponses, params *gen.GetPolicyBundleParams, bearer string) (bundle gen.PolicyBundle, early PolicyResult, hasEarly bool, etag string, err error) {
-	resp, err := gc.GetPolicyBundle(ctx, params, bearerEditor(bearer))
+	resp, err := gc.GetPolicyBundle(ctx, params, bearerEditor(bearer), policyBindingCapsEditor)
 	c.noteRenewalFromResponse(RenewalPathOther, resp, err)
 	if err != nil {
 		// context.Canceled is a shutdown, not a fetch verdict (classify skips
@@ -335,7 +335,8 @@ func (c *Client) receiveBundle(ctx context.Context, gc *gen.ClientWithResponses,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	switch resp.StatusCode {
+	// An older server's page answers as 404 (railreply.go).
+	switch c.railStatus(policyBundleRail, resp) {
 	case http.StatusOK:
 		// fall through to body decode below
 	case http.StatusNotModified:
@@ -386,6 +387,27 @@ func (c *Client) applyBundleGates(ctx context.Context, b gen.PolicyBundle, enr *
 		return PolicyResult{
 			Status: PolicyRejected, Version: b.Version, RejectCode: RejectSigInvalid,
 			Detail: fmt.Sprintf("signature verification failed: %v", err),
+		}, true, nil
+	}
+
+	// Gate 1b, the v2 BINDING (pass-2 review C156-15, orgcontract/
+	// policybinding.go): a bound bundle must be bound to THIS node's org and
+	// member (another member's composed team bundle is refused even though the
+	// org signed it); an unbound one is refused once this node holds a bound
+	// one (a signature downgrade). Before that an unbound bundle is accepted,
+	// which keeps an older server working. RejectSigInvalid on purpose: the
+	// reject code rides the policy-state wire, a closed set on older servers.
+	cachedBound := heldBundleBound(cachePath)
+	switch {
+	case b.Binding != nil && *b.Binding != (orgcontract.PolicyBinding{OrgID: enr.OrgID, Subject: enr.UserID}):
+		return PolicyResult{
+			Status: PolicyRejected, Version: b.Version, RejectCode: RejectSigInvalid,
+			Detail: "the bundle is signed for a different org or member than this node",
+		}, true, nil
+	case b.Binding == nil && cachedBound:
+		return PolicyResult{
+			Status: PolicyRejected, Version: b.Version, RejectCode: RejectSigInvalid,
+			Detail: "an unbound (v1) bundle after this node held a bound (v2) one: refused as a signature downgrade",
 		}, true, nil
 	}
 
@@ -474,15 +496,21 @@ func (c *Client) applyBundleGates(ctx context.Context, b gen.PolicyBundle, enr *
 	if lastVersion > 0 && b.Version == lastVersion {
 		if cacheOK && cachedVer == b.Version {
 			incoming := sha256.Sum256([]byte(b.BundleTOML))
-			if hex.EncodeToString(incoming[:]) == cachedHash {
+			if hex.EncodeToString(incoming[:]) != cachedHash {
+				// Same version, different content → non-monotonic republish.
+				return PolicyResult{
+					Status: PolicyRejected, Version: b.Version, RejectCode: RejectVersionReplay,
+					Detail: fmt.Sprintf("version replay: served version %d with content differing from the cached bundle (non-monotonic republish - bump the version to change content)", b.Version),
+				}, true, nil
+			}
+			if b.Binding == nil || cachedBound {
 				// Identical content already current → no reload (SF-B).
 				return PolicyResult{Status: PolicyUnchanged, Version: b.Version, CachedVersion: cachedVer}, true, nil
 			}
-			// Same version, different content → non-monotonic republish.
-			return PolicyResult{
-				Status: PolicyRejected, Version: b.Version, RejectCode: RejectVersionReplay,
-				Detail: fmt.Sprintf("version replay: served version %d with content differing from the cached bundle (non-monotonic republish — bump the version to change content)", b.Version),
-			}, true, nil
+			// The same content now arrives BOUND over an unbound cache (the
+			// first poll after the server learned to bind, C156-15): fall
+			// through and re-cache it with its ETag, so the binding sticks and
+			// the next poll is a 304 instead of a re-download.
 		}
 		// No usable cached baseline (cache absent/corrupt/unverifiable)
 		// at an equal recorded version: fall through to accept so the
@@ -569,7 +597,10 @@ func (c *Client) PolicyPollLoop(ctx context.Context, cachePath string, onResult 
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return c.runLoop(ctx, c.policyPollInterval(), cycle)
+	// policyBundleKick is the policy-freshness checker's wake-up (P2,
+	// policyfreshness.go): a moved "bundle" rail version fetches now
+	// instead of at the next hourly poll.
+	return c.runLoopKick(ctx, c.policyPollInterval(), c.policyBundleKick, cycle)
 }
 
 // policyPollInterval returns the configured poll cadence, defaulted.
@@ -667,6 +698,30 @@ func (c *Client) readCachedBundle(ctx context.Context, cachePath, orgURL string)
 	}
 	sum := sha256.Sum256([]byte(cached.BundleTOML))
 	return cached.Version, hex.EncodeToString(sum[:]), true, nil
+}
+
+// heldBundleBound reports whether the bundle cached at path carries a v2
+// binding. Any read or decode failure answers false (no binding to keep).
+func heldBundleBound(path string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var held struct {
+		Binding *orgcontract.PolicyBinding `json:"binding"`
+	}
+	return json.Unmarshal(raw, &held) == nil && held.Binding != nil
+}
+
+// policyBindingCapsEditor asks the guard-bundle GET for a v2 (org- and
+// member-bound) signature (orgcontract.PolicyBindingCapability). A plain query
+// marker, not a generated parameter: a server that predates it ignores it and
+// keeps serving v1.
+func policyBindingCapsEditor(_ context.Context, req *http.Request) error {
+	q := req.URL.Query()
+	q.Add("policy_caps", orgcontract.PolicyBindingCapability)
+	req.URL.RawQuery = q.Encode()
+	return nil
 }
 
 // writeFileAtomic writes data to path via a same-directory temp file +

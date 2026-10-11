@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -87,7 +89,7 @@ func TestStandingTermsAreCommunitySpecific(t *testing.T) {
 		t.Errorf("community.endpoint(gw) = %q, want the gateway's CommunityEndpoint %q", communityEndpoint, wantCommunity)
 	}
 	if communityEndpoint == structuralEndpoint {
-		t.Fatalf("community and structural endpoints must differ (both resolved to %q) — a community grant would bind the wrong rail's endpoint", communityEndpoint)
+		t.Fatalf("community and structural endpoints must differ (both resolved to %q) - a community grant would bind the wrong rail's endpoint", communityEndpoint)
 	}
 
 	// Field classes are recorded too — same fallback-bug shape (Sol review F2

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/notify/email"
 )
 
@@ -67,32 +68,41 @@ type Data struct {
 	// To is the recipient override; empty leaves Message.To nil so the Notifier
 	// applies the configured [email].to defaults.
 	To []string
+	// CostDisplay is the developer cost display the node digest follows ("usd"
+	// or "tokens", D-013). Under "tokens" every figure renders as the token
+	// usage behind it (TotalTokens, PriorTotalTokens, LineItem.Tokens) and the
+	// dollar-only movers section is left out (T-204). Empty is dollars, which is
+	// what the org digest (an admin surface) always sends.
+	CostDisplay      string
+	TotalTokens      int64
+	PriorTotalTokens int64
 }
 
 // Compose renders Data into an email.Message through the shared composer. Pure:
 // no I/O. The subject follows the "[Observer] …" convention; the heading frames
 // the total as observed spend with a prior-period delta.
 func Compose(d Data) email.Message {
-	subject := fmt.Sprintf("[Observer] %s — %s", d.Title, d.PeriodLabel)
+	subject := fmt.Sprintf("[Observer] %s - %s", d.Title, d.PeriodLabel)
 	if strings.TrimSpace(d.OrgName) != "" {
-		subject = fmt.Sprintf("[Observer] %s: %s — %s", d.OrgName, d.Title, d.PeriodLabel)
+		subject = fmt.Sprintf("[Observer] %s: %s - %s", d.OrgName, d.Title, d.PeriodLabel)
 	}
 
-	heading := fmt.Sprintf("Observed spend for %s: %s.", d.PeriodLabel, money(d.TotalUSD))
+	fig := d.figures()
+	heading := fmt.Sprintf("Observed %s for %s: %s.", fig.noun, d.PeriodLabel, fig.total(d.TotalUSD, d.TotalTokens))
 	if d.HasPrior {
-		heading = fmt.Sprintf("Observed spend for %s: %s (%s vs the prior period).",
-			d.PeriodLabel, money(d.TotalUSD), signedDelta(d.TotalUSD, d.PriorTotalUSD))
+		heading = fmt.Sprintf("Observed %s for %s: %s (%s vs the prior period).",
+			fig.noun, d.PeriodLabel, fig.total(d.TotalUSD, d.TotalTokens), fig.delta(d.TotalUSD, d.PriorTotalUSD, d.TotalTokens, d.PriorTotalTokens))
 	}
 
 	fields := []email.Field{
 		{Label: "Period", Value: d.PeriodLabel},
-		{Label: "Observed spend", Value: money(d.TotalUSD)},
+		{Label: "Observed " + fig.noun, Value: fig.total(d.TotalUSD, d.TotalTokens)},
 	}
 	if d.HasPrior {
 		fields = append(
 			fields,
-			email.Field{Label: "Prior period", Value: money(d.PriorTotalUSD)},
-			email.Field{Label: "Change", Value: signedDelta(d.TotalUSD, d.PriorTotalUSD)},
+			email.Field{Label: "Prior period", Value: fig.total(d.PriorTotalUSD, d.PriorTotalTokens)},
+			email.Field{Label: "Change", Value: fig.delta(d.TotalUSD, d.PriorTotalUSD, d.TotalTokens, d.PriorTotalTokens)},
 		)
 	}
 	if d.HasAlertCount {
@@ -106,11 +116,13 @@ func Compose(d Data) email.Message {
 		}
 		sec := email.Section{Title: b.Title}
 		for _, it := range b.Items {
-			sec.Fields = append(sec.Fields, email.Field{Label: labelOrNone(it.Label), Value: money(it.CostUSD)})
+			sec.Fields = append(sec.Fields, email.Field{Label: labelOrNone(it.Label), Value: fig.total(it.CostUSD, it.Tokens)})
 		}
 		sections = append(sections, sec)
 	}
-	if len(d.Movers) > 0 {
+	// Movers carry dollars only, so the token view leaves them out rather than
+	// printing hidden figures.
+	if len(d.Movers) > 0 && !fig.tokens {
 		sec := email.Section{Title: "Top movers vs prior period"}
 		for _, m := range d.Movers {
 			sec.Fields = append(sec.Fields, email.Field{
@@ -132,6 +144,7 @@ func Compose(d Data) email.Message {
 }
 
 // money formats a USD amount with two decimals.
+// no-bare-usd:allow (dollar view only; Data.CostDisplay renders token figures)
 func money(v float64) string { return fmt.Sprintf("$%.2f", v) }
 
 // labelOrNone renders an empty label as a readable placeholder so a blank
@@ -216,4 +229,44 @@ func lessMover(a, b Mover) bool {
 		return a.CurrentUSD > b.CurrentUSD
 	}
 	return a.Label < b.Label
+}
+
+// digestFigures renders the digest's figures under its cost display.
+type digestFigures struct {
+	tokens bool
+	noun   string
+}
+
+func (d Data) figures() digestFigures {
+	if costtext.Tokens(d.CostDisplay) {
+		return digestFigures{tokens: true, noun: "usage"}
+	}
+	return digestFigures{noun: "spend"}
+}
+
+// total is one figure: dollars, or the token usage behind them.
+func (f digestFigures) total(usd float64, tokens int64) string {
+	if f.tokens {
+		return costtext.TokenFigure(tokens)
+	}
+	return money(usd)
+}
+
+// delta is the change versus the prior period in the figure's own unit.
+func (f digestFigures) delta(usd, priorUSD float64, tokens, priorTokens int64) string {
+	if !f.tokens {
+		return signedDelta(usd, priorUSD)
+	}
+	diff := tokens - priorTokens
+	sign := "+"
+	if diff < 0 {
+		sign, diff = "-", -diff
+	}
+	if priorTokens == 0 {
+		if tokens == 0 {
+			return "no change"
+		}
+		return sign + costtext.TokenFigure(diff) + " (new)"
+	}
+	return fmt.Sprintf("%s%s (%+.0f%%)", sign, costtext.TokenFigure(diff), float64(tokens-priorTokens)/float64(priorTokens)*100)
 }

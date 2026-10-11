@@ -38,7 +38,7 @@ func TestDecideAttach(t *testing.T) {
 			// attach path: bare (anti-recursion) and SILENT — its stderr is the
 			// user's attached PTY, so an "attach skipped" line would print on every
 			// session and mislead.
-			name: "daemon-spawned inner launcher never re-attaches (anti-recursion), even with --attach — SILENT",
+			name: "daemon-spawned inner launcher never re-attaches (anti-recursion), even with --attach - SILENT",
 			in: attachDecisionInputs{
 				enabled: true, defaultOn: true, grounded: true,
 				daemonSpawned: true, flagAttach: true,
@@ -527,7 +527,7 @@ func TestAttachSocketReachable(t *testing.T) {
 	}
 
 	if got := attachsock.DefaultTransport().Describe(); got != attachsock.TransportUnixSocket {
-		t.Skipf("attach transport is %q, not %q — the live-listener probe below pins AF_UNIX behaviour", got, attachsock.TransportUnixSocket)
+		t.Skipf("attach transport is %q, not %q - the live-listener probe below pins AF_UNIX behaviour", got, attachsock.TransportUnixSocket)
 	}
 
 	// Live listener at the derived socket path.
@@ -544,6 +544,15 @@ func TestAttachSocketReachable(t *testing.T) {
 		t.Skipf("cannot listen on %q: %v", sockPath, err)
 	}
 	defer ln.Close()
+	if !attachInBuild {
+		// A build without the terminals component links no attach client, so
+		// the probe answers unreachable even with a listener up (D-514: a
+		// default-on attach stays a silent bare launch).
+		if attachSocketReachable(dbPath) {
+			t.Errorf("attachSocketReachable(%q) = true in a build without terminals, want false", dbPath)
+		}
+		return
+	}
 	if !attachSocketReachable(dbPath) {
 		t.Errorf("attachSocketReachable(%q) = false, want true (listener up)", dbPath)
 	}

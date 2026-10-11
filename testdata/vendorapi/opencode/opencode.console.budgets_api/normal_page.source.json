@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].email": "VerifiedOfficial",
+    "[].exceeded": "VerifiedOfficial",
+    "[].limit_micro_cents": "VerifiedOfficial",
+    "[].resets_at": "VerifiedOfficial",
+    "[].source": "VerifiedOfficial",
+    "[].spent_micro_cents": "VerifiedOfficial",
+    "[].updated_at": "VerifiedOfficial",
+    "[].user_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "8bf01a58478e5d920b26233fa90189763f642d487aa162b8426a11dbe500b356",
+  "http": {
+    "method": "GET",
+    "path": "/console/api/v1/budgets/members",
+    "status": 200
+  },
+  "notes": "The first member is the documented 'List member budgets' example, verbatim. The second (inherited default, over its limit, updated_at null) and third (null limit and source: unlimited) are synthesized from the documented rules: decimal strings in microcents (100,000,000 per US dollar), null limit and source mean unlimited, updated_at null without a custom override.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "OpenCode Console Budgets API (v2 docs, console/api/budgets), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "c0d91f72aaf2c18c67f77186190c00a958a687a915f4d811cdb8d33e0622aea7",
+  "source_url": "https://opencode.ai/v2/docs/console/api/budgets/",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "opencode.console.budgets_api"
+}

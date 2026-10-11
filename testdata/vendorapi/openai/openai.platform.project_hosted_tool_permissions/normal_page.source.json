@@ -1,0 +1,30 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "code_interpreter": "VerifiedOfficial",
+    "code_interpreter.enabled": "VerifiedOfficial",
+    "file_search": "VerifiedOfficial",
+    "file_search.enabled": "VerifiedOfficial",
+    "image_generation": "VerifiedOfficial",
+    "image_generation.enabled": "VerifiedOfficial",
+    "mcp": "VerifiedOfficial",
+    "mcp.enabled": "VerifiedOfficial",
+    "web_search": "VerifiedOfficial",
+    "web_search.enabled": "VerifiedOfficial"
+  },
+  "fixture_sha256": "cafa6a10896c5041d44566e989ae72b63eb2d265ff83ad8ee0e0e2288a94c36a",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/projects/{project_id}/hosted_tool_permissions",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId retrieve-project-hosted-tool-permissions.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.project_hosted_tool_permissions"
+}

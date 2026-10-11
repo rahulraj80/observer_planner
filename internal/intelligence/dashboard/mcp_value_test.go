@@ -60,7 +60,7 @@ func TestHandleConfigSection_MCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.RestartRequired {
-		t.Error("mcp saves bind at the next MCP server spawn — restart_required must be false")
+		t.Error("mcp saves bind at the next MCP server spawn - restart_required must be false")
 	}
 
 	reloaded, err := config.Load(config.LoadOptions{GlobalPath: cfgPath})

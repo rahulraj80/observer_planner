@@ -126,8 +126,8 @@ func TestPaddleWebhookRejectsBadSignature(t *testing.T) {
 		DailyCap int `json:"daily_cap"`
 	}
 	decode(t, uresp, &snap)
-	if snap.DailyCap != 20 {
-		t.Fatalf("caps after rejected webhooks = %d, want 20 (free — nothing applied)", snap.DailyCap)
+	if snap.DailyCap != 100 {
+		t.Fatalf("caps after rejected webhooks = %d, want 100 (free, nothing applied)", snap.DailyCap)
 	}
 }
 
@@ -190,8 +190,8 @@ func TestPaddleWebhookBindingRefusedWithoutNonce(t *testing.T) {
 		DailyCap int `json:"daily_cap"`
 	}
 	decode(t, uresp, &snap)
-	if snap.DailyCap != 20 {
-		t.Fatalf("caps after refused binding = %d, want 20 (free — nothing applied)", snap.DailyCap)
+	if snap.DailyCap != 100 {
+		t.Fatalf("caps after refused binding = %d, want 100 (free, nothing applied)", snap.DailyCap)
 	}
 }
 

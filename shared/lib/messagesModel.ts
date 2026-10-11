@@ -3,6 +3,8 @@
 // SessionDetailPanel.tsx during the tab split; the shell still owns the sort
 // STATE (it feeds the request params), this file owns the shape of it.
 
+import { costLabel, dollarsShown, withoutDollars } from "./format.ts";
+
 export const MESSAGES_LIMIT = 25;
 export const RAW_EVENTS_LIMIT = 50;
 
@@ -242,10 +244,24 @@ export function visibleMessageColumns(
   sortBy: MessageSortKey,
 ): MessageColumn[] {
   const p = MESSAGE_PRESETS.find((x) => x.id === preset);
-  if (!p || p.keys == null) return MESSAGE_COLUMNS;
+  if (!p || p.keys == null) return inCostView(MESSAGE_COLUMNS);
   const want = new Set<MessageSortKey>(p.keys);
   want.add(sortBy);
-  return MESSAGE_COLUMNS.filter((c) => want.has(c.key));
+  return inCostView(MESSAGE_COLUMNS.filter((c) => want.has(c.key)));
+}
+
+// DOLLAR_ONLY_COLUMNS have no token form: the API / Tool dollar split.
+const DOLLAR_ONLY_COLUMNS = new Set<MessageSortKey>(["ai_cost_usd", "tool_cost_usd"]);
+
+// inCostView applies the developer cost display (format.ts cost affordances):
+// in the org's token-usage view the dollar-only columns are dropped and the
+// total column, whose cell then renders the row's tokens, is named for them.
+// The identity in dollars mode (the org's only mode).
+function inCostView(cols: MessageColumn[]): MessageColumn[] {
+  if (dollarsShown()) return cols;
+  return withoutDollars(cols, (c) => DOLLAR_ONLY_COLUMNS.has(c.key)).map((c) =>
+    c.key === "cost_usd" ? { ...c, label: costLabel("Total $", "Total tok") } : c,
+  );
 }
 
 // messageTableMinWidth is the layout budget for a column set — the point at

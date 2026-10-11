@@ -190,7 +190,8 @@ func nodeInterventionBudget(ctx context.Context, st *store.Store, cfg config.Con
 		}
 		effective, _ := orgbudget.Compose(thresholdsOf(cfg.Guard.Budget), cached.Body, orgbudget.Capabilities{
 			FromOrg: cfg.Guard.Budget.FromOrg, OrgAuthoritative: true, RequireOrgBudget: true,
-			HaveBody: haveBody, FetchState: fetchState, GuardMode: cfg.Guard.Mode,
+			FailClosed: cfg.Guard.Budget.FailClosed,
+			HaveBody:   haveBody, FetchState: fetchState, GuardMode: cfg.Guard.Mode,
 		})
 		d.Stop = effective.BudgetRequired || effective.Protection.Any()
 		if d.Stop {

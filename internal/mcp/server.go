@@ -14,8 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
+	"github.com/marmutapp/superbased-observer/internal/codeintelapi"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 	"github.com/marmutapp/superbased-observer/internal/stash"
@@ -46,6 +47,12 @@ type Options struct {
 	ToolCallTimeout time.Duration
 	// ExtraTools lets callers add custom tools on top of the built-in set.
 	ExtraTools []Tool
+	// CostDisplay resolves the developer cost display ("usd" or "tokens",
+	// store.ResolveDeveloperCostDisplay). Under "tokens" every tool result
+	// reaches the AI client without its dollar-keyed fields and with the
+	// dollar amounts in its text hidden (T-204): the agent relays what it
+	// reads to the developer. Nil is dollars.
+	CostDisplay func() string
 	// CostEngine optionally overrides the built-in cost engine (pricing table
 	// with baked-in defaults only). Pass a config-aware engine from the CLI
 	// so user-configured pricing overrides flow into get_cost_summary.
@@ -65,12 +72,12 @@ type Options struct {
 	// called on it; see taskreport.LoadSessionTaskReport's doc comment).
 	Tasks config.TasksConfig
 	// CodeIntel is the code-intelligence provider for structural
-	// enrichment (the strangler-fig seam — codeintel.Provider). When
+	// enrichment (the strangler-fig seam, codeintelapi.Provider). When
 	// non-nil and Available(), check_file_freshness and get_file_history
 	// include a `structure` block with functions, callers, and imports,
 	// and the get_symbols / get_relations retrieval tools are served from
 	// it. Nil is treated as an unavailable provider.
-	CodeIntel codeintel.Provider
+	CodeIntel codeintelapi.Provider
 	// Stash, when non-nil, registers the `retrieve_stashed` MCP tool.
 	// Pairs with the v1.4.41 / Tier 1 / G31 (CCR) feature: the proxy
 	// stashes large tool_result bodies and replaces them with a marker
@@ -165,6 +172,7 @@ type Server struct {
 	name            string
 	version         string
 	toolCallTimeout time.Duration
+	costDisplay     func() string
 
 	mu    sync.RWMutex
 	tools map[string]Tool
@@ -185,6 +193,7 @@ func New(opts Options) (*Server, error) {
 		name:            defaultIfEmpty(opts.ServerName, "observer"),
 		version:         defaultIfEmpty(opts.ServerVersion, "dev"),
 		toolCallTimeout: opts.ToolCallTimeout,
+		costDisplay:     opts.CostDisplay,
 		tools:           map[string]Tool{},
 	}
 	engine := opts.CostEngine
@@ -193,7 +202,7 @@ func New(opts Options) (*Server, error) {
 	}
 	cg := opts.CodeIntel
 	if cg == nil {
-		cg = codeintel.Unavailable()
+		cg = codeintelapi.Unavailable()
 	}
 	for _, t := range builtinTools(opts.DB, cg, opts.SignalRecorder) {
 		s.Register(t)
@@ -421,6 +430,11 @@ func (s *Server) handleToolsCall(ctx context.Context, params json.RawMessage) (a
 	body, mErr := json.MarshalIndent(result, "", "  ")
 	if mErr != nil {
 		return nil, &rpcError{Code: errInternalError, Message: "marshal tool result: " + mErr.Error()}
+	}
+	if s.costDisplay != nil && costtext.Tokens(s.costDisplay()) {
+		if shaped, ok := costtext.ShapeJSON(body); ok {
+			body = shaped
+		}
 	}
 	return toolCallResult{
 		Content: []toolContent{{Type: "text", Text: string(body)}},

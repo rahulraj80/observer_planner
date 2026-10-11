@@ -13,6 +13,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/govern/sidecar"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // checkGovernance is the §1.7 disclosure surface for the admin-controlled
@@ -62,12 +63,12 @@ func checkGovernance(ctx context.Context, database *sql.DB, cfg config.Config, h
 
 	if crossmount.AutoDetectSuppressed(homeOverride, "") {
 		details = append(details,
-			"cross-env: not inspected — this doctor run pinned HomeDir, so cross-OS auto-detection is suppressed (incident 2026-07-31)")
+			"cross-env: not inspected - this doctor run pinned HomeDir, so cross-OS auto-detection is suppressed (incident 2026-07-31)")
 	} else if sibs := DetectCrossEnvSiblingDBs(cfg.Observer.DBPath, crossmount.AllHomes()); len(sibs) > 0 {
 		status = worseStatus(status, StatusWarn)
 		for _, sib := range sibs {
 			details = append(details, fmt.Sprintf(
-				"cross-env: foreign-OS observer.db at %s (%s) carries its own sidecar this daemon never reads — see `observer start`'s cross-env warning",
+				"cross-env: foreign-OS observer.db at %s (%s) carries its own sidecar this daemon never reads - see `observer start`'s cross-env warning",
 				sib.Path, sib.Origin,
 			))
 		}
@@ -89,10 +90,13 @@ func checkGovernance(ctx context.Context, database *sql.DB, cfg config.Config, h
 		details = append(
 			details,
 			fmt.Sprintf("sidecar: %s", path),
-			fmt.Sprintf("%s, but a sidecar is still present — a downgraded or dead daemon never rewrites it (§8.3)", why),
-			"remedy: delete the file, or run `observer unenroll` if this machine should no longer be governed at all",
+			fmt.Sprintf("%s, but a sidecar is still present - a downgraded or dead daemon never rewrites it (§8.3)", why),
+			"remedy: delete the file, or run "+remedy.Quote(remedy.Of(remedy.OrgUnenroll, ""))+" if this machine should no longer be governed at all",
 		)
-		return Check{Name: name, Status: status, Message: "orphaned/stale sidecar at " + path, Details: details}
+		return Check{
+			Name: name, Status: status, Message: "orphaned/stale sidecar at " + path, Details: details,
+			Remediations: []remedy.Remediation{remedy.Of(remedy.OrgUnenroll, "")},
+		}
 	}
 
 	// From here the node IS governed: a live, non-expired grant is on
@@ -112,9 +116,11 @@ func checkGovernance(ctx context.Context, database *sql.DB, cfg config.Config, h
 	if integrity == grantIntegrityInvalid {
 		return Check{
 			Name: name, Status: StatusFail,
-			Message: "the recorded organisation grant does NOT verify against this machine's pinned organisation key — " +
-				"the stored authority record has been altered; re-enrol (`observer unenroll` then `observer enroll`) to re-establish it",
-			Details: details,
+			Message: "the recorded organization grant does NOT verify against this machine's pinned organization key - " +
+				"the stored authority record has been altered; re-enrol (" + remedy.Quote(remedy.Of(remedy.OrgUnenroll, "")) +
+				" then " + remedy.Quote(remedy.Of(remedy.OrgEnroll, "")) + ") to re-establish it",
+			Details:      details,
+			Remediations: []remedy.Remediation{remedy.Of(remedy.OrgUnenroll, ""), remedy.Of(remedy.OrgEnroll, "")},
 		}
 	}
 
@@ -129,7 +135,7 @@ func checkGovernance(ctx context.Context, database *sql.DB, cfg config.Config, h
 			details = append(details, "write probe: "+errnoDetail(perr))
 			return Check{
 				Name: name, Status: StatusFail,
-				Message: fmt.Sprintf("sidecar directory %s is not writable (%s) — the daemon cannot pin governance here",
+				Message: fmt.Sprintf("sidecar directory %s is not writable (%s) - the daemon cannot pin governance here",
 					filepath.Dir(path), errnoDetail(perr)),
 				Details: details,
 			}
@@ -139,7 +145,7 @@ func checkGovernance(ctx context.Context, database *sql.DB, cfg config.Config, h
 
 	if !sidecarPresent {
 		status = worseStatus(status, StatusWarn)
-		details = append(details, "no sidecar written yet — start the daemon (`observer start`) so it can resolve and write one")
+		details = append(details, "no sidecar written yet - start the daemon (`observer start`) so it can resolve and write one")
 		return Check{Name: name, Status: status, Message: "governed, but no sidecar written yet", Details: details}
 	}
 
@@ -153,7 +159,7 @@ func checkGovernance(ctx context.Context, database *sql.DB, cfg config.Config, h
 		// The sidecar's OWN embedded grant_expires_at disagrees with the
 		// live grant table (a stale copy) — still an orphan condition.
 		status = worseStatus(status, StatusWarn)
-		details = append(details, "reason: the sidecar's own grant_expires_at has passed (a stale copy — the live grant table disagrees)")
+		details = append(details, "reason: the sidecar's own grant_expires_at has passed (a stale copy - the live grant table disagrees)")
 		return Check{Name: name, Status: status, Message: "orphaned/stale sidecar at " + path, Details: details}
 	}
 
@@ -168,7 +174,7 @@ func checkGovernance(ctx context.Context, database *sql.DB, cfg config.Config, h
 			status = worseStatus(status, StatusWarn)
 			return Check{
 				Name: name, Status: status,
-				Message: fmt.Sprintf("grant expires in %d day(s) (%s) — sidecar %s, pins applied=%t",
+				Message: fmt.Sprintf("grant expires in %d day(s) (%s) - sidecar %s, pins applied=%t",
 					days, grantExpiresAt.Format(time.RFC3339), path, pinsApplied),
 				Details: details,
 			}

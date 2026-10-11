@@ -130,8 +130,8 @@ func TestFeatureDecision(t *testing.T) {
 			if !d.Allowed && d.Reason == "" {
 				t.Fatalf("a denied Decision must carry a Reason")
 			}
-			if !d.Allowed && d.Reason != denyReason {
-				t.Fatalf("denial reason = %q, want the shared %q", d.Reason, denyReason)
+			if !d.Allowed && d.Reason != featureDenyReason(tc.feature) {
+				t.Fatalf("denial reason = %q, want the shared %q", d.Reason, featureDenyReason(tc.feature))
 			}
 		})
 	}

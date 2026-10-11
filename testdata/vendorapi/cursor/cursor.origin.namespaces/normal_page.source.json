@@ -1,0 +1,27 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "namespaces": "VerifiedOfficial",
+    "namespaces[]": "VerifiedOfficial",
+    "namespaces[].namespace": "VerifiedOfficial",
+    "namespaces[].namespace.id": "VerifiedOfficial",
+    "namespaces[].namespace.slug": "VerifiedOfficial",
+    "namespaces[].namespace.type": "VerifiedOfficial",
+    "namespaces[].viewerCanCreateRepositories": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ac2ef6751fb31004f17db36c9605e7741caf9ed7f584d538e9e6331599eb2353",
+  "http": {
+    "method": "GET",
+    "path": "/v1/origin/namespaces",
+    "status": 200
+  },
+  "notes": "Verbatim example listNamespaces of GET /v1/origin/namespaces (operationId OriginService_ListNamespaces).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Origin OpenAPI description (protoc-gen-openapi), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "b03508286077cd57cf76356c395b50b38eaa54d07b6bddd4989222df6781adf4",
+  "source_url": "https://cursor.com/docs/api/origin/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.origin.namespaces"
+}

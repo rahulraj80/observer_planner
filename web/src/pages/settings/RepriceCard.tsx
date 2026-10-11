@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { Button, ConfirmButton, Input, Pill, Table } from "@/components/primitives";
+import { Button, ConfirmButton, Input, Pill, SinglePicker, Table } from "@/components/primitives";
 import { ApiError, fetchJSON } from "@/lib/api";
+import { keepSelected } from "@/lib/pickerOptions";
+import { useModelOptions } from "@/lib/usePickerSources";
 import { fmtDateTime, fmtInt } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 import {
@@ -55,6 +57,7 @@ type Notice = { tone: "info" | "success" | "warn"; text: string };
 
 export function RepriceCard() {
   const res = useApi<RepriceStatusResponse>(STATUS);
+  const models = useModelOptions();
   const token = res.data?.confirm_token ?? "";
 
   const [inputs, setInputs] = useState<RepriceInputs>(EMPTY_INPUTS);
@@ -197,16 +200,21 @@ export function RepriceCard() {
             onChange={(e) => set("until", e.target.value)}
             disabled={busy !== null}
           />
-          <Input
-            label="Model"
-            placeholder="all models"
-            mono
-            value={inputs.model}
-            onChange={(e) => set("model", e.target.value)}
-            disabled={busy !== null}
-          />
+          <div>
+            <span className="mb-1 block text-[11px] font-medium text-fg-2">Model</span>
+            <SinglePicker
+              options={keepSelected(models.options, inputs.model ? [inputs.model] : [])}
+              value={inputs.model}
+              onChange={(v) => set("model", v)}
+              allowFree
+              loading={models.loading}
+              placeholder="all models"
+              ariaLabel="Model"
+              disabled={busy !== null}
+            />
+          </div>
         </div>
-        <p className="text-[10.5px] text-fg-3">Empty dates mean no bound. Empty model means every model.</p>
+        <p className="text-[10.5px] text-fg-3">Empty dates mean no bound. No model picked means every model.</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

@@ -140,7 +140,7 @@ func applyGUIFallbacks(res *Resolution, spec integration.GUILaunchSpec, env Env)
 			res.Verdict = VerdictOK
 			res.Bin = dir
 			res.Notes = append(res.Notes, fmt.Sprintf(
-				"%s resolved as an application bundle at %s — launch via open -a",
+				"%s resolved as an application bundle at %s - launch via open -a",
 				spec.DarwinApp, dir))
 			return
 		}

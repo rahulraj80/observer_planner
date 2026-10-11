@@ -36,7 +36,7 @@ func TestRenderMultiRowStructure(t *testing.T) {
 	out := Render(baseTable(), RenderOptions{})
 	lines := strings.Split(out, "\n")
 
-	if !strings.HasPrefix(lines[0], "SuperBased — observed agent spend, last 30 days") {
+	if !strings.HasPrefix(lines[0], "SuperBased - observed agent spend, last 30 days") {
 		t.Errorf("title line = %q", lines[0])
 	}
 	if !strings.Contains(lines[0], "one-shot · no daemon") {
@@ -161,7 +161,7 @@ func TestRenderEmptyCorpusWithPartialNote(t *testing.T) {
 	tbl := Table{
 		Notes: []Note{
 			{Code: "empty_state", Text: "no session activity found."},
-			{Code: "partial", Text: "scan stopped at the 30s budget — read 3 of 900 session files, so totals are a partial view"},
+			{Code: "partial", Text: "scan stopped at the 30s budget - read 3 of 900 session files, so totals are a partial view"},
 		},
 	}
 	out := Render(tbl, RenderOptions{})
@@ -184,7 +184,7 @@ func TestRenderEmptyCorpusWithNoLocalTokenSourceNote(t *testing.T) {
 			{
 				Code:  "no_local_token_source",
 				Tools: []string{"qoder"},
-				Text:  "qoder: no local token source — usage server-side only — local logs carry zero tokens and no model; no base-URL knob",
+				Text:  "qoder: no local token source - usage server-side only - local logs carry zero tokens and no model; no base-URL knob",
 			},
 		},
 	}
@@ -204,7 +204,7 @@ func TestRenderEmptyCorpusWithScanErrorsNote(t *testing.T) {
 	tbl := Table{
 		Notes: []Note{
 			{Code: "empty_state", Text: "no session activity found."},
-			{Code: "scan_errors", Text: "12 of 12 session files failed to parse — see --verbose for details"},
+			{Code: "scan_errors", Text: "12 of 12 session files failed to parse - see --verbose for details"},
 		},
 	}
 	out := Render(tbl, RenderOptions{})
@@ -224,7 +224,7 @@ func TestRenderEmptyCorpusWithUnpricedModelsNote(t *testing.T) {
 	tbl := Table{
 		Notes: []Note{
 			{Code: "empty_state", Text: "no session activity found."},
-			{Code: "unpriced_models", Text: "1 model has no pricing entry — its tokens are excluded from the dollar totals"},
+			{Code: "unpriced_models", Text: "1 model has no pricing entry - its tokens are excluded from the dollar totals"},
 		},
 	}
 	out := Render(tbl, RenderOptions{})
@@ -258,7 +258,7 @@ func TestRenderEmptyCorpusOmitsGapNote(t *testing.T) {
 func TestRenderUnpricedModelsNote(t *testing.T) {
 	tbl := baseTable()
 	tbl.UnknownModelCount = 2
-	tbl.Notes = append(tbl.Notes, Note{Code: "unpriced_models", Text: "2 models have no pricing entry — their tokens are excluded from the dollar totals"})
+	tbl.Notes = append(tbl.Notes, Note{Code: "unpriced_models", Text: "2 models have no pricing entry - their tokens are excluded from the dollar totals"})
 	out := Render(tbl, RenderOptions{})
 	if !strings.Contains(out, "2 models have no pricing entry") {
 		t.Errorf("unpriced_models note missing from output:\n%s", out)
@@ -270,7 +270,7 @@ func TestRenderNoLocalTokenSourceNote(t *testing.T) {
 	tbl.Notes = append(tbl.Notes, Note{
 		Code:  "no_local_token_source",
 		Tools: []string{"qoder"},
-		Text:  "qoder: no local token source — usage server-side only — local logs carry zero tokens and no model; no base-URL knob",
+		Text:  "qoder: no local token source - usage server-side only - local logs carry zero tokens and no model; no base-URL knob",
 	})
 	out := Render(tbl, RenderOptions{})
 	if !strings.Contains(out, "qoder: no local token source") {
@@ -296,7 +296,7 @@ func TestRenderPartialNote(t *testing.T) {
 	tbl.Partial = &PartialScan{Budget: "30s", FilesWalked: 40, FilesTotal: 412}
 	tbl.Notes = append(tbl.Notes, Note{
 		Code: "partial",
-		Text: "scan stopped at the 30s budget — read 40 of 412 session files, so totals are a partial view",
+		Text: "scan stopped at the 30s budget - read 40 of 412 session files, so totals are a partial view",
 	})
 	out := Render(tbl, RenderOptions{})
 	if !strings.Contains(out, "scan stopped at the 30s budget") {
@@ -432,7 +432,7 @@ func TestRenderHonestyInvariants(t *testing.T) {
 	tbl := baseTable()
 	tbl.Notes = append(
 		tbl.Notes,
-		Note{Code: "unpriced_models", Text: "1 model has no pricing entry — its tokens are excluded from the dollar totals"},
+		Note{Code: "unpriced_models", Text: "1 model has no pricing entry - its tokens are excluded from the dollar totals"},
 		Note{Code: "gap", Text: "copilot-cli: per-turn input/cache attribution needs --log-level debug"},
 	)
 	out := Render(tbl, RenderOptions{})

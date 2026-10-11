@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 // standing_takeover.go — the OPT-IN revoke-standing-on-takeover policy
@@ -102,7 +104,7 @@ func (s *Server) handleRemoteSetRevokeStandingOnTakeover(w http.ResponseWriter, 
 		return
 	}
 	if !cfg.Remote.Enabled {
-		http.Error(w, `{"error":"remote access is off — arm remote access first"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"remote access is off - arm remote access first"}`, http.StatusBadRequest)
 		return
 	}
 	cfg.Remote.RevokeStandingOnTakeover = next
@@ -156,7 +158,7 @@ func (s *Server) handleRemoteSetAllowRemoteTakeover(w http.ResponseWriter, r *ht
 		return
 	}
 	if !cfg.Remote.Enabled {
-		http.Error(w, `{"error":"remote access is off — arm remote access first"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"remote access is off - arm remote access first"}`, http.StatusBadRequest)
 		return
 	}
 	cfg.Remote.AllowRemoteTerminalTakeover = next

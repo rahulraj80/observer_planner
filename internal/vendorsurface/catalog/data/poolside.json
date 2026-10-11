@@ -1,0 +1,1341 @@
+{
+ "group": "poolside",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/poolside-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "poolside.console.bridge",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.console",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "unknown"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "unknown"
+   },
+   "tier": {
+    "doc": "enterprise"
+   },
+   "freshness_doc": "on call",
+   "lookback_doc": "unknown",
+   "per_user_doc": "per resource",
+   "mechanism_doc": "/v0/bridge/credentials[/{id}] CRUD, repositories, repositories/{id}/commits (POST indexes a commit), pipelines, versions, steps, builds, pipeline-step-runs, agent-sessions; inbound webhook triggers with CEL filters",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials, (Commits ingest), Sessions",
+   "grain_doc": "per resource",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (path list only, no schemas)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/poolsideai/bridge-sdk",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.console.central_policy",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.console",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "unknown"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "enterprise"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "Marketing: \"Administrators define the boundaries centrally; the Platform enforces them\"; sandbox network policy and secret injection per session; \"centrally managed MCP servers\"",
+   "read_write_doc": "W (UI presumed)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (marketing only)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://poolside.ai/blog/introducing-the-poolside-platform",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.console.core_api",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.console",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer token, deployment base URL"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none visible"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "unknown"
+   },
+   "tier": {
+    "doc": "enterprise"
+   },
+   "freshness_doc": "on call",
+   "lookback_doc": "unknown",
+   "per_user_doc": "per session",
+   "mechanism_doc": "GET /v0/agents?name=, POST /v0/agents/{id}/sessions, GET /v0/sessions/{id} (`state` terminal set finished/failed/cancelled/canceled/invalid)",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession (state)",
+   "build": "buildable",
+   "build_doc": "Driverable (SDK-verified; no tokens, user or timestamps)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/poolsideai/bridge-sdk",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.console.trajectories",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.console",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "unknown"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "unknown"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "unknown"
+   },
+   "tier": {
+    "doc": "enterprise"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "\"audit retention\" (unspecified)",
+   "per_user_doc": "per action",
+   "mechanism_doc": "Marketing: \"Every agent action ... recorded as a searchable trajectory\"; Console covers \"audit retention\"; no API or schema public",
+   "read_write_doc": "R",
+   "class_doc": "Audit, Content",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (marketing only)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://poolside.ai/blog/introducing-the-poolside-platform",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.deploy.models",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.deploy",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cluster admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "self-hosted"
+   },
+   "freshness_doc": "on deploy",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "Operator chooses which models to deploy (\"Manage models\" pages per platform); Helm charts private",
+   "read_write_doc": "W",
+   "class_doc": "(ModelAccess)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (charts private)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/deployment/cloud/aws-eks/manage-models.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.gateway.bifrost",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.gateway",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "Bifrost admin / virtual keys"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Bifrost API"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per key"
+   },
+   "tier": {
+    "doc": "self-hosted (optional)"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "`logRetentionDays`",
+   "per_user_doc": "per virtual key (per user if keys issued per user, as recommended)",
+   "mechanism_doc": "Customer-deployed Bifrost (third-party): Governance > Virtual Keys (name, expiry, provider scope), per-key spend limit with reset period, per-key token/request limits (minute to monthly), request logs in SQLite (`logRetentionDays`, example 365), Prometheus `/metrics`, `/health`; Bifrost's own API applies",
+   "read_write_doc": "R/W",
+   "class_doc": "Usage, Cost, Limits, RateLimits, Credentials, Telemetry, Retention",
+   "grain_doc": "PerCall logs + per virtual key",
+   "build": "buildable",
+   "build_doc": "Driverable via the third-party gateway contract (not a Poolside API)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "per_call",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "G",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitGroup",
+     "facet": "G",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimitProject",
+     "facet": "G",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/deployment/inference-gateways/bifrost.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.gateway.litellm",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.gateway",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "a LiteLLM key as Authorization: Bearer <key>; the gateway-wide view needs an admin role (a proxy_admin_viewer virtual key is the read-only choice; the master key is never asked for)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "one page of up to 1000 daily spend rows per run; has_more or total_pages above one is refused (pages split a day)"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per key"
+   },
+   "tier": {
+    "doc": "self-hosted (optional)"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "LiteLLM config",
+   "per_user_doc": "per virtual key",
+   "mechanism_doc": "Customer-deployed LiteLLM (third-party): GET /user/daily/activity?start_date&end_date&page&page_size (SpendAnalyticsPaginatedResponse: results per date with breakdown.models, metadata page/total_pages/has_more); Postgres stores keys, budgets and spend logs",
+   "read_write_doc": "R/W",
+   "class_doc": "Usage, Cost, Limits, Credentials",
+   "grain_doc": "GatewayDay x model",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "usd_micros",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/deployment/inference-gateways/litellm.md",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://docs.litellm.ai/docs/proxy/cost_tracking.md",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/types/proxy/management_endpoints/common_daily_activity.py",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16E, T-717): a customer_host surface (LiteLLM is third-party software the customer deploys in front of Poolside inference, on its own domain; the connection declares the tuple, ledger VCONN-HOST-1). Driver internal/vendorapi/poolside LiteLLM: GET /user/daily/activity with start_date and end_date (UTC dates, at most one day per run), page 1, page_size 1000; user_id, api_key, model and timezone are never sent. Paging is over the gateway's daily spend rows, not dates, so a split day would land partial: an answer with has_more or total_pages above one is refused as schema drift. Tool attribution: gateway traffic is any client's, so every row lands as an UNATTRIBUTED org-level fact under the reserved value gateway:litellm (vendorapi.GatewayTool), never the poolside tool; nothing on a spend, budget, alert or enforcement path reads it. Facts per (UTC day, model): cost (usd, the documented float converted to micro-dollars with a bounded exponent), input, output tokens and requests, plus cache read and write tokens and successful and failed requests when present (absent is never zero). The api_keys breakdown (hashed keys with alias, team, user and e-mail) and every other breakdown are never decoded: closed DTO, secret class may_return_secret kept. The documented example shows flat model entries; the endpoint's source nests them under metrics, which the driver follows (a flat entry is drift). [BETA] per the endpoint's own docstring. Synthetic only, no vendor response observed: assumption_tested.",
+   "derivation": {
+    "reach_rule": "override: LiteLLM admin API on the customer deployment",
+    "build_rule": "lane ENTAPI-L16E: driver internal/vendorapi/poolside LiteLLM, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: LiteLLM proxy key auth: Authorization: Bearer <key> (cost_tracking.md examples)"
+   },
+   "status": "synthetic, awaiting live validation",
+   "customer_host": true
+  },
+  {
+   "id": "poolside.identity.api",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.identity",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "tenant-admin key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "unknown"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "unknown"
+   },
+   "tier": {
+    "doc": "enterprise"
+   },
+   "freshness_doc": "on call",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user / team",
+   "mechanism_doc": "https://<api-domain>/poolside/v1 (users, teams, list teams, add team members, create user) and /scim (SCIM 2.0, Okta / Entra ID); service-account keys need `tenant-admin`; Teams CSV import (`team_id`, `email`)",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Groups, Roles, ServiceAccounts",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (docs access-code gated; third-party profile scraped 2026-07-11)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/api-evangelist/poolside-ai",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.poolside.ai/organization/identity-management-api",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.inference.models",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "hosted"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET /v1/models",
+   "read_write_doc": "R",
+   "class_doc": "(ModelAccess read)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (body undocumented)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/api/overview.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.inference.response_usage",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer API key (hosted) or gateway key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "not documented"
+   },
+   "tier": {
+    "doc": "hosted, self-managed, OpenRouter"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per call (caller)",
+   "mechanism_doc": "POST /v1/chat/completions `usage.prompt_tokens/completion_tokens/total_tokens`; streaming chunks cumulative usage",
+   "read_write_doc": "R",
+   "class_doc": "Usage",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable on the proxy wire only",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/api/overview.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.node.hooks",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per event",
+   "mechanism_doc": "`hook_api_version` 1.0: PreToolUse, PostToolUse, UserPromptSubmit, Stop, PreCompact, SessionStart; stdin envelope with `event_id`, `session_id`, `trajectory_path`; block/deny/updated_input decisions",
+   "read_write_doc": "R/W",
+   "class_doc": "Telemetry (node intercept)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable (node)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/hooks.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.node.settings",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "at start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per node / per repo",
+   "mechanism_doc": "`.poolside/settings.local.yaml` > `.poolside/settings.yaml` (committed) > `~/.config/poolside/settings.yaml`; tools allow/deny/disabled (disabled cannot be re-enabled), paths allow/deny (deny wins), secrets redact_patterns, mcp_servers enabled_tools/allow/deny/disabled, sandbox network policy + egress allow-list, subagents, hooks; NO managed tier",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (node file)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/settings-file-reference.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.node.trajectories",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "local",
+   "per_user_doc": "per session",
+   "mechanism_doc": "trajectory-<agentId>_<sessionId>.ndjson; per-call tokens on `tool_call.inference.end`; `/usage` session and subagent cost",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Content, Usage",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (node; Observer adapter)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/poolsideai/pool",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "schemeless_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.platform.api_keys",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.platform",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "hosted"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per key",
+   "mechanism_doc": "UI only (platform.poolside.ai > API Keys > New key)",
+   "read_write_doc": "R/W in UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/api/overview.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "poolside.selfhosted.prometheus",
+   "vendor_group": "poolside",
+   "vendor": "poolside",
+   "plane": "poolside.selfhosted",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none documented (cluster access)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "self-hosted enterprise"
+   },
+   "freshness_doc": "scrape interval",
+   "lookback_doc": "pod lifetime (counters reset on restart)",
+   "per_user_doc": "aggregate per model (no user, team or key label)",
+   "mechanism_doc": "GET :8080/metrics on `inference-<uuid>` pods; ~49 `vllm:*` series (prompt/generation/cached tokens, request success, latency); labels `engine`, `model_name`",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Telemetry",
+   "grain_doc": "OrgDay-able counters per model (scrape)",
+   "build": "buildable",
+   "build_doc": "Driverable (display-only, per model)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "tokens",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.poolside.ai/metrics/inference-metrics.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

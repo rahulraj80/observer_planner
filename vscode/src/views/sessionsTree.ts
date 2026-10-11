@@ -105,7 +105,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<vscode.Tree
         return [makePlaceholder('Loading…')];
       case 'error':
         return [
-          makePlaceholder('Failed to load — check Output channel', {
+          makePlaceholder('Failed to load - check Output channel', {
             tooltip: this.status.message,
           }),
         ];

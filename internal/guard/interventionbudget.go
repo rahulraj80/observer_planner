@@ -42,6 +42,10 @@ type InterventionBudgetInput struct {
 	SourceReady   bool
 	Now           time.Time
 	BudgetBinding string
+	// MaxSnapshotAge lets this check reuse a good accounting snapshot read
+	// within the bound instead of a fresh read (review P3-11). Zero keeps the
+	// strict fresh read the process controller and the launch gate take.
+	MaxSnapshotAge time.Duration
 }
 
 // InterventionBudgetDecision is a managed budget decision for future billable
@@ -67,6 +71,13 @@ type InterventionBudgetDecision struct {
 	// decision time itself and refuses process control on stale aggregate
 	// evidence. Unavailable-accounting denials do not clear at a time boundary.
 	ValidUntil time.Time
+	// AccountingUnavailable is true when this decision could not read spend at
+	// all this time (the accounting lookup failed or timed out), as opposed to
+	// a decision taken on a read that succeeded. It is the one TRANSIENT
+	// condition (review P3-11): a missing price table, a broken capture source
+	// or a binding mismatch arrive on a successful read or before any read and
+	// are never flagged here.
+	AccountingUnavailable bool
 	// Revision binds the result to the exact installed policy snapshot.
 	Revision  uint64
 	Available bool
@@ -97,7 +108,26 @@ func (g *Guard) checkInterventionBudgetWith(es *engineSet, in InterventionBudget
 		return InterventionBudgetDecision{Deny: true, Reason: "budget policy engine is unavailable"}
 	}
 	document := es.budgetWitness
+	// The B-625 fail-safe (T-718), the same table the proxy admission walks:
+	// an engine composed for an enrolment this node no longer holds governs
+	// nothing. Without this the hook-path stop file and the process controller
+	// kept publishing the left organization's stops until a restart. Only a
+	// CONFIRMED "not enrolled" retires it: a failed identity read keeps the
+	// last composed engine in force (REVIEW-4 P4-01, D-521). Intervention is
+	// managed-only, so a retired engine stops nothing here; the node's own
+	// local caps are enforced on the proxy path.
+	if es.budgetBinding != "" || es.base.ManagedBudgetRequired() {
+		if current, state, ok := g.budgetIdentity(); ok &&
+			orgBudgetLiveness(true, state, current, es.budgetBinding, g.budgetConfig().FailClosed) == budgetLiveRetired {
+			return InterventionBudgetDecision{Available: true, Revision: es.revision, DocumentWitness: document}
+		}
+	}
 	if in.BudgetBinding != "" && in.BudgetBinding != es.budgetBinding {
+		if !g.budgetConfig().FailClosed {
+			// D-502: the current enrolment's budget has not been composed yet
+			// and the org did not opt into fail-closed: stop nothing.
+			return InterventionBudgetDecision{Available: true, Revision: es.revision, DocumentWitness: document}
+		}
 		return InterventionBudgetDecision{
 			Revision:        es.revision,
 			DocumentWitness: document,
@@ -144,7 +174,8 @@ func (g *Guard) checkInterventionBudgetWith(es *engineSet, in InterventionBudget
 		// model with no org or exact rate is priced by the same fallback ladder
 		// the node's dashboard uses, counted against the cap, and reported -
 		// never turned into a stopped process (ruling A2, 2026-09-15).
-		out.AccountingEvidence = g.stampBudgetSnapshot(&ev, true, es.accountingContext(true))
+		out.AccountingEvidence = g.stampBudgetSnapshotWithin(&ev, true, in.MaxSnapshotAge, es.accountingContext(true))
+		out.AccountingUnavailable = out.AccountingEvidence == nil && g.budgetLookup != nil
 	}
 	if in.SessionID == "" {
 		// Node-wide budgets do not need a guessed session join. A session cap

@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "changeId": "749356201",
+      "userId": "user_3k9x8q...",
+      "userEmail": "developer@company.com",
+      "source": "COMPOSER",
+      "model": null,
+      "totalLinesAdded": 18,
+      "totalLinesDeleted": 4,
+      "createdAt": "2025-07-30T15:10:12.000Z",
+      "metadata": [
+        {
+          "fileName": "src/analytics/report.ts",
+          "fileExtension": "ts",
+          "linesAdded": 12,
+          "linesDeleted": 3
+        },
+        {
+          "fileName": "src/analytics/ui.tsx",
+          "fileExtension": "tsx",
+          "linesAdded": 6,
+          "linesDeleted": 1
+        }
+      ]
+    }
+  ],
+  "totalCount": 128,
+  "page": 1,
+  "pageSize": 200
+}

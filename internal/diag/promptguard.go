@@ -29,13 +29,13 @@ func checkPromptGuardWiring(cfg config.Config) Check {
 	if !cfg.Guard.Prompt.Enabled {
 		return Check{
 			Name: name, Status: StatusWarn,
-			Message: "prompt-submit intervention disabled ([guard.prompt].enabled = false) — secrets/PII typed into a prompt are forwarded unexamined",
+			Message: "prompt-submit intervention disabled ([guard.prompt].enabled = false) - secrets/PII typed into a prompt are forwarded unexamined",
 		}
 	}
 	if !cfg.Guard.Prompt.HookLane {
 		return Check{
 			Name: name, Status: StatusWarn,
-			Message: "hook lane disabled ([guard.prompt].hook_lane = false) — prompt-submit hooks are registered but do not evaluate; only the proxy lane (if enabled) sees the prompt",
+			Message: "hook lane disabled ([guard.prompt].hook_lane = false) - prompt-submit hooks are registered but do not evaluate; only the proxy lane (if enabled) sees the prompt",
 		}
 	}
 	return Check{Name: name, Status: StatusOK, Message: fmt.Sprintf("hook lane active, mode=%s", cfg.Guard.Prompt.Mode)}

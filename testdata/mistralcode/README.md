@@ -1,8 +1,11 @@
 # mistralcode fixtures
 
-> **Two layouts live here.** Everything at the top level
-> (`session_*/`, `growth-snapshots/`) is the **vibe CLI** layout,
+> **Three layouts live here.** Everything at the top level
+> (`session_*/`, `growth-snapshots/`) is the **legacy vibe CLI** layout,
 > hand-built from shapes confirmed against a real install. The
+> `vibe-home/logs/session/unified/` subtree is the **vibe 2.25+ unified
+> store** (see ["vibe-home/ — the 2.25+ unified store"](#vibe-home--the-225-unified-store)
+> below). The
 > `ide/` subtree is the **Mistral Code IDE (Continue-fork) layout**
 > and is **FULLY SYNTHETIC** — see
 > ["ide/ — synthetic Continue-fork fixtures"](#ide--synthetic-continue-fork-fixtures)
@@ -46,6 +49,33 @@ Operator: santosh@marmut.app.
 | Missing/partial `meta.json` | Yes | `partial1`. |
 | Cursor/offset idempotency across a growing transcript | Yes | `growth-snapshots/t1` → `t2`. |
 | `VIBE_HOME` root override | No | Environment-variable behavior; covered by an inline unit test (`TestDefaultRoots_VibeHomeOverride` in `internal/adapter/mistralcode/fixtures_test.go`), not a fixture (there is nothing file-shaped to fixture). |
+
+## vibe-home/ — the 2.25+ unified store
+
+Added 2026-10-03 after the demo node 1 live test found vibe 2.25.8
+captured nothing (it writes only `unified/<uuid>/`). Operator reference:
+[`docs/mistral-code-adapter.md`](../../docs/mistral-code-adapter.md)
+§"vibe 2.25+ unified store".
+
+| Session | What it is | Use in tests |
+| --- | --- | --- |
+| `7d1e0f22-3a4b-4c5d-8e6f-a1b2c3d4e5f6/` | The LIVE node-1 shape, anonymized: one user prompt, the completion failed with a 429 (no assistant entry, no `tokenUsage`), the error names model `mistral-vibe-cli-latest`. Like the live store it keeps the superseded generation `0000000000000004` and its journal `0000000000000005.jsonl` next to the current generation `0000000000000012` and its empty segment `0000000000000013.jsonl`. | `TestUnified_FailedLiveShape`: exactly one prompt plus one `api_error`, the superseded journal is not replayed. |
+| `4f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b/` | Two turns. The snapshot holds turn 1 in two chunks (prompt, reasoning, `file_system.read_file`, `file_system.search_replace`, a failed `file_system.bash`, the assistant answer, a `model_change` checkpoint); the journal holds turn 2 (prompt, a discarded assistant fragment, a `vibe.todo` effect appended running then replaced completed, the answer, an envelope with cumulative `tokenUsage`). | `TestUnified_RichSession`, `TestUnified_JournalGrowth`, `TestUnified_CollectedGenerationRetries`, `TestUnified_ManifestPathEscapeRefused`. |
+
+Grounding: the store skeleton (CURRENT, manifest, projection-state,
+chunk naming and body, journal record envelope, the failed-turn envelope,
+runtime-state `session_metadata`) was read from the live node-1 session.
+That session held only a failed turn, so the assistant, reasoning, effect
+and `model_change` entry shapes and the journal delta ops come from vibe
+2.25.8's own source (`mistralai_vibe_local_harness/vibe/_projection.py`,
+`_storage.py`) and its unified tool-name table
+(`vibe/app_server/_unified_tool_projection.py`). Every value is synthetic
+(prompts, paths, ids, counts); chunk file names and manifest digests are
+real SHA-256 values over the synthetic bodies. No credential, username or
+real prompt text from the node appears here. The generator was a one-off
+script (not kept in the repo); edit the files directly or regenerate them
+the same way: canonical JSON (sorted keys, no spaces) per document, chunk
+name = sha256 of the chunk body without its trailing newline.
 
 ## Reproducing the dumps
 

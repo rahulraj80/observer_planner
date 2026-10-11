@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/hook"
 	"github.com/marmutapp/superbased-observer/internal/integration"
@@ -177,12 +179,10 @@ var hookMechanismDialect = map[integration.HookMechanism]hookDialectEntry{
 	integration.HookPoolsideYAML:   {hook.PromptDialectPoolside, "UserPromptSubmit", "UserPromptSubmit"},
 	integration.HookCascadeJSON:    {hook.PromptDialectCascade, "pre_user_prompt", "pre_user_prompt"},
 	integration.HookCommandCodeMod: {hook.PromptDialectCommandCode, "transformInput", "transformInput"},
-	// zcode: AutoWired stays false on its registry row (no register*
-	// writer exists), so runProbeHook never reaches the registration
-	// check for it — but the dialect/event ARE known (receiver built
-	// and tested), so it still belongs in this table; the AutoWired
-	// gate in runProbeHook is what renders it "documented, not
-	// auto-wired" instead of silently no-dialect.
+	// Antigravity CLI PreInvocation (audit P1): warn-only.
+	integration.HookAntigravityJSON: {hook.PromptDialectAntigravityPreInvocation, "PreInvocation", "PreInvocation"},
+	// zcode: `observer init` registers it since hook-parity Lane A4
+	// (2026-10-03), so the probe checks its registration like any row.
 	integration.HookZcodeJSON: {hook.PromptDialectZcode, "UserPromptSubmit", "UserPromptSubmit"},
 }
 
@@ -250,21 +250,49 @@ const (
 // against Register's AlreadySet — see hookDialectEntry's doc comment
 // for why those two differ for Claude Code.
 func checkHookRegistration(binary, configPath, tool, registryEvent string) (state hookRegistrationState, detail string, err error) {
-	reg, regErr := hook.NewRegistry(hookRegistrationOptions(binary, configPath))
-	if regErr != nil {
-		return hookRegNotRegistered, "", regErr
+	for i, spelling := range registrationConfigSpellings(configPath) {
+		reg, regErr := hook.NewRegistry(hookRegistrationOptions(binary, spelling))
+		if regErr != nil {
+			return hookRegNotRegistered, "", regErr
+		}
+		res := reg.Register(tool)
+		switch {
+		case res.CoveredElsewhere():
+			return hookRegRegistered, "already covered by " + res.SkipReason, nil
+		case res.Skipped:
+			// Not applicable on this target (review M2-05): no Observer
+			// hook exists here, so the probe must not read it as wired.
+			return hookRegNotRegistered, "not applicable: " + res.SkipReason, nil
+		case res.Error != nil && i == 0:
+			return hookRegConflict, res.Error.Error(), nil
+		case containsString(registryEvent, res.AlreadySet):
+			return hookRegRegistered, res.ConfigPath, nil
+		}
+		detail = res.ConfigPath
 	}
-	res := reg.Register(tool)
+	return hookRegNotRegistered, detail, nil
+}
+
+// registrationConfigSpellings returns the --config spellings a hook command
+// registered for configPath may carry: configPath itself, plus the other
+// spelling of the default global config (no --config at all, or the
+// default path written out), because a hook registered either way reads
+// the same file. Without it a hook `observer init` registered with no
+// --config read as "not registered" to a doctor run with an explicit
+// --config of the default path (the dashboard always passes one).
+func registrationConfigSpellings(configPath string) []string {
+	out := []string{configPath}
+	def, err := config.ResolveGlobalPath("")
+	if err != nil || def == "" {
+		return out
+	}
 	switch {
-	case res.Skipped:
-		return hookRegRegistered, "already covered by " + res.SkipReason, nil
-	case res.Error != nil:
-		return hookRegConflict, res.Error.Error(), nil
-	case containsString(registryEvent, res.AlreadySet):
-		return hookRegRegistered, res.ConfigPath, nil
-	default:
-		return hookRegNotRegistered, res.ConfigPath, nil
+	case configPath == "":
+		out = append(out, def)
+	case filepath.Clean(configPath) == filepath.Clean(def):
+		out = append(out, "")
 	}
+	return out
 }
 
 // hookHomeCheck is checkHookRegistrationHomes' per-home result: tool's
@@ -335,7 +363,10 @@ func checkHookRegistrationHome(home, tool, binary, configPath, registryEvent str
 // and DryRun stays hardcoded true unconditionally regardless of what a
 // test overrides, so this seam can never turn the probe into a writer.
 var hookRegistrationOptions = func(binary, configPath string) hook.Options {
-	return hook.Options{BinaryPath: binary, ConfigPath: configPath, DryRun: true}
+	// The command the writers register (registration.go, U1) and the
+	// T-725 equivalence they apply, so an entry `observer start` keeps
+	// as equivalent is reported as registered here too.
+	return hook.Options{BinaryPath: registrationCommand(binary), ConfigPath: configPath, DryRun: true, KeepEquivalentHooks: true}
 }
 
 // windowsHookHomeDetected reports whether hook.Registry can actually
@@ -418,7 +449,7 @@ func formatHookHomeVerdict(h hookHomeCheck) string {
 	case h.state == hookRegRegistered:
 		return fmt.Sprintf("REGISTERED (%s)", h.detail)
 	case h.state == hookRegConflict:
-		return fmt.Sprintf("CONFLICT — a non-observer hook occupies this event: %s", h.detail)
+		return fmt.Sprintf("CONFLICT - a non-observer hook occupies this event: %s", h.detail)
 	default:
 		return fmt.Sprintf("NOT REGISTERED (%s)", h.detail)
 	}
@@ -464,12 +495,12 @@ func runProbeHook(ctx context.Context, binary, configPath, tool string) diag.Che
 	if !ok {
 		return diag.Check{
 			Name: name, Status: diag.StatusWarn,
-			Message: fmt.Sprintf("no known prompt-submit dialect for %q — nothing to probe (see `observer adapters` PROMPT column)", tool),
+			Message: fmt.Sprintf("no known prompt-submit dialect for %q - nothing to probe (see `observer adapters` PROMPT column)", tool),
 		}
 	}
 
 	// B3 (phase-3a review): a mechanism whose registry row is
-	// AutoWired:false (zcode today) has a tested receiver/dialect but
+	// AutoWired:false (none today; zcode was the last, until hook-parity Lane A4) has a tested receiver/dialect but
 	// genuinely NO writer to check registration against — `observer
 	// init` never reaches it (hookSupported requires AutoWired), so
 	// "would the registered command block" is not a question this
@@ -481,7 +512,7 @@ func runProbeHook(ctx context.Context, binary, configPath, tool string) diag.Che
 	if !capRow.Hook.AutoWired {
 		return diag.Check{
 			Name: name, Status: diag.StatusWarn,
-			Message: fmt.Sprintf("%s: prompt-submit dialect is built and tested, but documented, not auto-wired — no registration writer exists to check a live install against", tool),
+			Message: fmt.Sprintf("%s: prompt-submit dialect is built and tested, but documented, not auto-wired - no registration writer exists to check a live install against", tool),
 		}
 	}
 
@@ -510,13 +541,13 @@ func runProbeHook(ctx context.Context, binary, configPath, tool string) diag.Che
 	case hookRegNotRegistered:
 		return diag.Check{
 			Name: name, Status: diag.StatusFail,
-			Message: fmt.Sprintf("%s: NOT REGISTERED — no observer hook wired for %s on any checked home, so the prompt-submit guard never sees this tool's prompts (%s)", tool, event, hookHomesSummary(homes)),
+			Message: fmt.Sprintf("%s: NOT REGISTERED - no observer hook wired for %s on any checked home, so the prompt-submit guard never sees this tool's prompts (%s)", tool, event, hookHomesSummary(homes)),
 			Details: []string{"remedy: " + autoRegisterRemediation(tool)},
 		}
 	case hookRegConflict:
 		return diag.Check{
 			Name: name, Status: diag.StatusFail,
-			Message: fmt.Sprintf("%s: NOT REGISTERED — a non-observer hook already occupies %s on at least one checked home (%s)", tool, event, hookHomesSummary(homes)),
+			Message: fmt.Sprintf("%s: NOT REGISTERED - a non-observer hook already occupies %s on at least one checked home (%s)", tool, event, hookHomesSummary(homes)),
 			Details: []string{"remedy: observer init --all --force (or the equivalent per-tool target) to take over the slot, then re-run this probe"},
 		}
 	}
@@ -540,7 +571,7 @@ func runProbeHook(ctx context.Context, binary, configPath, tool string) diag.Che
 	if probeCtx.Err() != nil {
 		return diag.Check{
 			Name: name, Status: diag.StatusFail,
-			Message: fmt.Sprintf("probe timed out invoking `%s %s` — the hook receiver may be hung", binary, strings.Join(args, " ")),
+			Message: fmt.Sprintf("probe timed out invoking `%s %s` - the hook receiver may be hung", binary, strings.Join(args, " ")),
 		}
 	}
 
@@ -570,13 +601,13 @@ func runProbeHook(ctx context.Context, binary, configPath, tool string) diag.Che
 		if gotCode == wantCode {
 			return diag.Check{
 				Name: name, Status: diag.StatusOK,
-				Message: fmt.Sprintf("%s: BLOCKED a synthetic secret (exit code %d) — the prompt-submit guard is live", tool, gotCode),
+				Message: fmt.Sprintf("%s: BLOCKED a synthetic secret (exit code %d) - the prompt-submit guard is live", tool, gotCode),
 			}
 		}
 		remedy := "remedy: `observer init --all` (or the equivalent per-tool target) to register the hook, then re-run this probe. If already registered, check [guard]/[guard.prompt] with `observer guard prompt status`."
 		return diag.Check{
 			Name: name, Status: diag.StatusFail,
-			Message: fmt.Sprintf("%s: ALLOWED a synthetic secret through (exit code %d, want %d) — the hook either isn't registered, or the guard isn't evaluating it", tool, gotCode, wantCode),
+			Message: fmt.Sprintf("%s: ALLOWED a synthetic secret through (exit code %d, want %d) - the hook either isn't registered, or the guard isn't evaluating it", tool, gotCode, wantCode),
 			Details: []string{remedy, "stdout: " + stdout.String(), "stderr: " + stderr.String()},
 		}
 	}
@@ -593,13 +624,13 @@ func runProbeHook(ctx context.Context, binary, configPath, tool string) diag.Che
 	if blocked {
 		return diag.Check{
 			Name: name, Status: diag.StatusOK,
-			Message: fmt.Sprintf("%s: BLOCKED a synthetic secret (%s) — the prompt-submit guard is live", tool, detail),
+			Message: fmt.Sprintf("%s: BLOCKED a synthetic secret (%s) - the prompt-submit guard is live", tool, detail),
 		}
 	}
 	remedy := "remedy: `observer init --all` (or the equivalent per-tool target) to register the hook, then re-run this probe. If already registered, check [guard]/[guard.prompt] with `observer guard prompt status`."
 	return diag.Check{
 		Name: name, Status: diag.StatusFail,
-		Message: fmt.Sprintf("%s: ALLOWED a synthetic secret through (%s) — the hook either isn't registered, or the guard isn't evaluating it", tool, detail),
+		Message: fmt.Sprintf("%s: ALLOWED a synthetic secret through (%s) - the hook either isn't registered, or the guard isn't evaluating it", tool, detail),
 		Details: []string{remedy, "stderr: " + stderr.String()},
 	}
 }

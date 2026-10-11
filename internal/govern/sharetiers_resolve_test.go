@@ -25,26 +25,17 @@ func TestW8PerTierGateThroughResolve(t *testing.T) {
 	body := `{"schema":2,"share":{"cache_detail":true,"full_content":true}}`
 	e := Resolve(phase1bDelivered(t, body), grant, testLive(), testNow)
 
-	// The grant carries no dashboard.visibility authority, so the
-	// always-present `sections` class drops and the posture reports
-	// StateInert — that is orthogonal to this test (see
-	// TestManagedRaiseAppliesEvenWhenPostureIsInert: StateInert never
-	// suppresses the directives that WERE authorized) and is asserted here
-	// only so a future reader is not surprised by it.
-	if e.State != StateInert {
-		t.Fatalf("State = %q, want inert (sections has no authority here): Dropped=%+v", e.State, e.Dropped)
+	// The grant carries no dashboard.visibility token, but it is MANAGED, and
+	// on a managed grant the always-present `sections` class is authorized by
+	// managed consent (backlog item 4), so nothing is dropped. Orthogonal to
+	// this test; asserted only so a future reader is not surprised by it.
+	if e.State != StateApplied {
+		t.Fatalf("State = %q, want applied: Dropped=%+v", e.State, e.Dropped)
 	}
-	var sawSectionsDropped bool
 	for _, d := range e.Dropped {
-		if d.Directive == "sections" {
-			sawSectionsDropped = true
-		}
 		if d.Directive == "share" {
 			t.Fatalf("share class unexpectedly dropped: %+v (extract.cache should authorize it)", d)
 		}
-	}
-	if !sawSectionsDropped {
-		t.Fatalf("expected sections to be dropped: %+v", e.Dropped)
 	}
 
 	// The granted tier: MergeBoolGated raises it off a local false, and

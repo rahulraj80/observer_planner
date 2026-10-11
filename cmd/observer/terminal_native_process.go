@@ -2,18 +2,15 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/termrun"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve"
 )
 
@@ -29,43 +26,6 @@ type terminalProcessBinding struct {
 	script      string
 	scripts     []string
 	interpreter string
-}
-
-// newTerminalNativeResolver supplies the common discovery pass with adapter
-// capabilities and a current terminal process. Native identity never comes
-// from the PID bridge, whose rows include inferred associations.
-func newTerminalNativeResolver(handleForRun func(string) (string, bool), processForHandle func(string) (int, string, bool), kindForHandle func(string) (termrun.Kind, string, bool), cfg *config.Config) func(context.Context, string) (terminalNativeIdentity, error) {
-	return func(ctx context.Context, runID string) (terminalNativeIdentity, error) {
-		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
-		handle, live := handleForRun(runID)
-		if !live {
-			return terminalNativeIdentity{}, errTerminalIdentityUncertain
-		}
-		_, tool, known := kindForHandle(handle)
-		if !known {
-			return terminalNativeIdentity{}, errTerminalIdentityUncertain
-		}
-		tool = canonicalToolForRun(tool)
-		a := genericAdapterRegistry().Get(tool)
-		resolver, supported := a.(adapter.TerminalSessionResolver)
-		if !supported || !terminalNativeDiscoveryAvailable(a) {
-			return terminalNativeIdentity{}, nil
-		}
-		pid, birth, live := processForHandle(handle)
-		if !live {
-			return terminalNativeIdentity{}, errTerminalIdentityUncertain
-		}
-		binding := terminalBindingForAdapter(a, cfg)
-		candidate, err := terminalNativeSession(ctx, pid, birth, a, resolver, binding)
-		if current, currentBirth, stillLive := processForHandle(handle); !stillLive || current != pid || currentBirth != birth {
-			return terminalNativeIdentity{}, errTerminalIdentityUncertain
-		}
-		if current, stillLive := handleForRun(runID); !stillLive || current != handle {
-			return terminalNativeIdentity{}, errTerminalIdentityUncertain
-		}
-		return candidate, err
-	}
 }
 
 func terminalBindingForAdapter(a adapter.Adapter, cfg *config.Config) terminalProcessBinding {

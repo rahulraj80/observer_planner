@@ -76,7 +76,7 @@ func contentCaptureBlockReason(cfg config.Config) string {
 		return "message-content capture is off: set full_content = true (or admin_managed = true) under [org_client.share] in this node's config.toml"
 	}
 	if !cfg.Ingest.OTel.CapturesContent() {
-		return fmt.Sprintf("message-content capture is off: [ingest.otel] content_capture = %q blocks it — set it to %q (or remove the key) in this node's config.toml",
+		return fmt.Sprintf("message-content capture is off: [ingest.otel] content_capture = %q blocks it - set it to %q (or remove the key) in this node's config.toml",
 			cfg.Ingest.OTel.ContentCapture, config.ContentCaptureFull)
 	}
 	return ""

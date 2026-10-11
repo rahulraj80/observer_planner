@@ -1,0 +1,43 @@
+{
+  "data": [
+    {
+      "chat_metrics": {
+        "distinct_conversation_skill_used_count": 0
+      },
+      "claude_code_metrics": {
+        "distinct_session_skill_used_count": 0
+      },
+      "cowork_metrics": {
+        "distinct_session_skill_used_count": 0
+      },
+      "distinct_user_count": 0,
+      "office_metrics": {
+        "excel": {
+          "distinct_session_skill_used_count": 0
+        },
+        "outlook": {
+          "distinct_session_skill_used_count": 0
+        },
+        "powerpoint": {
+          "distinct_session_skill_used_count": 0
+        },
+        "word": {
+          "distinct_session_skill_used_count": 0
+        }
+      },
+      "skill_name": "skill_name",
+      "attributed_list_price": "attributed_list_price",
+      "currency": "currency",
+      "enable_count": 0,
+      "estimated_overage_spend": "estimated_overage_spend",
+      "invocation_count": 0,
+      "product": "product",
+      "rbac_group_id": "rbac_group_id",
+      "rbac_group_name": "rbac_group_name",
+      "share_status": "organization",
+      "skill_display_name": "skill_display_name",
+      "user_id": "user_id"
+    }
+  ],
+  "next_page": "next_page"
+}

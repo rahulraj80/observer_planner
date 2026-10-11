@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -13,10 +15,10 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/attachsock"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/termrun"
 	"github.com/marmutapp/superbased-observer/internal/termsession"
@@ -263,7 +265,7 @@ func TestAttachHostEmitsSpawnAuditRow(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
-	sink := newSpawnAuditSink(database, dashboard.SpawnAuditKind(termrun.KindAttach))
+	sink := newSpawnAuditSink(database, dashapi.SpawnAuditKind(termrun.KindAttach))
 	launcher := &fakeAttachLauncher{res: termsvc.LaunchResult{Handle: "H9", RunID: "R9"}}
 	host := newAttachHost(launcher, successAttachMgr{}, sink)
 
@@ -328,11 +330,11 @@ func TestAttachHostSpawnAuditDetached(t *testing.T) {
 			t.Fatalf("LaunchAttachable: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("LaunchAttachable blocked on the audit sink — the spawn must not wait on auditing (F3)")
+		t.Fatal("LaunchAttachable blocked on the audit sink - the spawn must not wait on auditing (F3)")
 	}
 	// The audit has NOT run yet (still blocked), proving detachment.
 	if n := atomic.LoadInt32(&audited); n != 0 {
-		t.Fatalf("audit ran before release (%d) — it must be detached", n)
+		t.Fatalf("audit ran before release (%d) - it must be detached", n)
 	}
 	close(release)
 	deadline := time.Now().Add(2 * time.Second)
@@ -455,7 +457,7 @@ func TestAttachExtraArgsProxyFlagName(t *testing.T) {
 		{"default --proxy spelling", "http://p", "--proxy", []string{"--proxy", "http://p"}},
 		{"hermes/pi --proxy-url spelling", "http://p", "--proxy-url", []string{"--proxy-url", "http://p"}},
 		{"seed-only tool drops override (empty flag)", "http://p", "", nil},
-		{"no override, flag set — nothing emitted", "", "--proxy", nil},
+		{"no override, flag set - nothing emitted", "", "--proxy", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

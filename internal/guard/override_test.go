@@ -254,13 +254,14 @@ func TestHumanBlockLine(t *testing.T) {
 			wantAbsent: []string{"observer guard approve", "<session-id>", "--session"},
 		},
 		{
-			name: "org locked says ask your admin",
+			name: "org locked offers the request path",
 			av: ActionVerdict{
 				Kind: policy.KindFileAccess, OrgLocked: true,
 				Verdict: policy.Verdict{RuleID: "R-152"},
 			},
 			sessionID:   "sess-2",
-			wantContain: []string{"blocked this file access.", "locked by your organization; ask your admin."},
+			wantContain: []string{"blocked this file access; your organization locks this rule.", "observer request access --rule R-152"},
+			wantAbsent:  []string{"ask your admin"},
 		},
 		{
 			name: "unknown kind falls back",
@@ -268,7 +269,7 @@ func TestHumanBlockLine(t *testing.T) {
 				Kind: policy.EventKind("something_new"), OrgLocked: true,
 				Verdict: policy.Verdict{RuleID: "R-1"},
 			},
-			wantContain: []string{"blocked this action."},
+			wantContain: []string{"blocked this action;"},
 		},
 		{
 			name:      "no org bundle stays silent",
@@ -602,7 +603,7 @@ func TestApprovals_ProjectScopeOnALaneWithNoProjectRoot(t *testing.T) {
 	t.Run("unwired resolver still asks with an empty hash", func(t *testing.T) {
 		t.Parallel()
 		g, seen := newGuard(t, nil)
-		v, approved := g.applyApprovals(blocking, proxyEvent())
+		v, approved := approvedOf(g.applyApprovals(blocking, proxyEvent(), OrgGrantLaneProxy))
 		if approved || v.Decision != policy.DecisionDeny {
 			t.Fatalf("want the pre-fix behaviour (no match), got (%v, approved=%v)", v.Decision, approved)
 		}
@@ -621,7 +622,7 @@ func TestApprovals_ProjectScopeOnALaneWithNoProjectRoot(t *testing.T) {
 			}
 			return root
 		})
-		v, approved := g.applyApprovals(blocking, proxyEvent())
+		v, approved := approvedOf(g.applyApprovals(blocking, proxyEvent(), OrgGrantLaneProxy))
 		if !approved || v.Decision != policy.DecisionFlag {
 			t.Fatalf("want the grant to apply, got (%v, approved=%v)", v.Decision, approved)
 		}
@@ -638,7 +639,7 @@ func TestApprovals_ProjectScopeOnALaneWithNoProjectRoot(t *testing.T) {
 		})
 		ev := proxyEvent()
 		ev.ProjectRoot = root
-		if _, approved := g.applyApprovals(blocking, ev); !approved {
+		if _, approved := approvedOf(g.applyApprovals(blocking, ev, OrgGrantLaneProxy)); !approved {
 			t.Fatal("the event's own root must resolve the grant")
 		}
 	})
@@ -649,11 +650,17 @@ func TestApprovals_ProjectScopeOnALaneWithNoProjectRoot(t *testing.T) {
 			t.Error("the allow path must not pay the resolve")
 			return ""
 		})
-		if _, approved := g.applyApprovals(policy.Verdict{Decision: policy.DecisionFlag, RuleID: "R-172"}, proxyEvent()); approved {
+		if _, approved := approvedOf(g.applyApprovals(policy.Verdict{Decision: policy.DecisionFlag, RuleID: "R-172"}, proxyEvent(), OrgGrantLaneProxy)); approved {
 			t.Fatal("a flag verdict is not an approval")
 		}
 		if len(*seen) != 0 {
 			t.Fatalf("lookup ran on a non-blocking verdict: %v", *seen)
 		}
 	})
+}
+
+// approvedOf reads applyApprovals' outcome as the pre-G3 "local approval
+// applied" bool these tests were written against.
+func approvedOf(v policy.Verdict, o approvalOutcome) (policy.Verdict, bool) {
+	return v, o.approved()
 }

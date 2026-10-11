@@ -1,0 +1,46 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "tasks": "VerifiedOfficial",
+    "tasks[]": "VerifiedOfficial",
+    "tasks[].archived_at": "VerifiedOfficial",
+    "tasks[].artifacts": "VerifiedOfficial",
+    "tasks[].artifacts[]": "VerifiedOfficial",
+    "tasks[].artifacts[].data": "VerifiedOfficial",
+    "tasks[].artifacts[].data.id": "VerifiedOfficial",
+    "tasks[].artifacts[].provider": "VerifiedOfficial",
+    "tasks[].artifacts[].type": "VerifiedOfficial",
+    "tasks[].created_at": "VerifiedOfficial",
+    "tasks[].creator": "VerifiedOfficial",
+    "tasks[].creator.id": "VerifiedOfficial",
+    "tasks[].creator_type": "VerifiedOfficial",
+    "tasks[].id": "VerifiedOfficial",
+    "tasks[].name": "VerifiedOfficial",
+    "tasks[].owner": "VerifiedOfficial",
+    "tasks[].owner.id": "VerifiedOfficial",
+    "tasks[].repository": "VerifiedOfficial",
+    "tasks[].repository.id": "VerifiedOfficial",
+    "tasks[].session_count": "VerifiedOfficial",
+    "tasks[].state": "VerifiedOfficial",
+    "tasks[].updated_at": "VerifiedOfficial"
+  },
+  "fixture_sha256": "5e390fba85ca930577ae2acd838b359619bb223c162a45cc4e722e4c6f18b863",
+  "http": {
+    "headers": {
+      "link": "<https://api.github.com/agents/tasks?page=2>; rel=\"next\"",
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/agents/tasks",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /agents/tasks (operationId agent-tasks/list-tasks). Paging is the Link header (the header value is a synthesized example of the documented mechanism).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.agents.tasks"
+}

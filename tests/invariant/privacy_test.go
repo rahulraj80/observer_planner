@@ -2862,6 +2862,11 @@ var forbiddenCacheTables = []string{
 	// guard_approvals immediately above. It gets NO paired org-server
 	// migration, by design — same posture as the cachetrack tables.
 	"guard_prompt_reconsider",
+	// The post-hoc prompt lane's pre-send marks (migration 150, prompt
+	// guard coverage audit 2026-10-02): session id + a sha256 of the
+	// scrubbed prompt. A digest of a short prompt is guessable, so it is
+	// NODE-LOCAL; no paired org-server migration.
+	"guard_prompt_presend",
 	// Process-observability tables (migration 044,
 	// docs/process-observability.md §10.1) are NODE-LOCAL: they record
 	// OS-level process trees, argv previews, executable identity, and
@@ -2942,6 +2947,23 @@ var forbiddenCacheTables = []string{
 	// like org_routing_policies above, so round-tripping it is pure
 	// noise even setting the receipt problem aside.
 	"org_announcements",
+	// The org DISPLAY-POLICY cache (migration 148, the org's signed choice of
+	// whether developers' dashboards show dollars or token usage) is
+	// RECEIVED state, exactly like org_announcements above: pushing it back
+	// would tell the server which version a node holds, a receipt nobody
+	// asked for. internal/store/orgdisplaypolicy.go is its one owner.
+	"org_display_policy",
+	// The org ACCESS-GRANT cache and the request outbox (migration 152,
+	// request-grants design §4.1). The grants are RECEIVED state signed for
+	// this one member|machine, and pushing them back would be the same
+	// receipt problem as org_display_policy; the outbox holds the developer's
+	// own unsent words, which leave the node only through the request POST
+	// they previewed. internal/store/accessgrant.go is the one owner. The
+	// per-event guard_events.grant_id is the one grant fact that does ship,
+	// as metadata on the existing guard_events row.
+	"org_access_grant_state",
+	"org_access_grants",
+	"access_request_outbox",
 	// Code-intelligence tables (internal/codeintel, migrations 050+,
 	// docs/codeintel/) are NODE-LOCAL: they hold a project's source
 	// paths, symbol names, signatures, import specifiers, and the
@@ -3336,6 +3358,21 @@ var forbiddenCacheTables = []string{
 	// data the node already pushed (B2), so nothing new goes out to produce
 	// them. The single store seam is internal/store/intelcache.go.
 	"org_intel_cache",
+	// Cloud Intelligence parity, node side (agent migration 153,
+	// docs/plans/cloud-intelligence-parity-design-2026-10-03.md section 3.7).
+	// All three are NODE-LOCAL BY TABLE NAME. org_intel_requirement caches the
+	// org's signed terms (the org's document coming BACK); org_intel_consent is
+	// the developer's own append-only consent history; org_intel_receipts is
+	// the local audit (sweeps, leave, notices). The consent POSTURE reaches the
+	// org only as the dedicated signed POST /api/agent/intel/consent report
+	// (an enum, a version and a digest), never through the push envelope.
+	"org_intel_requirement",
+	"org_intel_consent",
+	"org_intel_receipts",
+	// Parity phase 2 (agent migration 154): the node-built evidence outbox.
+	// The evidence leaves only through POST /api/agent/intel/evidence, never
+	// the push envelope.
+	"org_intel_outbox",
 	// Standalone-node public pricing feed, node side (agent migration 113,
 	// docs/plans/pricing-sync-tokenomics-to-platform-plan-2026-09-11.md §C.3,
 	// Wave N). pricing_feed_cache is NODE-LOCAL BY TABLE NAME: orgpush.go must
@@ -3477,6 +3514,40 @@ var forbiddenCacheTables = []string{
 	// existing change queue as an ordinary wire column, never through these.
 	"reprice_runs",
 	"reprice_changes",
+	// Dashboard-installed tools (agent migration 149). The node's own record
+	// of AI tools its local dashboard installed — tool, channel, the exact
+	// argv executed (which can carry the operator's home path in an npm
+	// --prefix) and the install/uninstall lifecycle. It describes this
+	// machine's software, not the org's work, and backs the local-only
+	// Uninstall affordance. NODE-LOCAL; the single writer is
+	// internal/store/toolinstalls.go.
+	"tool_installs",
+	// Adapter config editor layer store (agent migration 155): which
+	// developer layer authored each vendor-file key Observer's editor wrote
+	// (value fingerprints, the authored value for display, never a secret)
+	// and the per-save history (key NAMES, backup paths). NODE-LOCAL: an
+	// individual node reports nothing (operator ruling D-112 is
+	// managed-only and composes through a store function seam in phase
+	// P7). Single writer internal/store/agentconfig.go.
+	"agent_config_layers",
+	"agent_config_writes",
+	// The org AI tool settings policy on a managed node (agent migration
+	// 160, adapter config P6/P7): the cached signed document and the
+	// per-directive applied state (with local project roots). NODE-LOCAL;
+	// the managed-only state report reaches the wire ONLY as the
+	// envelope-level AgentConfigState, composed by a store function seam
+	// (internal/store/agentconfigorg.go) from closed fields. Single writer
+	// internal/store/agentconfigorg.go.
+	"org_agent_config_policy",
+	"agent_config_org_state",
+	// Component purge plans (agent migration 158, modular packaging P1, lane
+	// MP-GATE): the persisted, expiring candidate sets of a component data
+	// purge (plan ids, component ids, table names and primary keys). The
+	// purge itself is node-local by construction (db.WithRetentionDeletes,
+	// no org tombstone). NODE-LOCAL; single writer
+	// internal/store/componentpurge.go.
+	"component_purge_plans",
+	"component_purge_candidates",
 }
 
 // forbiddenGatewayTables names the SERVER-SIDE gateway tables that MUST NEVER be
@@ -3792,6 +3863,32 @@ var forbiddenOrgControlPlaneTables = []string{
 	// violation, the same posture as org_identity_settings/122 above.
 	"org_display_settings",
 	"org_budget_policy_version",
+	// Per-team / per-member developer dashboard visibility (server migration
+	// 194): the org admin's override layers. The node RECEIVES the composed
+	// result on the signed node.governance rail and never pushes a row.
+	"org_dashboard_visibility_overrides",
+	// The per-member served node.governance version ledger (server migration
+	// 205, pass-2 review C156-08): server bookkeeping of what each member was
+	// served on the signed node.governance rail; the node never pushes a row.
+	"org_nodegov_served_versions",
+	// The per-member, per-family served policy-resource version ledger
+	// (server migration 207, T-391): server bookkeeping of what each member
+	// was served on the signed policy-resource rail; never pushed.
+	"org_policy_served_versions",
+	// The per-machine Ed25519 credentials (server migration 208, T-656): the
+	// node sends its public key once on its own registration route; the
+	// table never rides the push wire.
+	"org_machine_keys",
+	// Its per-member successor (server migration 229, REVIEW-4 P4-06): same
+	// credentials keyed by (org, machine, member); equally server-only.
+	"org_member_machine_keys",
+	// The org AI tool settings policy documents (server migration 201) and
+	// managed nodes' applied state as the server stores it (202). The node
+	// RECEIVES the composed policy on its own signed rail and ships its
+	// state only as the envelope-level AgentConfigState report; it never
+	// names either server table.
+	"org_agent_config_policies",
+	"org_agent_config_state",
 	// Enterprise Update Management server-only tables (server migration 127,
 	// docs/plans/enterprise-update-management-plan-2026-09-07.md §3.3).
 	// org_update_manifests is the signed publication registry served on the
@@ -3809,6 +3906,12 @@ var forbiddenOrgControlPlaneTables = []string{
 	"org_update_artifacts",
 	"org_update_rollouts",
 	"org_node_versions",
+	// Modular packaging plan 5.6 / 5.6.1 (server migration 220, lane
+	// MP-REL2): the vendor-signed release index per version and the
+	// publication object the v2 agent route serves. Same direction as the
+	// 127 tables: a node RECEIVES the v2 document, it never ships a row.
+	"org_update_release_indexes",
+	"org_update_publications",
 	// The node BUDGET posture board (server migration 130, gap
 	// G1-BUDGET-POSTURE). It is upserted at INGEST from the enum-only
 	// budget_posture field on the push ENVELOPE, exactly as org_node_versions
@@ -3817,6 +3920,10 @@ var forbiddenOrgControlPlaneTables = []string{
 	// internal/store/orgpush.go would be both nonsensical and a boundary
 	// violation.
 	"org_node_budget_posture",
+	// The node COMPONENT posture board (server migration 224, T-682): upserted
+	// at ingest from the enum-only component_posture ENVELOPE field, the same
+	// direction as org_node_budget_posture.
+	"org_node_component_posture",
 	// Org Dashboard Enterprise Sign-In server-only tables (server migration
 	// 128, docs/plans/org-enterprise-sign-in-plan-2026-09-07.md §3.6).
 	// org_auth_settings is the dashboard-editable identity singleton (enabled
@@ -3990,6 +4097,70 @@ var forbiddenOrgControlPlaneTables = []string{
 	// orgpush.go must never name either.
 	"org_reprice_runs",
 	"org_reprice_changes",
+	// Vendor connections (server migration 209 / PG lineage 0076, enterprise
+	// vendor API lane F4): the tenancy and binding model (CONTROL) and the
+	// runner's run and watermark records (DATA). Server-only: the org server
+	// polls vendors itself, a node never holds a vendor admin credential or
+	// a vendor connection, and orgpush.go must never name any of them.
+	"org_vendor_accounts",
+	"org_vendor_auth_bindings",
+	"org_vendor_surface_bindings",
+	"org_vendor_inbound_bindings",
+	"org_vendor_surface_ownership",
+	"org_vendor_claims",
+	"org_vendor_runs",
+	"org_vendor_run_supplies",
+	"org_vendor_watermarks",
+	// Observation foundations and projection / receipt schema (server
+	// migrations 211 / 212, lanes F5 / F6): the vendor resource graph, its
+	// change log, identity aliases and suggestions, daily health, manual
+	// upload sagas, control projections, validation receipts, model maps and
+	// fanout plans. All server-only.
+	"org_vendor_identity_aliases",
+	"org_vendor_upload_intents",
+	"org_vendor_snapshot_manifests",
+	"org_vendor_resource_observations",
+	"org_vendor_edge_observations",
+	"org_vendor_resources",
+	"org_vendor_resource_edges",
+	"org_vendor_resource_changes",
+	"org_vendor_identity_suggestions",
+	"org_vendor_health_daily",
+	"org_vendor_upload_batches",
+	"org_vendor_control_projections",
+	"org_vendor_validation_receipts",
+	"org_vendor_validation_transitions",
+	"org_vendor_model_maps",
+	"org_vendor_fanout_plans",
+	// G3..G6 (server migrations 215-218, lane F10): usage retractions,
+	// aggregate facts, held vendor identities, vendor audit events,
+	// snapshots, the inbound replay ledger and the display source policy.
+	// All server-only.
+	"org_vendor_retractions",
+	"org_vendor_facts",
+	"org_vendor_held_identities",
+	"org_vendor_audit_events",
+	"org_vendor_snapshots",
+	"org_vendor_replay",
+	"org_vendor_source_policy",
+	// G7 (server migration 223, lane L12): spend approval thresholds,
+	// conversions, comparison reports (member ids, held identities, per-member
+	// values) and approvals. All server-only.
+	"org_vendor_spend_thresholds",
+	"org_vendor_conversions",
+	"org_vendor_comparisons",
+	"org_vendor_spend_approvals",
+	// Vendor control writes (server migration 225, lane L14): the kill
+	// switch, proposals (member ids, vendor identities) and their audit
+	// events. All server-only.
+	"org_vendor_control_write_switch",
+	"org_vendor_control_writes",
+	"org_vendor_control_write_events",
+	// Vendor content (server migration 226, lane L15): the per-connection
+	// consent history and the content items themselves (prompts,
+	// responses, transcripts). All server-only.
+	"org_vendor_content_consents",
+	"org_vendor_content",
 }
 
 // TestForbiddenOrgControlPlaneTablesExpectedSet is the NON-GAMEABLE membership
@@ -4131,6 +4302,11 @@ func TestForbiddenOrgControlPlaneTablesExpectedSet(t *testing.T) {
 		// orgpush.go guard from noticing a seam that named them.
 		"org_display_settings",
 		"org_budget_policy_version",
+		// The org AI tool settings policy and managed nodes' applied state
+		// (server migrations 203 / 204). Dropping either from the sentinel
+		// would stop the orgpush.go guard from noticing a seam that named it.
+		"org_agent_config_policies",
+		"org_agent_config_state",
 		// Enterprise Update Management server-only tables (server migration
 		// 127). Dropping any of these from the sentinel would stop the
 		// orgpush.go guard from noticing a seam that named them.
@@ -4138,6 +4314,9 @@ func TestForbiddenOrgControlPlaneTablesExpectedSet(t *testing.T) {
 		"org_update_artifacts",
 		"org_update_rollouts",
 		"org_node_versions",
+		// Server migration 220 (modular packaging plan 5.6.1).
+		"org_update_release_indexes",
+		"org_update_publications",
 		// The node budget posture board (server migration 130). Dropping it
 		// from the sentinel would stop the orgpush.go guard from noticing a
 		// seam that named it.
@@ -4238,6 +4417,60 @@ func TestForbiddenOrgControlPlaneTablesExpectedSet(t *testing.T) {
 		// Org stored-cost re-price (server migration 187, lane G-REPRICE).
 		"org_reprice_runs",
 		"org_reprice_changes",
+		// Vendor connections (server migration 209, enterprise vendor API
+		// lane F4). org_vendor_auth_bindings holds store: references to
+		// SEALED vendor admin credentials.
+		"org_vendor_accounts",
+		"org_vendor_auth_bindings",
+		"org_vendor_surface_bindings",
+		"org_vendor_inbound_bindings",
+		"org_vendor_surface_ownership",
+		"org_vendor_claims",
+		"org_vendor_runs",
+		"org_vendor_run_supplies",
+		"org_vendor_watermarks",
+		// Observation foundations and projection / receipt schema (server
+		// migrations 211 / 212). org_vendor_identity_aliases maps vendor
+		// identities onto org members.
+		"org_vendor_identity_aliases",
+		"org_vendor_upload_intents",
+		"org_vendor_snapshot_manifests",
+		"org_vendor_resource_observations",
+		"org_vendor_edge_observations",
+		"org_vendor_resources",
+		"org_vendor_resource_edges",
+		"org_vendor_resource_changes",
+		"org_vendor_identity_suggestions",
+		"org_vendor_health_daily",
+		"org_vendor_upload_batches",
+		"org_vendor_control_projections",
+		"org_vendor_validation_receipts",
+		"org_vendor_validation_transitions",
+		"org_vendor_model_maps",
+		"org_vendor_fanout_plans",
+		// G3..G6 (server migrations 215-218, lane F10). Held identities
+		// and facts carry vendor identities and per-member values.
+		"org_vendor_retractions",
+		"org_vendor_facts",
+		"org_vendor_held_identities",
+		"org_vendor_audit_events",
+		"org_vendor_snapshots",
+		"org_vendor_replay",
+		"org_vendor_source_policy",
+		// G7 (server migration 223, lane L12).
+		"org_vendor_spend_thresholds",
+		"org_vendor_conversions",
+		"org_vendor_comparisons",
+		"org_vendor_spend_approvals",
+		// Vendor control writes (server migration 225, lane L14).
+		"org_vendor_control_write_switch",
+		"org_vendor_control_writes",
+		"org_vendor_control_write_events",
+		// Vendor content (server migration 226, lane L15).
+		"org_vendor_content_consents",
+		"org_vendor_content",
+		// Per-member machine keys (server migration 229, REVIEW-4 P4-06).
+		"org_member_machine_keys",
 	}
 	have := make(map[string]struct{}, len(forbiddenOrgControlPlaneTables))
 	for _, n := range forbiddenOrgControlPlaneTables {

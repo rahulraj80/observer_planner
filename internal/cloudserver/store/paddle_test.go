@@ -1551,3 +1551,57 @@ func TestPaddleRealSandboxPayloadsPreserveTrialThroughZeroTotalTransaction(t *te
 		t.Fatalf("trial_ends_at is nil after replay, want set (the real trial end, 2026-09-18)")
 	}
 }
+
+// TestPaddleRenewalNeverRevertsAMigratedPlanVersion is the D-299 regression:
+// a plan-version migration (0041) moves a subscriber's in-force assignment
+// forward to plus_beta v3, but the deployed price map can still name the
+// version the subscriber moved OFF. Without the version floor, the next
+// renewal re-asserts that older version, which reads as a downgrade (lower
+// caps, same pool) and schedules the account back onto the stale allowance at
+// the next cycle boundary.
+func TestPaddleRenewalNeverRevertsAMigratedPlanVersion(t *testing.T) {
+	s, acct, now := paddleStore(t) // testPrice maps to plus_beta v1
+	ctx := context.Background()
+
+	if in, err := s.ProcessPaddleEvent(ctx, store.PaddleEvent{
+		EventID: "evt_act", EventType: "subscription.activated", AccountID: acct,
+		CheckoutNonce: mintNonce(t, s, acct, now),
+		CustomerID:    "ctm_1", SubscriptionID: "sub_1", Status: "active", PriceID: testPrice,
+		OccurredAt: now, CurrentPeriodEnd: now.AddDate(0, 1, 0), Now: now,
+	}); err != nil || !in.Applied {
+		t.Fatalf("activation intake=%+v err=%v, want Applied", in, err)
+	}
+
+	// The migration's move, through the one assignment seam: plus_beta v3 in
+	// force from here on.
+	moved := now.Add(time.Hour)
+	if _, err := s.AssignPlan(ctx, acct, store.PlanPlusBeta, 3, time.Time{}, moved); err != nil {
+		t.Fatalf("AssignPlan(plus_beta v3): %v", err)
+	}
+
+	// A renewal whose price still maps to v1.
+	renewAt := moved.Add(time.Hour)
+	in, err := s.ProcessPaddleEvent(ctx, store.PaddleEvent{
+		EventID: "evt_renew_v1", EventType: "subscription.updated",
+		CustomerID: "ctm_1", SubscriptionID: "sub_1", Status: "active", PriceID: testPrice,
+		OccurredAt: renewAt, CurrentPeriodEnd: renewAt.AddDate(0, 1, 0), Now: renewAt,
+	})
+	if err != nil || !in.Applied {
+		t.Fatalf("renewal intake=%+v err=%v, want Applied", in, err)
+	}
+
+	for _, at := range []time.Time{renewAt, store.NextMonthlyCycleStart(renewAt).Add(time.Hour)} {
+		al, err := s.ResolveAllowance(ctx, acct, "session_enrichment", at)
+		if err != nil {
+			t.Fatalf("ResolveAllowance at %s: %v", at, err)
+		}
+		if al.Plan.Name != store.PlanPlusBeta || al.Plan.Version != 3 || al.MonthlyCap != 15000 {
+			t.Fatalf("at %s the account is on %s v%d (monthly %d), want plus_beta v3 / 15000 - the renewal reverted the migrated version",
+				at, al.Plan.Name, al.Plan.Version, al.MonthlyCap)
+		}
+	}
+	sub, err := s.AccountSubscription(ctx, acct)
+	if err != nil || sub.PlanName != store.PlanPlusBeta || sub.PlanVersion != 3 {
+		t.Fatalf("subscription = %+v err=%v, want plus_beta v3 recorded on the row", sub, err)
+	}
+}

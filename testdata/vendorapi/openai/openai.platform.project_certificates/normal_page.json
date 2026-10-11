@@ -1,0 +1,19 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "organization.project.certificate",
+      "id": "cert_abc",
+      "name": "My Example Certificate",
+      "active": true,
+      "created_at": 1234567,
+      "certificate_details": {
+        "valid_at": 12345667,
+        "expires_at": 12345678
+      }
+    }
+  ],
+  "first_id": "cert_abc",
+  "last_id": "cert_abc",
+  "has_more": true
+}

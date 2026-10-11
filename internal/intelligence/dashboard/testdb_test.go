@@ -55,6 +55,6 @@ func TestOpenTestDBSeedsFromTemplate(t *testing.T) {
 	}
 	defer database.Close()
 	if !seeded {
-		t.Fatal("a brand-new path was NOT seeded from the template — every test in this package is paying full migration cost again")
+		t.Fatal("a brand-new path was NOT seeded from the template - every test in this package is paying full migration cost again")
 	}
 }

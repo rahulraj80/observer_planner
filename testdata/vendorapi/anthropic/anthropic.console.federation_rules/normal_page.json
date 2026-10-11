@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "id": "fdrl_01SDCCSbTxrXDpWc1phhtcfK",
+      "applies_to_all_workspaces": true,
+      "archived_at": "2019-12-27T18:11:19.117Z",
+      "archived_by_actor_id": "archived_by_actor_id",
+      "attributes": {
+        "foo": "string"
+      },
+      "created_at": "2024-10-30T23:58:27.427722Z",
+      "created_by_actor_id": "created_by_actor_id",
+      "description": "description",
+      "issuer_id": "issuer_id",
+      "issuer_name": "issuer_name",
+      "match": {
+        "audience": "audience",
+        "claims": {
+          "foo": "string"
+        },
+        "condition": "condition",
+        "subject_prefix": "subject_prefix"
+      },
+      "name": "prod-deploy-pipeline",
+      "oauth_scope": "oauth_scope",
+      "target": {
+        "service_account_id": "svac_01SDCCSbTxrXDpWc1phhtcfK",
+        "type": "service_account",
+        "service_account_name": "service_account_name"
+      },
+      "token_lifetime_seconds": 0,
+      "type": "federation_rule",
+      "updated_at": "2024-10-30T23:58:27.427722Z",
+      "updated_by_actor_id": "updated_by_actor_id",
+      "workspace_id": "workspace_id",
+      "workspace_ids": [
+        "string"
+      ]
+    }
+  ],
+  "next_page": "next_page"
+}

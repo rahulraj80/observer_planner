@@ -2,7 +2,6 @@ package hook
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -12,11 +11,11 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/policy"
 )
 
-// HandleGuarded is the guarded counterpart of HandleApprove for
-// pre-execution hook channels (guard spec §3.2 seam 1, §6.1): parse
-// the payload into a policy.Event, evaluate, and — when the verdict
-// requires blocking or asking — write the client's decision JSON.
-// HandleApprove remains the path for [guard] enabled=false.
+// HandleGuarded is the guarded counterpart of HandleApprove for Claude
+// Code's PreToolUse (guard spec §3.2 seam 1, §6.1): the Claude Code row of
+// the tool-gate dialect table, served by the one generalized handler
+// (HandleToolGate). HandleApprove remains the path for [guard]
+// enabled=false.
 //
 // Reply-ownership contract: HandleGuarded writes to stdout ONLY when
 // it blocks (deny/ask emission) — it then returns blocked=true and
@@ -38,70 +37,27 @@ func HandleGuarded(
 	persist func(guard.ActionVerdict),
 	stdout, stderr io.Writer,
 ) (blocked bool, recordAfterReply func()) {
-	pe, ok := BuildClaudeCodeEvent(body)
-	if !ok {
-		// Not an evaluable tool shape: nothing to judge, caller
-		// proceeds with its normal approve path.
-		return false, nil
-	}
-	verdict, recordWorthy := ev.EvaluateHook(pe)
-	em := guard.ResolveEmission(verdict.Verdict, pe.Caps)
-	// Human first, agent second (org guardrail control wave, Track B):
-	// under an org bundle a blocking reason leads with one plain
-	// sentence naming the override command (or saying the rule is
-	// locked). A no-op on an individual node, so the wire reply stays
-	// byte-identical there.
-	em = guard.HumanizeEmission(em, verdict, pe.SessionID)
-	verdict.Enforced = em.Enforced
-	if em.DegradedFrom != "" {
-		// Don't clobber a marker EvaluateHook already set (the §6.3
-		// "approved" exception marker) with the empty no-degradation
-		// case.
-		verdict.DegradedFrom = em.DegradedFrom
-	}
-
-	doPersist := func() {
-		if persist != nil {
-			persist(verdict)
-		}
-	}
-	logForensics := func(action string) {
-		appendHookEventLog(hookEvent{
-			Event:        event,
-			Bytes:        len(body),
-			SessionID:    pe.SessionID,
-			Tool:         payloadFieldString(body, "tool_name"),
-			Action:       action,
-			RuleID:       verdict.Verdict.RuleID,
-			Decision:     verdict.Verdict.Decision.String(),
-			Severity:     verdict.Verdict.Severity.String(),
-			DegradedFrom: em.DegradedFrom,
-		})
-	}
-
-	if em.Permission == "ask" || em.Permission == "deny" {
-		// Reply FIRST (machine-parsable reason — agents read it and
-		// self-correct), then forensics + DB.
-		_ = json.NewEncoder(stdout).Encode(buildClaudeCodeBlockReply(em))
-		fmt.Fprintf(stderr, "observer-hook: %s guard %s (%s: %s)\n",
-			event, em.Permission, verdict.Verdict.RuleID, verdict.Verdict.Reason)
-		logForensics("guard:" + em.Permission)
-		doPersist()
-		return true, nil
-	}
-
-	if !recordWorthy {
-		return false, nil
-	}
-	// Flag-class (or degraded) verdict on the allow path: record it,
-	// but only after the caller's reply.
-	logForensics("approve+flag")
-	return false, doPersist
+	return HandleGuardedDecided(event, body, ev, persist, nil, stdout, stderr)
 }
 
-// truncatedPreToolReason is the agent/human-facing reason for the
-// fail-closed ask HandleTruncatedPreTool emits.
-const truncatedPreToolReason = "Observer guard could not evaluate this tool call: its hook payload exceeded the size the guard reads, so the call is held for your approval instead of being approved unexamined."
+// HandleGuardedDecided is HandleGuarded with ToolGateRequest.Decided: on a
+// block, decided runs right after the reply is written and before persist,
+// so the cmd layer marks the reply sent before any work that could panic or
+// outlive the watchdog (review M2-11). A nil decided is HandleGuarded.
+func HandleGuardedDecided(
+	event string,
+	body []byte,
+	ev guard.Evaluator,
+	persist func(guard.ActionVerdict),
+	decided func(exitCode int),
+	stdout, stderr io.Writer,
+) (blocked bool, recordAfterReply func()) {
+	res := HandleToolGate(ToolGateRequest{
+		Tool: models.ToolClaudeCode, Dialect: ToolGateDialectClaudeCode,
+		NativeEvent: "PreToolUse", Label: event, Body: body, Decided: decided,
+	}, ev, persist, stdout, stderr)
+	return res.Replied, res.RecordAfterReply
+}
 
 // HandleTruncatedPreTool is the fail-closed branch for a Claude Code
 // PreToolUse payload the caller could NOT read in full (security review
@@ -112,22 +68,16 @@ const truncatedPreToolReason = "Observer guard could not evaluate this tool call
 // approved WITHOUT evaluation even when an enforce-mode deny rule covered
 // its target. When the guard is enforcing, the call is held for the human
 // (ask) rather than approved; when it is not enforcing (observe / off),
-// nothing is written and the caller keeps its normal approve path.
+// nothing is written and the caller keeps its normal approve path. The
+// generalized form is HandleToolGate's Truncated request field.
 //
 // Returns true when it wrote the ask reply (the caller must not write
 // another).
 func HandleTruncatedPreTool(event string, enforcing bool, stdout, stderr io.Writer) bool {
-	if !enforcing {
-		return false
-	}
-	_ = json.NewEncoder(stdout).Encode(buildClaudeCodeBlockReply(guard.Emission{
-		Permission: "ask",
-		Enforced:   true,
-		Reason:     truncatedPreToolReason,
-	}))
-	fmt.Fprintf(stderr, "observer-hook: %s guard ask (payload truncated, not evaluable)\n", event)
-	appendHookEventLog(hookEvent{Event: event, Action: "guard:ask:truncated"})
-	return true
+	return handleTruncatedToolGate(ToolGateRequest{
+		Tool: models.ToolClaudeCode, Dialect: ToolGateDialectClaudeCode,
+		NativeEvent: "PreToolUse", Label: event, Truncated: true, Enforcing: enforcing,
+	}, stdout, stderr).Replied
 }
 
 // claudeCodeBlockReply is the §6.2 Claude Code decision shape: the

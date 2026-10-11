@@ -1,5 +1,5 @@
 import { useApi } from "@/lib/useApi";
-import { fmtBytes, fmtUSD } from "@/lib/format";
+import { dollarsShown, fmtBytes, fmtUSD } from "@/lib/format";
 import { HelpInd } from "@/components/HelpInd";
 import { ModelId, Tooltip } from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
@@ -127,7 +127,9 @@ function VerbosityBody({ data }: { data: VerbosityResponse }) {
       )}
 
       {/* estimated token/$ split (plan §7) */}
-      {data.cost_estimated && <VerbosityCost data={data} />}
+      {/* The est. split is dollars only: not shown in the org's token-usage
+          view (format.ts cost affordances). */}
+      {data.cost_estimated && dollarsShown() && <VerbosityCost data={data} />}
 
       {!data.authored_captured && (
         <p className="rounded-2 border border-warn/30 bg-warn/10 px-2 py-1.5 text-[10px] text-warn">

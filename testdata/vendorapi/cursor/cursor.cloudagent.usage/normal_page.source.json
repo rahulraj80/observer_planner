@@ -1,0 +1,36 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "runs": "VerifiedOfficial",
+    "runs[]": "VerifiedOfficial",
+    "runs[].id": "VerifiedOfficial",
+    "runs[].usage": "VerifiedOfficial",
+    "runs[].usage.cacheReadTokens": "VerifiedOfficial",
+    "runs[].usage.cacheWriteTokens": "VerifiedOfficial",
+    "runs[].usage.inputTokens": "VerifiedOfficial",
+    "runs[].usage.outputTokens": "VerifiedOfficial",
+    "runs[].usage.totalTokens": "VerifiedOfficial",
+    "runs[].usageUuid": "VerifiedOfficial",
+    "totalUsage": "VerifiedOfficial",
+    "totalUsage.cacheReadTokens": "VerifiedOfficial",
+    "totalUsage.cacheWriteTokens": "VerifiedOfficial",
+    "totalUsage.inputTokens": "VerifiedOfficial",
+    "totalUsage.outputTokens": "VerifiedOfficial",
+    "totalUsage.totalTokens": "VerifiedOfficial"
+  },
+  "fixture_sha256": "7118dd511cb5d4ee28eec6981d719a1d5d7d37e321e2cf322633627bf8bfac1f",
+  "http": {
+    "method": "GET",
+    "path": "/v1/agents/{id}/usage",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get Agent Usage\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Cloud Agents API endpoints page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "606bb636970ab8de2e8d87bfff9c13ae972ebe4817cc88ced9a60882aab124ef",
+  "source_url": "https://cursor.com/docs/cloud-agent/api/endpoints.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.cloudagent.usage"
+}

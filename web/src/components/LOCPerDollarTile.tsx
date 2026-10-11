@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { LOC_SUMMARY_PATH } from "@/lib/api";
 import { fmtInt, fmtUSD } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
@@ -14,8 +15,9 @@ import { CodeCommentSplit } from "@shared/primitives/CodeCommentSplit";
 // score. It shows the two inputs beside the quotient so the reader can see
 // exactly what was divided by what.
 //
-// Scope honesty: /api/loc/summary takes only a DAY count (no hours, no custom
-// range) and a NUMERIC project id, which the dashboard's project filter (a
+// Scope honesty: the tile fetches /api/loc/summary by DAY count (the endpoint
+// also honours since/until since T-550) and the endpoint scopes by a NUMERIC
+// project id, which the dashboard's project filter (a
 // root path) cannot supply, and it has no tool filter at all. Rather than
 // pass filters the server would silently drop - producing a window-wide
 // numerator over a filtered denominator - the tile fetches BOTH sides at the
@@ -92,10 +94,10 @@ export function LOCPerDollarTile({
           </p>
           {uncounted && (
             <p>
-              No line counts exist for this window. Run{" "}
-              <code className="rounded-1 bg-bg-3 px-1 py-0.5 font-mono text-[9.5px] text-fg-2">
-                observer backfill --loc
-              </code>{" "}
+              No line counts exist for this window. Run the{" "}
+              <Link to="/settings?section=backfill" className="font-medium text-accent hover:text-accent-strong">
+                loc backfill in Settings &rarr; Backfill
+              </Link>{" "}
               to populate history.
             </p>
           )}
@@ -107,10 +109,10 @@ export function LOCPerDollarTile({
           )}
           <p>
             Window: last {days} day{days === 1 ? "" : "s"}
-            {windowLabel && ` (page window ${windowLabel})`} · all tools and
-            projects.
+            {windowLabel && ` (page window ${windowLabel})`} · all tools,
+            projects and models.
             {filtered &&
-              " Not narrowed by the tool or project filter: line counts are not filterable by either yet."}
+              " Not narrowed by the tool, project or model filter: line counts are not filterable by any of them yet."}
           </p>
           {/* Honesty rule: with no editor reporting saves this counts only
               the agent's lines, so it must never be read as a whole-team

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -272,7 +274,7 @@ func TestCloudSyncCommunityDeclaresTheSourceWindowRuleOnTheWire(t *testing.T) {
 		}
 	}
 	if cloudCommunitySourceWindowRule != "in_progress_utc_month_after_grant" {
-		t.Errorf("cloudCommunitySourceWindowRule = %q — the rule id must say what egress does", cloudCommunitySourceWindowRule)
+		t.Errorf("cloudCommunitySourceWindowRule = %q - the rule id must say what egress does", cloudCommunitySourceWindowRule)
 	}
 }
 

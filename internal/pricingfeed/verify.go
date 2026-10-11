@@ -98,8 +98,8 @@ func Verify(env Envelope, keys KeySet) error {
 	}
 	var canonical []byte
 	var err error
-	if env.rawRows != nil {
-		canonical, err = canonicalRawRows(env.rawRows)
+	if env.RawRows() != nil {
+		canonical, err = canonicalRawRows(env.RawRows())
 	} else {
 		canonical, err = CanonicalRows(env.Rows)
 	}

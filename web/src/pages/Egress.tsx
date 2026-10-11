@@ -1,5 +1,6 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import {
+  Button,
   ChartShell,
   EmptyState,
   ErrorState,
@@ -16,7 +17,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/DataTable";
 import { ObsDisabled } from "@/components/ObsDisabled";
 import { useApi } from "@/lib/useApi";
-import { ApiError } from "@/lib/api";
+import { ApiError, fetchJSON } from "@/lib/api";
 import { fmtClock, fmtInt, fmtShortId } from "@/lib/format";
 import { decisionTone } from "@shared/lib/guardCatalog";
 import { VocabPill } from "@shared/lib/vocabPill";
@@ -473,10 +474,49 @@ function EgressDisabled() {
         - egress composes on the admission verdict. A policy that fails to compile is also reported
         here as not installed (the daemon logs the compile error and keeps admission running).
       </p>
-      <p className="mt-2">
-        Validate with <code className="rounded-1 bg-bg-2 px-1 font-mono">observer obs egress lint</code>.
-      </p>
+      <EgressLintCheck />
     </EmptyCard>
+  );
+}
+
+type EgressLintResponse = { ok: boolean; fatal: boolean; issues: string[] };
+
+// EgressLintCheck runs `observer obs egress lint` over the SAVED config
+// (GET /api/obs/egress/lint, the same lint the CLI prints), so a policy that
+// failed to install can be diagnosed here. Read-only, so no confirm step.
+function EgressLintCheck() {
+  const [res, setRes] = useState<EgressLintResponse | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    setBusy(true);
+    setErr(null);
+    try {
+      setRes(await fetchJSON<EgressLintResponse>("/api/obs/egress/lint"));
+    } catch (e) {
+      setRes(null);
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mt-3">
+      <Button variant="secondary" size="sm" onClick={() => void run()} disabled={busy}>
+        {busy ? "Checking…" : "Check the saved policy"}
+      </Button>
+      {err && <p className="mt-2 text-danger">{err}</p>}
+      {res && res.ok && <p className="mt-2 text-success">The saved egress policy compiles with no lint findings.</p>}
+      {res && !res.ok && (
+        <ul className="mt-2 space-y-0.5 font-mono text-[11px]">
+          {res.issues.map((is) => (
+            <li key={is} className={is.includes("FATAL") ? "text-danger" : "text-warn"}>
+              {is}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

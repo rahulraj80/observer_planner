@@ -44,6 +44,20 @@ type ActionInput struct {
 	// session since last observed (the §4.5 external_file taint
 	// source).
 	ExternalChange bool
+	// PromptText is the developer's prompt for a user_prompt action: the
+	// store's already-scrubbed raw_tool_input (the full text — Target is
+	// a ~200-char excerpt), falling back to Target. Empty for every other
+	// action type. IN-MEMORY ONLY: the post-hoc prompt lane
+	// (posthocprompt.go) scans it and then clears it from the verdict it
+	// returns; the persisted row carries a content-free fingerprint in
+	// Target instead, exactly like the hook and proxy prompt lanes.
+	PromptText string
+	// PromptDigest is the pre-send mark (PromptPreSendDigest) a hook or
+	// proxy prompt verdict carries: store.PersistGuardVerdicts records it
+	// in guard_prompt_presend so the capture lane can recognise the same
+	// prompt later. A one-way digest, node-local, never persisted on the
+	// guard_events row itself. Empty everywhere else.
+	PromptDigest string
 }
 
 // ActionVerdict pairs an evaluated action with its verdict — the
@@ -117,6 +131,22 @@ type ActionVerdict struct {
 	// IGNORED one is the reason suffix applyApprovals writes.
 	Overridable bool
 	OrgLocked   bool
+	// GrantID is the ORG access grant that changed this verdict (request-
+	// grants G3, orggrant.go): set with DegradedFrom = DegradedFromOrgGrant
+	// (lifted to flag) or DegradedFromOrgGrantSoften (deny softened to ask).
+	// Persisted as guard_events.grant_id, which ships to the org on the
+	// normal push and is part of the row's chain input (version 2). 0 = no
+	// grant.
+	GrantID int64
+	// RequestBase is the node dashboard origin the org-locked deny line
+	// links the request form under (request-grants G4; stamped by
+	// stampOrgOverride from SetRequestAccessBase, "" = the CLI command
+	// only). Derived state like Overridable/OrgLocked, never persisted.
+	RequestBase string
+	// softenedBy is a soften grant offered to the developer WITHOUT
+	// counting a use (orggrant.go approvalOutcome); it steers the deny
+	// text only. Derived state, never persisted.
+	softenedBy int64
 }
 
 // watcherCaps are the post-hoc channel capabilities (spec §3.3): the
@@ -177,6 +207,17 @@ func (g *Guard) EvaluateActions(inputs []ActionInput) []ActionVerdict {
 			g.taint.NoteCompaction(in.SessionID)
 			continue
 		}
+		// The developer's own prompt, captured after it was sent: the
+		// post-hoc prompt lane (posthocprompt.go). Before 2026-10-02 this
+		// fell through to classifyKind, which skips prompts, so a tool
+		// with no pre-send seam (agy, most of the fleet) recorded NOTHING
+		// for a secret typed into a prompt.
+		if in.ActionType == models.ActionUserPrompt {
+			if av, ok := g.evaluateCapturedPrompt(es, in); ok {
+				out = append(out, av)
+			}
+			continue
+		}
 		kind, evaluable := classifyKind(in.ActionType)
 		if !evaluable {
 			continue
@@ -197,9 +238,14 @@ func (g *Guard) EvaluateActions(inputs []ActionInput) []ActionVerdict {
 			// run length.
 			RepeatCount: g.repeats.Observe(in.SessionID, in.ActionType, in.Target),
 		}
-		g.stampBudgetSnapshot(&ev, false, es.accountingContext(false))
+		g.stampBudgetIfRead(es, &ev, false, es.accountingContext(false))
 		verdict, guardErr := g.evaluateWith(es, ev)
-		verdict, approved := g.applyApprovals(verdict, &ev)
+		if guardErr == nil {
+			verdict = g.labelOrgBudgetVerdict(verdict)
+		}
+		// Post-hoc lane: org grants never apply here (lane ""), the gate
+		// lane already decided and counted the call.
+		verdict, appr := g.applyApprovals(verdict, &ev, "")
 		if isBudgetRuleID(verdict.RuleID) && guardErr == nil &&
 			g.budgetAlreadyRecorded(in.SessionID, verdict.RuleID) {
 			// A budget breach records once per (session, rule) across
@@ -220,9 +266,7 @@ func (g *Guard) EvaluateActions(inputs []ActionInput) []ActionVerdict {
 				GuardError:  guardErr != nil,
 			}
 			g.stampOrgOverride(es, &av)
-			if approved {
-				av.DegradedFrom = "approved"
-			}
+			appr.stamp(&av)
 			out = append(out, av)
 		}
 		g.markTaint(in, kind, verdict)

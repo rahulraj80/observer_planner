@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
+	"github.com/marmutapp/superbased-observer/internal/codeintelapi"
 )
 
 // This file is P2.3 of the corpus archival arc
@@ -32,7 +32,7 @@ import (
 // an empty project key yields ("", false), which leaves the caller emitting
 // exactly the response it emitted before this arc existed. A wrong "archived"
 // claim would be worse than the silence it replaces.
-func archivedNote(ctx context.Context, cg codeintel.Provider, project string) (string, bool) {
+func archivedNote(ctx context.Context, cg codeintelapi.Provider, project string) (string, bool) {
 	if cg == nil || project == "" {
 		return "", false
 	}

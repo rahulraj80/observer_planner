@@ -99,3 +99,23 @@ test("permissionNamedIn: finds a key, ignores prose", () => {
   assert.equal(permissionNamedIn(""), null);
   assert.equal(permissionNamedIn(null), null);
 });
+
+// A 404 component_not_installed (modular packaging plan 7.3) is its own
+// class: the read belongs to an inactive component. Every other 404, and the
+// same body on another status, is not.
+test("notInstalled reads the component_not_installed 404 only", () => {
+  class BodyError extends FakeApiError {
+    readonly body: string;
+    constructor(status: number, body: string) {
+      super(status, "/api/terminal/runs", body);
+      this.body = body;
+    }
+  }
+  const body = JSON.stringify({ error: "component_not_installed", component: "terminals", state: "available" });
+  assert.deepEqual(describeApiFailure(new BodyError(404, body)).notInstalled, { component: "terminals", state: "available" });
+  assert.equal(describeApiFailure(new BodyError(404, body)).denied, false);
+  assert.equal(describeApiFailure(new BodyError(404, '{"error":"not_found"}')).notInstalled, null);
+  assert.equal(describeApiFailure(new BodyError(500, body)).notInstalled, null);
+  assert.equal(describeApiFailure(new FakeApiError(404, "/x", body)).notInstalled, null);
+  assert.equal(describeApiFailure(new Error("boom")).notInstalled, null);
+});

@@ -1,0 +1,1920 @@
+{
+ "group": "zed",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/zed-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "zed.client.acp_logs",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.client",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "session",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "in-editor `dev: open acp logs`",
+   "read_write_doc": "R (UI)",
+   "class_doc": "Telemetry (ACP protocol)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/ai/external-agents",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Debug view of Zed to External Agent messages",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.client.byok_route",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.client",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "provider key in OS keychain or env"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "provider"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "language_models.<provider>.api_url + custom_headers (\"useful for observability tooling\"); Bedrock ZED_AWS_ENDPOINT",
+   "read_write_doc": "R (via Observer proxy)",
+   "class_doc": "Usage (via proxy)",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable (documented settings)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/ai/use-api-access",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/ai/use-a-gateway",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "The only interception point for Zed Agent BYOK traffic; hosted Zed traffic cannot be routed",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.client.settings_json",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.client",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file system"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "live reload",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "FileProjection: user settings.json + project .zed/settings.json + profiles; keys agent.tool_permissions, agent.sandbox_permissions, context_servers, agent_servers, language_models.*.api_url/custom_headers, disable_ai, edit_predictions.provider/disabled_globs, telemetry.*, proxy, auto_install_extensions, session.trust_all_worktrees",
+   "read_write_doc": "R+W (file)",
+   "class_doc": "Policy (node-side)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable as a node file (documented schema), NOT admin-enforceable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/reference/all-settings",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/ai/tool-permissions",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/ai/sandboxing",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/ai/mcp",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/ai/external-agents",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "No system/managed layer (issue #22612 closed not planned). Any user can edit back",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.client.telemetry_log",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.client",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "session",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "in-editor viewer `zed: open telemetry log` (Help > View Telemetry Log)",
+   "read_write_doc": "R (UI)",
+   "class_doc": "Telemetry",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/telemetry",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Shows what is sent to Zed (Sentry/Snowflake); no OTLP, no user endpoint",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.client.threads_db",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.client",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file system"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local forever",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "local SQLite threads.db (zstd JSON blobs)",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Usage, Content",
+   "grain_doc": "PerSession (+ per-request token usage)",
+   "build": "buildable",
+   "build_doc": "Driverable (Observer adapter already ships)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/zed-industries/zed/discussions/48083",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Join key threads.id; request_token_usage net of cache read",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.cloud.feedback",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.cloud",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "end-user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any (Business: blocked unless admin enables)"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "stored in Snowflake, period not stated",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "POST /client/feedback/agent_thread, /agent_thread_comments, /edit_prediction",
+   "read_write_doc": "W (to Zed)",
+   "class_doc": "Content (outbound to Zed only)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/zed-industries/zed/main/crates/cloud_api_client/src/cloud_api_client.rs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/ai/ai-improvement",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Content goes to Zed, never returned to customer",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.cloud.llm_tokens",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.cloud",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "end-user credentials"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any signed-in with hosted access"
+   },
+   "freshness_doc": "per request",
+   "lookback_doc": "short-lived JWT",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "POST https://cloud.zed.dev/client/llm_tokens {organization_id}",
+   "read_write_doc": "W (mint)",
+   "class_doc": "Credentials (short-lived)",
+   "grain_doc": "PerCall",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/zed-industries/zed/main/crates/cloud_api_client/src/cloud_api_client.rs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://deepwiki.com/zed-industries/zed/9.2-terminal-view-and-rendering",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Selects which org pays for hosted traffic. Not an admin credential surface",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.cloud.system_settings",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.cloud",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "end-user, x-zed-system-id required"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "PATCH https://cloud.zed.dev/client/system_settings {selected_organization_id}",
+   "read_write_doc": "W",
+   "class_doc": "Policy (selected org)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/zed-industries/zed/main/crates/cloud_api_client/src/cloud_api_client.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Which org a machine bills to",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.cloud.usage_headers",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.cloud",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "end-user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Pro, Business, Free (edit predictions)"
+   },
+   "freshness_doc": "per call",
+   "lookback_doc": "none",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "response headers on hosted LLM / edit prediction calls (model requests and edit predictions usage amount / limit, subscription limit resource)",
+   "read_write_doc": "R (node-observable)",
+   "class_doc": "Usage, Limits",
+   "grain_doc": "PerCall",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "per_call",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.rs/zed_llm_client/latest/zed_llm_client/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Internal crate constants; legacy request-count model, token-based pricing since 2025",
+   "derivation": {
+    "reach_rule": "in_band",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.cloud.users_me",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.cloud",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "end-user Zed credentials, header `Authorization: <user_id> <access_token>` (no Bearer), optional x-zed-system-id"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any signed-in"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "current only",
+   "per_user_doc": "per-user (self)",
+   "mechanism_doc": "GET https://cloud.zed.dev/client/users/me (GetAuthenticatedUserResponse: organizations, default_organization_id, plans_by_organization, configuration_by_organization, plan{plan_v3, subscription_period, usage, has_overdue_invoices}, feature_flags)",
+   "read_write_doc": "R",
+   "class_doc": "Policy, Identity, Usage",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (undocumented internal client contract, source only, user credential)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/zed-industries/zed/main/crates/cloud_api_types/src/cloud_api_types.rs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/zed-industries/zed/main/crates/cloud_api_types/src/plan.rs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/zed-industries/zed/main/crates/cloud_api_client/src/cloud_api_client.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "This is HOW the editor learns the org's toggles (4 bools + edit_prediction pair). Join key: organization_id. Not an admin API: no member list, no spend limit field, no other users",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.billing_details",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner/Admin/Billing Manager"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Pro, Business"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "UI Billing page",
+   "read_write_doc": "R+W (UI)",
+   "class_doc": "BillingExport (payment, tax ID)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/account/billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Failed payment blocks hosted models",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.billing_usage",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Owner/Admin/Billing Manager"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Pro (personal), Business"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "not stated",
+   "per_user_doc": "aggregate (per-member undocumented)",
+   "mechanism_doc": "UI Billing page, embedded Orb portal",
+   "read_write_doc": "R (UI)",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "aggregate per org per billing period (granularity undocumented)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "usd_micros",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/account/billing",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/account/plans-and-pricing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Unit: tokens metered to USD at provider list +10%. No CSV, no API",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.data_privacy_controls",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "immediate server-side; Collaboration client-side, Zed >= 0.233",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate (all members; members cannot override)",
+   "mechanism_doc": "UI Data & Privacy: Zed Model Provider, Edit Prediction (+ Edit Prediction Feedback sub-toggle), Agent Thread Feedback, Collaboration",
+   "read_write_doc": "R+W (UI)",
+   "class_doc": "Policy, Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/business/admin-controls",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/business/privacy",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Excludes BYOK, gateways, local models, External Agents, Terminal Threads, extensions. Business defaults: feedback off, collaboration off",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.invoice_history",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner/Admin/Billing Manager"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Pro, Business"
+   },
+   "freshness_doc": "monthly + threshold invoices (Pro)",
+   "lookback_doc": "history in portal (period not stated)",
+   "per_user_doc": "aggregate (one consolidated org bill, no per-member invoices)",
+   "mechanism_doc": "UI Orb portal \"Invoice history\"; older Stripe invoices by email to billing-support@zed.dev",
+   "read_write_doc": "R (UI, manual download)",
+   "class_doc": "BillingExport",
+   "grain_doc": "per invoice",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/account/billing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Historical invoices immutable; tax via Sphere",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.member_invite",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "UI \"+ Invite Member\" (email + role), email join link",
+   "read_write_doc": "W (UI)",
+   "class_doc": "Identity (MemberProvision)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/roles",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Invitee must sign in with GitHub. No domain capture, no JIT",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.member_role_remove",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner/Admin (Owner-only: cancel, transfer ownership)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "UI per-member three-dot menu: change role, Remove",
+   "read_write_doc": "W (UI)",
+   "class_doc": "Roles, Identity",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/roles",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/business/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Removal keeps personal account and other org memberships",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.member_spend_view",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "not stated",
+   "per_user_doc": "per-user (claimed)",
+   "mechanism_doc": "UI (marketing claim only)",
+   "read_write_doc": "R (UI)",
+   "class_doc": "Cost",
+   "grain_doc": "per member (claimed)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (unverified)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/business",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/blog/zed-for-business",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "\"Track hosted AI spend per member\" on marketing page and v1.1 launch post; no docs page describes it",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.members",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "GitHub sign-in; Owner/Admin manage; Billing Manager and Member view list"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "current only",
+   "per_user_doc": "per-user",
+   "mechanism_doc": "UI dashboard.zed.dev > org > Members (list, filter by role, search)",
+   "read_write_doc": "R+W (UI)",
+   "class_doc": "Identity, Roles, Seats",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/business/organizations",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/roles",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Join key: invite email + GitHub account. Billing Manager consumes no seat. No export, no API",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.org_create_switch",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "GitHub sign-in"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "UI dashboard.zed.dev/create-organization; org switcher in dashboard and editor title bar",
+   "read_write_doc": "W (UI)",
+   "class_doc": "Projects (org container)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/business/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Org is the only container; personal org always exists; multi-org membership",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.org_spend_limit",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Owner/Admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business"
+   },
+   "freshness_doc": "immediate (hosted requests error when reached)",
+   "lookback_doc": "n/a",
+   "per_user_doc": "aggregate (org)",
+   "mechanism_doc": "UI Data & Privacy page, pre-tax org-wide USD cap on hosted models",
+   "read_write_doc": "R+W (UI)",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitOrg",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/account/billing",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/account/plans-and-pricing",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/blog/zed-for-business",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Default $0 (must be raised). Reset cadence undocumented. No per-member/per-group cap, no alerts",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.dashboard.pro_spend_limit",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.dashboard",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "the individual user"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Pro"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "monthly",
+   "per_user_doc": "per-user (self only)",
+   "mechanism_doc": "UI Billing page \"Monthly Spend Limit\" (personal org)",
+   "read_write_doc": "R+W (UI, self)",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/account/plans-and-pricing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Default $10 above $5 credit; Student fixed $10 credit cap. Not an admin control over org members",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.public.agent_metrics",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.public",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "public"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "weekly (last 2026-10-05)",
+   "lookback_doc": "default 30 d view",
+   "per_user_doc": "aggregate anonymized across all users",
+   "mechanism_doc": "public web page",
+   "read_write_doc": "R (UI)",
+   "class_doc": "Adoption (cross-customer)",
+   "grain_doc": "weekly aggregate per agent",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (not org-scoped)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/agent-metrics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "\"We do not track or expose individual user metrics\"; no org view, no export",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.public.hosted_models_pricing",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.public",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "public"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "changes with docs",
+   "lookback_doc": "current only",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "HTML docs page, per-1M-token prices for 31 hosted models (provider list +10%)",
+   "read_write_doc": "R",
+   "class_doc": "Cost (rate card)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (HTML, no machine contract)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/account/zed-hosted-models",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Use to estimate hosted spend from node token counts",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "zed.public.privacy_retention_docs",
+   "vendor_group": "zed",
+   "vendor": "zed",
+   "plane": "zed.public",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "public"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Business defaults enforced"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "docs statements: ZDR with Anthropic/OpenAI/Google except provider safety-retention models (Anthropic Covered Models, at least 30 d); feedback in Snowflake",
+   "read_write_doc": "R (docs)",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://zed.dev/docs/business/privacy",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/account/zed-hosted-models",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://zed.dev/docs/ai/ai-improvement",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "No residency statement anywhere",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

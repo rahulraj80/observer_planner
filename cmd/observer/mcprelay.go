@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 import (
@@ -46,7 +48,7 @@ func newMCPRelayCmd() *cobra.Command {
 			"MCP traffic against the organization's signed tools.mcp_access grant\n" +
 			"(local PDP + hash-chained decision record), and inspect what the\n" +
 			"best-effort node points (proxy tools[] filter, PreToolUse hook deny,\n" +
-			"config projection) actually cover — the coverage-honesty matrix.\n\n" +
+			"config projection) actually cover - the coverage-honesty matrix.\n\n" +
 			mcpRelayRestartNote,
 	}
 	cmd.AddCommand(newMCPRelayStatusCmd())
@@ -126,7 +128,7 @@ func newMCPRelayStatusCmd() *cobra.Command {
 				fmt.Fprintf(out, "table: version=%d mode=%s rows=%d policy_gen=%d cache=%s\n", s.TableVersion, s.TableMode, s.TableRows, s.PolicyGen, s.CachePath)
 				fmt.Fprintf(out, "approved vservers: %s\n", strings.Join(s.ApprovedVServers, ", "))
 			} else {
-				fmt.Fprintf(out, "table: none loaded (cache %s) — no tools.mcp_access resource accepted yet, or the relay is disabled\n", s.CachePath)
+				fmt.Fprintf(out, "table: none loaded (cache %s) - no tools.mcp_access resource accepted yet, or the relay is disabled\n", s.CachePath)
 			}
 			r := s.RemoteForwarding
 			if r.Wired {
@@ -249,7 +251,7 @@ func printProjectionReport(out func(string, ...any), rep project.Report, remoteS
 			out("mcp-relay project: %s skipped (%s)", r.Client.Tool, r.Skipped)
 		case r.Changed:
 			changed++
-			out("mcp-relay project: %s %s wrapped=[%s] remote=[%s] backup=%s", r.Client.Tool, r.Client.ConfigPath, strings.Join(r.Wrapped, ","), strings.Join(r.Remote, ","), r.BackupPath)
+			out("mcp-relay project: %s %s wrapped=[%s] remote=[%s]", r.Client.Tool, r.Client.ConfigPath, strings.Join(r.Wrapped, ","), strings.Join(r.Remote, ","))
 		default:
 			out("mcp-relay project: %s %s already projected (no change)", r.Client.Tool, r.Client.ConfigPath)
 		}
@@ -338,7 +340,7 @@ func printRestoreReport(out func(string, ...any), recs []project.RestoreReceipt)
 			restored++
 			note := ""
 			if r.Note != "" {
-				note = " — " + r.Note
+				note = " - " + r.Note
 			}
 			out("mcp-relay restore: %s %s restored (%s, rule %s, %d row(s))%s", r.Client.Tool, r.Client.ConfigPath, r.Mode, r.Rule, r.Rows, note)
 		}
@@ -448,7 +450,7 @@ func newMCPRelayWrapCmd() *cobra.Command {
 			}
 			defer cleanup()
 			if !cfg.MCPRelay.Enabled {
-				return errors.New("mcp-relay wrap: [mcp_relay].enabled is false — run `observer mcp-relay restore` to put the original client config back")
+				return errors.New("mcp-relay wrap: [mcp_relay].enabled is false - run `observer mcp-relay restore` to put the original client config back")
 			}
 			logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: slog.LevelWarn}))
 			st := store.New(database)

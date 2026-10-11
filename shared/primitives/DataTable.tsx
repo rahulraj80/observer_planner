@@ -43,6 +43,16 @@ const SORT_GLYPH: Record<"asc" | "desc" | "none", LucideIcon> = {
   none: ChevronsUpDown,
 };
 
+/**
+ * headerColSpan is the `colSpan` a header cell renders: the number of leaf
+ * columns it covers when that is more than one (a grouped column's header, or
+ * a placeholder over a grouped row), else undefined so a plain table's
+ * markup is unchanged.
+ */
+export function headerColSpan(h: { colSpan: number }): number | undefined {
+  return h.colSpan > 1 ? h.colSpan : undefined;
+}
+
 export type DataTableProps<T> = {
   data: T[];
   columns: ColumnDef<T, any>[];
@@ -302,15 +312,34 @@ export function DataTable<T>({
           {table.getHeaderGroups().map((hg) => (
             <tr key={hg.id} className="border-b border-line-2">
               {hg.headers.map((h) => {
+                // Grouped columns (a columnDef with `columns`): the group's
+                // header cell spans its leaf columns, and a leaf column with
+                // no group gets an empty placeholder cell on the group row.
+                // Without colSpan every group header took one column and the
+                // rows below no longer lined up.
+                const span = headerColSpan(h);
+                if (h.isPlaceholder) {
+                  return (
+                    <th
+                      key={h.id}
+                      colSpan={span}
+                      aria-hidden
+                      className={clsx("bg-bg-2 py-head", stickyHeader && "sticky top-0 z-10")}
+                    />
+                  );
+                }
+                const isGroup = h.subHeaders.length > 0;
                 const canSort = h.column.getCanSort();
                 const sorted = h.column.getIsSorted();
                 const right = h.column.columnDef.meta?.align === "right";
                 return (
                   <th
                     key={h.id}
+                    colSpan={span}
+                    scope={isGroup ? "colgroup" : undefined}
                     className={clsx(
                       "group/th whitespace-nowrap bg-bg-2 py-head font-medium",
-                      right ? "px-cell-num text-right" : "px-cell",
+                      isGroup ? "px-cell text-center text-fg-2" : right ? "px-cell-num text-right" : "px-cell",
                       stickyHeader && "sticky top-0 z-10",
                       canSort && "cursor-pointer select-none hover:text-fg-1",
                     )}
@@ -542,7 +571,7 @@ export function Pagination({
   return (
     <div className="flex items-center justify-between gap-3 pt-3 text-[11px] text-fg-3">
       <span>
-        {start.toLocaleString()}–{end.toLocaleString()} of{" "}
+        {start.toLocaleString()}-{end.toLocaleString()} of{" "}
         {total.toLocaleString()}
         {loading && <Spinner className="ml-2 align-[-2px]" />}
       </span>

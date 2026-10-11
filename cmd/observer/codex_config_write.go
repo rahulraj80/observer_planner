@@ -70,7 +70,7 @@ func writeCodexConfigBaseURL(configPath, targetURL, stamp string) (string, error
 	}
 
 	backupPath := configPath + ".bak." + stamp
-	if err := os.WriteFile(backupPath, existing, 0o600); err != nil {
+	if err := os.WriteFile(backupPath, existing, 0o600); err != nil { //nolint:gosec // G703: the codex config path resolved from the operator's own CODEX_HOME or home
 		return "", fmt.Errorf("backup %s: %w", backupPath, err)
 	}
 

@@ -108,6 +108,10 @@ func TestProcessLunaCompletion(t *testing.T) {
 		return string(b)
 	}
 	const secret = "AKIA1234567890ABCDEF" // AWS access-key shape — reliably masked
+	// A completion cut at max_output_tokens (D-313, T-414: the GPT-6 Luna
+	// route caps the answer at 1024 tokens and accepts the residual risk).
+	full := result("A title", []string{"metrics", "a1"})
+	truncated := full[:len(full)/2]
 
 	cases := []struct {
 		name          string
@@ -157,6 +161,11 @@ func TestProcessLunaCompletion(t *testing.T) {
 			},
 		},
 		{name: "unparseable", content: "not json", wantRejectSub: "unparseable output"},
+		// Truncation at the output cap never yields a partial result: the cut
+		// answer is incomplete JSON, and a reasoning model that spent the whole
+		// cap on reasoning returns empty content. Both are rejected.
+		{name: "truncated_mid_json", content: truncated, wantRejectSub: "unparseable output"},
+		{name: "truncated_empty_content", content: "", wantRejectSub: "unparseable output"},
 		{name: "control_char", content: result("bad\x00title", nil), wantRejectSub: "validate:"},
 		{name: "bad_enum", content: `{"title":"t","description":"d","confidence":"SUPER","schema_version":"` + cloudcontract.ResultSchemaVersion + `"}`, wantRejectSub: "validate:"},
 		{name: "oversize_title", content: result(strings.Repeat("x", 5000), nil), wantRejectSub: "validate:"},
@@ -216,6 +225,30 @@ func TestProcessLunaCompletion(t *testing.T) {
 				t.Fatalf("unexpected rejection: %s", rejection)
 			}
 			c.assert(t, got)
+		})
+	}
+}
+
+// TestInvalidOutputDetailNamesTruncation pins the attempt-ledger label for a
+// completion cut at max_output_tokens (D-313, T-414), so an operator can count
+// how often the deliberate cap truncates an answer. Any other rejection keeps
+// its detail verbatim.
+func TestInvalidOutputDetailNamesTruncation(t *testing.T) {
+	cases := []struct {
+		name   string
+		finish string
+		want   string
+	}{
+		{name: "cut at the cap", finish: foundry.FinishLength, want: "truncated at max_output_tokens (finish_reason=length): unparseable output"},
+		{name: "normal stop", finish: "stop", want: "unparseable output"},
+		{name: "no finish reason", finish: "", want: "unparseable output"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := jobs.InvalidOutputDetail(foundry.Response{FinishReason: c.finish}, "unparseable output")
+			if got != c.want {
+				t.Fatalf("detail = %q, want %q", got, c.want)
+			}
 		})
 	}
 }

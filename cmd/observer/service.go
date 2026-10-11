@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/service"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve"
 )
@@ -69,7 +71,7 @@ var lingerRunner = func(username string) (string, error) {
 func lingerAdvice(username, out string, err error) string {
 	if err != nil {
 		return fmt.Sprintf(
-			"Warning: could not check linger status for %s (%v) — if `systemctl --user start\n"+
+			"Warning: could not check linger status for %s (%v) - if `systemctl --user start\n"+
 				"observer.service` stops working after you log out, run: loginctl enable-linger %s\n",
 			username, err, username)
 	}
@@ -77,7 +79,7 @@ func lingerAdvice(username, out string, err error) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"Note: linger is not enabled for %s — a --user unit only starts at login and stops\n"+
+		"Note: linger is not enabled for %s - a --user unit only starts at login and stops\n"+
 			"at logout without it, and `systemctl --user` needs the user bus that linger keeps\n"+
 			"alive across logout. Run:\n    loginctl enable-linger %s\n",
 		username, username)
@@ -105,16 +107,18 @@ func newServiceCmd() *cobra.Command {
 			"headless box (e.g. a worker node running as root) so the daemon\n" +
 			"survives logout. Subcommands:\n" +
 			"    observer service install [--now]   write the unit + reload\n" +
+			"    observer service upgrade           point the unit at this binary after an upgrade\n" +
 			"    observer service start|stop|status|restart\n" +
 			"    observer service logs [-f]         journalctl for the unit\n" +
 			"    observer service uninstall         stop + disable + remove\n\n" +
 			"Note: `observer start` IS the proxy on :8820. Restarting the\n" +
 			"service while a live session routes through the proxy will drop\n" +
-			"that session — turn the route off first (see\n" +
+			"that session - turn the route off first (see\n" +
 			"docs/daemon-restart-runbook.md).",
 	}
 	cmd.AddCommand(
 		newServiceInstallCmd(),
+		newServiceUpgradeCmd(),
 		newServiceLifecycleCmd("start", "Start the observer service"),
 		newServiceLifecycleCmd("stop", "Stop the observer service"),
 		newServiceLifecycleCmd("restart", "Restart the observer service (drops active proxy sessions)"),
@@ -133,8 +137,9 @@ func resolveScope(system bool) service.Scope {
 	return service.ScopeUser
 }
 
-// systemdAvailable reports whether a systemd manager is present.
-func systemdAvailable() bool {
+// systemdAvailable reports whether a systemd manager is present. A package
+// var so tests can stand in for a systemd host.
+var systemdAvailable = func() bool {
 	_, err := os.Stat("/run/systemd/system")
 	return err == nil
 }
@@ -164,7 +169,11 @@ func newServiceInstallCmd() *cobra.Command {
 			"--user, /etc/systemd/system/ for --system), and runs\n" +
 			"daemon-reload. The --config/--recipe/--port you pass here are\n" +
 			"baked into the unit's ExecStart so the service uses the same\n" +
-			"configuration. Pass --now to enable + start immediately.",
+			"configuration. Pass --now to enable + start immediately. On a\n" +
+			"unit that is already running an older process (an upgraded binary,\n" +
+			"new arguments), --now restarts it (systemctl try-restart) only when\n" +
+			"nothing routes through the proxy; otherwise it prints the safe order\n" +
+			"and leaves the running daemon alone (docs/daemon-restart-runbook.md).",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runServiceInstall(serviceInstallOptions{
 				scope:      resolveScope(system),
@@ -177,7 +186,7 @@ func newServiceInstallCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&system, "system", false, "Install a system unit (/etc/systemd/system, requires root) instead of a --user unit")
-	cmd.Flags().BoolVar(&now, "now", false, "Enable + start the service immediately after installing")
+	cmd.Flags().BoolVar(&now, "now", false, "Enable + start the service immediately after installing (a running service is restarted only when nothing routes through the proxy)")
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml to bake into the unit (defaults to the daemon's own lookup)")
 	cmd.Flags().StringVar(&recipe, "recipe", "", "Compression recipe to bake into the unit")
 	cmd.Flags().IntVar(&port, "port", 0, "Proxy port to bake into the unit (0 = config default)")
@@ -190,7 +199,26 @@ type serviceInstallOptions struct {
 	configPath string
 	recipe     string
 	port       int
-	stdout     interface{ Write([]byte) (int, error) }
+	// upgrade is `observer service upgrade`: the unit must exist, its
+	// ExecStart arguments are kept (only the executable becomes this
+	// binary), and a stopped unit is left stopped.
+	upgrade bool
+	stdout  io.Writer
+	// deps are the injected I/O (zero value = production).
+	deps serviceInstallDeps
+}
+
+// serviceInstallDeps are runServiceInstall's I/O seams, so tests can run it
+// without systemd, a login shell or loginctl.
+type serviceInstallDeps struct {
+	// exe is the binary the unit names ("" = this process's own binary).
+	exe string
+	// pathDirs returns the unit's PATH dirs (nil = the merged login PATH).
+	pathDirs func() []string
+	// linger returns the linger note for the user scope (nil = loginctl).
+	linger func() string
+	// probe is the systemctl / process / route I/O (nil = production).
+	probe *serviceProbe
 }
 
 func runServiceInstall(opts serviceInstallOptions) error {
@@ -198,27 +226,41 @@ func runServiceInstall(opts serviceInstallOptions) error {
 		return errNoSystemd
 	}
 	if opts.scope == service.ScopeSystem && os.Geteuid() != 0 {
-		return errors.New("--system installs to /etc/systemd/system and requires root; re-run with sudo, or drop --system for a per-user unit")
-	}
-
-	exe, err := absoluteBinaryPath()
-	if err != nil {
-		return fmt.Errorf("resolve observer binary: %w", err)
-	}
-
-	var args []string
-	if opts.configPath != "" {
-		abs, aerr := filepath.Abs(opts.configPath)
-		if aerr != nil {
-			abs = opts.configPath
+		verb := "installs to"
+		if opts.upgrade {
+			verb = "rewrites"
 		}
-		args = append(args, "--config", abs)
+		return fmt.Errorf("--system %s /etc/systemd/system and requires root; re-run with sudo, or drop --system for a per-user unit", verb)
 	}
-	if opts.recipe != "" {
-		args = append(args, "--recipe", opts.recipe)
+	probe := defaultServiceProbe()
+	if opts.deps.probe != nil {
+		probe = *opts.deps.probe
 	}
-	if opts.port > 0 {
-		args = append(args, "--port", strconv.Itoa(opts.port))
+
+	exe := opts.deps.exe
+	if exe == "" {
+		resolved, err := absoluteBinaryPath()
+		if err != nil {
+			return fmt.Errorf("resolve observer binary: %w", err)
+		}
+		exe = resolved
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil && opts.scope == service.ScopeUser {
+		return fmt.Errorf("resolve home dir: %w", err)
+	}
+	unitPath := service.UnitPath(opts.scope, home)
+	oldExecStart := ""
+	if old, rerr := os.ReadFile(unitPath); rerr == nil { //nolint:gosec // the unit path is fixed by scope
+		oldExecStart = service.ExecStartLine(string(old))
+	} else if opts.upgrade {
+		return fmt.Errorf("%s", serviceUpgradeNoUnitMessage(service.UnitName, unitPath, scopeFlagSuffix(opts.scope)))
+	}
+
+	args, err := serviceUnitArgs(&opts, unitPath, oldExecStart, exe)
+	if err != nil {
+		return err
 	}
 
 	// The unit's PATH is the daemon's own merged (process + login-shell)
@@ -229,7 +271,12 @@ func runServiceInstall(opts serviceInstallOptions) error {
 	// toolresolve.Env every launcher in this process uses (launch.go);
 	// reusing it here means `install` pays the up-to-~6s login-shell
 	// capture at most once even if a future caller resolves a tool first.
-	pathDirs, _ := toolresolve.MergedPathDirs(resolveEnv())
+	var pathDirs []string
+	if opts.deps.pathDirs != nil {
+		pathDirs = opts.deps.pathDirs()
+	} else {
+		pathDirs, _ = toolresolve.MergedPathDirs(resolveEnv())
+	}
 	pathEnv := unitPathEnv(pathDirs)
 	if pathEnv == "" {
 		fmt.Fprintf(opts.stdout, "unit PATH = %s (fallback: could not resolve the operator's PATH)\n", service.DefaultPath)
@@ -237,13 +284,9 @@ func runServiceInstall(opts serviceInstallOptions) error {
 		fmt.Fprintf(opts.stdout, "unit PATH = %s\n", pathEnv)
 	}
 
-	unit := service.RenderUnit(service.UnitOptions{ExecPath: exe, Args: args, Scope: opts.scope, Path: pathEnv})
+	snap := componentSnapshotFor(opts.configPath)
+	unit := service.RenderUnit(service.UnitOptions{ExecPath: exe, Args: args, Scope: opts.scope, Path: pathEnv, Runs: serviceRuns(snap.Active)})
 
-	home, err := os.UserHomeDir()
-	if err != nil && opts.scope == service.ScopeUser {
-		return fmt.Errorf("resolve home dir: %w", err)
-	}
-	unitPath := service.UnitPath(opts.scope, home)
 	if mkErr := os.MkdirAll(filepath.Dir(unitPath), 0o755); mkErr != nil {
 		return fmt.Errorf("create unit dir: %w", mkErr)
 	}
@@ -261,34 +304,186 @@ func runServiceInstall(opts serviceInstallOptions) error {
 	// fail outright. Detected, never run — the operator runs the printed
 	// command themselves.
 	if opts.scope == service.ScopeUser {
-		if u, uerr := user.Current(); uerr == nil {
-			if note := lingerNoticeFor(u.Username); note != "" {
-				fmt.Fprint(opts.stdout, "\n"+note)
-			}
+		note := ""
+		if opts.deps.linger != nil {
+			note = opts.deps.linger()
+		} else if u, uerr := user.Current(); uerr == nil {
+			note = lingerNoticeFor(u.Username)
+		}
+		if note != "" {
+			fmt.Fprint(opts.stdout, "\n"+note)
 		}
 	}
 
-	if rErr := runServiceCommand(service.Systemctl(opts.scope, "daemon-reload")); rErr != nil {
+	if rErr := probe.run(service.Systemctl(opts.scope, "daemon-reload")); rErr != nil {
 		return fmt.Errorf("systemctl daemon-reload: %w", rErr)
 	}
 
-	if opts.now {
-		if eErr := runServiceCommand(service.Systemctl(opts.scope, "enable", service.UnitName)); eErr != nil {
-			return fmt.Errorf("systemctl enable: %w", eErr)
-		}
-		if sErr := runServiceCommand(service.Systemctl(opts.scope, "start", service.UnitName)); sErr != nil {
-			return fmt.Errorf("systemctl start: %w", sErr)
-		}
-		fmt.Fprintln(opts.stdout, "Service enabled + started.")
-	} else {
-		fmt.Fprintf(opts.stdout, "Installed (not started). Start it with:\n    observer service start%s\n",
-			scopeFlagSuffix(opts.scope))
+	refresh := serviceRefresh{
+		scope: opts.scope, exe: exe, oldExecStart: oldExecStart, newExecStart: service.ExecStartLine(unit),
+		startIfInactive: opts.now && !opts.upgrade, port: serviceProxyPort(opts.configPath, opts.port), w: opts.stdout,
 	}
-	fmt.Fprintln(opts.stdout,
-		"\nNote: the service IS the proxy on :8820. Before `observer service restart`\n"+
-			"while a session routes through the proxy, turn the route off first\n"+
-			"(see docs/daemon-restart-runbook.md).")
+	if opts.now || opts.upgrade {
+		if err := applyServiceRefresh(refresh, probe); err != nil {
+			return err
+		}
+	} else {
+		reportInstalledNotStarted(refresh, probe)
+	}
+	fmt.Fprintln(opts.stdout, serviceRestartNote(snap.Active("capture.proxy")))
 	return nil
+}
+
+// reportInstalledNotStarted is `install` without --now: it starts nothing and
+// restarts nothing, but no longer says "not started" about a running unit
+// (T-753).
+func reportInstalledNotStarted(r serviceRefresh, p serviceProbe) {
+	suffix := scopeFlagSuffix(r.scope)
+	active, pid, err := p.show(r.scope)
+	if err != nil || !active {
+		fmt.Fprintf(r.w, "Installed (not started). Start it with:\n    observer service start%s\n", suffix)
+		return
+	}
+	link, lerr := p.readExe(pid)
+	if lerr == nil && !runningExeDiffers(link, r.exe) && (r.oldExecStart == "" || r.oldExecStart == r.newExecStart) {
+		fmt.Fprintf(r.w, "Installed. The service is already running this binary (pid %d).\n", pid)
+		return
+	}
+	fmt.Fprintf(r.w, "Installed. The service is running (pid %d) and keeps its current process until restarted:\n"+
+		"    observer service install --now%s\n"+
+		"restarts it now if no proxy route or proxied session is live, and otherwise says what to run.\n", pid, suffix)
+}
+
+// serviceUnitArgs returns the `observer start` arguments the unit runs. An
+// upgrade keeps what `observer service install` baked in (only the
+// executable moves to exe) and fills opts.configPath / opts.port from them;
+// an install builds them from its flags.
+func serviceUnitArgs(opts *serviceInstallOptions, unitPath, oldExecStart, exe string) ([]string, error) {
+	if opts.upgrade {
+		oldExe, kept, ok := service.SplitExecStart(oldExecStart)
+		if !ok {
+			return nil, fmt.Errorf("%s runs %q, not `<observer> start ...`; rewrite it with: observer service install --now%s", unitPath, oldExecStart, scopeFlagSuffix(opts.scope))
+		}
+		opts.configPath, opts.port = serviceArgValue(kept, "--config"), atoiOrZero(serviceArgValue(kept, "--port"))
+		if filepath.Clean(oldExe) != filepath.Clean(exe) {
+			fmt.Fprintf(opts.stdout, "The unit ran %s; it now runs %s.\n", oldExe, exe)
+		}
+		return kept, nil
+	}
+	var args []string
+	if opts.configPath != "" {
+		abs, aerr := filepath.Abs(opts.configPath)
+		if aerr != nil {
+			abs = opts.configPath
+		}
+		args = append(args, "--config", abs)
+	}
+	if opts.recipe != "" {
+		args = append(args, "--recipe", opts.recipe)
+	}
+	if opts.port > 0 {
+		args = append(args, "--port", strconv.Itoa(opts.port))
+	}
+	return args, nil
+}
+
+// serviceArgValue returns the value after flag in a unit's ExecStart
+// arguments ("" when absent).
+func serviceArgValue(args []string, flag string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func atoiOrZero(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// serviceProxyPort is the proxy port the unit's daemon listens on: the
+// baked --port, else the config's [proxy] port, else 8820.
+func serviceProxyPort(configPath string, port int) int {
+	if port > 0 {
+		return port
+	}
+	if cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath}); err == nil && cfg.Proxy.Port > 0 {
+		return cfg.Proxy.Port
+	}
+	return 8820
+}
+
+// newServiceUpgradeCmd implements `observer service upgrade` (T-753): after
+// an in-place upgrade (install.sh, npm, a copied binary) the unit is
+// rewritten for this binary with its arguments kept, and a running service is
+// restarted only when nothing routes through the proxy; otherwise the safe
+// order is printed and the old process keeps running.
+func newServiceUpgradeCmd() *cobra.Command {
+	var system bool
+	cmd := &cobra.Command{
+		Use:   "upgrade",
+		Short: "Point the installed unit at this binary and restart it if nothing routes through the proxy",
+		Long: "After an upgrade replaced the observer binary, the running service keeps\n" +
+			"the previous process. `upgrade` rewrites observer.service for THIS binary,\n" +
+			"keeping the --config/--recipe/--port it was installed with, refreshes its\n" +
+			"Description, runs daemon-reload, and then:\n" +
+			"  - restarts the service (systemctl try-restart) when the daemon has no\n" +
+			"    proxy listener, or no proxy route is active and no connection to the\n" +
+			"    proxy is open;\n" +
+			"  - otherwise leaves it running and prints the safe order: the daemon IS\n" +
+			"    the proxy, so restart it when no AI session uses the proxy, with the\n" +
+			"    route off first (docs/daemon-restart-runbook.md).\n" +
+			"A stopped service is left stopped. install.sh runs this on an upgrade.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runServiceInstall(serviceInstallOptions{
+				scope:   resolveScope(system),
+				upgrade: true,
+				stdout:  cmd.OutOrStdout(),
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&system, "system", false, "Upgrade the system unit (/etc/systemd/system, requires root) instead of the --user unit")
+	return cmd
+}
+
+// serviceRunParts is the unit Description's table (T-744): each part `observer
+// start` runs and the component that must be active for it; "" is always on.
+var serviceRunParts = []struct{ part, component string }{
+	{"proxy", "capture.proxy"},
+	{"watcher", ""},
+	{"dashboard", "ui.dashboard"},
+}
+
+// serviceRuns lists what `observer start` runs on this node for the unit's
+// Description, from the active components: a minimal build or a node with
+// capture.proxy turned off is no longer described as a proxy.
+func serviceRuns(active func(string) bool) []string {
+	out := []string{}
+	for _, p := range serviceRunParts {
+		if p.component == "" || active(p.component) {
+			out = append(out, p.part)
+		}
+	}
+	return out
+}
+
+// serviceRestartNote is the closing note of `observer service install`. On a
+// node whose proxy is not active (a minimal build, or capture.proxy turned
+// off) the service runs no proxy, so the "the service IS the proxy" warning
+// was untrue there (T-732).
+func serviceRestartNote(proxyActive bool) string {
+	if !proxyActive {
+		return "\nNote: the API proxy (capture.proxy) is not active on this machine, so the service\n" +
+			"runs the watcher and dashboard only and restarting it interrupts no AI tool session."
+	}
+	return "\nNote: the service IS the proxy on :8820. Before `observer service restart`\n" +
+		"while a session routes through the proxy, turn the route off first\n" +
+		"(see docs/daemon-restart-runbook.md)."
 }
 
 // newServiceLifecycleCmd builds the thin start/stop/restart/status
@@ -375,4 +570,15 @@ func scopeFlagSuffix(scope service.Scope) string {
 		return " --system"
 	}
 	return ""
+}
+
+// serviceUpgradeNoUnitMessage is `observer service upgrade`'s answer when no
+// unit is installed (U7, lane FIX-UPGRADE): that daemon was started with
+// `observer start`, so the message gives that restart path first (the one
+// the npm postinstall prints for it) and the service install second.
+func serviceUpgradeNoUnitMessage(unit, unitPath, scopeFlag string) string {
+	return fmt.Sprintf("no %s at %s, so there is no service to upgrade.\n"+
+		"  A daemon started with `observer start`: when no AI session uses the proxy, turn the proxy route off,\n"+
+		"    stop that process (Ctrl-C in its terminal, or kill its pid), then run `observer start` again (docs/daemon-restart-runbook.md).\n"+
+		"  To run it as a service instead: observer service install --now%s", unit, unitPath, scopeFlag)
 }

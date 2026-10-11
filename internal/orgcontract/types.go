@@ -12,6 +12,14 @@ package orgcontract
 type EnrollRequest struct {
 	OneTimeToken   string `json:"one_time_token"`   // "<token_id>.<secret>"
 	AgentPublicKey string `json:"agent_public_key"` // base64url-encoded Ed25519 public key
+
+	// Capabilities are tokens the enrolling node advertises so the server
+	// shapes the signed grant to what this node can verify (today only
+	// EnrolCapabilityInitialComponents; see GrantForNode). omitempty on both
+	// sides of the compat invariant: an older server decodes the request
+	// without DisallowUnknownFields and ignores it, and an older node sends
+	// none, so the server never offers it a field it would fail to verify.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // EnrollResponse is the 200 body of POST /api/agent/enroll. The bearer is
@@ -187,6 +195,11 @@ const (
 	CaptureRiskHookConfigMissing     = "hook_config_missing"
 	CaptureRiskCodexHookUntrusted    = "codex_hook_untrusted"
 	CaptureRiskHookConfigChanged     = "hook_config_changed"
+	// CaptureRiskAgentConfigDrift: a setting the org's AI tool policy
+	// enforces no longer holds its value on this node (adapter config P7).
+	// The detail rides PushEnvelope.AgentConfigState. Additive: an older
+	// server drops the unknown label (NormalizeLabels), never the report.
+	CaptureRiskAgentConfigDrift = "agent_config_drift"
 )
 
 // Closed unknown-check labels. An unknown check is not a clean result and is
@@ -650,6 +663,35 @@ type PushEnvelope struct {
 	// omitempty keeps a pre-feature node's envelope BYTE-IDENTICAL to today's
 	// accepted shape, and a pre-feature server ignores the unknown key.
 	BudgetPosture *BudgetPostureRow `json:"budget_posture,omitempty"`
+
+	// ComponentPosture is the OPTIONAL enum-only component posture of this
+	// node (modular packaging plan 6.4, T-682): distro, catalog version, the
+	// compiled and active digests, the governance source, and the state and
+	// reason of every component that is not active. See ComponentPostureRow
+	// in componentposture.go. Envelope-level and composed through a store
+	// func seam like BudgetPosture; omitempty keeps a pre-feature node's
+	// envelope byte-identical, and a pre-feature server ignores the key.
+	ComponentPosture *ComponentPostureRow `json:"component_posture,omitempty"`
+
+	// AgentConfigState is a MANAGED node's applied state of the org's AI tool
+	// settings policy (adapter config phase P7, agentconfigstate.go): one row
+	// per setting and target file, closed enums plus value hashes. ENVELOPE-
+	// level like BudgetPosture and composed the same way, through a func seam
+	// (internal/store/agentconfigorgstate.go), so orgpush.go names no node
+	// table. Nil on an individual node and on a managed node holding no
+	// policy; omitempty keeps every other envelope byte-identical, and a
+	// pre-feature server ignores the unknown key.
+	AgentConfigState *AgentConfigStateReport `json:"agent_config_state,omitempty"`
+
+	// AgentConfigInventory is a MANAGED node's whole AI tool configuration
+	// (D-112, T-427, agentconfiginventory.go): every catalogued setting found
+	// in its tools' settings files and every instruction-family file, values
+	// and text scrubbed of secrets. Composed through a func seam
+	// (internal/store/agentconfiginventory.go) like AgentConfigState, only
+	// under raw content and only when it changed since the last accepted
+	// push. omitempty keeps every other envelope byte-identical, and a
+	// pre-feature server ignores the unknown key.
+	AgentConfigInventory *AgentConfigInventoryReport `json:"agent_config_inventory,omitempty"`
 }
 
 // PushResponse is the 200 body of POST /api/agent/push.
@@ -741,6 +783,91 @@ type PushResponse struct {
 	// server never emits it and the node stays inert; a pre-feature agent
 	// ignores the unknown key.
 	UpdateVersions map[string]int64 `json:"update_versions,omitempty"`
+
+	// RailVersions is the OPTIONAL rail nudge (2026-10-02 budget-latency arc,
+	// P2): the current version of every node-pulled rail that is NOT a
+	// policy-resource family (RailBudget, RailPricing, RailBundle,
+	// RailRouting, RailAnnouncement, RailDisplay). The SAME map GET /api/agent/policy-version
+	// returns, riding the push acknowledgment so a push still converges. A
+	// HINT only, exactly like PolicyVersions: it carries no document; the node
+	// fetches through each rail's own signed, pinned, monotonic path. A
+	// separate key from PolicyVersions on purpose: an older node treats every
+	// policy_versions key as a policy-resource family and would wake that
+	// loop for a budget edit.
+	RailVersions map[string]int64 `json:"rail_versions,omitempty"`
+}
+
+// Rail keys of PushResponse.RailVersions / PolicyVersionsDoc.RailVersions.
+const (
+	RailBudget       = "budget"
+	RailPricing      = "pricing"
+	RailBundle       = "bundle"
+	RailRouting      = "routing"
+	RailAnnouncement = "announcement"
+	// RailDisplay is the developer cost-display rail (GET
+	// /api/agent/display-policy, DisplayPolicyDoc); its version is the
+	// org_display_settings counter the signed document carries. An older node
+	// ignores the unknown key; an older server never sends it.
+	RailDisplay = "display"
+	// RailGrants is the per-caller access-grant rail (GET /api/agent/grants,
+	// AccessGrantDoc); its version is org_access_grant_epoch, bumped on every
+	// issue, revoke, extend and scheduled-start. An older node ignores the
+	// unknown key; an older server never sends it.
+	RailGrants = "grants"
+)
+
+// PolicyVersionsPath is the node's lightweight policy-freshness probe
+// (GET, enrolment bearer; ETag / If-None-Match -> 304).
+const PolicyVersionsPath = "/api/agent/policy-version"
+
+// The HELD policy-version probe (T-474: an org change reaches an ACTIVE node
+// within seconds). An active node adds ?wait=<seconds> to the probe together
+// with its If-None-Match; a server that supports holding keeps the request
+// open while the version vector still matches that ETag, answers 200 the
+// moment it moves, and answers 304 when the hold ends. It marks every answer
+// to a hold it granted with HeaderPolicyVersionsHold. Both halves are
+// additive: an older server ignores the query parameter and answers at once
+// without the header (the node then keeps its pre-hold cadence), and an older
+// node never asks. The body and every signed rail are unchanged.
+const (
+	// PolicyVersionsHoldParam is the query parameter carrying the requested
+	// hold in whole seconds.
+	PolicyVersionsHoldParam = "wait"
+	// HeaderPolicyVersionsHold is set by a server that granted the hold; its
+	// value is the hold it applied, in whole seconds.
+	HeaderPolicyVersionsHold = "X-SBO-Policy-Hold"
+	// MaxPolicyVersionsHoldSeconds caps the hold a server applies, whatever
+	// a node asks for. It stays under the node's 30 s HTTP client timeout and
+	// the org server's 60 s write timeout.
+	MaxPolicyVersionsHoldSeconds = 25
+)
+
+// HeaderPushMinInterval is the org's push BACKPRESSURE hint on an accepted
+// push (2026-10-02 budget-latency arc, P3): the minimum number of whole
+// seconds this node should leave between two pushes. It only ever slows a
+// node's activity-driven pushes (the node's own 15 s floor still applies, and
+// its ceiling is unaffected); an absent header means no hint. Older nodes
+// ignore it.
+const HeaderPushMinInterval = "X-SBO-Push-Min-Interval"
+
+// PolicyVersionsDoc is the probe's response body: the version vector of every
+// node-pulled policy, and NOTHING else - no caps, no prices, no rules. It is
+// UNSIGNED by design: it can only make a node call the existing signed rails,
+// never apply, lower, raise or clear anything itself (docs/security.md
+// POLICY-PROBE-1).
+type PolicyVersionsDoc struct {
+	// PolicyVersions is the latest published version per policy-resource
+	// family (the push-ack nudge's map).
+	PolicyVersions map[string]int64 `json:"policy_versions,omitempty"`
+	// RailVersions is the per-rail version (see PushResponse.RailVersions).
+	RailVersions map[string]int64 `json:"rail_versions"`
+	// The wire name "probe_after_seconds" is RESERVED (T-533): it was declared
+	// here as a server-advised probe interval that no server ever sent and no
+	// node ever read, so it was removed. Removal is compatible both ways: a
+	// server never emitted it (it was omitempty and always zero), and the node
+	// decodes this document leniently. The node's own pacing is
+	// internal/policyfresh (activity, backstop, held-probe gap). Never reuse
+	// the name with another meaning.
 }
 
 // HeaderGrantReplacementAck is the request header a node sets on POST
@@ -839,6 +966,10 @@ type PolicyBundle struct {
 	SignedAt string `json:"signed_at"`
 	// Description is the operator's note for the version history.
 	Description string `json:"description,omitempty"`
+	// Binding is set on a v2 (bound) delivery only: the org and member the
+	// signature also covers (policybinding.go). Absent on every v1 envelope,
+	// so a released node, which never asks for v2, never sees it.
+	Binding *PolicyBinding `json:"binding,omitempty"`
 }
 
 // SignedPolicyResource is the P0-5 unified, family-tagged, signed org
@@ -916,6 +1047,10 @@ type SignedPolicyResource struct {
 	SignedAt string `json:"signed_at"`
 	// Description is the operator's note for the version history.
 	Description string `json:"description,omitempty"`
+	// Binding is set on a v2 (bound) delivery only: the org, member and
+	// projection target the signature also covers (policybinding.go). Absent
+	// on every stored row and every v1 delivery.
+	Binding *PolicyBinding `json:"binding,omitempty"`
 }
 
 // SessionRow is a session as pushed to the server.
@@ -1274,6 +1409,11 @@ type GuardEventRow struct {
 
 	OrgID     string `json:"org_id"`
 	UserEmail string `json:"user_email"`
+
+	// GrantID is the org access grant that covered this event (request-grants
+	// design §3.2; agent 152 / org 196). Zero (omitted) means no grant, and is
+	// all a node or server that predates the design ever sends or reads.
+	GrantID int64 `json:"grant_id,omitempty"`
 }
 
 // TokenUsageRow is an adapter-derived token-usage row as pushed. All

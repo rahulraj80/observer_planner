@@ -3,7 +3,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/integration"
 )
 
 // primeAgentProviderName is the custom prime-agent provider entry the
@@ -64,8 +64,11 @@ func newPrimeAgentCmd() *cobra.Command {
 			"`observer` provider into ~/.prime/agent/models.json (baseUrl = the\n" +
 			"proxy's OpenAI-compatible endpoint), then runs `prime-agent\n" +
 			"--provider " + primeAgentProviderName + "`.\n\n" +
-			"The provider entry is merged in idempotently — your other\n" +
-			"prime-agent providers are preserved. Never writes a secret directly:\n" +
+			"The provider entry is merged in for the session and removed again\n" +
+			"when prime-agent exits; your other prime-agent providers are\n" +
+			"preserved. It is not written over your own provider named\n" +
+			"`observer`, nor when no key is available (prime-agent then starts\n" +
+			"unrouted). Never writes a secret directly:\n" +
 			"the observer provider's apiKey is the NAME `OPENAI_API_KEY`, which\n" +
 			"prime-agent resolves from your environment at runtime. Provide your\n" +
 			"key via OPENAI_API_KEY or prime-agent's --api-key flag.\n\n" +
@@ -133,8 +136,38 @@ func newPrimeAgentCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := ensurePrimeAgentObserverProvider(resolved + "/v1"); err != nil {
-				return fmt.Errorf("ensure prime-agent provider: %w", err)
+			// Sol A5-08: the `observer` provider is session-scoped. It is
+			// written only when the child will have a key for it and the
+			// name is not the operator's own provider, and it is removed
+			// again after prime-agent exits (or this launch fails).
+			route, err := preparePrimeAgentObserverProvider(resolved+"/v1", launcherHasOpenAIKey(args))
+			if err != nil {
+				return err
+			}
+			if route.note != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), route.note)
+			}
+			if route.restore != nil {
+				defer func() {
+					if rerr := route.restore(); rerr != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "observer prime-agent: could not remove the session %q provider from %s; remove it by hand if prime-agent lists it\n",
+							primeAgentProviderName, primeAgentModelsDisplay)
+					}
+				}()
+			}
+			// T-035: on a managed node, every built-in provider the registry
+			// row can cover is pointed at its proxy lane for the session too.
+			if home, herr := os.UserHomeDir(); herr == nil {
+				restoreOverrides, err := applyManagedProviderOverrides(cmd.Context(), configPath, providerOverridesSpec{
+					tool: "prime-agent", path: filepath.Join(home, ".prime", "agent", "models.json"), display: primeAgentModelsDisplay,
+					proxyRoot: resolved, ownName: primeAgentProviderName, overrides: integration.ProviderOverridesFor("prime-agent"),
+				}, cmd.ErrOrStderr())
+				if err != nil {
+					return err
+				}
+				if restoreOverrides != nil {
+					defer restoreOverrides()
+				}
 			}
 			// Seed the handover into the USER args as a trailing positional
 			// BEFORE prepending --provider, so the conflict check sees only
@@ -147,7 +180,7 @@ func newPrimeAgentCmd() *cobra.Command {
 				// injection kinds, so this flag case is the launcher's own
 				// guard (the pi/commandcode -p/--print precedent).
 				if argsContainHeadlessFlag(args, "-p", "--print") {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE prime-agent session, but you forwarded the headless -p/--print one-shot — drop it (or run the handover through `prime-agent -p` yourself)")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE prime-agent session, but you forwarded the headless -p/--print one-shot - drop it (or run the handover through `prime-agent -p` yourself)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer prime-agent: %v\n", err)
 					return err
 				}
@@ -156,7 +189,7 @@ func newPrimeAgentCmd() *cobra.Command {
 				// positional the way the bare command does. Fail fast, before
 				// the (comparatively expensive) handoff render.
 				if verb, bad := primeAgentHeadlessScan.leadingVerb(args); bad {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE prime-agent session, but you forwarded the subcommand %q — drop it, or run `prime-agent %s` yourself", verb, verb)
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE prime-agent session, but you forwarded the subcommand %q - drop it, or run `prime-agent %s` yourself", verb, verb)
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer prime-agent: %v\n", err)
 					return err
 				}
@@ -189,7 +222,10 @@ func newPrimeAgentCmd() *cobra.Command {
 			}
 			// Prepend the provider selection; the user's args (plus any
 			// seeded prompt) follow (and may override --model / --api-key).
-			forwarded := append([]string{"--provider", primeAgentProviderName}, args...)
+			forwarded := args
+			if route.routed {
+				forwarded = append([]string{"--provider", primeAgentProviderName}, args...)
+			}
 			return runEnvLauncher(envLauncherSpec{
 				tool:       "prime-agent",
 				bin:        bin,
@@ -199,6 +235,7 @@ func newPrimeAgentCmd() *cobra.Command {
 				proxyURL:   resolved,
 				env:        nil, // prime-agent routes via models.json, not an env var
 				dbPath:     cfg.Observer.DBPath,
+				unrouted:   !route.routed,
 				stderr:     os.Stderr,
 			})
 		},
@@ -225,58 +262,33 @@ func primeAgentAttachPassthrough(binPath string) []string {
 	return nil
 }
 
-// ensurePrimeAgentObserverProvider idempotently writes/merges the
-// `observer` provider into ~/.prime/agent/models.json with the given
-// OpenAI-compatible base URL. Any existing providers are preserved; only
-// the observer entry is (re)written, so repeated runs and a changed proxy
-// port both converge. The apiKey is the env var NAME, never a literal key.
-// Structurally identical to pi.go's ensurePiObserverProvider — same
-// upstream file schema.
-func ensurePrimeAgentObserverProvider(baseURL string) error {
+// primeAgentModelsDisplay is how the launcher names prime-agent's models
+// file in terminal text (never the resolved absolute path).
+const primeAgentModelsDisplay = "~/.prime/agent/models.json"
+
+// preparePrimeAgentObserverProvider puts the session-scoped `observer`
+// provider into ~/.prime/agent/models.json under the same rules as pi's
+// (prepareObserverModelsProvider: only with a credential, never over the
+// operator's own provider of that name, removed after the session) — same
+// upstream file schema. The apiKey is the env var NAME, never a literal key.
+func preparePrimeAgentObserverProvider(baseURL string, hasCredential bool) (observerModelsRoute, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return observerModelsRoute{}, newVisibleLauncherError(err,
+			"observer prime-agent: cannot locate your home directory to configure prime-agent's provider")
 	}
-	dir := filepath.Join(home, ".prime", "agent")
-	path := filepath.Join(dir, "models.json")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-
-	root := map[string]any{}
-	if data, rerr := os.ReadFile(path); rerr == nil && len(data) > 0 {
-		if jerr := json.Unmarshal(data, &root); jerr != nil {
-			return fmt.Errorf("parse existing %s: %w", path, jerr)
-		}
-	} else if rerr != nil && !os.IsNotExist(rerr) {
-		return rerr
-	}
-
-	providers, _ := root["providers"].(map[string]any)
-	if providers == nil {
-		providers = map[string]any{}
-	}
-	providers[primeAgentProviderName] = map[string]any{
-		"baseUrl": baseURL,
-		"api":     "openai-completions",
-		"apiKey":  "OPENAI_API_KEY", // env var NAME — prime-agent resolves it; no secret on disk
-		"models": []any{
+	return prepareObserverModelsProvider(observerModelsProviderSpec{
+		tool:    "prime-agent",
+		path:    filepath.Join(home, ".prime", "agent", "models.json"),
+		display: primeAgentModelsDisplay,
+		name:    primeAgentProviderName,
+		baseURL: baseURL,
+		models: []any{
 			primeAgentModel("gpt-4o", "gpt-4o (observer proxy)"),
 			primeAgentModel("gpt-4o-mini", "gpt-4o-mini (observer proxy)"),
 		},
-	}
-	root["providers"] = providers
-
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return err
-	}
-	// Atomic-ish write: temp + rename so a crash can't truncate the file.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+		hasCredential: hasCredential,
+	})
 }
 
 // primeAgentModel builds one model entry for the observer provider's models

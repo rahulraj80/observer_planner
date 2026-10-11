@@ -58,7 +58,7 @@ func TestCompileBodyRejected(t *testing.T) {
 		want string
 	}{
 		{"missing schema", `{"sections":{"hidden":["remote"]}}`, "schema is required"},
-		{"future schema", `{"schema":3,"sections":{"hidden":["remote"]}}`, "understands up to 2"},
+		{"future schema", `{"schema":4,"sections":{"hidden":["remote"]}}`, "understands up to 3"},
 		{"unknown top-level key", `{"schema":2,"pins":{"guard.enabled":true}}`, "unknown field"},
 		// A schema-1 body naming a Phase-1b directive class is a HARD error,
 		// not a silent drop: the schema number must always describe what the
@@ -72,7 +72,7 @@ func TestCompileBodyRejected(t *testing.T) {
 		{"T8: enrolment settings section cannot be hidden", `{"schema":1,"sections":{"settings_hidden":["enrolment"]}}`, "can never be hidden or locked"},
 		{"T8: org settings section cannot be locked", `{"schema":1,"sections":{"settings_read_only":["org"]}}`, "can never be hidden or locked"},
 		{"duplicate id in one list", `{"schema":1,"sections":{"hidden":["remote","remote"]}}`, "twice"},
-		{"same id hidden and read-only", `{"schema":1,"sections":{"hidden":["remote"],"read_only":["remote"]}}`, "never both"},
+		{"same id hidden and read-only", `{"schema":1,"sections":{"hidden":["remote"],"read_only":["remote"]}}`, "exactly one of"},
 		{"empty id", `{"schema":1,"sections":{"hidden":[""]}}`, "empty id"},
 		{"trailing bytes", `{"schema":1} {}`, "trailing bytes"},
 		{"non-http policy url", `{"schema":1,"notice":{"policy_url":"javascript:alert(1)"}}`, "absolute http or https URL"},

@@ -287,21 +287,21 @@ func buildWarnings(spec Spec, rep Report) []string {
 			continue
 		}
 		if cr.Executed < spec.Analysis.MinSample {
-			w = append(w, "config "+cr.ConfigID+" below sample floor — ranking suppressed, verdict inconclusive")
+			w = append(w, "config "+cr.ConfigID+" below sample floor - ranking suppressed, verdict inconclusive")
 		}
 		// Wide CI from tiny N must not imply a stable ranking.
 		if width := cr.SuccessCI.Hi - cr.SuccessCI.Lo; width > 0.5 {
-			w = append(w, "config "+cr.ConfigID+" success CI is wide (>0.5) — treat any ranking cautiously")
+			w = append(w, "config "+cr.ConfigID+" success CI is wide (>0.5) - treat any ranking cautiously")
 		}
 		if setupErr := cr.StatusCensus[StatusSetupError]; setupErr > 0 {
-			w = append(w, "config "+cr.ConfigID+" had setup failures — a flaky corpus row can masquerade as a model difference")
+			w = append(w, "config "+cr.ConfigID+" had setup failures - a flaky corpus row can masquerade as a model difference")
 		}
 	}
 	for _, cmp := range rep.Comparisons {
 		if cmp.Verdict == VerdictInsufficientDistinctTasks {
 			w = append(w, "comparison "+cmp.Candidate+" vs "+cmp.Baseline+" rests on only "+
 				strconv.Itoa(cmp.PairedTasks)+" distinct task(s) (floor "+strconv.Itoa(spec.Analysis.MinTasks)+
-				") — verdict suppressed; add more distinct tasks, repeats alone don't count")
+				") - verdict suppressed; add more distinct tasks, repeats alone don't count")
 		}
 	}
 	return w

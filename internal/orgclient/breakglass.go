@@ -210,7 +210,7 @@ func (c *Client) pruneExpiredLocked(now time.Time) (dropped int) {
 		if exp := parseRFC3339OrZero(l.ExpiresAt); exp.IsZero() || !now.Before(exp) {
 			delete(c.bg.leases, id)
 			dropped++
-			c.logger.Info("break-glass: lease expired at TTL — custody restored for this upstream", "lease_id", id, "upstream", l.UpstreamID)
+			c.logger.Info("break-glass: lease expired at TTL - custody restored for this upstream", "lease_id", id, "upstream", l.UpstreamID)
 		}
 	}
 	return dropped
@@ -284,7 +284,7 @@ func (c *Client) maybeRedeemBreakGlassLeases(ctx context.Context, body []byte, s
 func (c *Client) RedeemBreakGlassLease(ctx context.Context, l orgcontract.BreakGlassLease, signKey ed25519.PrivateKey, enr *store.Enrolment) (accepted bool, err error) {
 	_ = ctx
 	refuse := func(reason string, kv ...any) (bool, error) {
-		c.logger.Warn("break-glass lease REFUSED: "+reason+" — custody stays with the gateway", append([]any{"lease_id", l.LeaseID}, kv...)...)
+		c.logger.Warn("break-glass lease REFUSED: "+reason+" - custody stays with the gateway", append([]any{"lease_id", l.LeaseID}, kv...)...)
 		return false, nil
 	}
 	if enr == nil {
@@ -344,7 +344,7 @@ func (c *Client) RedeemBreakGlassLease(ctx context.Context, l orgcontract.BreakG
 	}
 	cred, oerr := sealbox.Open(kp, l.SealedCredential, sealbox.LeaseAAD(l.OrgID, l.UserID, l.UpstreamID))
 	if oerr != nil {
-		c.logger.Warn("break-glass lease REFUSED: sealed credential did not open for this machine — custody stays with the gateway", "lease_id", l.LeaseID, "err", oerr)
+		c.logger.Warn("break-glass lease REFUSED: sealed credential did not open for this machine - custody stays with the gateway", "lease_id", l.LeaseID, "err", oerr)
 		return false, nil
 	}
 	c.bg.leases[l.LeaseID] = redeemedLease{
@@ -354,7 +354,7 @@ func (c *Client) RedeemBreakGlassLease(ctx context.Context, l orgcontract.BreakG
 	}
 	c.persistBreakGlassLocked()
 	// Loud by design: custody is suspended, visibly.
-	c.logger.Warn("break-glass lease REDEEMED — custody is SUSPENDED for this upstream until the lease expires or is revoked",
+	c.logger.Warn("break-glass lease REDEEMED - custody is SUSPENDED for this upstream until the lease expires or is revoked",
 		"lease_id", l.LeaseID, "upstream", l.UpstreamID, "approved_by", l.ApprovedBy, "expires_at", l.ExpiresAt)
 	return true, nil
 }
@@ -370,7 +370,7 @@ func (c *Client) DropBreakGlassLeases(ids []string, why string) int {
 		if l, ok := c.bg.leases[id]; ok {
 			delete(c.bg.leases, id)
 			n++
-			c.logger.Warn("break-glass lease DROPPED — custody restored for this upstream", "lease_id", id, "upstream", l.UpstreamID, "why", why)
+			c.logger.Warn("break-glass lease DROPPED - custody restored for this upstream", "lease_id", id, "upstream", l.UpstreamID, "why", why)
 		}
 	}
 	if n > 0 {

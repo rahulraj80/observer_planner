@@ -153,6 +153,11 @@ type PushCursor struct {
 // explicitly recorded as ungated with a reason. TestSnapGateCoversEveryGatedWire
 // fails by name on an unclassified new family.
 type PushBatch struct {
+	// Full reports that a cursor lane stopped on the byte budget with rows
+	// still waiting above the new cursor (2026-10-02 budget-latency arc,
+	// P3): the push loop pushes again shortly instead of sleeping a whole
+	// interval. Snapshot-wire trimming never sets it.
+	Full       bool
 	Cursor     PushCursor
 	Sessions   []orgcontract.SessionRow
 	Actions    []orgcontract.ActionRow
@@ -387,7 +392,31 @@ type PushBatch struct {
 	// table on the node, and this file names none. Like UpdatePosture it IS
 	// counted by hasAggregates(), through hasPostures() — see there.
 	BudgetPosture *orgcontract.BudgetPostureRow
-	EstBytes      int64
+	// ComponentPosture is the node's enum-only component posture (modular
+	// packaging plan 6.4, T-682), composed by Store.composeComponentPosture in
+	// componentposture.go through a func seam. nil until cmd/observer wires
+	// the provider. It forces a push only when it changed since the last
+	// delivered one (componentPostureChanged), so an idle node reports a
+	// change once, not every interval.
+	ComponentPosture *orgcontract.ComponentPostureRow
+	// componentPostureChanged: ComponentPosture differs from the last one the
+	// org server accepted from this process.
+	componentPostureChanged bool
+	// AgentConfigState is a MANAGED node's applied state of the org's AI tool
+	// settings policy (adapter config P7). Composed by
+	// Store.composeAgentConfigState in agentconfigorg.go through a func seam
+	// so this file names no node table; nil on an individual node, so the
+	// envelope stays byte-identical there.
+	AgentConfigState *orgcontract.AgentConfigStateReport
+	// AgentConfigInventory is a MANAGED node's whole AI tool configuration
+	// (D-112, T-427), composed by Store.composeAgentConfigInventory in
+	// agentconfiginventory.go through a func seam; attached only under raw
+	// content and only when it changed since the last accepted push.
+	AgentConfigInventory *orgcontract.AgentConfigInventoryReport
+	EstBytes             int64
+	// agentConfigChanged: AgentConfigState differs from the last report this
+	// process composed (hasPostures counts only a change).
+	agentConfigChanged bool
 	// Acks is what an ACCEPTED push acknowledges in the node-local re-send
 	// queue (agent migration 140): the change-sequence snapshot every
 	// cursor-wire row carried as NodeRev, the id range each cursor lane
@@ -465,7 +494,7 @@ func (b PushBatch) hasControl() bool {
 // unable to tell "not enforcing" from "not reporting". Reporting rides the
 // EXISTING push loop; there is deliberately no second loop.
 func (b PushBatch) hasPostures() bool {
-	return b.BudgetPosture != nil || b.UpdatePosture != nil
+	return b.BudgetPosture != nil || b.UpdatePosture != nil || b.agentConfigChanged || b.AgentConfigInventory != nil || b.componentPostureChanged
 }
 
 // hasSessionAggregates is the SESSION-SCOPED half of hasAggregates, split
@@ -642,6 +671,100 @@ func (s *Store) SavePushCursorIfUnchanged(ctx context.Context, expected, next Pu
 		return false, fmt.Errorf("store.SavePushCursorIfUnchanged: commit: %w", err)
 	}
 	return true, nil
+}
+
+// PushEligibleCounts returns, for the five cursor tables a status report
+// shows (sessions, actions, api_turns, token_usage, guard_events), how many
+// rows sit ABOVE cur: exactly the rows the next push would read for that
+// table, before scope and budget.
+//
+// IT IS A ROW COUNT, NOT MAX-ID MINUS CURSOR (T-373). Ids have gaps (a
+// deleted or retention-pruned row leaves one), and sessions has no INTEGER
+// PRIMARY KEY, so its implicit rowid can fall BELOW the cursor when the
+// newest rows are deleted (the orphaned-session sweep at daemon start). The
+// subtraction then over-stated the count or went negative. A count over the rowid range is an index seek bounded by what
+// is actually waiting. Pass the zero cursor for every row in each table.
+func (s *Store) PushEligibleCounts(ctx context.Context, cur PushCursor) (PushCursor, error) {
+	var c PushCursor
+	for _, q := range []struct {
+		sql   string
+		after int64
+		dst   *int64
+	}{
+		{`SELECT COUNT(*) FROM sessions WHERE rowid > ?`, cur.Sessions, &c.Sessions},
+		{`SELECT COUNT(*) FROM actions WHERE id > ?`, cur.Actions, &c.Actions},
+		{`SELECT COUNT(*) FROM api_turns WHERE id > ?`, cur.APITurns, &c.APITurns},
+		{`SELECT COUNT(*) FROM token_usage WHERE id > ?`, cur.TokenUsage, &c.TokenUsage},
+		{`SELECT COUNT(*) FROM guard_events WHERE id > ?`, cur.GuardEvents, &c.GuardEvents},
+	} {
+		if err := s.db.QueryRowContext(ctx, q.sql, q.after).Scan(q.dst); err != nil {
+			return PushCursor{}, fmt.Errorf("store.PushEligibleCounts: %w", err)
+		}
+	}
+	return c, nil
+}
+
+// clampSessionPushCursor lowers the sessions push cursor to the table's
+// current MAX(rowid) when it is above it (T-373).
+//
+// sessions keys the push by its IMPLICIT rowid, and SQLite assigns a new
+// implicit rowid as MAX(rowid)+1. When the newest sessions are deleted
+// (the orphaned-session sweep removes sessions that never produced a row),
+// MAX(rowid) drops below the cursor and every new session is then allocated
+// a rowid AT OR BELOW it, so `rowid > cursor` never selects it: new sessions
+// stopped shipping until the table grew past the old high-water mark.
+// Lowering the cursor to the current maximum cannot re-ship anything (no row
+// exists between the two) and lets the next new session through. The other
+// cursor tables use AUTOINCREMENT ids, which are never reused, so they need
+// no clamp.
+//
+// VACUUM DOES NOT RENUMBER sessions (T-423, grounded 2026-10-05). SQLite
+// only "may" change implicit rowids on VACUUM; in practice VACUUM and VACUUM
+// INTO keep them for any table with an index, and sessions always has its
+// TEXT PRIMARY KEY autoindex. Every product VACUUM path (archive reclaim,
+// db vacuum / backup, the auto_vacuum conversion, the update snapshot) is
+// pinned by orgpush_vacuum_test.go, and a manual VACUUM from the system
+// sqlite3 CLI (3.31.1) behaves the same. A hand-made dump/reload of the database file WOULD renumber sessions and is
+// not covered by this clamp; it is not a product path.
+func (s *Store) clampSessionPushCursor(ctx context.Context, cursor int64) (int64, error) {
+	var maxRowid int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(rowid), 0) FROM sessions`).Scan(&maxRowid); err != nil {
+		return cursor, fmt.Errorf("store.clampSessionPushCursor: %w", err)
+	}
+	if cursor > maxRowid {
+		return maxRowid, nil
+	}
+	return cursor, nil
+}
+
+// SessionPushCursorClamper is the one method ClampSessionPushCursor needs:
+// both *sql.DB and *sql.Tx satisfy it, so a deleter clamps inside its own
+// delete transaction.
+type SessionPushCursorClamper interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// ClampSessionPushCursor lowers the PERSISTED sessions push cursor and the
+// sessions re-send floor (migration 140) to the table's current
+// MAX(rowid), when they are above it (T-373). Every node-side deleter of
+// sessions calls it right after its delete, before any new session can be
+// inserted: that is the only moment the lowering is provably exact, since
+// the next implicit rowid SQLite hands out is MAX(rowid)+1 and would
+// otherwise land at or below the cursor and never ship (and, below the
+// floor, never be re-sent). No row exists between the new and the old value,
+// so nothing is re-shipped. A node that is not enrolled has neither key and
+// the statements change nothing.
+func ClampSessionPushCursor(ctx context.Context, ex SessionPushCursorClamper) error {
+	for _, key := range []string{pushCursorKeySessions, "org_push_floor_sessions"} {
+		if _, err := ex.ExecContext(ctx, `
+			UPDATE schema_meta
+			   SET value = CAST((SELECT COALESCE(MAX(rowid), 0) FROM sessions) AS TEXT)
+			 WHERE key = ?
+			   AND CAST(value AS INTEGER) > (SELECT COALESCE(MAX(rowid), 0) FROM sessions)`, key); err != nil {
+			return fmt.Errorf("store.ClampSessionPushCursor: %s: %w", key, err)
+		}
+	}
+	return nil
 }
 
 // CurrentMaxIDs returns the current high-water id of each table. Enrolment
@@ -1172,6 +1295,11 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	if maxBytes <= 0 {
 		maxBytes = 1 << 20
 	}
+	sessionCursor, err := s.clampSessionPushCursor(ctx, cur.Sessions)
+	if err != nil {
+		return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: %w", err)
+	}
+	cur.Sessions = sessionCursor
 	batch := PushBatch{Cursor: cur}
 	// One budget spine for the whole envelope: cursor wires bound against
 	// budget.max (unchanged semantics), snapshot wires against
@@ -1188,7 +1316,13 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 		if batch.RowCount() == 0 {
 			return true
 		}
-		return budget.est+rowBytes <= budget.max-pushEnvelopeCursorSlack
+		if budget.est+rowBytes <= budget.max-pushEnvelopeCursorSlack {
+			return true
+		}
+		// A cursor lane stopped on the byte budget with this row still
+		// waiting: the push loop re-kicks instead of sleeping (P3).
+		batch.Full = true
+		return false
 	}
 
 	// Scope: resolve allow/deny project roots to the set of allowed
@@ -1256,7 +1390,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	if !budgetHit {
 		q := sessionPushSelect + ` WHERE s.rowid > ?`
 		if scopeFilter != "" {
-			q += ` AND p.id IN (` + scopeFilter + `)`
+			q += ` AND p.id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY s.rowid ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.Sessions)
@@ -1287,7 +1421,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	if !budgetHit {
 		q := actionPushSelect + ` WHERE a.id > ?`
 		if scopeFilter != "" {
-			q += ` AND a.project_id IN (` + scopeFilter + `)`
+			q += ` AND a.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY a.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.Actions)
@@ -1318,7 +1452,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	if !budgetHit {
 		q := apiTurnPushSelect + ` WHERE t.id > ?`
 		if scopeFilter != "" {
-			q += ` AND t.project_id IN (` + scopeFilter + `)`
+			q += ` AND t.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY t.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.APITurns)
@@ -1361,29 +1495,56 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 		if err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: token_usage: %w", err)
 		}
+		// S10-SPEED settle holdback (pushsettle.go), SCOPED to the held
+		// row's own session (2026-10-02 budget-latency arc, P3). An
+		// unsettled row is the LAST token row of its session (the predicate
+		// requires it), so holding it can only ever delay OTHER sessions'
+		// rows behind the single id watermark. It is therefore held only
+		// while nothing that is ready waits behind it: consecutive held rows
+		// are buffered, and the first ready row after them ships the buffer
+		// with it. A held row that ships early carries no gen_ms; since
+		// agent migration 140 the stamp that lands later is RE-SENT
+		// (org_push_change_token_usage covers gen_ms/gen_basis), so the
+		// holdback only ever saved a round trip, never the stamp itself.
+		// Held rows still at the tail stay unshipped and the cursor stops
+		// before the first of them, exactly as before.
+		type heldRow struct {
+			id int64
+			r  orgcontract.TokenUsageRow
+			sz int64
+		}
+		var heldBuf []heldRow
+		ship := func(id int64, r orgcontract.TokenUsageRow, sz int64) bool {
+			if !fits(sz) {
+				// token_usage is the last table; no need to set budgetHit.
+				return false
+			}
+			batch.TokenUsage = append(batch.TokenUsage, r)
+			batch.Cursor.TokenUsage = id
+			budget.est += sz
+			return true
+		}
+	tokenRows:
 		for rows.Next() {
 			id, held, r, err := s.scanTokenUsagePushRow(rows, share, orgID, userEmail, rev)
 			if err != nil {
 				_ = rows.Close()
 				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan token_usage: %w", err)
 			}
-			// S10-SPEED settle holdback (pushsettle.go): stop BEFORE the
-			// first unsettled row so the cursor never passes it; it ships
-			// on a later tick carrying its gen_ms stamp. (Since agent
-			// migration 140 a stamp that lands after the row shipped is
-			// ALSO re-sent, so the holdback now saves a round trip rather
-			// than being the only way the stamp reaches the org.)
-			if held {
-				break
-			}
 			sz := jsonSize(r)
-			if !fits(sz) {
-				// token_usage is the last table; no need to set budgetHit.
+			if held {
+				heldBuf = append(heldBuf, heldRow{id: id, r: r, sz: sz})
+				continue
+			}
+			for _, h := range heldBuf {
+				if !ship(h.id, h.r, h.sz) {
+					break tokenRows
+				}
+			}
+			heldBuf = heldBuf[:0]
+			if !ship(id, r, sz) {
 				break
 			}
-			batch.TokenUsage = append(batch.TokenUsage, r)
-			batch.Cursor.TokenUsage = id
-			budget.est += sz
 		}
 		if err := closeRows(rows); err != nil {
 			return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: token_usage rows: %w", err)
@@ -1407,7 +1568,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 		             COALESCE(ge.degraded_from,''), COALESCE(ge.enforced,0), COALESCE(ge.source,''),
 		             COALESCE(ge.target_hash,''),
 		             COALESCE(ge.reason,''), COALESCE(ge.target_excerpt,''), COALESCE(ge.taint_origin,''),
-		             ge.chain_prev, ge.chain_hash
+		             ge.chain_prev, ge.chain_hash, COALESCE(ge.grant_id, 0)
 		        FROM guard_events ge
 		        LEFT JOIN sessions s ON ge.session_id = s.id
 		       WHERE ge.id > ?`
@@ -1417,7 +1578,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 			// posture event) is conservatively EXCLUDED under a scoped
 			// push — when the operator restricts by project, unattributable
 			// rows don't ship.
-			q += ` AND s.project_id IN (` + scopeFilter + `)`
+			q += ` AND s.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY ge.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.GuardEvents)
@@ -1433,7 +1594,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 				&r.DegradedFrom, &enforced, &r.Source,
 				&r.TargetHash,
 				&r.Reason, &r.TargetExcerpt, &r.TaintOrigin,
-				&r.ChainPrev, &r.ChainHash); err != nil {
+				&r.ChainPrev, &r.ChainHash, &r.GrantID); err != nil {
 				_ = rows.Close()
 				return PushBatch{}, fmt.Errorf("store.SelectUnpushedSince: scan guard_event: %w", err)
 			}
@@ -1477,7 +1638,7 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 		        LEFT JOIN sessions s ON oc.session_id = s.id
 		       WHERE oc.id > ?`
 		if scopeFilter != "" {
-			q += ` AND s.project_id IN (` + scopeFilter + `)`
+			q += ` AND s.project_id IN (` + scopeFilter + `)` //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		}
 		q += ` ORDER BY oc.id ASC`
 		rows, err := s.db.QueryContext(ctx, q, cur.OTelContent)
@@ -1646,6 +1807,23 @@ func (s *Store) SelectUnpushedSince(ctx context.Context, cur PushCursor, maxByte
 	// with them: a posture the admin cannot see is the failure the row exists
 	// to prevent. nil = nothing to report; the envelope stays byte-identical.
 	batch.BudgetPosture = s.composeBudgetPosture()
+	// The component posture (modular packaging plan 6.4): composed through
+	// the func seam in componentposture.go; metadata about the binary, so it
+	// ships in every share mode. A change forces a push until delivered.
+	batch.ComponentPosture, batch.componentPostureChanged = s.composeComponentPosture(ctx)
+
+	// The org AI tool policy state (adapter config P7): a managed node's
+	// applied state, composed through the func seam in agentconfigorg.go so
+	// this file names no node table. Observed values ride only under
+	// shipsRawContent(). A changed report forces a push (an admin must see
+	// drift without waiting for unrelated telemetry); an unchanged one only
+	// rides along.
+	batch.AgentConfigState = s.composeAgentConfigState(ctx, share.shipsRawContent())
+	batch.agentConfigChanged = s.noteAgentConfigDigest(batch.AgentConfigState)
+	// The AI tool configuration inventory (D-112, T-427): same func-seam
+	// posture, value-bearing, so raw content only; attached only when it
+	// changed since the last accepted push (a change forces a push).
+	batch.AgentConfigInventory = s.composeAgentConfigInventory(ctx, share.shipsRawContent())
 
 	// Cache-detail aggregate (Arc 4 P5c) — attached only under the
 	// cache_detail tier. Computed by store.SelectCacheSummaries (which owns
@@ -2211,7 +2389,7 @@ func (s *Store) composeResends(ctx context.Context, batch *PushBatch, budget *en
 		if !tracked || n >= pushResendRowCap {
 			continue
 		}
-		q := l.head + pushChangesFilter(l.table, l.idExpr)
+		q := l.head + pushChangesFilter(l.table, l.idExpr) //nolint:gosec // G202: the fragment is formatted int64 project ids or a fixed table name; values bind as args
 		if scopeFilter != "" {
 			q += ` AND ` + l.scopeExpr + ` IN (` + scopeFilter + `)`
 		}
@@ -3024,6 +3202,7 @@ var knownSurfaceHosts = map[string]bool{
 	"junie-cli":        true,
 	"kiro-cli":         true,
 	"kiro-crew":        true,
+	"poolside-cli":     true,
 	"qoder-work":       true,
 	"vibe":             true,
 }

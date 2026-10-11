@@ -64,14 +64,14 @@ func TestEveryLaunchSeededOrDocAssistedSubcommandHasContinueFrom(t *testing.T) {
 	}
 
 	if len(rows) == 0 {
-		t.Fatal("no LaunchSeeded/LaunchDocAssisted subcommand rows resolved on the root tree — the test premise is unverifiable (registry or root wiring regressed)")
+		t.Fatal("no LaunchSeeded/LaunchDocAssisted subcommand rows resolved on the root tree - the test premise is unverifiable (registry or root wiring regressed)")
 	}
 
 	for _, r := range rows {
 		r := r
 		t.Run(r.verb, func(t *testing.T) {
 			if got := r.cmd.Flags().Lookup("continue-from"); got == nil {
-				t.Fatalf("tool %q (verb %q, LaunchMode %v) registers no --continue-from flag on its cobra command — the WS-SEED / doc-assisted drift class documented in docs/plans/adapter-parity-audit-2026-08-25.md §1", r.tool, r.verb, r.mode)
+				t.Fatalf("tool %q (verb %q, LaunchMode %v) registers no --continue-from flag on its cobra command - the WS-SEED / doc-assisted drift class documented in docs/plans/adapter-parity-audit-2026-08-25.md §1", r.tool, r.verb, r.mode)
 			}
 		})
 	}

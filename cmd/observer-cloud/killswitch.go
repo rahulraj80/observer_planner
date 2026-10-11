@@ -20,11 +20,11 @@ func newKillSwitchCmd() *cobra.Command {
 		Use:   "kill-switch",
 		Short: "read or flip a Cloud Intelligence kill switch (incident response)",
 		Long: "Kill switches gate both new job submissions (the API) and the execution\n" +
-			"lease (the worker) — internal/cloudserver/store/control.go. A MISSING\n" +
-			"switch row is treated as active (paused) — fail closed — never as open.\n\n" +
+			"lease (the worker) - internal/cloudserver/store/control.go. A MISSING\n" +
+			"switch row is treated as active (paused) - fail closed - never as open.\n\n" +
 			"With no --route, `on`/`off` flips the GLOBAL free-tier switch\n" +
 			"(scope='global', key='all'). With --route <route-id>, it flips that\n" +
-			"route's own switch (scope='route', key=<route-id>) instead — the global\n" +
+			"route's own switch (scope='route', key=<route-id>) instead - the global\n" +
 			"switch is untouched.",
 	}
 	cmd.AddCommand(newKillSwitchStatusCmd(), newKillSwitchSetCmd(true), newKillSwitchSetCmd(false))

@@ -16,7 +16,7 @@ import (
 //
 // `observer enroll --idp <org-url>` prints a short code and a URL, the
 // developer signs in with their enterprise IdP on ANY device and approves, and
-// this loop polls until the organisation hands over an ordinary one-time
+// this loop polls until the organization hands over an ordinary one-time
 // enrolment code. That code then goes through the UNCHANGED enrol path, so
 // everything downstream — the managed-tenancy response, the signed grant, the
 // P6a machine bind — behaves exactly as it does on the code rail.
@@ -73,7 +73,7 @@ func (f *idpEnrolFlow) Run(ctx context.Context, orgURL string) (string, error) {
 	start, err := f.client.StartIdPEnrol(ctx, orgURL)
 	if err != nil {
 		if errors.Is(err, orgclient.ErrIdPEnrolUnavailable) {
-			return "", errors.New("this organisation does not offer sign-in enrolment (it may be switched off, or the server may be older than the feature).\n" +
+			return "", errors.New("this organization does not offer sign-in enrolment (it may be switched off, or the server may be older than the feature).\n" +
 				"  Ask an administrator for an enrolment code and run `observer enroll <org-url> <code>` instead")
 		}
 		return "", err
@@ -100,27 +100,51 @@ func (f *idpEnrolFlow) Run(ctx context.Context, orgURL string) (string, error) {
 				// Mid-flow this is the pairing being gone rather than the
 				// feature being absent — the server deliberately answers the
 				// same way to both so a poll cannot enumerate live pairings.
-				return "", fmt.Errorf("the organisation no longer recognises code %s. Run `observer enroll --idp %s` again to get a fresh code", start.UserCode, orgURL)
+				return "", fmt.Errorf("the organization no longer recognises code %s. Run `observer enroll --idp %s` again to get a fresh code", start.UserCode, orgURL)
 			}
 			return "", err
 		}
 
-		switch res.Status {
-		case orgclient.IdPStatusApproved:
-			fmt.Fprintln(f.out, "Approved. Completing enrolment.")
-			return res.OneTimeToken, nil
-		case orgclient.IdPStatusPending:
-			// Keep waiting, quietly. A line per poll would bury the code the
-			// developer still has to read off the screen.
-		case orgclient.IdPStatusSlowDown:
-			interval = backoff(interval, res.Interval)
-		case orgclient.IdPStatusDenied:
-			return "", errors.New("the enrolment was refused in the browser. Nothing was granted and this machine is not enrolled")
-		case orgclient.IdPStatusExpired:
-			return "", fmt.Errorf("code %s expired before it was approved. Run `observer enroll --idp %s` again to get a fresh code", start.UserCode, orgURL)
-		default:
-			return "", fmt.Errorf("the organisation answered with an enrolment state this version of Observer does not understand (%q); upgrade Observer, or ask an administrator for an enrolment code", res.Status)
+		step := idpPollStep(res, interval, start.UserCode, orgURL)
+		if step.err != nil {
+			return "", step.err
 		}
+		if step.token != "" {
+			fmt.Fprintln(f.out, "Approved. Completing enrolment.")
+			return step.token, nil
+		}
+		interval = step.interval
+	}
+}
+
+// idpStep is what one poll answer means for the flow: keep waiting at
+// interval, finish with token, or stop with err.
+type idpStep struct {
+	interval time.Duration
+	token    string
+	err      error
+}
+
+// idpPollStep classifies one poll answer. It is the ONE decision table for a
+// sign-in enrolment, shared by the CLI loop above and the dashboard's
+// step-at-a-time flow (orgenrol_dashboard.go), so both say the same thing
+// about a denied, expired or unknown answer.
+func idpPollStep(res orgclient.IdPEnrolPoll, interval time.Duration, userCode, orgURL string) idpStep {
+	switch res.Status {
+	case orgclient.IdPStatusApproved:
+		return idpStep{interval: interval, token: res.OneTimeToken}
+	case orgclient.IdPStatusPending:
+		// Keep waiting, quietly. A line per poll would bury the code the
+		// developer still has to read off the screen.
+		return idpStep{interval: interval}
+	case orgclient.IdPStatusSlowDown:
+		return idpStep{interval: backoff(interval, res.Interval)}
+	case orgclient.IdPStatusDenied:
+		return idpStep{err: errors.New("the enrolment was refused in the browser. Nothing was granted and this machine is not enrolled")}
+	case orgclient.IdPStatusExpired:
+		return idpStep{err: fmt.Errorf("code %s expired before it was approved. Run `observer enroll --idp %s` again to get a fresh code", userCode, orgURL)}
+	default:
+		return idpStep{err: fmt.Errorf("the organization answered with an enrolment state this version of Observer does not understand (%q); upgrade Observer, or ask an administrator for an enrolment code", res.Status)}
 	}
 }
 
@@ -131,8 +155,8 @@ func (f *idpEnrolFlow) Run(ctx context.Context, orgURL string) (string, error) {
 // different device.
 func (f *idpEnrolFlow) announce(start orgclient.IdPEnrolStart) {
 	fmt.Fprintln(f.out)
-	fmt.Fprintln(f.out, "Sign in with your organisation account to enrol this machine.")
-	fmt.Fprintln(f.out, "You need an active dashboard account on that organisation first (redeem your")
+	fmt.Fprintln(f.out, "Sign in with your organization account to enrol this machine.")
+	fmt.Fprintln(f.out, "You need an active dashboard account on that organization first (redeem your")
 	fmt.Fprintln(f.out, "sign-in invite and sign in once). Then open the URL below, sign in if asked,")
 	fmt.Fprintln(f.out, "and enter the code.")
 	fmt.Fprintln(f.out, "You can do this on any device - a phone or another computer is fine.")

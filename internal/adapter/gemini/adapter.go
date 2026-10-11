@@ -136,13 +136,49 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		return adapter.ParseResult{}, fmt.Errorf("gemini.ParseSessionFile: stat: %w", statErr)
 	}
 
+	var (
+		res adapter.ParseResult
+		err error
+	)
 	switch kind {
 	case classifyLegacyJSON:
-		return a.parseLegacy(ctx, path, fi, fromOffset)
+		res, err = a.parseLegacy(ctx, path, fi, fromOffset)
 	case classifyJSONL:
-		return a.parseJSONL(ctx, path, fi, fromOffset)
+		res, err = a.parseJSONL(ctx, path, fi, fromOffset)
+	default:
+		return adapter.ParseResult{}, errors.New("gemini.ParseSessionFile: unreachable")
 	}
-	return adapter.ParseResult{}, errors.New("gemini.ParseSessionFile: unreachable")
+	res.TokenEvents = collapseTokenRestatements(res.TokenEvents)
+	return res, err
+}
+
+// collapseTokenRestatements keeps ONE token event per (SourceFile,
+// SourceEventID) in a parse result: the position of the first, the values
+// of the last. Gemini CLI appends the SAME assistant message twice (once
+// when its text and thoughts land, again once its toolCalls resolve) and
+// a message_update line restates a message's usage, so one model call
+// used to come out of a parse as two or three token events (T-543). The
+// store's (source_file, source_event_id) upsert collapsed them on disk,
+// but every consumer of the parse result itself (the watcher's
+// budget-capture accounting, fold checks, scans) saw the call counted
+// twice. The later record is the complete restatement, so its counts win.
+func collapseTokenRestatements(evs []models.TokenEvent) []models.TokenEvent {
+	if len(evs) < 2 {
+		return evs
+	}
+	type key struct{ file, id string }
+	at := make(map[key]int, len(evs))
+	out := make([]models.TokenEvent, 0, len(evs))
+	for _, e := range evs {
+		k := key{e.SourceFile, e.SourceEventID}
+		if i, seen := at[k]; seen && e.SourceEventID != "" {
+			out[i] = e
+			continue
+		}
+		at[k] = len(out)
+		out = append(out, e)
+	}
+	return out
 }
 
 // projectHashFromPath extracts the <hash> segment from
@@ -278,7 +314,7 @@ func resolveRecordedRoot(raw string) (root, remote string, id git.Identity) {
 	if p == "" {
 		return "", "", git.Identity{}
 	}
-	if _, err := os.Stat(p); err != nil {
+	if _, err := os.Stat(p); err != nil { //nolint:gosec // G703: stat of a project root the tool recorded locally, read only
 		return p, "", git.Identity{}
 	}
 	if identity, err := git.ResolveIdentity(p, git.IdentityOptions{}); err == nil {

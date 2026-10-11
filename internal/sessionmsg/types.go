@@ -118,6 +118,14 @@ type ActionRow struct {
 	ResponseTokensEst   int64
 	UserAttachmentsJSON string
 
+	// HookCaptured is true when a lifecycle hook wrote this action rather
+	// than the tool's own transcript: the "<tool>:hook" source_file
+	// convention (hooklifecycle.IsHookSource), resolved at the caller's
+	// boundary from source_file or, on a metadata-only org row, its
+	// source_file_hash. Derive reads it only for the prompt-shadow fold
+	// (DeriveInput.PromptHookShadow).
+	HookCaptured bool
+
 	// StatusRaw is the stored reading body (actions.raw_tool_input) of a
 	// STATUS action (status.go: IsStatusAction), loaded by a caller that
 	// has it (the node) so Derive can tell a changed reading from a
@@ -296,6 +304,15 @@ type DeriveInput struct {
 	// ("tokens:"-prefixed source_event_id), which Derive reconciles
 	// wholesale against the session's per-turn capture (cumulative.go).
 	SessionCumulative bool
+
+	// PromptHookShadow is internal/integration.Capability.Hook.
+	// PromptShadowsTranscript for this session's tool, resolved by the
+	// caller: true when the tool's prompt-submit hook writes a user_prompt
+	// row for a prompt its own transcript also records. Derive then folds
+	// each hook-captured prompt onto the transcript prompt of the same turn
+	// (the transcript row is canonical), so one prompt is one user message
+	// (T-563; promptshadow.go).
+	PromptHookShadow bool
 
 	// DefaultModel is the session's own overall model (sessions.model),
 	// used only as the last-resort fallback for a synthesized row whose

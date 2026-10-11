@@ -1,6 +1,8 @@
 // Package mistralcode implements an adapter for Mistral Code, whose CLI
-// binary is `vibe` (installed via `uv tool`). Mistral Code writes a
-// per-session directory under ~/.vibe/logs/session/:
+// binary is `vibe` (installed via `uv tool`). vibe >= 2.25 writes the
+// "unified harness" store under ~/.vibe/logs/session/unified/<uuid>/ (see
+// unified.go). Earlier versions (and sessions they left behind) use the
+// LEGACY per-session directory under ~/.vibe/logs/session/:
 //
 //	session_<YYYYMMDD_HHMMSS>_<8hex>/
 //	  meta.json       session metadata: working_directory, git branch,
@@ -22,7 +24,8 @@
 // confirmed live 2026-08-25), ~/.vibe/config.toml (mode 0600), ~/.vibe/vibehistory
 // (raw prompt history, mode 0600), ~/.vibe/connector_bootstrap_cache.json, and
 // any other vibe-home file — this adapter reads only meta.json + messages.jsonl
-// under a session directory.
+// under a legacy session directory, and only the store documents unified.go
+// names under a unified session directory.
 package mistralcode
 
 import (
@@ -197,10 +200,12 @@ func homeRoots() []string {
 }
 
 // IsSessionFile implements adapter.Adapter. A path qualifies when it is
-// under a watch root AND matches one of the two layouts: the vibe CLI's
-// per-session messages.jsonl (meta.json is read as a sibling, not tracked
-// directly) or the IDE store's <sessionId>.json document (sessions.json is
-// read as a sibling, not tracked directly).
+// under a watch root AND matches one of the three layouts: the vibe CLI's
+// legacy per-session messages.jsonl (meta.json is read as a sibling, not
+// tracked directly), the vibe >= 2.25 unified store's CURRENT pointer (the
+// generation it names is read whole; unified.go), or the IDE store's
+// <sessionId>.json document (sessions.json is read as a sibling, not tracked
+// directly).
 func (a *Adapter) IsSessionFile(path string) bool {
 	if classifyLayout(path) == layoutNone {
 		return false
@@ -285,8 +290,11 @@ type vibeToolCall struct {
 // existed. IsSessionFile stays strict — it gates on classifyLayout — so
 // the watcher never widens.
 func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset int64) (adapter.ParseResult, error) {
-	if classifyLayout(path) == layoutIDE {
+	switch classifyLayout(path) {
+	case layoutIDE:
 		return a.parseIDESession(ctx, path)
+	case layoutUnified:
+		return a.parseUnifiedSession(ctx, path)
 	}
 	return a.parseVibeSession(ctx, path, fromOffset)
 }
@@ -417,7 +425,18 @@ func (a *Adapter) parseVibeSession(ctx context.Context, path string, fromOffset 
 		}
 	}
 
-	for i, rec := range recs {
+	// Record ids and synthesized timestamps use the record's index in the
+	// WHOLE file, not in this call's slice: vibe appends one message per
+	// write, so an incremental parse sees each new record at slice index
+	// 0, and "user:<sess>:0" then collided with the first prompt and was
+	// dropped as a duplicate (demo node 1, 2026-10-02: 3 prompts in
+	// messages.jsonl, 1 stored, the secret-bearing one lost).
+	idxBase := 0
+	if fromOffset > 0 {
+		idxBase = recordsBefore(path, fromOffset)
+	}
+	for j, rec := range recs {
+		i := idxBase + j
 		ts := base.Add(time.Duration(i) * time.Millisecond)
 		switch rec.Role {
 		case "user":
@@ -717,4 +736,33 @@ func truncate(s string, n int) string {
 
 func itoa(i int) string {
 	return strconv.Itoa(i)
+}
+
+// recordsBefore counts the records ParseSessionFile would decode from the
+// first offset bytes of path (terminated, non-blank lines within the line
+// cap that decode as a vibeRecord), so an incremental parse numbers its
+// records exactly as a parse from 0 would. A read error counts what was
+// read so far.
+func recordsBefore(path string, offset int64) int {
+	f, err := os.Open(path) //nolint:gosec // the same watched session file
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	r := bufio.NewReader(io.LimitReader(f, offset))
+	n := 0
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 && bytes.HasSuffix(line, []byte("\n")) && len(line) <= maxLineBytes {
+			if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
+				var rec vibeRecord
+				if json.Unmarshal(trimmed, &rec) == nil {
+					n++
+				}
+			}
+		}
+		if err != nil {
+			return n
+		}
+	}
 }

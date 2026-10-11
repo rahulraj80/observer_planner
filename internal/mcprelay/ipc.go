@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/attachsock"
+	"github.com/marmutapp/superbased-observer/internal/localipc"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/localpdp"
 )
 
 // ipc.go is the owner-only IPC mode (§12.2 "ipc"): the endpoint is
-// internal/attachsock's Transport seam - an AF_UNIX socket under a 0700
+// internal/localipc's Transport seam - an AF_UNIX socket under a 0700
 // directory on unix, a named pipe with an owner-only DACL on Windows -
 // never a new primitive. A per-client bootstrap secret on the first frame
 // binds the stream to a registered product client -> `ipc_bound`.
@@ -29,7 +29,7 @@ const ipcKeyName = "mcprelay"
 
 // IPCEndpoint returns the relay's IPC endpoint for an observer DB path.
 func IPCEndpoint(dbPath string) (string, error) {
-	ep, err := attachsock.DefaultTransport().Endpoint(filepath.Join(filepath.Dir(dbPath), ipcKeyName, "ipc"))
+	ep, err := localipc.DefaultTransport().Endpoint(filepath.Join(filepath.Dir(dbPath), ipcKeyName, "ipc"))
 	if err != nil {
 		return "", fmt.Errorf("mcprelay.IPCEndpoint: %w", err)
 	}
@@ -40,14 +40,14 @@ func IPCEndpoint(dbPath string) (string, error) {
 // attach transport (which enforces the 0700 parent / owner DACL and refuses
 // to steal a live listener).
 func ListenIPC(dbPath string) (net.Listener, string, error) {
-	if !attachsock.Supported() {
-		return nil, "", fmt.Errorf("mcprelay.ListenIPC: %w", attachsock.ErrUnsupported)
+	if !localipc.Supported() {
+		return nil, "", fmt.Errorf("mcprelay.ListenIPC: %w", localipc.ErrUnsupported)
 	}
 	ep, err := IPCEndpoint(dbPath)
 	if err != nil {
 		return nil, "", err
 	}
-	ln, err := attachsock.DefaultTransport().Listen(ep)
+	ln, err := localipc.DefaultTransport().Listen(ep)
 	if err != nil {
 		return nil, "", fmt.Errorf("mcprelay.ListenIPC: %w", err)
 	}
@@ -56,7 +56,7 @@ func ListenIPC(dbPath string) (net.Listener, string, error) {
 
 // DialIPC connects to the relay's IPC endpoint.
 func DialIPC(ctx context.Context, endpoint string, timeout time.Duration) (net.Conn, error) {
-	return attachsock.DefaultTransport().Dial(ctx, endpoint, timeout)
+	return localipc.DefaultTransport().Dial(ctx, endpoint, timeout)
 }
 
 // IPCClient is what a bootstrap secret proves about the connecting client.

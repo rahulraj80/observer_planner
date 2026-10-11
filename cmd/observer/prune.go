@@ -9,16 +9,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/archive"
-	"github.com/marmutapp/superbased-observer/internal/archivestore"
-	"github.com/marmutapp/superbased-observer/internal/archivesvc"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/retention"
@@ -56,7 +52,7 @@ func newPruneCmd() *cobra.Command {
 			addr := fmt.Sprintf("127.0.0.1:%d", cfg.Proxy.Port)
 			if portUp(addr) {
 				return fmt.Errorf(
-					"prune: the observer daemon is live on %s and already runs its own retention pass — a manual `observer prune` would race it.\n"+
+					"prune: the observer daemon is live on %s and already runs its own retention pass - a manual `observer prune` would race it.\n"+
 						"Let the daemon's periodic tick handle it, or stop the daemon first (docs/daemon-restart-runbook.md: route OFF → stop → prune → relaunch → route ON) for an ad-hoc pass",
 					addr,
 				)
@@ -72,7 +68,7 @@ func newPruneCmd() *cobra.Command {
 			if vacuum {
 				if portUp(addr) {
 					return fmt.Errorf(
-						"prune --vacuum: the observer daemon is live on %s — a full VACUUM needs exclusive DB access.\n"+
+						"prune --vacuum: the observer daemon is live on %s - a full VACUUM needs exclusive DB access.\n"+
 							"Stop the daemon first (safe order in docs/daemon-restart-runbook.md: route OFF → stop → prune --vacuum → relaunch → route ON), then re-run",
 						addr,
 					)
@@ -89,7 +85,7 @@ func newPruneCmd() *cobra.Command {
 			var storBefore db.StorageReport
 			if breakdown {
 				fmt.Fprintln(cmd.OutOrStdout(),
-					"prune: computing per-table storage breakdown (dbstat full scan — may take a while on a large DB)…")
+					"prune: computing per-table storage breakdown (dbstat full scan - may take a while on a large DB)…")
 				storBefore, _ = db.StorageStats(cmd.Context(), database)
 			}
 
@@ -117,7 +113,7 @@ func newPruneCmd() *cobra.Command {
 					needed := uint64(dbSize) * 2
 					if free, ferr := statfsFreeBytes(cfg.Observer.DBPath); ferr == nil && free < needed {
 						return fmt.Errorf(
-							"prune --vacuum: not enough free disk space for a full VACUUM — it rewrites the whole %s DB to a temp copy and needs roughly 2x headroom (need ~%s free, have %s free, short by %s). Free up space or move observer.db_path to a volume with more room, then retry",
+							"prune --vacuum: not enough free disk space for a full VACUUM - it rewrites the whole %s DB to a temp copy and needs roughly 2x headroom (need ~%s free, have %s free, short by %s). Free up space or move observer.db_path to a volume with more room, then retry",
 							humanBytes(dbSize), humanBytes(int64(needed)), humanBytes(int64(free)), humanBytes(int64(needed-free)),
 						)
 					}
@@ -131,7 +127,7 @@ func newPruneCmd() *cobra.Command {
 					return fmt.Errorf("prune --vacuum: %w", verr)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(),
-					"vacuum complete: db compacted, auto_vacuum mode = %d (2 = incremental — future retention passes reclaim pages live)\n",
+					"vacuum complete: db compacted, auto_vacuum mode = %d (2 = incremental - future retention passes reclaim pages live)\n",
 					mode)
 			}
 			// AFTER snapshot (taken post-vacuum so it reflects the final
@@ -184,7 +180,7 @@ func newPruneCmd() *cobra.Command {
 			printPruneReclamation(cmd.OutOrStdout(), storBefore, storAfter, walBefore, walAfter, breakdown, vacuum)
 			if res.SizeCapUnmet {
 				fmt.Fprintf(cmd.OutOrStdout(),
-					"WARNING: DB still exceeds max_db_size_mb after shedding aged actions — the bulk is in other tables (token_usage / cache_*). Recent actions were protected. Raise [observer.retention].max_db_size_mb.\n")
+					"WARNING: DB still exceeds max_db_size_mb after shedding aged actions - the bulk is in other tables (token_usage / cache_*). Recent actions were protected. Raise [observer.retention].max_db_size_mb.\n")
 			}
 			return nil
 		},
@@ -193,10 +189,10 @@ func newPruneCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON")
 	cmd.Flags().BoolVar(&vacuum, "vacuum", false,
 		"After pruning, convert the DB to auto_vacuum=INCREMENTAL and run a full VACUUM. "+
-			"Refuses while the daemon is live — run in a restart window (docs/daemon-restart-runbook.md)")
+			"Refuses while the daemon is live - run in a restart window (docs/daemon-restart-runbook.md)")
 	cmd.Flags().BoolVar(&breakdown, "breakdown", true,
 		"Report a before/after per-table storage breakdown (dbstat) so you can see what was reclaimed and where the bulk lives. "+
-			"dbstat is a full DB scan — pass --breakdown=false to skip it on a very large DB")
+			"dbstat is a full DB scan - pass --breakdown=false to skip it on a very large DB")
 	return cmd
 }
 
@@ -263,7 +259,7 @@ func printPruneReclamation(w io.Writer, before, after db.StorageReport, walBefor
 		fmt.Fprintf(w, "  WAL checkpoint: truncated %s (%s → %s)\n",
 			fmtMB(walDelta), fmtMB(walBefore), fmtMB(walAfter))
 	case walBefore > 8*1024*1024:
-		fmt.Fprintf(w, "  WAL checkpoint: WAL still %s — a long-lived reader likely pinned it (checkpoint can't truncate past the oldest snapshot); retry when idle\n",
+		fmt.Fprintf(w, "  WAL checkpoint: WAL still %s - a long-lived reader likely pinned it (checkpoint can't truncate past the oldest snapshot); retry when idle\n",
 			fmtMB(walAfter))
 	}
 
@@ -290,7 +286,7 @@ func printPruneReclamation(w io.Writer, before, after db.StorageReport, walBefor
 		fmt.Fprintf(w, "  %-24s %s freed (%s → %s)\n", c.label+":", fmtMB(freed), fmtMB(b), fmtMB(a))
 	}
 	if !anyCat {
-		fmt.Fprintln(w, "  (no table shrank — nothing was eligible for retention this pass)")
+		fmt.Fprintln(w, "  (no table shrank - nothing was eligible for retention this pass)")
 	}
 
 	// Top individual tables by reclaimed bytes (surfaces anything not folded
@@ -323,7 +319,7 @@ func printPruneReclamation(w io.Writer, before, after db.StorageReport, walBefor
 		fmt.Fprintf(w, "main DB file: %s → %s (freed pages returned to the OS by VACUUM)\n",
 			fmtMB(before.TotalBytes), fmtMB(after.TotalBytes))
 	} else {
-		fmt.Fprintf(w, "main DB file: %s → %s (unchanged — deletes freed %s of pages onto the freelist)\n",
+		fmt.Fprintf(w, "main DB file: %s → %s (unchanged - deletes freed %s of pages onto the freelist)\n",
 			fmtMB(before.TotalBytes), fmtMB(after.TotalBytes), fmtMB(reclaimable))
 		if reclaimable > 16*1024*1024 {
 			fmt.Fprintf(w, "run `observer prune --vacuum` with the daemon DOWN to return %s of free pages to the OS\n",
@@ -356,7 +352,12 @@ func fmtMB(b int64) string {
 // for both passes. Pinned by retention package's existing tests + the new
 // TestPruneCacheRows_SecondRunNoop.
 func runRetention(ctx context.Context, cfg config.Config, database *sql.DB) (retention.Result, error) {
-	p := retention.New(database)
+	// The orphaned-session sweep brings the org push cursor down in its own
+	// delete transaction (T-373): sessions has an implicit rowid that a
+	// deletion of the newest rows lets SQLite reuse.
+	p := retention.New(database).WithSessionsDeletedHook(func(ctx context.Context, tx *sql.Tx) error {
+		return store.ClampSessionPushCursor(ctx, tx)
+	})
 	res, err := p.Run(ctx, retention.Options{
 		MaxAgeDays:            cfg.Observer.Retention.MaxAgeDays,
 		MaxDBSizeMB:           cfg.Observer.Retention.MaxDBSizeMB,
@@ -526,123 +527,6 @@ func runRetention(ctx context.Context, cfg config.Config, database *sql.DB) (ret
 	return res, nil
 }
 
-// runCodeIntelArchiveSweep moves one bounded batch of stale code-intelligence
-// projects into ~/.observer/archive.db.
-//
-// It opens the archive database for the duration of the sweep and closes it
-// again: the archive is touched once per retention pass, so holding a second
-// connection pool open for the daemon's whole lifetime would cost idle
-// connections (each a candidate temp-file holder) for no benefit.
-//
-// FAIL-OPEN, and specifically fail-open in ONE direction: if the archive
-// database cannot be opened, the codeintel sweep is SKIPPED for this pass —
-// it never falls back to the delete path. An operator who asked for archival
-// and got deletion because a file was momentarily unavailable would have lost
-// data to a config option whose entire purpose was to stop losing data. The
-// projects stay hot and are re-offered next pass.
-func runCodeIntelArchiveSweep(ctx context.Context, cfg config.Config) (projects int, rows int64, err error) {
-	path := cfg.Archive.Path
-	if path == "" {
-		return 0, 0, nil
-	}
-	if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
-		slog.Warn("archive sweep skipped: archive directory unavailable",
-			"path", path, "error", mkErr)
-		return 0, 0, nil
-	}
-	cold, openErr := archivestore.Open(ctx, archivestore.Options{Path: path})
-	if openErr != nil {
-		slog.Warn("archive sweep skipped: archive database unavailable (projects stay hot)",
-			"path", path, "error", openErr)
-		return 0, 0, nil
-	}
-	defer func() { _ = cold.Close() }()
-
-	// A SEPARATE hot handle, not the caller's: an archive move streams a
-	// whole project through the pool, and borrowing the shared handle for
-	// that would put a long cold-path read on the same connections the
-	// daemon's hot work uses (design §1.2's explicit rejection).
-	hotDB, dbErr := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
-	if dbErr != nil {
-		slog.Warn("archive sweep skipped: could not open a dedicated hot handle",
-			"error", dbErr)
-		return 0, 0, nil
-	}
-	defer func() { _ = hotDB.Close() }()
-
-	mover := &archivesvc.Mover{
-		Hot:       store.New(hotDB),
-		Cold:      cold,
-		BatchRows: cfg.Archive.BatchRows,
-	}
-	res, sweepErr := mover.SweepCodeIntel(ctx, cfg.CodeIntel.RetentionDays,
-		archive.PlanOptions{MaxUnitsPerPass: cfg.Archive.MaxProjectsPerPass})
-	if res.Considered > res.Attempted {
-		slog.Info("archive sweep capped for this pass",
-			"considered", res.Considered, "attempted", res.Attempted,
-			"max_projects_per_pass", cfg.Archive.MaxProjectsPerPass)
-	}
-	return res.Archived, res.RowsArchived, sweepErr
-}
-
-// runProcessArchiveSweep moves one bounded batch of stale process-capture
-// day-windows into ~/.observer/archive.db, then applies the archive file's own
-// (later) expiry horizon.
-//
-// Same open-for-the-pass, separate-hot-handle, FAIL-OPEN-IN-ONE-DIRECTION
-// posture as runCodeIntelArchiveSweep — and the fail-open direction matters
-// more here than anywhere else in the arc. If the archive database cannot be
-// opened, the sweep is SKIPPED and NOTHING is deleted; it never falls back to
-// the hot prune. An operator who turned archival on and got their only copy of
-// a process trail deleted because a file was momentarily unavailable would have
-// lost unrecoverable data to a setting whose entire purpose was to stop losing
-// it. The windows stay hot and are re-offered next pass.
-func runProcessArchiveSweep(ctx context.Context, cfg config.Config) (archivesvc.ProcessSweepResult, error) {
-	var zero archivesvc.ProcessSweepResult
-	path := cfg.Archive.Path
-	if path == "" {
-		return zero, nil
-	}
-	if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
-		slog.Warn("process archive sweep skipped: archive directory unavailable",
-			"path", path, "error", mkErr)
-		return zero, nil
-	}
-	cold, openErr := archivestore.Open(ctx, archivestore.Options{Path: path})
-	if openErr != nil {
-		slog.Warn("process archive sweep skipped: archive database unavailable (windows stay hot)",
-			"path", path, "error", openErr)
-		return zero, nil
-	}
-	defer func() { _ = cold.Close() }()
-
-	hotDB, dbErr := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
-	if dbErr != nil {
-		slog.Warn("process archive sweep skipped: could not open a dedicated hot handle",
-			"error", dbErr)
-		return zero, nil
-	}
-	defer func() { _ = hotDB.Close() }()
-
-	mover := &archivesvc.ProcessMover{
-		Hot:       store.New(hotDB),
-		Cold:      cold,
-		BatchRows: cfg.Archive.BatchRows,
-	}
-	res, sweepErr := mover.SweepProcess(ctx, cfg.Observer.Process.ArchiveDays, cfg.Archive.MaxProjectsPerPass)
-
-	// The cold expiry runs even when the move half reported errors: a window
-	// that failed to archive is unrelated to windows whose cold copy is now
-	// past the delete horizon, and letting one block the other would grow the
-	// archive without bound.
-	expired, expErr := mover.ExpireProcessWindows(ctx, cfg.Observer.Process.RetentionDays, cfg.Archive.MaxProjectsPerPass)
-	res.Expired = expired
-	if res.Considered > res.Archived+res.Skipped+res.Failed {
-		slog.Info("process archive sweep capped for this pass", "considered", res.Considered)
-	}
-	return res, errors.Join(sweepErr, expErr)
-}
-
 // runRetentionLeased wraps runRetention with the T2.3 (P1-F) cross-process
 // "retention" dblease so multiple observer processes on the same machine
 // (proxy, watcher, a manual `observer prune`) don't run a retention pass
@@ -706,7 +590,7 @@ func retentionTickLoop(ctx context.Context, configPath string) {
 					"duration_ms", res.DurationMs)
 			}
 			if res.SizeCapUnmet {
-				logger.Warn("retention: DB still over max_db_size_mb after shedding aged actions — the bulk is in other tables (token_usage / cache_* / codeintel_* / process_runs). Recent actions were protected by the keep-floor. Raise [observer.retention].max_db_size_mb or add token retention.",
+				logger.Warn("retention: DB still over max_db_size_mb after shedding aged actions - the bulk is in other tables (token_usage / cache_* / codeintel_* / process_runs). Recent actions were protected by the keep-floor. Raise [observer.retention].max_db_size_mb or add token retention.",
 					"max_db_size_mb", cfg.Observer.Retention.MaxDBSizeMB,
 					"db_bytes", res.DBSizeBytesAfter)
 			}
@@ -747,7 +631,7 @@ func retentionTickLoop(ctx context.Context, configPath string) {
 				"db_bytes", res.DBSizeBytesAfter,
 				"duration_ms", res.DurationMs)
 			if res.SizeCapUnmet {
-				logger.Warn("retention tick: DB still over max_db_size_mb after shedding aged actions — the bulk is in other tables. Recent actions were protected by the keep-floor.")
+				logger.Warn("retention tick: DB still over max_db_size_mb after shedding aged actions - the bulk is in other tables. Recent actions were protected by the keep-floor.")
 			}
 		}
 	}

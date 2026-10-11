@@ -152,6 +152,17 @@ Open the command palette (`Ctrl+Shift+P` / `⌘⇧P`) and search for
 | `SuperBased: Refresh Instructions from Learnings` | CodeLens on `CLAUDE.md` etc. — runs `observer suggest --apply --target <…>` for the current workspace. |
 | `SuperBased: Preview Instruction Suggestions` | Same as above but dry-run; opens stdout in a new editor beside the original. |
 
+**Components that are not active.** The extension reads the daemon's
+component state (`GET /api/components/state`) when the daemon comes up
+and every minute after. While the API proxy component (`capture.proxy`)
+is not active on this machine, the proxied launch commands and
+`Copy Proxy Env Vars` leave the command palette (a keybinding still
+reaches them and says why), and the contributed proxied terminal profile
+opens a plain terminal with a warning. While the cache status route
+belongs to an inactive component, the cache-expiry status bar stays
+hidden and does not poll. A failed read, or a daemon without that route,
+shows everything as before.
+
 ## Settings
 
 | Setting | Default | Purpose |

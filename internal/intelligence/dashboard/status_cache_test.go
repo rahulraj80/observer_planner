@@ -242,7 +242,7 @@ func TestStatusSnapshotCache_UptimeNotFrozen(t *testing.T) {
 	second := getStatus(t, s)
 
 	if got := calls.Load(); got != 1 {
-		t.Fatalf("scans = %d, want 1 — the second response must have been served from cache for this test to mean anything", got)
+		t.Fatalf("scans = %d, want 1 - the second response must have been served from cache for this test to mean anything", got)
 	}
 
 	up1, ok1 := first["uptime_seconds"].(float64)
@@ -251,7 +251,7 @@ func TestStatusSnapshotCache_UptimeNotFrozen(t *testing.T) {
 		t.Fatalf("uptime_seconds missing: first=%v second=%v", first["uptime_seconds"], second["uptime_seconds"])
 	}
 	if up2 <= up1 {
-		t.Errorf("uptime_seconds = %v then %v — a cached snapshot froze the uptime clock", up1, up2)
+		t.Errorf("uptime_seconds = %v then %v - a cached snapshot froze the uptime clock", up1, up2)
 	}
 	if up1 < 29 || up1 > 31 {
 		t.Errorf("uptime_seconds = %v, want ~30 (stamped per request from processStartedAt)", up1)
@@ -262,7 +262,7 @@ func TestStatusSnapshotCache_UptimeNotFrozen(t *testing.T) {
 
 	// started_at must track the same per-request stamp, not the cached body.
 	if first["started_at"] == second["started_at"] {
-		t.Errorf("started_at identical across the two responses (%v) — it was served from the cache", first["started_at"])
+		t.Errorf("started_at identical across the two responses (%v) - it was served from the cache", first["started_at"])
 	}
 }
 
@@ -321,7 +321,7 @@ func TestStatusSnapshotCache_KeyedByDatabase(t *testing.T) {
 	s.demoDB.Store(other.opts.DB)
 	getStatus(t, s)
 	if got := calls.Load(); got != 2 {
-		t.Errorf("scans after DB swap = %d, want 2 — a cached snapshot of the previous database was served", got)
+		t.Errorf("scans after DB swap = %d, want 2 - a cached snapshot of the previous database was served", got)
 	}
 
 	// And back: the swapped-away entry must not be resurrected.
@@ -382,7 +382,7 @@ func TestStatusSnapshotCache_AbortingPollersStillPopulate(t *testing.T) {
 	// served from the entry those abandoned requests paid for.
 	body := getStatus(t, s)
 	if got := calls.Load(); got != 1 {
-		t.Errorf("scans after a follow-up poll = %d, want 1 — the detached scan's "+
+		t.Errorf("scans after a follow-up poll = %d, want 1 - the detached scan's "+
 			"result was not stored, so every poll re-scans (the original saturation)", got)
 	}
 	if _, ok := body["counts"].(map[string]any); !ok {
@@ -418,11 +418,11 @@ func TestStatusSnapshotCache_ClientAbortDoesNotCancelScan(t *testing.T) {
 
 	got := <-seen
 	if got.errAtEntry != nil {
-		t.Errorf("scan context was already cancelled (%v) — the client's cancellation "+
+		t.Errorf("scan context was already cancelled (%v) - the client's cancellation "+
 			"reached the scan; it must run detached", got.errAtEntry)
 	}
 	if !got.deadlineOK {
-		t.Error("scan context carries no deadline — a detached scan nothing can cancel " +
+		t.Error("scan context carries no deadline - a detached scan nothing can cancel " +
 			"must be bounded by statusScanTimeout")
 	}
 
@@ -474,7 +474,7 @@ func TestStatusSnapshotCache_DegradedNotStored(t *testing.T) {
 					t.Errorf("query_errors on the wire = %v, want %d", body["query_errors"], tc.queryErrors)
 				}
 			} else if _, present := body["query_errors"]; present {
-				t.Errorf("query_errors present on a healthy snapshot (%v) — omitempty must keep "+
+				t.Errorf("query_errors present on a healthy snapshot (%v) - omitempty must keep "+
 					"the wire shape byte-identical to before the field existed", body["query_errors"])
 			}
 
@@ -542,7 +542,7 @@ func TestStatusSnapshotCache_DemoABA(t *testing.T) {
 
 	getStatus(t, s)
 	if got := calls.Load(); got != 2 {
-		t.Errorf("scans after a demo start/stop round trip = %d, want 2 — the pre-demo "+
+		t.Errorf("scans after a demo start/stop round trip = %d, want 2 - the pre-demo "+
 			"snapshot was served back as if it were current", got)
 	}
 }
@@ -575,7 +575,7 @@ func TestStatusSnapshotCache_StaleWhileRevalidate(t *testing.T) {
 			t.Fatalf("stale hit %d: /api/status = %d", i, rr.Code)
 		}
 		if el := time.Since(start); el >= scanCost {
-			t.Errorf("stale hit %d took %v — it waited for the scan instead of serving the stale entry", i, el)
+			t.Errorf("stale hit %d took %v - it waited for the scan instead of serving the stale entry", i, el)
 		}
 	}
 	s.statusSnap.bg.Wait()
@@ -592,7 +592,7 @@ func TestStatusSnapshotCache_StaleWhileRevalidate(t *testing.T) {
 	start := time.Now()
 	getStatus(t, s)
 	if el := time.Since(start); el < scanCost {
-		t.Errorf("request past statusStaleServeMax returned in %v — it served an entry too old to present as current", el)
+		t.Errorf("request past statusStaleServeMax returned in %v - it served an entry too old to present as current", el)
 	}
 	if got := calls.Load(); got != 3 {
 		t.Errorf("scans = %d, want 3", got)

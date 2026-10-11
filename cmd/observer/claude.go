@@ -65,7 +65,7 @@ func newClaudeCmd() *cobra.Command {
 			"proxy. For Pro/Max OAuth users, also re-exports the OAuth access\n" +
 			"token as ANTHROPIC_AUTH_TOKEN so Claude Code's normal `/v1/messages`\n" +
 			"path lands at the proxy instead of bypassing it. Same Pro/Max\n" +
-			"billing — observer just gets to see (and compress) the body.\n\n" +
+			"billing - observer just gets to see (and compress) the body.\n\n" +
 			"All arguments after the subcommand are forwarded to claude. Use\n" +
 			"`--` to separate observer flags from claude flags:\n" +
 			"    observer claude -- --print \"hi\"\n\n" +
@@ -137,7 +137,7 @@ func newClaudeCmd() *cobra.Command {
 	// combinable with --attach (the daemon owns the resumed PTY).
 	if capClaude, _ := integration.For("claude-code"); capClaude.Resume.Kind == integration.ResumeNative {
 		cmd.Flags().StringVar(&resume, "resume", "",
-			"Resume a CLOSED claude-code session by its id: launches `claude --resume <id>`, reattaching the tool's REAL prior conversation (signed thinking blocks and all) — NOT a distilled fork. Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
+			"Resume a CLOSED claude-code session by its id: launches `claude --resume <id>`, reattaching the tool's REAL prior conversation (signed thinking blocks and all) - NOT a distilled fork. Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
 	}
 	return cmd
 }
@@ -173,7 +173,10 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 
 	// P6 item 5: refuse a bare launch of an org-disallowed tool (node.features
 	// tools.disallow). "claude-code" is claude's integration-registry key.
-	if err := refuseIfToolDisallowedCfg(cfg, "claude-code", opts.stderr); err != nil {
+	// A PEEK here (review M3-10): an attached launch is started by the
+	// daemon's inner `observer claude`, which counts the grant use; the bare
+	// path below counts it after the attach decision. One launch, one use.
+	if err := refuseIfToolDisallowedPeekCfg(cfg, "claude-code", opts.stderr); err != nil {
 		return err
 	}
 
@@ -234,6 +237,10 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 	if outcome.handled {
 		return attachErr
 	}
+	// The bare path starts claude itself: count the grant use here (M3-10).
+	if err := refuseIfToolDisallowedCfg(cfg, "claude-code", opts.stderr); err != nil {
+		return err
+	}
 	// F3(a): remember when the attach layer already emitted its daemon-unreachable
 	// notice, so a downstream empty-unset proxy-down notice (same root cause — the
 	// daemon IS the proxy) doesn't print a redundant SECOND line, and the
@@ -266,7 +273,7 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 		defer release()
 		opts.claudeArgs = injectClaudeResume(opts.claudeArgs, opts.resume)
 		fmt.Fprintf(opts.stderr,
-			"observer claude: native resume — reattaching session %s via `claude --resume` (real transcript, not a fork)\n",
+			"observer claude: native resume - reattaching session %s via `claude --resume` (real transcript, not a fork)\n",
 			opts.resume)
 	}
 
@@ -347,7 +354,7 @@ func runClaudeLauncher(ctx context.Context, opts claudeLauncherOptions) error {
 	// didn't prove); fix or drop --settings and re-run.
 	if route.cliUnreadable {
 		fmt.Fprintf(opts.stderr,
-			"observer claude: refusing to launch — your --settings value (%s) could not be read or parsed as a settings object, so observer cannot tell whether it routes claude to the observer proxy. Fix or drop --settings (pass a readable file path or valid inline JSON) and re-run.\n",
+			"observer claude: refusing to launch - your --settings value (%s) could not be read or parsed as a settings object, so observer cannot tell whether it routes claude to the observer proxy. Fix or drop --settings (pass a readable file path or valid inline JSON) and re-run.\n",
 			route.file)
 		return exitErr(1)
 	}
@@ -431,11 +438,11 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, rou
 	switch {
 	case info.OAuthStale:
 		fmt.Fprintf(opts.stderr,
-			"observer claude: stored OAuth token in %s is expired — NOT re-exporting it (a stale env token blocks Claude Code's own refresh and the session 401s). Launching with ANTHROPIC_BASE_URL only; claude refreshes its token itself.\n",
+			"observer claude: stored OAuth token in %s is expired - NOT re-exporting it (a stale env token blocks Claude Code's own refresh and the session 401s). Launching with ANTHROPIC_BASE_URL only; claude refreshes its token itself.\n",
 			credPath)
 	case info.CredentialsErr != nil:
 		fmt.Fprintf(opts.stderr,
-			"observer claude: warning — credentials file %s exists but is unparseable (%v); falling back to API-key mode. Fix the file or set ANTHROPIC_AUTH_TOKEN manually if you're a Pro/Max user.\n",
+			"observer claude: warning - credentials file %s exists but is unparseable (%v); falling back to API-key mode. Fix the file or set ANTHROPIC_AUTH_TOKEN manually if you're a Pro/Max user.\n",
 			credPath, info.CredentialsErr)
 	case info.OAuthPreset:
 		fmt.Fprintf(opts.stderr,
@@ -446,7 +453,7 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, rou
 		// hand-edited file the user probably wants to know about).
 		if credentialsFileExists(credPath) {
 			fmt.Fprintf(opts.stderr,
-				"observer claude: warning — credentials file %s has no claudeAiOauth.accessToken; falling back to API-key mode. Re-run `claude` to refresh your OAuth credentials if you're a Pro/Max user.\n",
+				"observer claude: warning - credentials file %s has no claudeAiOauth.accessToken; falling back to API-key mode. Re-run `claude` to refresh your OAuth credentials if you're a Pro/Max user.\n",
 				credPath)
 		}
 	}
@@ -463,7 +470,7 @@ func runClaudeRoutedLaunch(opts claudeLauncherOptions, bin, proxyURL string, rou
 			proxyURL)
 	} else {
 		fmt.Fprintf(opts.stderr,
-			"observer claude: routing via %s (ANTHROPIC_BASE_URL only — using existing API-key auth)\n",
+			"observer claude: routing via %s (ANTHROPIC_BASE_URL only - using existing API-key auth)\n",
 			proxyURL)
 	}
 
@@ -584,7 +591,7 @@ func rejectIncompatibleClaudeAttachFlags(opts claudeLauncherOptions) error {
 func rejectIncompatibleClaudeResumeFlags(opts claudeLauncherOptions) error {
 	switch {
 	case opts.continueFrom != "":
-		return errors.New("observer claude: --resume (native, reattaches the REAL transcript) is mutually exclusive with --continue-from (distilled fork into a NEW session) — pick one")
+		return errors.New("observer claude: --resume (native, reattaches the REAL transcript) is mutually exclusive with --continue-from (distilled fork into a NEW session) - pick one")
 	case opts.carry != "":
 		return errors.New("observer claude: --carry only applies to --continue-from and cannot be combined with --resume")
 	case opts.fromMessage != 0:
@@ -984,7 +991,7 @@ func runClaudeVerify(stderr interface{ Write([]byte) (int, error) }, r claudeVer
 	if r.ProxyReachable {
 		fmt.Fprintf(stderr, "  PASS  proxy reachable at %s\n", r.ProxyURL)
 	} else {
-		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s — start `observer start` or `observer proxy start`\n", r.ProxyURL)
+		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s - start `observer start` or `observer proxy start`\n", r.ProxyURL)
 		failed++
 	}
 
@@ -997,7 +1004,7 @@ func runClaudeVerify(stderr interface{ Write([]byte) (int, error) }, r claudeVer
 	case r.Info.OAuthInjected:
 		fmt.Fprintf(stderr, "  PASS  Pro/Max OAuth token found in %s; would re-export as ANTHROPIC_AUTH_TOKEN\n", r.CredentialsPath)
 	case credentialsFileExists(r.CredentialsPath):
-		fmt.Fprintf(stderr, "  WARN  %s present but has no accessToken — API-key mode will be used. If you're a Pro/Max user, re-run `claude` interactively to refresh credentials.\n", r.CredentialsPath)
+		fmt.Fprintf(stderr, "  WARN  %s present but has no accessToken - API-key mode will be used. If you're a Pro/Max user, re-run `claude` interactively to refresh credentials.\n", r.CredentialsPath)
 	default:
 		fmt.Fprintf(stderr, "  PASS  no Pro/Max credentials file at %s (assuming API-key mode; ensure ANTHROPIC_API_KEY is set)\n", r.CredentialsPath)
 	}
@@ -1012,7 +1019,7 @@ func runClaudeVerify(stderr interface{ Write([]byte) (int, error) }, r claudeVer
 		fmt.Fprintln(stderr, "observer claude --verify: all checks passed; `observer claude` should capture every turn.")
 		return nil
 	}
-	fmt.Fprintf(stderr, "observer claude --verify: %d check(s) failed — fix above and re-verify.\n", failed)
+	fmt.Fprintf(stderr, "observer claude --verify: %d check(s) failed - fix above and re-verify.\n", failed)
 	return exitErr(1)
 }
 

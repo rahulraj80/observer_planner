@@ -50,7 +50,9 @@ func TestAutoRegisterRemediation(t *testing.T) {
 }
 
 // TestAutoRegisterHooks_PromptLaneOnlyGate pins B4 (phase-3a review):
-// a PromptLaneOnly mechanism (Gemini CLI's HookGeminiSettings today)
+// a mechanism whose only written binding is prompt-family (Poolside since
+// T-363 put Gemini CLI's tool gate live; its PreToolUse still owes a live
+// test, so `observer start` would write only UserPromptSubmit)
 // must not be written at all when [guard.prompt].enabled/hook_lane
 // resolves to false — writing a hook whose only reason to exist is
 // prompt-submit evaluation that will never run is dead weight the
@@ -58,10 +60,13 @@ func TestAutoRegisterRemediation(t *testing.T) {
 // (Claude Code's session/tool-call events, PromptLaneOnly=false) must
 // still register regardless of this gate.
 func TestAutoRegisterHooks_PromptLaneOnlyGate(t *testing.T) {
+	requireComponents(t, "integration.hooks")
+	requireActiveAdapters(t, "claude-code", "poolside")
+	requireAdapter(t, "claude-code")
 	setupHome := func(t *testing.T) string {
 		t.Helper()
 		home := t.TempDir()
-		for _, dir := range []string{".claude", ".gemini"} {
+		for _, dir := range []string{".claude", filepath.Join(".config", "poolside")} {
 			if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -71,19 +76,19 @@ func TestAutoRegisterHooks_PromptLaneOnlyGate(t *testing.T) {
 		return home
 	}
 
-	t.Run("promptLaneEnabled=false: PromptLaneOnly (gemini-cli) skipped, claude-code still registered", func(t *testing.T) {
+	t.Run("promptLaneEnabled=false: prompt-only (poolside) skipped, claude-code still registered", func(t *testing.T) {
 		home := setupHome(t)
 		var stdout, stderr bytes.Buffer
 		autoRegisterHooks(&stdout, &stderr, "", false)
 		out := stdout.String()
-		if strings.Contains(out, "gemini-cli") {
-			t.Errorf("stdout = %q, must not mention gemini-cli when promptLaneEnabled=false", out)
+		if strings.Contains(out, "poolside") {
+			t.Errorf("stdout = %q, must not mention poolside when promptLaneEnabled=false", out)
 		}
 		if !strings.Contains(out, "claude-code") {
 			t.Errorf("stdout = %q, want claude-code to still be auto-registered (PromptLaneOnly=false)", out)
 		}
-		if _, err := os.Stat(filepath.Join(home, ".gemini", "settings.json")); err == nil {
-			t.Errorf("~/.gemini/settings.json was written even though promptLaneEnabled=false")
+		if _, err := os.Stat(filepath.Join(home, ".config", "poolside", "settings.yaml")); err == nil {
+			t.Errorf("~/.config/poolside/settings.yaml was written even though promptLaneEnabled=false")
 		}
 		if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); err != nil {
 			t.Errorf("~/.claude/settings.json was NOT written: %v", err)
@@ -95,8 +100,8 @@ func TestAutoRegisterHooks_PromptLaneOnlyGate(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		autoRegisterHooks(&stdout, &stderr, "", true)
 		out := stdout.String()
-		if !strings.Contains(out, "gemini-cli") {
-			t.Errorf("stdout = %q, want gemini-cli auto-registered when promptLaneEnabled=true", out)
+		if !strings.Contains(out, "poolside") {
+			t.Errorf("stdout = %q, want poolside auto-registered when promptLaneEnabled=true", out)
 		}
 		if !strings.Contains(out, "claude-code") {
 			t.Errorf("stdout = %q, want claude-code auto-registered", out)
@@ -144,9 +149,15 @@ func TestAutoRegisterRemediation_LongTailVendorsNameNoDedicatedFlag(t *testing.T
 // had the prompt-submit hook lane disabled.
 func TestAutoRegisterHooks_PromptLaneOnlyGateAppliesToWindowsBridgeTargets(t *testing.T) {
 	t.Parallel()
+	// Qwen Code and Qoder left this list in hook-parity Lane C: they now
+	// wire live-grounded lifecycle bindings, so the capability-shaped gate
+	// registers them with the prompt lane off (asserted below).
 	windowsTargets := []string{
-		"gemini-cli-windows", "qwen-code-windows", "droid-windows",
-		"qoder-windows", "poolside-windows", "command-code-windows",
+		// droid-windows left this list on 2026-10-04 (T-357): droid's
+		// PreToolUse gate went live, so start writes it with the prompt
+		// lane off too. gemini-cli-windows left on 2026-10-06 (T-363):
+		// its BeforeTool gate went live.
+		"poolside-windows", "command-code-windows",
 	}
 	for _, tool := range windowsTargets {
 		t.Run(tool, func(t *testing.T) {
@@ -155,7 +166,7 @@ func TestAutoRegisterHooks_PromptLaneOnlyGateAppliesToWindowsBridgeTargets(t *te
 			// lookup autoRegisterHooks used to use never resolves a
 			// "-windows" suffixed id — it is not a registry key.
 			if _, ok := integration.For(tool); ok {
-				t.Fatalf("integration.For(%q) ok = true — this tool now IS a bare registry key; the whole premise of the advertisedCapability fix (and this test) is stale, re-check the gate", tool)
+				t.Fatalf("integration.For(%q) ok = true - this tool now IS a bare registry key; the whole premise of the advertisedCapability fix (and this test) is stale, re-check the gate", tool)
 			}
 			// The FIX: advertisedCapability strips the suffix and
 			// resolves the base row, so the gate this feeds
@@ -168,8 +179,20 @@ func TestAutoRegisterHooks_PromptLaneOnlyGateAppliesToWindowsBridgeTargets(t *te
 			if !isWindows {
 				t.Errorf("advertisedCapability(%q) isWindows = false, want true", tool)
 			}
-			if !c.Hook.PromptLaneOnly {
-				t.Errorf("advertisedCapability(%q).Hook.PromptLaneOnly = false, want true — the base row must be PromptLaneOnly for this regression to be meaningful", tool)
+			// The base row resolves (since hook-parity Lane A these rows
+			// also wire a tool gate, so they are no longer PromptLaneOnly;
+			// the gate below is the capability-shaped one).
+			if c.Tool != strings.TrimSuffix(tool, "-windows") {
+				t.Errorf("advertisedCapability(%q).Tool = %q, want the base row", tool, c.Tool)
+			}
+			// Since hook-parity Lane A these rows also wire a tool gate,
+			// which still owes its live test, so `observer start` would
+			// write only the prompt event: its gate must refuse.
+			if hookRegistrationWanted(tool, false, autoRegisterSkipEvent) {
+				t.Errorf("hookRegistrationWanted(%q, false, autoRegisterSkipEvent) = true, want false with the prompt lane off", tool)
+			}
+			if autoRegisterDecision(tool, false) {
+				t.Errorf("autoRegisterDecision(%q, false) = true, want false with the prompt lane off", tool)
 			}
 		})
 	}
@@ -178,7 +201,7 @@ func TestAutoRegisterHooks_PromptLaneOnlyGateAppliesToWindowsBridgeTargets(t *te
 	// prompt-submit event (session/tool-call capture) must NOT be
 	// PromptLaneOnly — a disabled prompt lane must never suppress their
 	// registration.
-	for _, tool := range []string{"claude-code-windows", "cursor-windows", "codex-windows"} {
+	for _, tool := range []string{"claude-code-windows", "cursor-windows", "codex-windows", "qwen-code-windows", "qoder-windows", "droid-windows", "gemini-cli-windows"} {
 		t.Run(tool+"_not_prompt_lane_only", func(t *testing.T) {
 			t.Parallel()
 			c, _, ok := advertisedCapability(tool)
@@ -186,7 +209,10 @@ func TestAutoRegisterHooks_PromptLaneOnlyGateAppliesToWindowsBridgeTargets(t *te
 				t.Fatalf("advertisedCapability(%q) ok = false, want true", tool)
 			}
 			if c.Hook.PromptLaneOnly {
-				t.Errorf("advertisedCapability(%q).Hook.PromptLaneOnly = true, want false — this mechanism carries session/tool-call value beyond prompt-submit and must always register", tool)
+				t.Errorf("advertisedCapability(%q).Hook.PromptLaneOnly = true, want false - this mechanism carries session/tool-call value beyond prompt-submit and must always register", tool)
+			}
+			if !hookRegistrationWanted(tool, false, autoRegisterSkipEvent) {
+				t.Errorf("hookRegistrationWanted(%q, false, autoRegisterSkipEvent) = false, want true (wired lifecycle bindings)", tool)
 			}
 		})
 	}

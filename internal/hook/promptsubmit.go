@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,6 +63,13 @@ type promptReplyOutcome struct {
 	// FIX-2's truncated-prompt notice) — Blocking is always false when
 	// Warn is true.
 	Warn bool
+	// Redacted is true when the verdict's action is guard.PromptActionRedact:
+	// the prompt goes through as Masked (every secret span replaced by its
+	// [REDACTED:type] marker). Only a dialect with a redact builder ever
+	// sees it; Blocking and Warn are false then.
+	Redacted bool
+	// Masked is the rewritten prompt text when Redacted.
+	Masked string
 }
 
 // promptDialect is one row of the table-driven wire-shape dispatch
@@ -111,7 +119,75 @@ type promptDialect struct {
 	// into the one channel the vendor renders as the user-facing
 	// reason.
 	stderrReason bool
+	// caps is what this wire shape lets the developer SEE and DO for a
+	// prompt finding (guard.PromptSeamCaps), resolved through the one
+	// decision x capability table (guard/promptaction.go). Warn is true
+	// only where the vendor documents a pass-through notice the
+	// DEVELOPER sees: Claude Code and Codex `systemMessage`
+	// (code.claude.com/docs/en/hooks, learn.chatgpt.com/docs/hooks,
+	// fetched 2026-10-02), Gemini CLI `systemMessage`. Cursor's
+	// beforeSubmitPrompt has no non-blocking notice field (cursor.com/
+	// docs/agent/hooks, fetched 2026-10-02), and additionalContext /
+	// additional_context reach the MODEL, not the developer, so those
+	// rows cannot warn: a flag there is recorded and toasted
+	// (flag-after).
+	caps guard.PromptSeamCaps
+	// allowReply is the dialect's own "nothing to say" reply, written
+	// when Observer has no verdict to give (no prompt found, guard off,
+	// a non-prompt event, a recovered panic): HandlePromptAllow. nil
+	// means the host accepts the generic {"decision":"approve"}
+	// (HandleApprove). A host whose output schema REJECTS unknown fields
+	// must set it: Antigravity CLI accepts only `injectSteps` or an empty
+	// object, and logged "unknown field \"decision\"" on every
+	// invocation (node 1 live test, 2026-10-03).
+	allowReply any
+	// oncePerPrompt marks a seam that fires repeatedly for ONE prompt
+	// (agy's PreInvocation runs before every model call of a turn): a
+	// prompt with findings is judged once, deduped on the pre-send mark
+	// the first verdict's persist leaves (guard.PromptAlreadyJudged).
+	oncePerPrompt bool
+	// redact, when non-nil, builds the dialect's MODIFY reply: the host
+	// sends out.Masked to the model instead of what the developer typed
+	// (Poolside hook_specific_output.updated_prompt, commandcode
+	// {action:"transform"}). A dialect with redact sets caps.Redact; the
+	// handler offers it to the decision table only when the guard could
+	// mask this prompt completely (guard.Guard.RedactPromptText).
+	redact func(out promptReplyOutcome) any
+	// silentAllow marks a host that treats ANY non-empty stdout on an allow
+	// as text to add to the model context (Kimi Code appends an exit-0
+	// hook's stdout to the conversation as a <hook_result> message), so
+	// "nothing to say" must be an EMPTY stdout, never a JSON approve.
+	silentAllow bool
 }
+
+// repeatSeamNothingNew reports whether a oncePerPrompt seam has nothing
+// new to say: the prompt is clean, or a pre-send lane already judged it.
+// No DB read unless the prompt has a finding.
+func repeatSeamNothingNew(ge PromptEvaluator, sessionID, prompt string, findings int) bool {
+	if findings == 0 {
+		return true
+	}
+	c, ok := ge.(promptJudgedChecker)
+	return ok && c.PromptAlreadyJudged(sessionID, prompt, time.Now().UTC())
+}
+
+// promptJudgedChecker is the optional evaluator capability a
+// oncePerPrompt dialect uses (guard.Guard implements it).
+type promptJudgedChecker interface {
+	PromptAlreadyJudged(sessionID, text string, at time.Time) bool
+}
+
+// promptHookStops is the capability every dialect below shares: each can
+// stop the prompt with its own block signal, and the reconsider-once
+// flow turns that into a re-enter.
+var promptHookStops = guard.PromptSeamCaps{Reenter: true, Block: true}
+
+// promptHookWarns adds the documented pass-through notice.
+var promptHookWarns = guard.PromptSeamCaps{Warn: true, Reenter: true, Block: true}
+
+// promptHookStopsOrRedacts is a seam that can stop the prompt AND rewrite
+// what the model receives (Poolside updated_prompt, commandcode transform).
+var promptHookStopsOrRedacts = guard.PromptSeamCaps{Reenter: true, Block: true, Redact: true}
 
 // jsonHasAnyKey reports whether body decodes as a JSON object carrying
 // at least one of the given top-level keys — used by every extractor
@@ -234,6 +310,11 @@ type claudeCodePromptOut struct {
 }
 
 type claudeCodePromptReply struct {
+	// SystemMessage is the documented common field "Warning message
+	// shown to the user" (code.claude.com/docs/en/hooks, fetched
+	// 2026-10-02): the flag decision's visible warning. additionalContext
+	// only reaches the model.
+	SystemMessage      string              `json:"systemMessage,omitempty"`
 	HookSpecificOutput claudeCodePromptOut `json:"hookSpecificOutput"`
 }
 
@@ -245,10 +326,13 @@ func buildClaudeCodePromptReply(out promptReplyOutcome) any {
 		return nil
 	}
 	hso := claudeCodePromptOut{HookEventName: "UserPromptSubmit"}
+	reply := claudeCodePromptReply{}
 	if out.Warn {
 		hso.AdditionalContext = out.Reason
+		reply.SystemMessage = out.Reason
 	}
-	return claudeCodePromptReply{HookSpecificOutput: hso}
+	reply.HookSpecificOutput = hso
+	return reply
 }
 
 // ClaudeCodePromptApproveReply is the modern UserPromptSubmit "allow"
@@ -275,6 +359,10 @@ func ClaudeCodePromptApproveReply() any {
 // vendor-confirmed verb rather than inventing a distinction the docs
 // don't draw (contract's own "never a guessed payload" discipline).
 type promptTopLevelBlockOut struct {
+	// SystemMessage is Codex's "surfaced as a warning in the UI" field
+	// (learn.chatgpt.com/docs/hooks, fetched 2026-10-02); Droid and Qwen
+	// Code take the same Claude-Code-compatible common field.
+	SystemMessage      string                        `json:"systemMessage,omitempty"`
 	Decision           string                        `json:"decision,omitempty"`
 	Reason             string                        `json:"reason,omitempty"`
 	HookSpecificOutput *promptTopLevelHookOutputOnly `json:"hookSpecificOutput,omitempty"`
@@ -297,6 +385,7 @@ func buildPromptTopLevelBlockReply(out promptReplyOutcome) any {
 	}
 	if out.Warn {
 		return promptTopLevelBlockOut{
+			SystemMessage: out.Reason,
 			HookSpecificOutput: &promptTopLevelHookOutputOnly{
 				HookEventName:     "UserPromptSubmit",
 				AdditionalContext: out.Reason,
@@ -545,6 +634,123 @@ func buildCommandCodePromptReply(out promptReplyOutcome) any {
 	return promptCommandCodeOut{Action: "continue"}
 }
 
+// buildPoolsidePromptRedactReply is Poolside's MODIFY reply
+// (docs.poolside.ai/hooks, fetched 2026-10-03): exit 0 with
+// hook_specific_output.updated_prompt makes the MODEL receive the rewritten
+// prompt while the terminal keeps showing what the developer typed;
+// additional_context (also honoured on this event) tells the model why the
+// value reads as a redaction marker.
+func buildPoolsidePromptRedactReply(out promptReplyOutcome) any {
+	type poolsideRedactOut struct {
+		UpdatedPrompt     string `json:"updated_prompt"`
+		AdditionalContext string `json:"additional_context,omitempty"`
+	}
+	return struct {
+		HookSpecificOutput poolsideRedactOut `json:"hook_specific_output"`
+	}{poolsideRedactOut{UpdatedPrompt: out.Masked, AdditionalContext: out.Reason}}
+}
+
+// buildCommandCodePromptRedactReply is commandcode's Mods SDK transform
+// (commandcode.ai/docs/mods, fetched 2026-10-03): {action:'transform',text}
+// "rewrites the prompt text that reaches the model" for this model call
+// only; the visible record keeps the typed input. The go:embed'd bridge
+// (commandcodemod/observer-guard.ts) already returns a transform reply
+// verbatim.
+func buildCommandCodePromptRedactReply(out promptReplyOutcome) any {
+	type commandCodeTransformOut struct {
+		Action string `json:"action"`
+		Text   string `json:"text"`
+	}
+	return commandCodeTransformOut{Action: "transform", Text: out.Masked}
+}
+
+// Kimi Code's UserPromptSubmit (kimi-code 2.1.1, grounded 2026-10-03 from
+// the bundled source of the installed build on demo node 1:
+// agent-core-v2 externalHooks runHook.ts / userPrompt.ts; the vendor page
+// moonshotai.github.io/kimi-code/en/customization/hooks agrees on the
+// envelope). The runner camelCases-to-snake_cases the input, so stdin is
+// {"hook_event_name","session_id","session_title","cwd",...,"prompt",
+// "is_steer"} - the generic {prompt, session_id} shape. Exit 2 BLOCKS and
+// its trimmed stderr becomes the block message, which Kimi appends to the
+// conversation as a <hook_result hook_event="UserPromptSubmit"> message
+// and dispatches as a HookResult event (the developer sees it in the
+// transcript; the model reads it too). On exit 0 a non-empty stdout is
+// appended to the model context as another <hook_result>, which is why the
+// allow reply is an empty stdout (silentAllow) and why a warning has no
+// developer-visible channel here (caps: stop only). A timed-out or crashed
+// hook is an allow (Kimi fails open).
+//
+// T-378 live capture (kimi 2.1.1 on demo node 1, 2026-10-07): "prompt" is
+// NOT a string on the wire but the turn's content parts,
+// [{"type":"text","text":"..."}]. A string-only decode failed on that body
+// and the receiver fell through to its unguarded allow, so a secret in the
+// prompt reached the model. Both shapes are read here: the text parts are
+// joined with newlines (non-text parts such as images carry no text to
+// scan), and a prompt value of any other shape is reported as a missing
+// field, never as an empty prompt.
+func extractKimiCodePrompt(body []byte) (prompt, sessionID string, ok, fieldMissing bool) {
+	var p struct {
+		Prompt    json.RawMessage `json:"prompt"`
+		SessionID string          `json:"session_id"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		return "", "", false, false
+	}
+	text, shapeOK := kimiPromptText(p.Prompt)
+	return text, p.SessionID, true, !jsonHasAnyKey(body, "prompt") || !shapeOK
+}
+
+// kimiPromptText reads a Kimi Code prompt value: a plain string, or a list
+// of content parts whose "text" members are joined with newlines. ok is
+// false for any other shape (including null and an absent value).
+func kimiPromptText(raw json.RawMessage) (string, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(trimmed, &s) == nil {
+		return s, true
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(trimmed, &parts) != nil {
+		return "", false
+	}
+	texts := make([]string, 0, len(parts))
+	for _, pt := range parts {
+		if pt.Text != "" {
+			texts = append(texts, pt.Text)
+		}
+	}
+	return strings.Join(texts, "\n"), true
+}
+
+// Devin CLI's UserPromptSubmit (docs.devin.ai/cli/extensibility/hooks/
+// lifecycle-hooks, fetched 2026-10-03): stdin carries "prompt" and
+// "session_id"; the only documented output is
+// hookSpecificOutput.additionalContext, which reaches the AGENT's context.
+// No block is documented, so the seam can only warn the model (caps:
+// warn, indirect) and every finding still toasts.
+var extractDevinCLIPrompt = extractGenericPrompt
+
+// devinCLIPromptOut is the hookSpecificOutput envelope Devin CLI documents.
+type devinCLIPromptOut struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext,omitempty"`
+}
+
+func buildDevinCLIPromptReply(out promptReplyOutcome) any {
+	if !out.Warn {
+		return struct{}{}
+	}
+	return struct {
+		HookSpecificOutput devinCLIPromptOut `json:"hookSpecificOutput"`
+	}{devinCLIPromptOut{HookEventName: "UserPromptSubmit", AdditionalContext: out.Reason}}
+}
+
 // Dialect ids — the channel's WIRE SHAPE, not a tool name. Multiple
 // registry tools may share one row (contract §6.7/§9.0).
 const (
@@ -593,6 +799,18 @@ const (
 	// internal/hook/hermesplugin's Python-plugin precedent for the
 	// analogous non-JSON-config registration model.
 	PromptDialectCommandCode = "command-code"
+	// PromptDialectAntigravityPreInvocation is Antigravity CLI's
+	// PreInvocation hook (promptagy.go): a warn-only seam that reads the
+	// prompt from the session transcript and can only inject a transient
+	// message for the model.
+	PromptDialectAntigravityPreInvocation = "antigravity-preinvocation"
+	// PromptDialectKimiCode is Kimi Code's UserPromptSubmit shape: exit 2
+	// with the reason on stderr blocks; an allow is an EMPTY stdout.
+	PromptDialectKimiCode = "kimi-code"
+	// PromptDialectDevinCLI is Devin CLI's UserPromptSubmit shape (its own
+	// .devin/hooks.v1.json, distinct from Devin Desktop's Cascade
+	// pre_user_prompt): context injection only, no block.
+	PromptDialectDevinCLI = "devin-cli"
 )
 
 // promptDialects is the dialect table (CLAUDE.md rule 5): exactly the
@@ -646,15 +864,70 @@ const (
 // setting blockExitCode risked interacting with its own
 // `HandleCursorEventGuarded` reply path in ways not audited here.
 var promptDialects = map[string]promptDialect{
-	PromptDialectClaudeCode:    {extract: extractClaudeCodePrompt, reply: buildClaudeCodePromptReply, blockExitCode: 2, stderrReason: true},
-	PromptDialectTopLevelBlock: {extract: extractGenericPrompt, reply: buildPromptTopLevelBlockReply, blockExitCode: 2},
-	PromptDialectCursor:        {extract: extractCursorPrompt, reply: buildCursorPromptReply},
-	PromptDialectGemini:        {extract: extractGenericPrompt, reply: buildGeminiPromptReply, blockExitCode: 2},
-	PromptDialectQoder:         {extract: extractQoderPrompt, reply: nil, blockExitCode: 2, stderrReason: true},
-	PromptDialectPoolside:      {extract: extractGenericPrompt, reply: buildPoolsidePromptReply, blockExitCode: 2},
-	PromptDialectZcode:         {extract: extractGenericPrompt, reply: buildZcodePromptReply},
-	PromptDialectCascade:       {extract: extractCascadePrompt, reply: nil, blockExitCode: 2},
-	PromptDialectCommandCode:   {extract: extractCommandCodePrompt, reply: buildCommandCodePromptReply},
+	PromptDialectClaudeCode:    {extract: extractClaudeCodePrompt, reply: buildClaudeCodePromptReply, blockExitCode: 2, stderrReason: true, caps: promptHookWarns},
+	PromptDialectTopLevelBlock: {extract: extractGenericPrompt, reply: buildPromptTopLevelBlockReply, blockExitCode: 2, caps: promptHookWarns},
+	PromptDialectCursor:        {extract: extractCursorPrompt, reply: buildCursorPromptReply, caps: promptHookStops},
+	PromptDialectGemini:        {extract: extractGenericPrompt, reply: buildGeminiPromptReply, blockExitCode: 2, caps: promptHookWarns},
+	PromptDialectQoder:         {extract: extractQoderPrompt, reply: nil, blockExitCode: 2, stderrReason: true, caps: promptHookStops},
+	PromptDialectPoolside:      {extract: extractGenericPrompt, reply: buildPoolsidePromptReply, redact: buildPoolsidePromptRedactReply, blockExitCode: 2, caps: promptHookStopsOrRedacts},
+	PromptDialectZcode:         {extract: extractGenericPrompt, reply: buildZcodePromptReply, caps: promptHookStops},
+	PromptDialectCascade:       {extract: extractCascadePrompt, reply: nil, blockExitCode: 2, caps: promptHookStops},
+	PromptDialectCommandCode:   {extract: extractCommandCodePrompt, reply: buildCommandCodePromptReply, redact: buildCommandCodePromptRedactReply, caps: promptHookStopsOrRedacts},
+	PromptDialectAntigravityPreInvocation: {
+		extract: extractAntigravityPreInvocationPrompt, reply: buildAntigravityPreInvocationReply,
+		caps: guard.PromptSeamWarnOnly, oncePerPrompt: true, allowReply: agyPreInvocationReply{},
+	},
+	// Plugin hosts' prompt seam (OpenCode / Kilo CLI chat.message, through
+	// the pluginshim TS shim): modify-only, so a block is delivered by
+	// replacing the message text before the model sees it, and the session
+	// id makes the resend-to-confirm flow keyable. No developer-visible
+	// pass-through notice exists (an added part would reach the model).
+	// The allow reply is HandleApprove's: the shim treats anything that is
+	// not deny / ask / modify as an allow.
+	PromptDialectPluginShim: {extract: extractPluginPrompt, reply: buildPluginPromptReply, caps: promptHookStops},
+	PromptDialectKimiCode: {
+		extract: extractKimiCodePrompt, reply: nil, blockExitCode: 2, stderrReason: true,
+		caps: promptHookStops, silentAllow: true,
+	},
+	PromptDialectDevinCLI: {
+		extract: extractDevinCLIPrompt, reply: buildDevinCLIPromptReply,
+		caps: guard.PromptSeamWarnOnly, allowReply: struct{}{},
+	},
+}
+
+// HandlePromptAllow writes dialect's allow reply (promptDialect.allowReply)
+// with HandleApprove's forensics, or HandleApprove's own reply for a
+// dialect that declares none (or an unknown dialect id). It is the ONE
+// fallback every prompt-submit receiver path uses when it has no verdict
+// to give, so a host with a strict output schema is never sent a field it
+// rejects.
+func HandlePromptAllow(dialect, event string, stdin io.Reader, stdout, stderr io.Writer) {
+	if d, ok := promptDialects[dialect]; ok && d.silentAllow {
+		handleAllow(event, stdin, stdout, stderr, nil)
+		return
+	}
+	if d, ok := promptDialects[dialect]; ok && d.allowReply != nil {
+		handleAllow(event, stdin, stdout, stderr, d.allowReply)
+		return
+	}
+	HandleApprove(event, stdin, stdout, stderr)
+}
+
+// PromptDialectWritesStdout reports whether dialect's prompt-submit wire
+// contract ever writes a stdout reply. False for the exit-code-only
+// dialects with a silent allow (Kimi Code): a recovered panic there must
+// leave stdout empty. Dialects without a row answer true (the generic
+// approve reply).
+func PromptDialectWritesStdout(dialect string) bool {
+	d, ok := promptDialects[dialect]
+	return !ok || !(d.silentAllow && d.reply == nil)
+}
+
+// KnownPromptDialect reports whether dialect has a row in the prompt
+// dialect table (a binding naming an unknown dialect is not evaluated).
+func KnownPromptDialect(dialect string) bool {
+	_, ok := promptDialects[dialect]
+	return ok
 }
 
 // promptBlockReasons is FIX-5's table-driven (CLAUDE.md rule 5) map
@@ -667,13 +940,13 @@ var promptDialects = map[string]promptDialect{
 // rendered with the same "you configured mode=block" text regardless
 // of which one actually happened.
 var promptBlockReasons = map[string]string{
-	"": ". Edit it out before sending — mode=\"block\" has no resend override.",
-	"unhashable": ". This finding type can't be fingerprinted for a resend override, so it blocks every time — " +
+	"": ". Edit it out before sending. mode=\"block\" has no resend override.",
+	"unhashable": ". This finding type can't be fingerprinted for a resend override, so it blocks every time; " +
 		"edit it out before sending.",
-	"no_session": ". No session id was available to track a resend, so this blocks unconditionally — " +
+	"no_session": ". No session id was available to track a resend, so this blocks unconditionally; " +
 		"edit it out before sending.",
 	"store_unwired": ". The reconsider-once store isn't available right now, so this blocks unconditionally " +
-		"(fail-closed) — edit it out before sending, or retry once observer is healthy.",
+		"(fail-closed). Edit it out before sending, or retry once observer is healthy.",
 	// "unscanned" (FIX-2's truncated/field-missing degrade under
 	// mode=block): the Reason itself is already the complete,
 	// self-explanatory message — no generic suffix needed.
@@ -716,8 +989,17 @@ func promptRemediationDetector(csv string) string {
 // every other PII-class detector share R-190).
 func promptHouseMessage(pv guard.PromptVerdict, sessionID string) string {
 	reason := pv.Verdict.Reason
+	if pv.Action == guard.PromptActionRedact {
+		return "observer: " + reason + ". The value was replaced with a [REDACTED] marker before the prompt reached the model."
+	}
 	switch pv.Outcome {
 	case guard.PromptOutcomeBlocked:
+		if guard.IsBudgetRule(pv.Verdict.RuleID) {
+			// A managed budget stop (T-519): the reason already names the
+			// budget, the spend and the request flow. Nothing in the prompt
+			// caused it, so no "edit it out" or resend suffix applies.
+			return "observer: " + reason
+		}
 		if pv.Verdict.Decision == policy.DecisionAsk {
 			detector := promptRemediationDetector(pv.Detectors)
 			if detector == "" {
@@ -730,7 +1012,7 @@ func promptHouseMessage(pv guard.PromptVerdict, sessionID string) string {
 				// The resend landed inside reconsider_min_delay — most likely
 				// the client's own retry, but a fast human gets the same
 				// verdict, so tell them what to do (F2, retry-floor review).
-				return "observer: " + reason + ". That resend arrived too fast to count as your confirmation — wait a moment and send it again unchanged to confirm, or edit it out."
+				return "observer: " + reason + ". That resend arrived too fast to count as your confirmation. Wait a moment and send it again unchanged to confirm, or edit it out."
 			}
 			return "observer: " + reason + ". Send it again unchanged to confirm, or edit it out. " +
 				"Run `observer guard prompt allow " + detector + " --session " + sessionID +
@@ -744,16 +1026,64 @@ func promptHouseMessage(pv guard.PromptVerdict, sessionID string) string {
 		// scan under mode=block — none of which is "you configured
 		// mode=block". Branch on the DegradedFrom marker those
 		// producers now set (internal/guard/promptguard.go).
+		// Sol A2-10: an org-overridable deny tells the developer how to
+		// override it (the shared guard rendering), never "edit it out".
+		if hint := guard.PromptOverrideHint(pv, sessionID); hint != "" {
+			return "observer: " + reason + hint
+		}
 		suffix, ok := promptBlockReasons[pv.DegradedFrom]
 		if !ok {
 			suffix = promptBlockReasons[""]
 		}
+		// Request-grants G4: an org-locked block leads with the request
+		// line (rule, link to the prefilled request form, CLI command) so
+		// it survives a host or display that shows only the start.
+		if hint := guard.PromptRequestAccessHint(pv, sessionID); hint != "" {
+			return "observer: " + hint + " Reason: " + reason + suffix
+		}
 		return "observer: " + reason + suffix
 	case guard.PromptOutcomeWarned:
+		if pv.OrgCapped {
+			return "observer: " + reason + " (sent: your organization set this rule to warn only; see `observer guard prompt status`)."
+		}
 		return "observer: " + reason + " (forwarded; see `observer guard prompt status`)."
 	default:
 		return reason
 	}
+}
+
+// promptRedactor is the optional evaluator capability a redact-capable
+// dialect uses (guard.Guard implements it): mask every secret in a prompt
+// and confirm the masked text rescans clean.
+type promptRedactor interface {
+	RedactPromptText(text string) (masked string, ok bool)
+}
+
+// promptRedactOffer returns the capabilities the decision table may use
+// for this prompt: the dialect's own, with Redact kept only when the
+// dialect can rewrite the prompt AND the guard masked it completely (a
+// secret-only finding set, a complete scan, a masked text that rescans
+// clean). Anything less withdraws Redact, so the table falls back to the
+// dialect's other actions rather than forwarding a half-masked prompt.
+func promptRedactOffer(d promptDialect, ge PromptEvaluator, prompt string, secrets []policy.SecretFinding, pii []policy.PIIFinding, complete bool) (guard.PromptSeamCaps, string) {
+	caps := d.caps
+	if !caps.Redact {
+		return caps, ""
+	}
+	caps.Redact = false
+	if d.redact == nil || !complete || len(pii) > 0 || len(secrets) == 0 {
+		return caps, ""
+	}
+	r, ok := ge.(promptRedactor)
+	if !ok {
+		return caps, ""
+	}
+	masked, ok := r.RedactPromptText(prompt)
+	if !ok {
+		return caps, ""
+	}
+	caps.Redact = true
+	return caps, masked
 }
 
 // HandlePromptSubmitGuarded is the ONE shared prompt-submit hook seam
@@ -845,6 +1175,13 @@ func HandlePromptSubmitGuarded(
 	if extractOK {
 		secrets, pii, scanTruncated = ge.BuildPromptFindings(prompt)
 	}
+	if d.oncePerPrompt && extractOK && !scanTruncated &&
+		repeatSeamNothingNew(ge, sessionID, prompt, len(secrets)+len(pii)) {
+		if d.reply != nil {
+			_ = json.NewEncoder(stdout).Encode(d.reply(promptReplyOutcome{}))
+		}
+		return true, nil, 0
+	}
 
 	ev := policy.Event{
 		Kind:        policy.KindUserPrompt,
@@ -863,24 +1200,23 @@ func HandlePromptSubmitGuarded(
 		PromptFieldMissing: fieldMissing,
 		Now:                time.Now().UTC(),
 	}
-	pv := ge.EvaluatePrompt(ev)
-	em := guard.ResolveEmission(pv.Verdict, caps)
+	// The one decision x capability table (guard/promptaction.go): the
+	// dialect row's caps decide what the developer gets for this
+	// decision, and the emission reports exactly that. A redact-capable
+	// dialect offers Redact only when the guard can mask THIS prompt
+	// completely (promptRedactOffer).
+	seamCaps, masked := promptRedactOffer(d, ge, prompt, secrets, pii, extractOK && !scanTruncated && !bodyTruncated)
+	pv := ge.EvaluatePrompt(ev).WithAction(seamCaps, "hook")
+	em := guard.PromptEmission(pv)
+	if extractOK {
+		// The pre-send mark the post-hoc capture lane dedupes on
+		// (guard/posthocprompt.go): carried to the one guard_events
+		// writer on the persisted verdict.
+		pv.CaptureDigest = guard.PromptPreSendDigest(prompt, pv.RecordWorthy())
+	}
 
-	out := promptReplyOutcome{
-		Blocking: em.Permission != "allow",
-		Warn:     em.Permission == "allow" && pv.RecordWorthy(),
-	}
-	if out.Blocking || out.Warn {
-		out.Reason = promptHouseMessage(pv, sessionID)
-	}
-	if d.reply != nil {
-		// A builder may return nil for an outcome its vendor signals
-		// WITHOUT a stdout reply (Claude Code's exit-2 block) — an
-		// encoded `null` would be a malformed hook reply, so skip it.
-		if r := d.reply(out); r != nil {
-			_ = json.NewEncoder(stdout).Encode(r)
-		}
-	}
+	out := promptOutcomeFor(pv, sessionID, masked)
+	writePromptReply(d, out, stdout)
 	if d.stderrReason && (out.Blocking || out.Warn) {
 		fmt.Fprintln(stderr, out.Reason)
 	}
@@ -908,11 +1244,54 @@ func HandlePromptSubmitGuarded(
 	}
 
 	if !pv.RecordWorthy() {
-		return true, nil, exitCode
+		if pv.CaptureDigest == "" || sessionID == "" {
+			return true, nil, exitCode
+		}
+		// Nothing to audit, but the stored form of this prompt will carry
+		// a typed redaction marker (e.g. an allow-listed fixture): persist
+		// a MARK-ONLY verdict (no rule id) so the capture lane does not
+		// flag afterwards what this lane deliberately let through.
+		// store.PersistGuardVerdicts writes the mark and no guard_events
+		// row; MaybeAlert ignores a verdict with no rule id.
 	}
 	return true, func() {
 		if persist != nil {
 			persist(pv, em, sessionID)
 		}
 	}, exitCode
+}
+
+// promptOutcomeFor maps a resolved prompt verdict onto the reply outcome
+// a dialect builder consumes. masked is carried only on a redact.
+func promptOutcomeFor(pv guard.PromptVerdict, sessionID, masked string) promptReplyOutcome {
+	out := promptReplyOutcome{
+		Blocking: pv.Action.Stops(),
+		Warn:     pv.Action == guard.PromptActionWarn,
+		Redacted: pv.Action == guard.PromptActionRedact,
+	}
+	if out.Blocking || out.Warn || out.Redacted {
+		out.Reason = promptHouseMessage(pv, sessionID)
+	}
+	if out.Redacted {
+		out.Masked = masked
+	}
+	return out
+}
+
+// writePromptReply encodes the dialect's stdout reply for out: the redact
+// builder on a redact, the reply builder otherwise. A builder may return
+// nil for an outcome its vendor signals WITHOUT a stdout reply (Claude
+// Code's exit-2 block); an encoded `null` would be a malformed hook
+// reply, so it is skipped.
+func writePromptReply(d promptDialect, out promptReplyOutcome, stdout io.Writer) {
+	builder := d.reply
+	if out.Redacted {
+		builder = d.redact
+	}
+	if builder == nil {
+		return
+	}
+	if r := builder(out); r != nil {
+		_ = json.NewEncoder(stdout).Encode(r)
+	}
 }

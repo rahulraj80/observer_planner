@@ -10,9 +10,10 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/claudeplugin"
 	"github.com/marmutapp/superbased-observer/internal/hook"
-	"github.com/marmutapp/superbased-observer/internal/mcp"
 	"github.com/marmutapp/superbased-observer/internal/mcp/locate"
+	"github.com/marmutapp/superbased-observer/internal/mcpregister"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // checkClaudeCodePlugin reports whether observer is wired into Claude
@@ -65,7 +66,7 @@ func checkClaudeCodePlugin(homeDir, homeOverride string) Check {
 		sides = append(sides, windowsPluginSide(winDir))
 	case crossmount.AutoDetectSuppressed(homeOverride, ""):
 		details = append(details,
-			"windows: not inspected — this doctor run pinned HomeDir, so cross-OS auto-detection is suppressed (incident 2026-07-31)")
+			"windows: not inspected - this doctor run pinned HomeDir, so cross-OS auto-detection is suppressed (incident 2026-07-31)")
 	}
 
 	var (
@@ -97,8 +98,8 @@ func checkClaudeCodePlugin(homeDir, homeOverride string) Check {
 			details,
 			"Each source fires independently, so every event fires twice.",
 			"Remove ONE of them:",
-			"  keep the plugin  → `observer uninstall --claude-code` (removes init's copy;"+
-				" re-add the proxy route with `observer init --claude-code --skip-hooks --skip-mcp`)",
+			"  keep the plugin  → "+remedy.Quote(remedy.Of(remedy.UninstallTool, "claude-code"))+" (removes init's copy;"+
+				" re-add the proxy route with "+remedy.Quote(remedy.Of(remedy.InitToolRoute, "claude-code"))+")",
 			fmt.Sprintf("  keep init wiring → `/plugin uninstall %s` inside Claude Code (removes the plugin's copy)",
 				claudeplugin.Name),
 			"Cost while both are wired: action rows do NOT duplicate (deterministic source_event_id +"+
@@ -108,7 +109,7 @@ func checkClaudeCodePlugin(homeDir, homeOverride string) Check {
 		)
 		return Check{
 			Name: name, Status: StatusWarn,
-			Message: fmt.Sprintf("observer is wired into Claude Code TWICE — by the %s plugin AND by `observer init` (%s)",
+			Message: fmt.Sprintf("observer is wired into Claude Code TWICE - by the %s plugin AND by `observer init` (%s)",
 				claudeplugin.Name, sideLabels(doubled)),
 			Details: details,
 		}
@@ -189,7 +190,7 @@ func nativePluginSide(homeDir string) pluginSide {
 	}
 	if mcpPath := claudeCodeMCPConfigPath(homeDir); mcpPath != "" && observerMCPEntryRegistered(mcpPath) {
 		s.InitWiring = append(s.InitWiring,
-			fmt.Sprintf("the %q MCP server in %s", mcp.ServerName, mcpPath))
+			fmt.Sprintf("the %q MCP server in %s", mcpregister.ServerName, mcpPath))
 	}
 	return s
 }
@@ -265,7 +266,7 @@ func observerMCPEntryRegistered(path string) bool {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return false
 	}
-	_, ok := doc.MCPServers[mcp.ServerName]
+	_, ok := doc.MCPServers[mcpregister.ServerName]
 	return ok
 }
 

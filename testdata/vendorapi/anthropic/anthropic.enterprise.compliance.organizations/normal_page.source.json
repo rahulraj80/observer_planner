@@ -1,0 +1,27 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].name": "VerifiedOfficial",
+    "data[].uuid": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "879e22f02c5c93d7d0145432a3f0a28b99d5a6fdd4d62c5f8f3ee415ffe6fe6e",
+  "http": {
+    "method": "GET",
+    "path": "/v1/compliance/organizations",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/compliance/organizations.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated Compliance API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "2ece9f3f845885fdfa0f44bbe7ea6c31fe869a313eabf2c3e6f5babf9e17a0ed",
+  "source_url": "https://platform.claude.com/docs/en/api/compliance.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.compliance.organizations"
+}

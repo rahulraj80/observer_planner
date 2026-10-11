@@ -19,6 +19,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/guard"
+	"github.com/marmutapp/superbased-observer/internal/guardtest"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -34,7 +35,7 @@ func newGuardCmd() *cobra.Command {
 		Short: "Security & control layer: status, rules, dry-runs, audit verification",
 		Long: "The guard layer evaluates agent actions against a table-driven\n" +
 			"policy (built-in + user + project rules), records verdicts in a\n" +
-			"hash-chained audit table, and — in enforce mode — blocks at the\n" +
+			"hash-chained audit table, and - in enforce mode - blocks at the\n" +
 			"hook seam. See docs/plans/guard-layer-implementation-spec-2026-06-10.md.",
 	}
 	cmd.AddCommand(newGuardStatusCmd())
@@ -126,7 +127,7 @@ func newGuardStatusCmd() *cobra.Command {
 			// must work on a fresh install before first capture.
 			database, err := db.Open(cmd.Context(), db.Options{Path: cfg.Observer.DBPath})
 			if err != nil {
-				fmt.Fprintf(out, "\n(DB unavailable — verdict counts and chain check skipped: %v)\n", err)
+				fmt.Fprintf(out, "\n(DB unavailable - verdict counts and chain check skipped: %v)\n", err)
 				return nil
 			}
 			defer database.Close()
@@ -172,7 +173,7 @@ func newGuardStatusCmd() *cobra.Command {
 			if report.OK {
 				fmt.Fprintf(out, "Audit chain:  OK (%d rows verified)\n", report.Checked)
 			} else {
-				fmt.Fprintf(out, "Audit chain:  BROKEN at id %d — %s\n", report.FirstDivergenceID, report.Detail)
+				fmt.Fprintf(out, "Audit chain:  BROKEN at id %d - %s\n", report.FirstDivergenceID, report.Detail)
 			}
 			return nil
 		},
@@ -261,7 +262,7 @@ func newGuardRulesCmd() *cobra.Command {
 func renderRuleCatalogMarkdown(infos []policy.RuleInfo) string {
 	var b strings.Builder
 	b.WriteString("# Guard rule catalog\n\n")
-	b.WriteString("GENERATED — do not edit by hand. Regenerate with:\n\n")
+	b.WriteString("GENERATED - do not edit by hand. Regenerate with:\n\n")
 	b.WriteString("    observer guard rules --markdown > docs/guard-rules.md\n\n")
 	b.WriteString("Rule IDs are stable and never reused (guard spec §5). The\n")
 	b.WriteString("Observe/Enforce columns are the mode-decision pair; observe is\n")
@@ -303,49 +304,31 @@ func newGuardTestCmd() *cobra.Command {
 			"so boundary rules behave as they would for a session in this repo.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, g, err := buildCLIGuard(configPath)
+			cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
 			if err != nil {
-				return err
+				return fmt.Errorf("load config: %w", err)
 			}
 			ev, err := buildTestEvent(args, filePath, eventJSON)
 			if err != nil {
 				return err
 			}
-			verdict, gerr := g.Evaluate(ev)
-			if gerr != nil {
-				return fmt.Errorf("guard internal error: %w", gerr)
-			}
-
-			// Second engine in enforce mode answers "would this block
-			// once you flip enforce?" — the pre-enforce confidence
-			// question this command exists for.
-			enforceCfg := cfg.Guard
-			enforceCfg.Mode = "enforce"
+			// guardtest.Run evaluates under the configured mode AND in
+			// enforce ("would this block once you flip enforce?" - the
+			// pre-enforce confidence question this command exists for).
+			// The Security page's Test a command card runs the same call.
 			home, _ := os.UserHomeDir()
-			eg, err := guard.New(guard.Options{Config: enforceCfg, Home: home})
+			res, err := guardtest.Run(cfg.Guard, home, nil, ev)
 			if err != nil {
-				return fmt.Errorf("construct enforce-mode guard: %w", err)
+				return err
 			}
-			enforceVerdict, _ := eg.Evaluate(ev)
 
 			out := cmd.OutOrStdout()
 			if jsonOut {
 				enc := json.NewEncoder(out)
 				enc.SetIndent("", "  ")
-				return enc.Encode(map[string]any{
-					"kind":             string(ev.Kind),
-					"target":           ev.Target,
-					"project_root":     ev.ProjectRoot,
-					"rule_id":          verdict.RuleID,
-					"severity":         verdict.Severity.String(),
-					"decision":         verdict.Decision.String(),
-					"enforce_decision": enforceVerdict.Decision.String(),
-					"reason":           verdict.Reason,
-					"advice":           verdict.Advice,
-					"source":           verdict.Source,
-				})
+				return enc.Encode(res.Report())
 			}
-			printTestVerdict(out, cfg.Guard.Mode, ev, verdict, enforceVerdict)
+			printTestVerdict(out, cfg.Guard.Mode, ev, res.Verdict, res.EnforceVerdict)
 			return nil
 		},
 	}
@@ -366,10 +349,7 @@ func buildTestEvent(args []string, filePath, eventJSON string) (policy.Event, er
 	if r, ok := git.FindRoot(cwd); ok {
 		root = r
 	}
-	base := policy.Event{
-		Tool: "guard-test", SessionID: "guard-test",
-		Cwd: cwd, ProjectRoot: root, Now: time.Now().UTC(),
-	}
+	base := guardtest.Base(cwd, root, time.Now().UTC())
 	set := 0
 	if len(args) == 1 && args[0] != "" {
 		set++
@@ -385,9 +365,7 @@ func buildTestEvent(args []string, filePath, eventJSON string) (policy.Event, er
 	}
 	switch {
 	case filePath != "":
-		base.Kind = policy.KindFileAccess
-		base.ActionType = "write_file"
-		base.Target = filePath
+		return guardtest.FileWrite(base, filePath), nil
 	case eventJSON != "":
 		var raw struct {
 			Kind       string `json:"kind"`
@@ -401,25 +379,17 @@ func buildTestEvent(args []string, filePath, eventJSON string) (policy.Event, er
 		if raw.Kind == "" || raw.Target == "" {
 			return policy.Event{}, errors.New(`--event requires at least {"kind":..., "target":...}`)
 		}
-		base.Kind = policy.EventKind(raw.Kind)
-		base.Target = raw.Target
-		base.ActionType = raw.ActionType
-		if raw.SessionID != "" {
-			base.SessionID = raw.SessionID
-		}
+		return guardtest.Raw(base, raw.Kind, raw.Target, raw.ActionType, raw.SessionID), nil
 	default:
-		base.Kind = policy.KindShellExec
-		base.ActionType = "run_command"
-		base.Target = args[0]
+		return guardtest.Command(base, args[0]), nil
 	}
-	return base, nil
 }
 
 // printTestVerdict renders the human dry-run report.
 func printTestVerdict(out io.Writer, mode string, ev policy.Event, v, enforceV policy.Verdict) {
 	fmt.Fprintf(out, "Event:        %s %q (project root %s)\n", ev.Kind, ev.Target, ev.ProjectRoot)
 	if v.RuleID == "" {
-		fmt.Fprintf(out, "Verdict:      allow — no rule matched\n")
+		fmt.Fprintf(out, "Verdict:      allow - no rule matched\n")
 	} else {
 		fmt.Fprintf(out, "Verdict:      %s (%s, severity %s, source %s)\n", v.Decision, v.RuleID, v.Severity, v.Source)
 		fmt.Fprintf(out, "Reason:       %s\n", v.Reason)
@@ -429,7 +399,7 @@ func printTestVerdict(out io.Writer, mode string, ev policy.Event, v, enforceV p
 	}
 	fmt.Fprintf(out, "Current mode: %s\n", mode)
 	if enforceV.Decision != v.Decision {
-		fmt.Fprintf(out, "In enforce:   %s — flipping [guard] mode would change this verdict\n", enforceV.Decision)
+		fmt.Fprintf(out, "In enforce:   %s - flipping [guard] mode would change this verdict\n", enforceV.Decision)
 	} else {
 		fmt.Fprintf(out, "In enforce:   %s (unchanged)\n", enforceV.Decision)
 	}
@@ -491,11 +461,11 @@ func newGuardLintCmd() *cobra.Command {
 			for _, tgt := range targets {
 				raw, err := os.ReadFile(tgt.path)
 				if errors.Is(err, os.ErrNotExist) {
-					fmt.Fprintf(out, "%-8s %s — not present (ok)\n", tgt.layer, tgt.path)
+					fmt.Fprintf(out, "%-8s %s - not present (ok)\n", tgt.layer, tgt.path)
 					continue
 				}
 				if err != nil {
-					fmt.Fprintf(out, "%-8s %s — read error: %v\n", tgt.layer, tgt.path, err)
+					fmt.Fprintf(out, "%-8s %s - read error: %v\n", tgt.layer, tgt.path, err)
 					problems++
 					continue
 				}
@@ -510,11 +480,11 @@ func newGuardLintCmd() *cobra.Command {
 					issues = guard.Lint(raw, tgt.layer)
 				}
 				if len(issues) == 0 {
-					fmt.Fprintf(out, "%-8s %s — OK\n", tgt.layer, tgt.path)
+					fmt.Fprintf(out, "%-8s %s - OK\n", tgt.layer, tgt.path)
 					continue
 				}
 				for _, issue := range issues {
-					fmt.Fprintf(out, "%-8s %s — %s\n", tgt.layer, tgt.path, issue)
+					fmt.Fprintf(out, "%-8s %s - %s\n", tgt.layer, tgt.path, issue)
 					problems++
 				}
 			}
@@ -541,7 +511,7 @@ func newGuardVerifyAuditCmd() *cobra.Command {
 			"chain link (SHA-256 over the previous link + the row's canonical\n" +
 			"bytes) and re-anchoring on the retention checkpoint. Reports the\n" +
 			"first divergence. Tamper-EVIDENT, not tamper-proof: an attacker\n" +
-			"with DB write access could recompute the whole chain — what this\n" +
+			"with DB write access could recompute the whole chain - what this\n" +
 			"catches is silent edits and mid-chain deletions.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -560,10 +530,10 @@ func newGuardVerifyAuditCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if report.OK {
-				fmt.Fprintf(out, "audit chain OK — %d row(s) verified\n", report.Checked)
+				fmt.Fprintf(out, "audit chain OK - %d row(s) verified\n", report.Checked)
 				return nil
 			}
-			fmt.Fprintf(out, "audit chain BROKEN — first divergence at id %d (%d row(s) walked)\n%s\n",
+			fmt.Fprintf(out, "audit chain BROKEN - first divergence at id %d (%d row(s) walked)\n%s\n",
 				report.FirstDivergenceID, report.Checked, report.Detail)
 			return errors.New("guard verify-audit: chain divergence")
 		},

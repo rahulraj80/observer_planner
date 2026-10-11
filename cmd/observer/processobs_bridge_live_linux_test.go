@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !sbo_omit_processobs
 
 package main
 
@@ -40,7 +40,7 @@ func TestProcessBridgeLive_CrossOSAttribution(t *testing.T) {
 	}
 	winObserver, ok := bridge.ResolveWindowsObserver(os.Getenv("OBSERVER_WINDOWS_BINARY"))
 	if !ok {
-		t.Skip("no Windows observer.exe resolved — build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
+		t.Skip("no Windows observer.exe resolved - build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -156,7 +156,7 @@ func TestProcessBridgeLive_EnvTokenAttribution(t *testing.T) {
 	}
 	winObserver, ok := bridge.ResolveWindowsObserver(os.Getenv("OBSERVER_WINDOWS_BINARY"))
 	if !ok {
-		t.Skip("no Windows observer.exe resolved — build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
+		t.Skip("no Windows observer.exe resolved - build bin/observer.exe or set OBSERVER_WINDOWS_BINARY")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -251,7 +251,7 @@ func TestProcessBridgeLive_EnvTokenAttribution(t *testing.T) {
 		}
 	}
 	if !sawClaude {
-		t.Fatalf("fake claude.exe not attributed by EV (session has %d runs) — check WSLENV propagation + a freshly-built bin/observer.exe", len(runs))
+		t.Fatalf("fake claude.exe not attributed by EV (session has %d runs) - check WSLENV propagation + a freshly-built bin/observer.exe", len(runs))
 	}
 	t.Logf("live EV smoke: claude.exe attributed env_token/high; session tree has %d runs", len(runs))
 }

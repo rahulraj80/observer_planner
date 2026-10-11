@@ -297,7 +297,7 @@ var rules = []coverageRule{
 			return t == TransportStdio && s.HasMCPRegistry && s.RegistryWriterImplemented && !s.StdioApplied
 		},
 		coverage: Uncovered,
-		note:     "wrap writer exists but no stdio wrap is verified on disk on this node (not applied, the config write failed or was edited since: observer mcp-relay enable)",
+		note:     "wrap writer exists but no stdio wrap is verified on disk on this node (not applied, the config write failed or was edited since; re-apply it with the relay actions on the MCP access card or `observer mcp-relay enable`)",
 	},
 	// 9. remote-http: projectable, but not applied / no token client.
 	{
@@ -305,7 +305,7 @@ var rules = []coverageRule{
 			return t == TransportRemoteHTTP && s.HasMCPRegistry && s.RegistryWriterImplemented && s.SupportsRemote && !s.RemoteApplied
 		},
 		coverage: Uncovered,
-		note:     "remote entry projectable but no relay remote entry is verified on disk on this node (not applied, the config write failed or was edited since: observer mcp-relay enable)",
+		note:     "remote entry projectable but no relay remote entry is verified on disk on this node (not applied, the config write failed or was edited since; re-apply it with the relay actions on the MCP access card or `observer mcp-relay enable`)",
 	},
 	{
 		match: func(s ClientShape, t Transport, _ Method) bool {

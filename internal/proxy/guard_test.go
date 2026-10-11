@@ -672,13 +672,55 @@ func TestGuardPromptDeny_ClampsUnsafeStatus(t *testing.T) {
 type stubPhaseGuard struct {
 	stubGuard
 	promptBodies [][]byte
+	promptTools  []string
 	afterBodies  [][]byte
 }
 
-func (s *stubPhaseGuard) ScanPrompt(_ context.Context, _ string, body []byte, _ string) GuardRequestResult {
+// TestGuardPromptPhaseCarriesClientTool pins audit P9: the proxy resolves
+// the client tool at its boundary (here the header signature table) and
+// hands it to the prompt-phase scanner, so a proxy-lane prompt verdict
+// names the tool instead of persisting with an empty one.
+func TestGuardPromptPhaseCarriesClientTool(t *testing.T) {
+	t.Parallel()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(anthropicOKBody))
+	}))
+	defer up.Close()
+	g := &stubPhaseGuard{}
+	p, err := New(Options{AnthropicUpstream: up.URL, OpenAIUpstream: up.URL, Sink: &fakeSink{}, Guard: g})
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+	ts := httptest.NewServer(p.Handler())
+	defer ts.Close()
+	for _, tc := range []struct{ ua, want string }{
+		{"claude-cli/2.1.0 (external, cli)", "claude-code"},
+		{"curl/8.0", ""},
+	} {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/messages",
+			strings.NewReader(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", tc.ua)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		resp.Body.Close()
+		g.mu.Lock()
+		got := g.promptTools[len(g.promptTools)-1]
+		g.mu.Unlock()
+		if got != tc.want {
+			t.Errorf("UA %q: scanner saw tool %q, want %q", tc.ua, got, tc.want)
+		}
+	}
+}
+
+func (s *stubPhaseGuard) ScanPrompt(ctx context.Context, _ string, body []byte, _ string) GuardRequestResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.promptBodies = append(s.promptBodies, append([]byte(nil), body...))
+	s.promptTools = append(s.promptTools, GuardClientTool(ctx))
 	if strings.Contains(string(body), "sk-ant-") {
 		return GuardRequestResult{Action: "prompt_deny", RuleID: "R-172", Reason: "observer: secret-shaped content in the prompt", Status: 400}
 	}

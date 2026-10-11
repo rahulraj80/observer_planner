@@ -44,10 +44,11 @@ func TestGuardPromptStatusCmd(t *testing.T) {
 		// (checkHookRegistration), not a bare registry listing — a
 		// fresh, isolated HOME with nothing registered must report NOT
 		// REGISTERED for a normally-auto-wired tool and the honest
-		// "documented, not auto-wired" line for zcode.
+		// zcode has a writer since hook-parity Lane A4, so it is probed
+		// (NOT REGISTERED in this fresh HOME) like every other row.
 		"claude-code", "codex", "cursor", "gemini-cli", "qwen-code", "droid",
 		"NOT REGISTERED",
-		"zcode            documented, not auto-wired",
+		"zcode",
 		"reconsider-once grants: 0 total, 0 expired",
 		// F4: no approvals seeded, must report that honestly.
 		"active prompt-submit approvals (R-172/R-190): none",

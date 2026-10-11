@@ -2,6 +2,9 @@ package notify
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +219,66 @@ func TestBuildNPMLookupAndParse(t *testing.T) {
 		if !strings.Contains(joined, sub) {
 			t.Errorf("format output missing %q:\n%s", sub, joined)
 		}
+	}
+}
+
+// lookupStub answers every request with one status and body.
+type lookupStub struct {
+	status int
+	body   string
+	calls  int
+}
+
+func (s *lookupStub) Do(*http.Request) (*http.Response, error) {
+	s.calls++
+	return &http.Response{StatusCode: s.status, Body: io.NopCloser(strings.NewReader(s.body)), Header: http.Header{}}, nil
+}
+
+// TestLookupNPMReputation pins the one lookup the CLI verb and the
+// dashboard control share (T-496), one row per outcome.
+func TestLookupNPMReputation(t *testing.T) {
+	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
+	doc := `{"name":"pkg","dist-tags":{"latest":"1.0.0"},"time":{"created":"2026-06-05T00:00:00Z"}}`
+	on := ReputationLookupOptions{CloudEnabled: true, ReputationEnabled: true, Now: now}
+	cases := []struct {
+		name    string
+		opts    ReputationLookupOptions
+		stub    *lookupStub
+		wantErr error
+		errSub  string
+		calls   int
+		young   bool
+	}{
+		{name: "cloud off", opts: ReputationLookupOptions{ReputationEnabled: true}, stub: &lookupStub{status: 200, body: doc}, wantErr: ErrReputationOff},
+		{name: "reputation off", opts: ReputationLookupOptions{CloudEnabled: true}, stub: &lookupStub{status: 200, body: doc}, wantErr: ErrReputationOff},
+		{name: "found and young", opts: on, stub: &lookupStub{status: 200, body: doc}, calls: 1, young: true},
+		{name: "not found", opts: on, stub: &lookupStub{status: 404}, wantErr: ErrPackageNotFound, calls: 1},
+		{name: "registry error", opts: on, stub: &lookupStub{status: 500}, errSub: "HTTP 500", calls: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := tc.opts
+			opts.Doer = tc.stub
+			info, err := LookupNPMReputation("pkg", opts)
+			switch {
+			case tc.wantErr != nil:
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+			case tc.errSub != "":
+				if err == nil || !strings.Contains(err.Error(), tc.errSub) {
+					t.Fatalf("err = %v, want %q", err, tc.errSub)
+				}
+			case err != nil:
+				t.Fatal(err)
+			default:
+				if info.Name != "pkg" || info.Young() != tc.young {
+					t.Fatalf("info = %+v", info)
+				}
+			}
+			if tc.stub.calls != tc.calls {
+				t.Fatalf("registry calls = %d, want %d", tc.stub.calls, tc.calls)
+			}
+		})
 	}
 }

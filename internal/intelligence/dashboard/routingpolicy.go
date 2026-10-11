@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing
+
 package dashboard
 
 import (
@@ -32,6 +34,27 @@ import (
 // every dashboard save), so what the editor shows is exactly what the
 // file holds.
 
+// routingPolicyTemplateNames lists the built-in policy template names the
+// [routing] section form accepts beside "custom" (settings.go).
+func routingPolicyTemplateNames() []string {
+	var out []string
+	for _, t := range routing.Templates() {
+		out = append(out, t.Name)
+	}
+	return out
+}
+
+// checkRoutingRulesTOML is the section save's gate for a RulesTOML
+// fragment (settings.go): parse, then the lint gate. Any problem refuses
+// the save with the file untouched.
+func checkRoutingRulesTOML(current config.RoutingConfig, text string) ([]config.RoutingRuleConfig, []string) {
+	rules, problems := parseRoutingRulesTOML(text)
+	if len(problems) == 0 {
+		_, problems = gateRoutingRules(current, rules)
+	}
+	return rules, problems
+}
+
 // routingRulesDoc is the TOML round-trip envelope: a fragment is the
 // [[routing.rules]] blocks exactly as they appear in config.toml.
 type routingRulesDoc struct {
@@ -52,10 +75,10 @@ func parseRoutingRulesTOML(text string) ([]config.RoutingRuleConfig, []string) {
 	}
 	var problems []string
 	for _, k := range md.Undecoded() {
-		problems = append(problems, fmt.Sprintf("key %q is outside [[routing.rules]] — the editor saves rules only; edit other [routing] shapes in the section form or the config file", k.String()))
+		problems = append(problems, fmt.Sprintf("key %q is outside [[routing.rules]] - the editor saves rules only; edit other [routing] shapes in the section form or the config file", k.String()))
 	}
 	if strings.TrimSpace(text) != "" && len(doc.Routing.Rules) == 0 && len(problems) == 0 {
-		problems = append(problems, "no [[routing.rules]] blocks found — the fragment must use the [[routing.rules]] table-array shape (see the recipe gallery in docs/model-routing.md)")
+		problems = append(problems, "no [[routing.rules]] blocks found - the fragment must use the [[routing.rules]] table-array shape (see the recipe gallery in docs/model-routing.md)")
 	}
 	return doc.Routing.Rules, problems
 }
@@ -131,7 +154,7 @@ func (s *Server) handleRoutingPolicy(w http.ResponseWriter, r *http.Request) {
 		"lint":        lintIssueViews(issues),
 		"config_path": s.opts.ConfigPath,
 		"note": "Custom rules append AFTER template expansion and are walked top-down, first match wins. " +
-			"Saving replaces ALL [[routing.rules]] — an empty editor clears them. The save is lint-gated and " +
+			"Saving replaces ALL [[routing.rules]] - an empty editor clears them. The save is lint-gated and " +
 			"restart-honest; key_pool, tiers, budgets, privacy rules and every other [routing] shape are untouched.",
 	})
 }

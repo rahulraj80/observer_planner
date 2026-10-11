@@ -1,0 +1,48 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "categories": "VerifiedOfficial",
+    "categories[]": "VerifiedOfficial",
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].end_time": "VerifiedOfficial",
+    "data[].results": "VerifiedOfficial",
+    "data[].results[]": "VerifiedOfficial",
+    "data[].results[].by_categories": "VerifiedOfficial",
+    "data[].results[].by_categories.Credit Source": "VerifiedOfficial",
+    "data[].results[].by_categories.Credit Source[]": "VerifiedOfficial",
+    "data[].results[].by_categories.Credit Source[].category": "VerifiedOfficial",
+    "data[].results[].by_categories.Credit Source[].count": "VerifiedOfficial",
+    "data[].results[].by_categories.Model": "VerifiedOfficial",
+    "data[].results[].by_categories.Model[]": "VerifiedOfficial",
+    "data[].results[].by_categories.Model[].category": "VerifiedOfficial",
+    "data[].results[].by_categories.Model[].count": "VerifiedOfficial",
+    "data[].results[].count": "VerifiedOfficial",
+    "data[].results[].user_email": "VerifiedOfficial",
+    "data[].start_time": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ee2481f9238c9aa4d732d49abbac78891e88afe34ffa75a6d3e3c724ca8eb65c",
+  "http": {
+    "method": "GET",
+    "path": "/v2/analytics/computer/usage",
+    "query": {
+      "dataset": "credit_usage",
+      "group_by": "user_email",
+      "start_time": "1746057600",
+      "end_time": "1746144000",
+      "limit": "100"
+    },
+    "status": 200
+  },
+  "notes": "The documented credit_usage response example, verbatim (one daily bucket, two members).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Perplexity Computer Analytics API v2 OpenAPI (getComputerUsageAnalyticsV2), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "29ecd7d855d64790edcb5301b3fc399b6a8eb00e6cca02478e26460a25e9f68a",
+  "source_url": "https://docs.perplexity.ai/api-reference/computer-analytics-usage-v2-get.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "perplexity.ent.analytics_v2_member"
+}

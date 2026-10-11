@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
-	"github.com/marmutapp/superbased-observer/internal/pricingfeed"
+	"github.com/marmutapp/superbased-observer/internal/pricingfeedwire"
 )
 
 // Windows is a model-id -> context-window table built from a pricing
@@ -18,7 +18,7 @@ type Windows map[string]int64
 // (the node's feed rows or the org's stored economics map). A model whose
 // economics carries no positive context_window_tokens is left out, so it
 // reads as unknown rather than 0.
-func ModelWindows(econ map[string]*pricingfeed.Economics) Windows {
+func ModelWindows(econ map[string]*pricingfeedwire.Economics) Windows {
 	out := Windows{}
 	for model, e := range econ {
 		if e == nil || e.ContextWindowTokens == nil || *e.ContextWindowTokens <= 0 {

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -5,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/sshprofile"
 	"github.com/marmutapp/superbased-observer/internal/termsession"
 	"github.com/marmutapp/superbased-observer/internal/termsvc"
@@ -173,7 +175,7 @@ func TestSnapshotEnablesProjectPanelForDefaultCwdLaunch(t *testing.T) {
 	}
 
 	adapter := &launchManagerAdapter{svc: svc, mgr: mgr}
-	var found *dashboard.LaunchInfo
+	var found *dashapi.LaunchInfo
 	for i, info := range adapter.Snapshot() {
 		if info.ID == res.Handle {
 			found = &adapter.Snapshot()[i]

@@ -5,22 +5,24 @@ import {
   ArrowUp,
   CircleHelp,
   Download,
-  ExternalLink,
-  Link,
   Menu,
-  Monitor,
-  Moon,
   RefreshCw,
-  Sun,
 } from "lucide-react";
 import { NAV_GROUPS } from "@/lib/nav";
+import { exportTargetFor } from "@/lib/exportTarget";
+import { exportJSONText } from "@/lib/costExport";
+import { useFilters, windowParams } from "@/lib/filters";
+import { nodeTabCrumb } from "@/lib/pageTabRoutes";
 import { useApi, useApiActivity } from "@/lib/useApi";
 import { fmtDuration } from "@/lib/format";
-import { useTheme, type ThemeMode } from "@/lib/theme";
+import { useTheme } from "@/lib/theme";
+import { ThemeToggle as SharedThemeToggle } from "@shared/primitives/ThemeToggle";
 import type { CloudStatusResponse, EnrolmentStatus, SetupClaude, StatusSnapshot } from "@/lib/types";
 import { isUpdateAvailable, useUpdateCheck } from "@/lib/version";
+import { orgDisplayLabel } from "@/lib/orgName";
 import { Icon, LiveDot, Tooltip } from "@/components/primitives";
 import { DensityToggle } from "@shared/primitives/DensityToggle";
+import { PageLinkTools } from "@shared/primitives";
 import { DENSITY_STORAGE_KEY } from "@shared/lib/density";
 import { useDensity } from "@shared/lib/useDensity";
 import {
@@ -30,27 +32,16 @@ import {
   liveDotProps,
   withDotClass,
 } from "@/lib/liveSignals";
+import { capturePillView, type CapturePillState } from "@/lib/capturePill";
 import { InstanceSwitcher } from "@/components/InstanceSwitcher";
+import { RemoteMachineChip } from "@/components/RemoteMachineChip";
+import { NotificationBell } from "@/components/NotificationBell";
 
 // `dashboard-refresh` is a window-level CustomEvent that useApi
 // listens for to re-fire its fetch. TopBar's Refresh button is the
 // only emitter for now; later we may add a per-window-blur retry.
 export const REFRESH_EVENT = "dashboard-refresh";
 
-// Maps the current pathname to the primary data endpoint that
-// Export will download. Falls back to /api/status.
-const EXPORT_MAP: Record<string, string> = {
-  "/": "/api/status",
-  "/sessions": "/api/sessions?limit=200",
-  "/actions": "/api/actions?limit=500",
-  "/cost": "/api/models",
-  "/analysis": "/api/analysis/headline",
-  "/tools": "/api/tools",
-  "/compression": "/api/compression/events?limit=500",
-  "/discovery": "/api/discover",
-  "/patterns": "/api/patterns?limit=200",
-  "/settings": "/api/config",
-};
 
 export function TopBar({
   onHelp,
@@ -60,7 +51,10 @@ export function TopBar({
   // onMenu opens the mobile nav drawer (< lg). Renders a hamburger.
   onMenu?: () => void;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  // The open page tab is the breadcrumb's last segment (lib/pageTabRoutes.ts,
+  // the table the command palette reads too); a default tab adds nothing.
+  const tabLabel = nodeTabCrumb(pathname, search);
   const group = NAV_GROUPS.find((g) =>
     g.items.some((i) => i.path === pathname),
   );
@@ -81,11 +75,34 @@ export function TopBar({
     window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
   }
 
+  // Export downloads the page's own data with the filters the page shows
+  // (lib/exportTarget.ts, one table); a page with nothing to export says so
+  // instead of downloading the status snapshot.
+  const { win, customRange, tool, project, model } = useFilters();
+  const exportTarget = exportTargetFor(pathname, search, {
+    window: windowParams(win, customRange),
+    tool,
+    project,
+    model,
+  });
+  const exportNone = "none" in exportTarget ? exportTarget.none : null;
+  const [exportError, setExportError] = useState<string | null>(null);
+  useEffect(() => setExportError(null), [pathname, search]);
+
   async function exportCurrent() {
-    const endpoint = EXPORT_MAP[pathname] ?? "/api/status";
+    if ("none" in exportTarget) return;
+    setExportError(null);
     try {
-      const res = await fetch(endpoint);
-      const blob = await res.blob();
+      const res = await fetch(exportTarget.url);
+      if (!res.ok) {
+        // A refused read (a hidden page, a local-only route on a remote
+        // view) is reported, never downloaded as if it were the data.
+        setExportError(`Export failed (HTTP ${res.status})`);
+        return;
+      }
+      // The download follows the developer cost display (T-204): in the
+      // token-usage view its dollar fields are left out (lib/costExport).
+      const blob = new Blob([exportJSONText(await res.text())], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -97,7 +114,7 @@ export function TopBar({
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      console.error("export failed", e);
+      setExportError(e instanceof Error ? `Export failed: ${e.message}` : "Export failed");
     }
   }
 
@@ -118,9 +135,20 @@ export function TopBar({
           <div className="flex min-w-0 items-center gap-2">
             <span className="hidden sm:inline">{group.label}</span>
             <span className="hidden sm:inline">/</span>
-            <b className="truncate text-fg-1">{item?.label ?? "-"}</b>
+            {tabLabel ? (
+              <>
+                <RouterLink to={pathname} className="truncate hover:text-fg-1">
+                  {item?.label ?? "-"}
+                </RouterLink>
+                <span>/</span>
+                <b className="truncate text-fg-1">{tabLabel}</b>
+              </>
+            ) : (
+              <b className="truncate text-fg-1">{item?.label ?? "-"}</b>
+            )}
           </div>
         )}
+        <RemoteMachineChip />
       </div>
       <div className="flex items-center gap-2 text-[11px] text-fg-3">
         {/* Secondary status + Export — hidden on phones (< md) to keep
@@ -136,11 +164,21 @@ export function TopBar({
               is unchanged. */}
           <InstanceSwitcher />
           <div className="mx-1 h-4 w-px bg-line-2" />
-          <Tooltip content="Export the current page's data as JSON">
+          {exportError && (
+            <span role="status" className="text-[11px] text-danger">
+              {exportError}
+            </span>
+          )}
+          <Tooltip content={exportNone ?? "Export the current page's data as JSON, with the filters in view"}>
             <button
               type="button"
               onClick={exportCurrent}
-              className="flex h-7 items-center gap-1.5 rounded-2 border border-line-2 bg-bg-2 px-2.5 text-[11px] text-fg-2 hover:bg-bg-3 hover:text-fg-0"
+              aria-disabled={exportNone != null}
+              aria-label={exportNone ? `Export: ${exportNone}` : "Export the current page's data as JSON"}
+              className={clsx(
+                "flex h-7 items-center gap-1.5 rounded-2 border border-line-2 bg-bg-2 px-2.5 text-[11px]",
+                exportNone ? "cursor-not-allowed text-fg-4" : "text-fg-2 hover:bg-bg-3 hover:text-fg-0",
+              )}
             >
               <Icon icon={Download} size="xs" />
               Export
@@ -159,24 +197,15 @@ export function TopBar({
             <span className="hidden sm:inline">Refresh</span>
           </button>
         </Tooltip>
-        {/* Extra link tools — desktop only (low value on a phone). */}
+        {/* Extra link tools: desktop only (low value on a phone). The
+            shared PageLinkTools, the same pair the org top bar carries. */}
         <div className="hidden items-center gap-2 md:flex">
           <div className="mx-1 h-4 w-px bg-line-2" />
-          <IconButton
-            title="Open in new tab"
-            onClick={() => window.open(window.location.href, "_blank")}
-          >
-            <Icon icon={ExternalLink} size="xs" />
-          </IconButton>
-          <IconButton
-            title="Copy link"
-            onClick={() => {
-              void navigator.clipboard?.writeText(window.location.href);
-            }}
-          >
-            <Icon icon={Link} size="xs" />
-          </IconButton>
+          <PageLinkTools />
         </div>
+        {/* The notification bell (D-323): what needs the developer, from
+            the daemon's feed. Renders nothing on a remote view. */}
+        <NotificationBell />
         <TopBarDensity />
         <ThemeToggle />
         {onHelp && (
@@ -194,45 +223,11 @@ export function TopBar({
   );
 }
 
-// Tri-state Light / Dark / System toggle. Renders as a tight three-
-// button segmented control. Reads/writes via useTheme().
+// Light / Dark / System: the shared ThemeToggle over the shared theme state.
 function ThemeToggle() {
-  const { mode, setMode } = useTheme();
-  const opts: { value: ThemeMode; label: ReactSVG; title: string }[] = [
-    { value: "light", label: <Icon icon={Sun} size={11} />, title: "Light theme" },
-    { value: "dark", label: <Icon icon={Moon} size={11} />, title: "Dark theme" },
-    { value: "system", label: <Icon icon={Monitor} size={11} />, title: "Follow system" },
-  ];
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Theme"
-      data-tour="topbar-theme"
-      className="flex items-center gap-0.5 rounded-2 border border-line-2 bg-bg-2 p-0.5"
-    >
-      {opts.map((o) => (
-        <Tooltip key={o.value} content={o.title}>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={mode === o.value}
-            onClick={() => setMode(o.value)}
-            className={clsx(
-              "grid h-6 w-6 place-items-center rounded-1 transition-colors",
-              mode === o.value
-                ? "bg-bg-4 text-fg-0"
-                : "text-fg-3 hover:bg-bg-3 hover:text-fg-1",
-            )}
-          >
-            {o.label}
-          </button>
-        </Tooltip>
-      ))}
-    </div>
-  );
+  const { mode, setMode, modes } = useTheme();
+  return <SharedThemeToggle value={mode} onChange={setMode} modes={modes} dataTour="topbar-theme" />;
 }
-
-type ReactSVG = React.ReactElement;
 
 // Comfortable / Compact row density, beside the theme control (both are
 // per-browser display preferences). Icons only in the bar; the words stay
@@ -324,7 +319,7 @@ function EnrolmentBadge() {
     refreshMs: 30000,
   });
   if (!status.data?.enrolled) return null;
-  const org = status.data.org_name || status.data.org_id || "organisation";
+  const org = orgDisplayLabel(status.data.org_display);
   return (
     <Tooltip content={`Sharing content-free activity rollups with ${org}. Manage in Settings → Enrolment.`}>
       <RouterLink
@@ -380,28 +375,28 @@ function CloudAccountBadge() {
   );
 }
 
+// The pill's tone per state (lib/capturePill.ts decides the state).
+const CAPTURE_PILL_TONE: Record<CapturePillState, string> = {
+  active: "border-success/40 bg-success-soft text-success",
+  paused: "border-warn/40 bg-warn-soft text-warn",
+  absent: "border-line-2 bg-bg-2 text-fg-3",
+};
+
 function CaptureStatePill({ setup }: { setup: SetupClaude | null }) {
-  const active =
-    setup?.status === "oauth_ready" || setup?.status === "api_key_ready";
+  const view = capturePillView(setup?.status);
   return (
-    <Tooltip
-      content={
-        active
-          ? "Proxy active - capturing"
-          : `Proxy ${setup?.status ?? "unknown"}`
-      }
-    >
+    <Tooltip content={view.tooltip}>
       <span
         tabIndex={0}
+        data-testid="capture-state-pill"
+        data-state={view.state}
         className={clsx(
           "flex h-6 cursor-help items-center gap-1.5 rounded-pill border px-2 text-[10.5px] font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]",
-          active
-            ? "border-success/40 bg-success-soft text-success"
-            : "border-warn/40 bg-warn-soft text-warn",
+          CAPTURE_PILL_TONE[view.state],
         )}
       >
-        <LiveDot {...withDotClass(liveDotProps(CAPTURE_DOT, active ? "active" : "paused"), "h-1.5 w-1.5 shrink-0")} />
-        {active ? "Active" : "Paused"}
+        <LiveDot {...withDotClass(liveDotProps(CAPTURE_DOT, view.state), "h-1.5 w-1.5 shrink-0")} />
+        {view.label}
       </span>
     </Tooltip>
   );

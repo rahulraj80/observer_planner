@@ -1105,29 +1105,19 @@ func (s *Store) LoadPromptChainInput(ctx context.Context, projectID, actionID in
 // actions the project recorded in [since, until) — UNCAPPED, unlike
 // LoadProjectPrompts' newest-N slice, so a session older than the cap
 // reports its real prompt count on the by-session table rather than a
-// misleading 0 (F5 of the 2026-09-22 arc review).
+// misleading 0 (F5 of the 2026-09-22 arc review). A prompt both the tool's
+// hook and its transcript recorded counts once (T-570, the prompt-shadow
+// fold via canonicalPromptsBySession).
 func (s *Store) LoadProjectPromptCounts(ctx context.Context, projectID int64, since, until time.Time) (map[string]int, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, COUNT(*)
-		  FROM actions
-		 WHERE project_id = ? AND action_type = ? AND timestamp >= ? AND timestamp < ?
-		 GROUP BY session_id`,
-		projectID, models.ActionUserPrompt, timestamp(since), timestamp(until))
+	bySession, err := canonicalPromptsBySession(ctx, s.db,
+		`a.project_id = ? AND a.timestamp >= ? AND a.timestamp < ?`,
+		projectID, timestamp(since), timestamp(until))
 	if err != nil {
 		return nil, fmt.Errorf("store.LoadProjectPromptCounts: %w", err)
 	}
-	defer rows.Close()
-	out := make(map[string]int)
-	for rows.Next() {
-		var sid string
-		var n int
-		if err := rows.Scan(&sid, &n); err != nil {
-			return nil, fmt.Errorf("store.LoadProjectPromptCounts: scan: %w", err)
-		}
-		out[sid] = n
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store.LoadProjectPromptCounts: rows: %w", err)
+	out := make(map[string]int, len(bySession))
+	for sid, prompts := range bySession {
+		out[sid] = len(prompts)
 	}
 	return out, nil
 }

@@ -21,10 +21,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/govern/sidecar"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/orgclient/gen"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
@@ -91,7 +93,7 @@ var ErrAuthFailed = errors.New("orgclient: authentication failed")
 // compound token is still good and will exchange successfully once the
 // account is active, so the caller should say "try again after signing in",
 // never "ask your admin for a new one".
-var ErrMemberNotActive = errors.New("orgclient: organisation account not active yet")
+var ErrMemberNotActive = errors.New("orgclient: organization account not active yet")
 
 // ErrBatchTooLarge reports that the complete serialized push envelope exceeds
 // either the node's configured maximum or the org server's accepted body size.
@@ -119,14 +121,27 @@ var ErrAgentTooOld = errors.New("orgclient: agent below the org's minimum versio
 // both configured ([org_client] enabled) and enrolled; see package doc.
 type Client struct {
 	// bg owns the node-side break-glass lease state (breakglass.go).
-	bg      breakGlassState
-	cfg     config.OrgClientConfig
-	store   *store.Store
-	bearers BearerStore
+	bg breakGlassState
+	// pushCeiling is the live org push-interval ceiling (resolved signed
+	// node-governance pin; 0 = none). nil = the configured interval alone.
+	// pushLocal is the node's own pre-governance interval it composes with.
+	pushCeiling func() int64
+	pushLocal   int64
+	// Per-rail 404 backoff (railbackoff.go): rails whose 404 means "none
+	// published / not offered" are re-asked on a doubling interval.
+	routingNotFound, announcementNotFound, intelNotFound notFoundBackoff
+	cfg                                                  config.OrgClientConfig
+	store                                                *store.Store
+	bearers                                              BearerStore
 	// agentAccessKeys is the per-device agent-access key slot (P1); nil
 	// until cmd/observer wires it (SetAgentAccessKeyStore), in which case no
 	// SourceNodeKey is derived and the envelope stays pre-P4-shaped.
 	agentAccessKeys AgentAccessKeyStore
+	// machineKeys is the machine key slot (T-656, machinekey.go); nil until
+	// cmd/observer wires it (SetMachineKeyStore), in which case no machine
+	// proof is sent, exactly like a released node.
+	machineKeys     MachineKeyStore
+	machineKeyState machineKeyState
 	httpClient      *http.Client
 	logger          *slog.Logger
 	agentVersion    string
@@ -195,6 +210,32 @@ type Client struct {
 	// number of publishes. The kick only ADVANCES the poll — every gate the
 	// fetch itself applies (signature, pin, accept_families) is unchanged.
 	policyResourceKick chan struct{}
+	// policyBundleKick wakes PolicyPollLoop (the guard bundle) when the
+	// policy-freshness probe reports the bundle rail moved (P2).
+	policyBundleKick chan struct{}
+	// freshActivity carries node activity into the policy-freshness checker
+	// (P2, policyfreshness.go). Buffered(1) + non-blocking sends: bursts
+	// coalesce.
+	freshActivity chan struct{}
+	// freshDispatch wakes the checker to fetch rails a push ack reported
+	// moved that the push cycle does not refresh itself (policyfreshness.go
+	// recordRailVersions).
+	freshDispatch chan struct{}
+	// pushActivity carries "new pushable rows committed" into PushLoop's
+	// scheduler (P3, pushloop.go). Buffered(1) + non-blocking sends.
+	pushActivity chan struct{}
+	// serverPushMin is the org's X-SBO-Push-Min-Interval hint from the last
+	// accepted push, as a time.Duration (0 = none).
+	serverPushMin atomic.Int64
+	// cycleRails is true while a push cycle that refreshes the
+	// pushCycleRails is running, so its own ack does not re-queue them.
+	cycleRails atomic.Bool
+	// fresh is the policy-freshness checker's state (policyfreshness.go).
+	fresh freshState
+	// railsMu serialises the rail fetches the push loop and the freshness
+	// checker can both trigger, so one rail is never fetched twice
+	// concurrently.
+	railsMu sync.Mutex
 
 	// lastPolicyVersions is the most recent policy_versions map seen on a
 	// push acknowledgment, compared under policyVersMu to detect a version
@@ -220,8 +261,16 @@ type Client struct {
 	// In-memory in W2; agent migration 105's update_state gives it durability
 	// in W3. A restart resetting the accepted ordinal is safe: only the replay
 	// rule reads it, and the downgrade rule compares against the INSTALLED
-	// binary, which a restart does not change.
+	// binary, which a restart does not change. In a build without the
+	// org.update component (-tags sbo_omit_org_update) it is an empty struct
+	// (update_omitted.go) and the rail does nothing.
 	updates updateCache
+
+	// tooOld is the last 426 min-version refusal the push rail received
+	// (agenttooold.go). It is core, not part of the update rail: a node built
+	// without self-update can still be refused by the org's version floor and
+	// must still say so.
+	tooOld agentTooOldState
 
 	// shareProvider resolves the share posture PushOnce ships under
 	// (admin-controlled Plane B, Phase 1b §2.4). Nil means "use the config
@@ -249,6 +298,13 @@ type Client struct {
 	// governanceSidecarPath. Empty in the solo case and in every test that
 	// never wires node.features.
 	featuresSidecarPath string
+
+	// guardBundleCachePath is the org guard bundle file ([guard.rules]
+	// org_bundle), removed by Enroll when a re-enrolment changes the org or the
+	// member: the bundle is signed for one member (binding v2), and a bound
+	// bundle left behind would make the next org's unbound bundles refused as
+	// a downgrade. Empty = nothing to remove.
+	guardBundleCachePath string
 
 	// renewalSink receives the classified outcome of every authenticated
 	// agent request (§4.2). Nil = today's exact behaviour.
@@ -292,6 +348,20 @@ type Client struct {
 	// can re-compose the live cost engine in-process. Nil-defaulted additive
 	// seam, exactly like budgetSink.
 	pricingSink func(PricingFetchOutcome)
+	// displayPolicySink is called after a NEW display-policy version was
+	// verified and cached, so the daemon's developer surfaces that render
+	// from a precomputed file (the budget-warning messages) re-render in the
+	// new display without waiting for their idle tick. Nil-defaulted
+	// additive seam; set via SetDisplayPolicySink.
+	displayPolicySink func()
+	// accessGrantSink is called after a NEW access-grants version was
+	// verified and cached (accessgrants.go). Nil-safe.
+	accessGrantSink func()
+	// agentConfigGate keeps the org AI tool policy rail OFF unless this node
+	// is managed with a live grant (agentconfigpolicy.go); agentConfigSink
+	// runs after a NEW version was cached. Both nil-defaulted additive seams.
+	agentConfigGate func(ctx context.Context) bool
+	agentConfigSink func()
 
 	// intelEnabled is the org-served-cloud-intelligence RESULT-pull gate
 	// ([intelligence].org_enrichment, org-served-cloud-intelligence plan
@@ -300,6 +370,15 @@ type Client struct {
 	// config reload / managed raise (W5) can turn it on without a restart.
 	// Set via SetIntelRail.
 	intelEnabled func() bool
+	// intelConsentSource resolves the node's current Cloud Intelligence
+	// consent posture for the consent report rail (intelconsent.go); nil
+	// disables reporting. intelConsentReported is the dedup key of the last
+	// report the server accepted (loop-owned, like intelSince).
+	intelConsentSource   func(ctx context.Context) (orgcontract.IntelConsentReport, bool)
+	intelConsentReported string
+	// intelSubmitSource queues the background org-plane submissions each
+	// cycle (Cloud Intelligence parity phase 2; nil = no background sweep).
+	intelSubmitSource func(ctx context.Context) error
 	// intelSince is the in-memory pagination cursor for the result pull: the
 	// NextCursor the server last returned. LOOP-OWNED — touched only by
 	// FetchIntelResults, which runs on the single push-loop goroutine. Not
@@ -330,6 +409,11 @@ type Client struct {
 	// restart re-pages from the start and re-attempts every row from zero,
 	// which is the fail-open behaviour we want.
 	intelRejects map[intelRowKey]int
+	// intelTombstoneApplied is the body hash of the last purge-tombstone set
+	// this daemon verified and applied in full, so an unchanged set is not
+	// re-applied every cycle. LOOP-OWNED like intelSince; NOT persisted (a
+	// restart re-applies the set once, which is idempotent).
+	intelTombstoneApplied string
 }
 
 // SetShareProvider installs the hot share-posture resolver (§2.4). Passing
@@ -339,6 +423,16 @@ func (c *Client) SetShareProvider(fn func() store.ShareOptions) {
 		return
 	}
 	c.shareProvider = fn
+}
+
+// SetGuardBundleCachePath tells Enroll which org guard bundle file to remove
+// when a re-enrolment changes the org or the member (T-393). Safe to leave
+// unset: the next accepted bundle fetch overwrites the file.
+func (c *Client) SetGuardBundleCachePath(path string) {
+	if c == nil {
+		return
+	}
+	c.guardBundleCachePath = path
 }
 
 // SetGovernanceSidecarPath tells Unenroll which sidecar to delete. Safe to
@@ -388,7 +482,7 @@ func (c *Client) removeFeaturesSidecar() {
 		return
 	}
 	if err := os.Remove(c.featuresSidecarPath); err != nil && !os.IsNotExist(err) {
-		c.logger.Warn("unenroll: could not remove the node.features sidecar — a stale tools.disallow list may briefly gate one-shot launchers until it is overwritten or expires",
+		c.logger.Warn("unenroll: could not remove the node.features sidecar - a stale tools.disallow list may briefly gate one-shot launchers until it is overwritten or expires",
 			"path", c.featuresSidecarPath, "err", err)
 	}
 }
@@ -448,8 +542,16 @@ func (c *Client) removeGovernanceSidecar() {
 		return
 	}
 	if err := os.Remove(c.governanceSidecarPath); err != nil && !os.IsNotExist(err) {
-		c.logger.Warn("unenroll: could not remove the governance sidecar — pinned settings will lift at the next hook once the grant's own expiry passes",
+		c.logger.Warn("unenroll: could not remove the governance sidecar - pinned settings will lift at the next hook once the grant's own expiry passes",
 			"path", c.governanceSidecarPath, "err", err)
+	}
+	// Its feature-access exceptions file goes with it (request-grants G8).
+	// Left behind it would lift nothing (it is bound to the removed
+	// sidecar's posture), so this is tidiness, not a guarantee.
+	if ex := sidecar.ExceptionsPath(c.governanceSidecarPath); ex != "" {
+		if err := os.Remove(ex); err != nil && !os.IsNotExist(err) {
+			c.logger.Warn("unenroll: could not remove the feature-access exceptions file", "path", ex, "err", err)
+		}
 	}
 }
 
@@ -479,6 +581,10 @@ func New(cfg config.OrgClientConfig, st *store.Store, bearers BearerStore, agent
 		logger:             logger,
 		agentVersion:       agentVersion,
 		policyResourceKick: make(chan struct{}, 1),
+		policyBundleKick:   make(chan struct{}, 1),
+		freshActivity:      make(chan struct{}, 1),
+		freshDispatch:      make(chan struct{}, 1),
+		pushActivity:       make(chan struct{}, 1),
 	}
 	// Lever 2 of the steady-state CPU remediation (plan Track R2): the PUSH
 	// LOOP owns the snapshot cadence, the store only applies it. Installed once
@@ -516,6 +622,28 @@ type PushResult struct {
 	Bytes        int   // gzip wire bytes shipped
 	AcceptedRows int64 // server-reported newly-stored rows
 	DedupedRows  int64 // server-reported already-present rows
+	// More reports that the batch was cut by the byte budget and rows are
+	// still waiting (store.PushBatch.Full): the push loop re-kicks.
+	More bool
+}
+
+// clearIdentityBoundDocs is Enroll's fail-closed clearing of the signed
+// documents bound to one enrolment identity, run after the durable generation
+// advanced and before the replacement enrolment row is written. It walks
+// identityBoundCaches (identitycaches.go): the budget on every enrolment, every
+// other identity-bound cache when the org or the member changes (T-393). A
+// first enrolment, or a re-enrolment as the same org and member, keeps them.
+func (c *Client) clearIdentityBoundDocs(ctx context.Context, oldEnr *store.Enrolment, newOrgKey, newUserID string) error {
+	changed := oldEnr != nil && (OrgKey(oldEnr.OrgServerURL, oldEnr.OrgID) != newOrgKey || oldEnr.UserID != newUserID)
+	for _, ic := range identityBoundCaches {
+		if ic.scope == clearOnIdentityChange && !changed {
+			continue
+		}
+		if err := ic.clear(ctx, c, oldEnr); err != nil {
+			return fmt.Errorf("clear prior %s: %w", ic.name, err)
+		}
+	}
+	return nil
 }
 
 // Enroll exchanges a one-time compound token for a long-lived bearer. It
@@ -551,6 +679,10 @@ func (c *Client) Enroll(ctx context.Context, orgURL, token string) (*store.Enrol
 	resp, err := gc.EnrollAgentWithResponse(ctx, gen.EnrollRequest{
 		OneTimeToken:   token,
 		AgentPublicKey: base64.RawURLEncoding.EncodeToString(pub),
+		// This node verifies, stores (agent migration 159) and re-verifies a
+		// grant carrying a signed initial component set, so the server may
+		// shape one for it (orgcontract.GrantForNode, modular packaging P4).
+		Capabilities: []string{orgcontract.EnrolCapabilityInitialComponents},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("orgclient.Enroll: post: %w", err)
@@ -576,7 +708,7 @@ func (c *Client) Enroll(ctx context.Context, orgURL, token string) (*store.Enrol
 		if resp.StatusCode() == http.StatusForbidden && eb.Error == "member_not_active" {
 			msg := eb.Message
 			if msg == "" {
-				msg = "your organisation account is not active yet"
+				msg = "your organization account is not active yet"
 			}
 			return nil, nil, fmt.Errorf("orgclient.Enroll: %w: %s"+
 				" (your enrolment token is still valid; run the same command again after you have signed in)",
@@ -654,14 +786,8 @@ func (c *Client) Enroll(ctx context.Context, orgURL, token string) (*store.Enrol
 	if err != nil {
 		return nil, nil, fmt.Errorf("orgclient.Enroll: activate enrolment generation: %w", err)
 	}
-	// A budget document is signed for one member and one enrollment epoch.
-	// Clear the singleton after advancing the durable generation and before
-	// publishing the replacement enrollment. Any late save from the old epoch
-	// now fails its generation predicate; a cold process cannot restore the old
-	// member's cap under the new identity.
-	c.budget.clear()
-	if err := c.store.ClearOrgBudget(ctx); err != nil {
-		return nil, nil, fmt.Errorf("orgclient.Enroll: clear prior org budget: %w", err)
+	if err := c.clearIdentityBoundDocs(ctx, oldEnr, newOrgKey, er.UserID); err != nil {
+		return nil, nil, fmt.Errorf("orgclient.Enroll: %w", err)
 	}
 	if err := c.store.WriteEnrolment(ctx, enr); err != nil {
 		return nil, nil, fmt.Errorf("orgclient.Enroll: write enrolment: %w", err)
@@ -781,41 +907,41 @@ func (c *Client) evaluateGrantOffer(er *orgcontract.EnrollResponse, orgURL, orgK
 	g := *er.Grant
 	switch {
 	case er.OrgPolicyPublicKey == "":
-		c.logger.Warn("enrolment grant REFUSED: the server offered governance but sent no org policy signing key, so the grant cannot be bound to any key — enrolling ungoverned")
+		c.logger.Warn("enrolment grant REFUSED: the server offered governance but sent no org policy signing key, so the grant cannot be bound to any key - enrolling ungoverned")
 		return nil
 	case pinnedKeyHash == "":
-		c.logger.Warn("enrolment grant REFUSED: the org policy signing key could not be pinned, so a grant would be authority bound to nothing — enrolling ungoverned")
+		c.logger.Warn("enrolment grant REFUSED: the org policy signing key could not be pinned, so a grant would be authority bound to nothing - enrolling ungoverned")
 		return nil
 	case g.KeyPinSHA256 == "" || g.KeyPinSHA256 != pinnedKeyHash:
-		c.logger.Warn("enrolment grant REFUSED: the grant names a different org policy signing key than the one this enrolment pinned — enrolling ungoverned",
+		c.logger.Warn("enrolment grant REFUSED: the grant names a different org policy signing key than the one this enrolment pinned - enrolling ungoverned",
 			"grant_key_sha256", g.KeyPinSHA256, "pinned_key_sha256", pinnedKeyHash)
 		return nil
 	case g.OrgID != er.OrgID:
-		c.logger.Warn("enrolment grant REFUSED: the grant names a different org than the enrolment — enrolling ungoverned",
+		c.logger.Warn("enrolment grant REFUSED: the grant names a different org than the enrolment - enrolling ungoverned",
 			"grant_org_id", g.OrgID, "enrolment_org_id", er.OrgID)
 		return nil
 	case strings.TrimRight(strings.TrimSpace(g.OrgServerURL), "/") != orgURL:
-		c.logger.Warn("enrolment grant REFUSED: the grant names a different org server than the one being enrolled with — enrolling ungoverned",
+		c.logger.Warn("enrolment grant REFUSED: the grant names a different org server than the one being enrolled with - enrolling ungoverned",
 			"grant_server", g.OrgServerURL, "enrolment_server", orgURL)
 		return nil
 	}
 	pubRaw, derr := base64.RawURLEncoding.DecodeString(er.OrgPolicyPublicKey)
 	if derr != nil {
-		c.logger.Warn("enrolment grant REFUSED: org policy public key did not decode — enrolling ungoverned", "err", derr)
+		c.logger.Warn("enrolment grant REFUSED: org policy public key did not decode - enrolling ungoverned", "err", derr)
 		return nil
 	}
 	if verr := orgcontract.VerifyEnrolmentGrant(g, ed25519.PublicKey(pubRaw)); verr != nil {
-		c.logger.Warn("enrolment grant REFUSED: signature did not verify under the pinned org policy key — enrolling ungoverned", "err", verr)
+		c.logger.Warn("enrolment grant REFUSED: signature did not verify under the pinned org policy key - enrolling ungoverned", "err", verr)
 		return nil
 	}
 	if g.ExpiresAt != "" {
 		exp, perr := time.Parse(time.RFC3339, g.ExpiresAt)
 		if perr != nil {
-			c.logger.Warn("enrolment grant REFUSED: expires_at is not RFC3339 — enrolling ungoverned", "expires_at", g.ExpiresAt)
+			c.logger.Warn("enrolment grant REFUSED: expires_at is not RFC3339 - enrolling ungoverned", "expires_at", g.ExpiresAt)
 			return nil
 		}
 		if !time.Now().UTC().Before(exp) {
-			c.logger.Warn("enrolment grant REFUSED: it is already expired — enrolling ungoverned", "expires_at", g.ExpiresAt)
+			c.logger.Warn("enrolment grant REFUSED: it is already expired - enrolling ungoverned", "expires_at", g.ExpiresAt)
 			return nil
 		}
 	}
@@ -858,70 +984,14 @@ func (c *Client) clearAgentAccessKeys() error {
 	return errors.Join(errs...)
 }
 
-// Unenroll deletes the local enrolment row and clears the keychain secrets
-// (the bearer store's records and the agent-access key).
-// The enrolment row is removed first so a concurrent push loop, which re-reads
-// the row each cycle, stops pushing as soon as it observes the absence. Absent
-// state is not an error (idempotent).
+// Unenroll leaves the organization: it walks the structured unenrol table
+// (unenrol.go, T-718) - fence the enrolment epoch, retire every enforcement
+// artifact the enrolment conferred, tell the organization (best effort), then
+// retire the identity and the credentials. Absent state is not an error
+// (idempotent). UnenrollWithReport returns the per-step outcome.
 func (c *Client) Unenroll(ctx context.Context) error {
-	// Snapshot first, then tombstone the generation BEFORE deleting the
-	// enrolment row (plan §6.9 / Codex B1): a concurrent fetch must observe
-	// tombstoned (or missing gen after clear) rather than a live enrolment
-	// with a still-active generation.
-	enr, _ := c.store.LoadEnrolment(ctx) //nolint:errcheck // best-effort snapshot; absent is fine
-
-	if enr != nil {
-		orgKey := OrgKey(enr.OrgServerURL, enr.OrgID)
-		if _, err := c.store.BumpEnrolmentGeneration(ctx, orgKey, true); err != nil {
-			return fmt.Errorf("orgclient.Unenroll: tombstone enrolment generation: %w", err)
-		}
-		// Admin-controlled Plane B (spec §5.1): delete the enrolment GRANT
-		// in the same fail-closed prefix as the tombstone, BEFORE the
-		// policy-resource state and the enrolment row. Revocation must
-		// leave nothing behind that could govern this machine, and the
-		// grant is the only artifact that could.
-		if err := c.store.DeleteEnrolmentGrant(ctx, orgKey); err != nil {
-			return fmt.Errorf("orgclient.Unenroll: delete enrolment grant: %w", err)
-		}
-		// Step 2b (Phase 1b §1.4): remove the governance sidecar, so a hook
-		// or MCP process spawned a millisecond later reads no pins. It is
-		// BEST-EFFORT because step 1 already tombstoned the generation and
-		// because the reader's own expiry rule is the backstop that makes a
-		// failed delete converge anyway — but leaving it would keep pinning
-		// keys in short-lived processes until the grant lapsed, which is a
-		// bad enough surprise to be worth the attempt and the log line.
-		c.removeGovernanceSidecar()
-		c.removeFeaturesSidecar()
-		if err := c.store.ClearPolicyResourceState(ctx, orgKey); err != nil {
-			return fmt.Errorf("orgclient.Unenroll: clear policy-resource state: %w", err)
-		}
-		c.clearPolicyResourceCacheTree(orgKey)
-	}
-	// Belt-and-braces: an unenrol running against a DB whose enrolment row
-	// is already gone cannot derive an org_key, and an orphan grant is
-	// authority with no owner. Clearing unconditionally is safe — a grant
-	// only ever exists for the current enrolment.
-	if err := c.store.DeleteAllEnrolmentGrants(ctx); err != nil {
-		return fmt.Errorf("orgclient.Unenroll: delete enrolment grants: %w", err)
-	}
-
-	if err := c.store.DeleteEnrolment(ctx); err != nil {
-		return fmt.Errorf("orgclient.Unenroll: %w", err)
-	}
-	c.budget.clear()
-	if err := c.bearers.Clear(); err != nil {
-		return fmt.Errorf("orgclient.Unenroll: %w", err)
-	}
-	if err := c.clearAgentAccessKeys(); err != nil {
-		return fmt.Errorf("orgclient.Unenroll: %w", err)
-	}
-	c.clearBreakGlass()
-	if c.orgIdentityChangedSink != nil {
-		c.orgIdentityChangedSink()
-	}
-
-	c.logger.Info("unenrolled from org")
-	return nil
+	_, err := c.UnenrollWithReport(ctx)
+	return err
 }
 
 // Status returns a snapshot of the agent's enrolment for the CLI / dashboard.
@@ -1149,6 +1219,20 @@ func (c *Client) PushOnce(ctx context.Context) (PushResult, error) {
 		// provider, and omitempty, so a node without the feature pushes a
 		// byte-identical envelope.
 		BudgetPosture: batch.BudgetPosture,
+		// The node's enum-only component posture (modular packaging plan
+		// 6.4): metadata about the binary, every share mode. nil until
+		// cmd/observer wires the provider; omitempty.
+		ComponentPosture: batch.ComponentPosture,
+		// A MANAGED node's applied state of the org AI tool policy (adapter
+		// config P7): closed enums and value hashes, an observed value only
+		// under raw content. nil on an individual node and omitempty, so
+		// every other envelope stays byte-identical; an older server ignores
+		// the unknown key.
+		AgentConfigState: batch.AgentConfigState,
+		// The managed node's AI tool configuration inventory (D-112,
+		// T-427): nil unless it changed and the node ships raw content;
+		// omitempty, and an older server ignores the unknown key.
+		AgentConfigInventory: batch.AgentConfigInventory,
 	}
 	// The posture's freshness horizon on the server is a function of how often
 	// this node reports, and the CLIENT is the one owner of that fact — the
@@ -1252,7 +1336,10 @@ func (c *Client) PushOnce(ctx context.Context) (PushResult, error) {
 		// (best-effort: a failure here never fails an accepted push).
 		_ = c.store.SaveLastPushPayload(ctx, raw)
 		_ = c.store.RecordPush(ctx, int64(batch.RowCount()), int64(len(wire)), "ok", "")
-		res := PushResult{RowCount: batch.RowCount(), Bytes: len(wire)}
+		res := PushResult{RowCount: batch.RowCount(), Bytes: len(wire), More: batch.Full}
+		// Server backpressure (P3): the org may advise a minimum gap
+		// between this node's pushes; the push scheduler honours it.
+		c.notePushMinInterval(resp.HTTPResponse)
 		if resp.JSON200 != nil {
 			res.AcceptedRows = resp.JSON200.AcceptedRows
 			res.DedupedRows = resp.JSON200.DedupedRows
@@ -1403,12 +1490,12 @@ func warnOnce(logger *slog.Logger, d *failureDeduper, err error, msg string, arg
 	isRepeat, repeats := d.observe(normalizeFailureKey(err))
 	fields := append(append([]any{}, args...), "err", err)
 	if isRepeat {
-		logger.Debug(msg+" (repeat, suppressed to DEBUG — see the first WARN for the remedy)", append(fields, "repeat_count", repeats)...)
+		logger.Debug(msg+" (repeat, suppressed to DEBUG - see the first WARN for the remedy)", append(fields, "repeat_count", repeats)...)
 		return
 	}
 	now := clockNow()
 	if !d.lastWarnAt.IsZero() && now.Sub(d.lastWarnAt) < warnBackstopInterval {
-		logger.Debug(msg+" (dedup key changed but within the WARN backstop window — suppressed to DEBUG)", fields...)
+		logger.Debug(msg+" (dedup key changed but within the WARN backstop window - suppressed to DEBUG)", fields...)
 		return
 	}
 	d.lastWarnAt = now
@@ -1436,8 +1523,8 @@ var benignRailFetchStates = map[string]bool{
 	// 404 on the pricing/intel rails: the org server predates the rail. An
 	// opt-out by not-yet-deploying, not an error, and it clears nothing.
 	orgcontract.PricingFetchNotSupported: true, // "not_supported" (pricing, intel)
-	// 404 on the budget rail: the org authored no budget for this member — an
-	// explicit NONE, never a failure.
+	// 404 on the budget rail with nothing cached: the server governs no budget
+	// for this caller. Never a failure, and never a clear (D-016).
 	orgcontract.BudgetFetchNoBudget: true, // "no_budget" (budget)
 	// a VERIFIED empty pricing body: the org negotiated nothing and the fleet
 	// prices at seed. Deliberate, and produces no error anyway.
@@ -1581,60 +1668,48 @@ func classifyNetError(err error) string {
 // do — so an enrol on a running daemon is picked up within one interval.
 var errIdle = errors.New("orgclient: idle cycle")
 
-// PushLoop runs the push cycle until ctx is cancelled (clean ctx-cancel
-// returns ctx.Err); it does not otherwise return (P1, never break the host
-// tool). Each cycle waits one interval, then re-reads the enrolment state AND
-// its credentials, so an `observer enroll`/`unenroll`/rotation on a running
-// daemon takes effect within one interval WITHOUT a restart — including
-// recovery from a rejected credential (ErrAuthFailed is retryable, not
-// terminal; see runLoop). Retryable failures shorten the next wait to the
-// current backoff (exponential, jittered); a success resets the backoff.
-func (c *Client) PushLoop(ctx context.Context) error {
-	// One failureDeduper PER independent failure stream, scoped to this
-	// single PushLoop call (a fresh set every time PushLoop is invoked,
-	// same lifetime as the closure below) — the enrolment-read, routing-
-	// policy, and announcement fetches ride PushLoop's cycle but are
-	// logged directly here rather than through runLoop's own switch, so
-	// runLoop's local dedupers (scoped to ITS invocation) can't cover
-	// them.
-	state := &pushCycleState{}
-	// RUN THE FIRST CYCLE IMMEDIATELY (org-observer fundamentals finding H3b).
-	// Every cycle carries the governance rails — routing, BUDGET, pricing,
-	// announcements — and sleeping a full interval before the first one meant
-	// a restarted daemon spent that interval with no answer from the org at
-	// all. On a node whose budget is org-REQUIRED that window is either a
-	// block or a bypass, depending only on what it had in memory; on every
-	// other node it is simply a push interval of stale governance for no
-	// reason. A pre-armed single-slot kick is the smallest expression of
-	// "start now, then settle into the interval".
-	kick := make(chan struct{}, 1)
-	kick <- struct{}{}
-	return c.runLoopKick(ctx, c.pushInterval(), kick, func(ctx context.Context) error {
-		return c.pushCycle(ctx, state)
-	})
-}
-
 // pushCycleState is the per-PushLoop failure-dedup state one cycle threads to
 // the next: one failureDeduper PER independent failure stream, so a routing
 // fetch recovering cannot re-arm the announcement fetch's WARN and vice versa.
 // A fresh set per PushLoop invocation (same lifetime as the loop).
 type pushCycleState struct {
-	enrolRead, routing, announcement failureDeduper
+	enrolRead, routing, announcement, displayPolicy, accessGrants, requestOutbox, agentConfig failureDeduper
+}
+
+// cycleKind is what one push-loop cycle does (pushsched.Decision, restated so
+// the scheduler's type does not thread through the cycle). The zero value is
+// a LIGHT cycle: the upload alone.
+type cycleKind struct {
+	// rails refreshes the governance rails (the ceiling cycle).
+	rails bool
+	// railsOnly skips the upload: a ceiling inside the org's push
+	// backpressure window still refreshes the rails on time (Sol A5-06).
+	// Meaningful only with rails.
+	railsOnly bool
 }
 
 // pushCycle is ONE push-loop cycle: enrolment read, the budget + pricing rails,
 // the push, then the remaining governance rails. It is the loop's body, split
 // out so a test can drive exactly one cycle and read the envelope it produced.
 // The ORDER is the contract - see the comment above refreshBudgetRails.
-func (c *Client) pushCycle(ctx context.Context, state *pushCycleState) error {
+func (c *Client) pushCycle(ctx context.Context, state *pushCycleState, kind cycleKind) (PushResult, error) {
+	rails := kind.rails
 	enr, err := c.store.LoadEnrolment(ctx)
 	if err != nil {
 		warnOnce(c.logger, &state.enrolRead, err, "org push: enrolment read failed")
-		return errIdle
+		return PushResult{}, errIdle
 	}
 	state.enrolRead.observe("")
 	if enr == nil {
-		return errIdle // not enrolled (yet, or unenrolled while running)
+		// Not enrolled (yet, or unenrolled while running). The budget sink is
+		// still told so (T-718): an `observer unenroll` in ANOTHER process
+		// cleared the store, but this daemon's composed budget, and with it a
+		// fail-closed B-625, lived on in memory until a restart because the
+		// sink only ever heard from a cycle that reached the rails.
+		c.railsMu.Lock()
+		c.retireBudgetRail()
+		c.railsMu.Unlock()
+		return PushResult{}, errIdle
 	}
 	// The budget + pricing rails run BEFORE the push, not after it
 	// (demo-estate finding 2026-09-20): the envelope carries the node's
@@ -1644,27 +1719,39 @@ func (c *Client) pushCycle(ctx context.Context, state *pushCycleState) error {
 	// `unreachable` posture, one second before the fetch succeeded. The
 	// org then read `budget_required` over a node whose proxy was passing
 	// requests until the next interval. See refreshBudgetRails.
-	c.refreshBudgetRails(ctx)
-	_, err = c.PushOnce(ctx)
-	if errors.Is(err, ErrNotEnrolled) {
-		return errIdle
+	//
+	// A LIGHT cycle (rails=false, the activity-driven push of P3) skips
+	// every rail: it ships rows and nothing else. Its ack still records the
+	// rail versions, and any rail it reports moved is queued for the
+	// policy-freshness checker (recordRailVersions) because cycleRails is
+	// false.
+	if rails {
+		c.refreshBudgetRails(ctx)
 	}
-	// Oversized-batch circuit bookkeeping lives HERE, not in runLoop's
-	// timing switch: runLoop is shared with the policy-poll loops, and a
-	// poll succeeding while the push is parked must not close the push
-	// circuit. This is the one owner of that state.
-	switch {
-	case errors.Is(err, ErrBatchTooLarge):
-		c.noteOversizedBatch(ctx, err)
-	case err == nil:
-		if cerr := c.store.ClearPushBreaker(ctx); cerr != nil {
-			c.logger.Warn("org push: could not clear the oversized-batch pause record", "err", cerr)
+	// A RAIL-ONLY cycle (Sol A5-06) skips the upload: the org asked this
+	// node to space its pushes, and the rails below are pulls the hint does
+	// not govern. Rows stay pending for the next upload cycle.
+	// err is nil here (the enrolment read above returned on failure), so a
+	// rail-only cycle reports success: every rail below is fail-open.
+	var res PushResult
+	if !kind.railsOnly || !rails {
+		res, err = c.uploadForCycle(ctx, rails)
+		if errors.Is(err, errIdle) {
+			return PushResult{}, errIdle
 		}
+	}
+	if !rails {
+		// The update nudge is ack-driven and fetches nothing unless the
+		// ack named a newer manifest, so it rides light cycles too.
+		c.FetchPendingUpdateManifests(ctx)
+		return res, err
 	}
 	// Best-effort §R19.1 policy sync rides the same cycle: a fetch
 	// failure never affects push health (P1 - the policy cache
 	// just stays at its last verified version).
+	c.railsMu.Lock()
 	_, routingOutcome, perr := c.FetchRoutingPolicy(ctx)
+	c.railsMu.Unlock()
 	// Forward the TOTAL typed outcome (§2.5b) to the P0-6 reporter. A nil
 	// outcome is a skip (context.Canceled - a shutdown, not a verdict); a
 	// nil sink (the default) is today's exact no-op (R6-1).
@@ -1685,6 +1772,15 @@ func (c *Client) pushCycle(ctx context.Context, state *pushCycleState) error {
 	// [intelligence].org_enrichment - a node that has not opted in makes no
 	// request at all, so this call is inert on every individual/unopted
 	// node. Every failure is FAIL-OPEN: the node keeps its cached results.
+	// Cloud Intelligence parity (design section 3.7): the requirement
+	// document, the T-155d sweep and the node's consent report ride the same
+	// cycle, before the result pull so a swept cache is never re-filled under
+	// a consent that no longer covers it.
+	c.runIntelConsentCycle(ctx)
+	// Parity phase 2: queue and send node-built org-plane evidence (B1).
+	// The background source is gated in cmd/observer by the same rail gate
+	// and consent as the result pull; developer-queued rows are sent here.
+	c.runIntelSubmitCycle(ctx)
 	intelOutcome, ierr := c.FetchIntelResults(ctx)
 	if ierr != nil && !errors.Is(ierr, ErrNotEnrolled) && !errors.Is(ierr, context.Canceled) {
 		c.logRailFetchFailure(intelOutcome.State,
@@ -1696,13 +1792,60 @@ func (c *Client) pushCycle(ctx context.Context, state *pushCycleState) error {
 	// new connection - and a fetch failure never affects push
 	// health (P1), it just leaves the banner at its last verified
 	// version.
+	c.railsMu.Lock()
 	_, aerr := c.FetchOrgAnnouncement(ctx)
+	c.railsMu.Unlock()
 	switch {
 	case aerr != nil && !errors.Is(aerr, ErrNotEnrolled):
 		warnOnce(c.logger, &state.announcement, aerr,
 			"org announcement fetch failed - if this persists, check the org server, or run `observer unenroll` / set [org_client].enabled = false to stop trying")
 	default:
 		state.announcement.observe("")
+	}
+	// The developer cost-display rail (operator ruling 2026-10-02) rides the
+	// SAME cycle for the same reasons as the announcement above, and fails
+	// the same way: a fetch failure never affects push health, it leaves the
+	// dashboard on the last verified value (dollars when nothing was ever
+	// verified).
+	// The policy-freshness checker refreshes it between cycles through the
+	// same helper (railFetchers, RailDisplay).
+	_, derr := c.refreshDisplayPolicy(ctx)
+	switch {
+	case derr != nil && !errors.Is(derr, ErrNotEnrolled):
+		warnOnce(c.logger, &state.displayPolicy, derr,
+			"org display policy fetch failed - developer dashboards keep the last verified cost display; if this persists, check the org server")
+	default:
+		state.displayPolicy.observe("")
+	}
+	// The access-grant rail (request-grants design §3.1) rides the SAME cycle
+	// for the same reasons, and fails the same way: a fetch failure keeps the
+	// last verified grants (each still bounded by its own expiry and the
+	// org's offline window) and never affects push health. Requests the
+	// developer raised while the org was unreachable go out here too.
+	if _, gerr := c.refreshAccessGrants(ctx); gerr != nil && !errors.Is(gerr, ErrNotEnrolled) {
+		warnOnce(c.logger, &state.accessGrants, gerr,
+			"org access grants fetch failed - the node keeps its last verified grants until they expire or go stale; if this persists, check the org server")
+	} else {
+		state.accessGrants.observe("")
+	}
+	if _, oerr := c.FlushAccessRequestOutbox(ctx); oerr != nil {
+		warnOnce(c.logger, &state.requestOutbox, oerr, "queued access requests could not be sent yet - they stay queued for the next cycle")
+	} else {
+		state.requestOutbox.observe("")
+	}
+	// The org AI tool policy rail (adapter config P6) rides the SAME cycle
+	// and fails the same way: a failure never affects push health and leaves
+	// the last verified policy in force. Gated to managed nodes with a live
+	// grant (no request at all otherwise). The freshness checker refreshes it
+	// between cycles through the same helper (railFetchers,
+	// RailAgentConfig).
+	_, acerr := c.refreshAgentConfigPolicy(ctx)
+	switch {
+	case acerr != nil && !errors.Is(acerr, ErrNotEnrolled):
+		warnOnce(c.logger, &state.agentConfig, acerr,
+			"org AI tool policy fetch failed - the last verified policy stays in force; if this persists, check the org server")
+	default:
+		state.agentConfig.observe("")
 	}
 	// Arc 4 P6b managed-integrity probe rides the SAME cycle (plan §9,
 	// announce.go discipline: no new timer/host/connection). MANAGED nodes
@@ -1723,7 +1866,33 @@ func (c *Client) pushCycle(ctx context.Context, state *pushCycleState) error {
 			c.logger.Warn("org managed-integrity report failed", "err", ierr)
 		}
 	}
-	return err
+	return res, err
+}
+
+// uploadForCycle is the upload half of a push cycle: PushOnce plus the
+// oversized-batch bookkeeping. A not-enrolled node maps to errIdle.
+func (c *Client) uploadForCycle(ctx context.Context, rails bool) (PushResult, error) {
+	// A rail cycle refreshes every push-cycle rail itself, so its own ack
+	// must not queue them again (policyfreshness.go recordRailVersions).
+	c.cycleRails.Store(rails)
+	defer c.cycleRails.Store(false)
+	res, err := c.PushOnce(ctx)
+	if errors.Is(err, ErrNotEnrolled) {
+		return PushResult{}, errIdle
+	}
+	// Oversized-batch circuit bookkeeping lives HERE, not in runLoop's
+	// timing switch: runLoop is shared with the policy-poll loops, and a
+	// poll succeeding while the push is parked must not close the push
+	// circuit. This is the one owner of that state.
+	switch {
+	case errors.Is(err, ErrBatchTooLarge):
+		c.noteOversizedBatch(ctx, err)
+	case err == nil:
+		if cerr := c.store.ClearPushBreaker(ctx); cerr != nil {
+			c.logger.Warn("org push: could not clear the oversized-batch pause record", "err", cerr)
+		}
+	}
+	return res, err
 }
 
 // refreshBudgetRails polls the org BUDGET rail and, beside it, the org
@@ -1756,6 +1925,8 @@ func (c *Client) pushCycle(ctx context.Context, state *pushCycleState) error {
 // engine would hold the persisted rates while the posture said nothing had
 // been applied.
 func (c *Client) refreshBudgetRails(ctx context.Context) {
+	c.railsMu.Lock()
+	defer c.railsMu.Unlock()
 	budgetOutcome, berr := c.FetchBudgetPolicy(ctx)
 	// The cadence the push loop is actually ticking at rides with every
 	// outcome (bundle BUD-N): the composition boundary derives the
@@ -1776,6 +1947,33 @@ func (c *Client) refreshBudgetRails(ctx context.Context) {
 			"org pricing distribution channel off or not offered",
 			"org pricing policy fetch failed", prerr)
 	}
+}
+
+// retireBudgetRail tells the budget sink that no enrolment exists, so the
+// boundary recomposes onto the node's own numbers and drops every org-derived
+// cap, protection and the fail-closed posture (T-718). It also drops this
+// client's in-memory copy of the last verified body. Idempotent and cheap: the
+// boundary's apply is a no-op when nothing changed.
+func (c *Client) retireBudgetRail() {
+	c.budget.clear()
+	if c.budgetSink == nil {
+		return
+	}
+	c.budgetSink(BudgetFetchOutcome{State: orgcontract.BudgetFetchNotEnrolled, PushInterval: c.pushInterval()})
+}
+
+// RetireIdentity is the in-process half of a leave (T-718): after Unenroll ran
+// in this process OR another, the daemon calls it so the org budget rail
+// recomposes at once rather than at the next push cycle. Safe on an enrolled
+// node: it only acts when the store holds no enrolment.
+func (c *Client) RetireIdentity(ctx context.Context) {
+	enr, err := c.store.LoadEnrolment(ctx)
+	if err != nil || enr != nil {
+		return
+	}
+	c.railsMu.Lock()
+	defer c.railsMu.Unlock()
+	c.retireBudgetRail()
 }
 
 // PushNow runs ONE push exactly the way a loop cycle does: the budget and
@@ -1812,13 +2010,13 @@ func (c *Client) PushNow(ctx context.Context) (PushResult, error) {
 // parked push into a broken daemon (P1).
 func (c *Client) noteOversizedBatch(ctx context.Context, err error) {
 	until := time.Now().UTC().Add(oversizedBatchBackoff)
-	c.logger.Error("org push PAUSED — the composed rollup is larger than the accepted push limit, "+
+	c.logger.Error("org push PAUSED - the composed rollup is larger than the accepted push limit, "+
 		"so NOTHING is reaching the org server until this clears",
 		"err", err,
 		"paused_for", oversizedBatchBackoff.String(),
 		"resumes_at", until.Format(time.RFC3339),
 		"what_to_check", "raise [org_client].max_push_bytes, narrow [org_client.scope] to fewer "+
-			"projects, or turn off a large [org_client.share] tier — the org server also enforces "+
+			"projects, or turn off a large [org_client.share] tier - the org server also enforces "+
 			"its own body limit, so a node-side raise alone may not be enough")
 	if serr := c.store.OpenPushBreaker(ctx, until, err.Error()); serr != nil {
 		c.logger.Warn("org push: could not record the oversized-batch pause for the dashboard", "err", serr)
@@ -1858,10 +2056,15 @@ func (c *Client) runLoop(ctx context.Context, interval time.Duration, action fun
 // A nil kick blocks forever in the select, making this byte-identical to the
 // plain loop — every existing caller passes nil via runLoop.
 func (c *Client) runLoopKick(ctx context.Context, interval time.Duration, kick <-chan struct{}, action func(context.Context) error) error {
-	backoff := initialBackoff
-	authBackoff := initialBackoff
-	sleep := interval
-	var failDeduper, authFailDeduper failureDeduper
+	return c.runLoopKickFn(ctx, func() time.Duration { return interval }, kick, action)
+}
+
+// runLoopKickFn is runLoopKick with the interval re-read after every cycle,
+// so a live change (the push loop's governance ceiling) takes effect on the
+// next wait without restarting the loop.
+func (c *Client) runLoopKickFn(ctx context.Context, intervalFn func() time.Duration, kick <-chan struct{}, action func(context.Context) error) error {
+	retry := newLoopRetry()
+	sleep := intervalFn()
 	for {
 		select {
 		case <-ctx.Done():
@@ -1869,49 +2072,11 @@ func (c *Client) runLoopKick(ctx context.Context, interval time.Duration, kick <
 		case <-time.After(sleep):
 		case <-kick:
 		}
-
 		err := action(ctx)
-		switch {
-		case errors.Is(err, context.Canceled):
+		var stop bool
+		sleep, stop, _ = retry.after(c, err, intervalFn())
+		if stop {
 			return ctx.Err()
-		case errors.Is(err, errIdle):
-			sleep = interval
-		case errors.Is(err, ErrAuthFailed):
-			// A rejected credential is RETRYABLE, not terminal. Each cycle
-			// re-reads the bearer + signing key from the store, so a re-enrol or
-			// key rotation writes fresh credentials that the next cycle loads and
-			// recovers from WITHOUT a process restart — the proxy/data plane is
-			// never bounced. Back off on a dedicated, higher-capped track so a
-			// genuinely-revoked node settles to a slow cadence instead of
-			// spamming, while a prompt re-enrol still recovers within the first
-			// (fast) retries.
-			warnOnce(c.logger, &authFailDeduper, err,
-				"org push: authentication failed, retrying (re-enrol or rotate to recover)",
-				"backoff", authBackoff.String())
-			sleep = jitter(authBackoff)
-			authBackoff = nextBackoffCapped(authBackoff, authFailMaxBackoff)
-		case errors.Is(err, ErrBatchTooLarge):
-			// Deliberately silent: PushLoop's own handler (noteOversizedBatch)
-			// already logged the operator-facing explanation on this same cycle
-			// AND persisted the pause for the dashboard / CLI. Logging again
-			// here would double-report it with strictly less detail.
-			sleep = oversizedBatchBackoff
-		case err != nil:
-			warnOnce(c.logger, &failDeduper, err,
-				"org push failed, backing off — if the org server stays unreachable, fix it, run `observer unenroll`, or set [org_client].enabled = false to stop retrying",
-				"backoff", backoff.String())
-			sleep = jitter(backoff)
-			backoff = nextBackoff(backoff)
-		default:
-			sleep = interval
-			backoff = initialBackoff
-			authBackoff = initialBackoff
-			// A successful cycle is a recovery: re-arm both trackers so a
-			// LATER failure — even one identical to whatever failed before
-			// — gets a fresh WARN instead of being mistaken for the same
-			// ongoing outage.
-			failDeduper.observe("")
-			authFailDeduper.observe("")
 		}
 	}
 }
@@ -1939,12 +2104,40 @@ func (c *Client) snapshotInterval() time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
+// pushInterval is the push CEILING: the longest the loop waits between two
+// cycles when nothing kicks it. It is the node's own
+// [org_client].push_interval_seconds (default 120 s), lowered LIVE by the
+// org's signed node-governance ceiling when one is in force
+// (org_client.push_interval_seconds, a hot lowering-only pin) through the
+// same config.GovernanceLowerInt the restart-time overlay uses — so the
+// value a restarted daemon reads and the value a running one applies can
+// never disagree.
 func (c *Client) pushInterval() time.Duration {
-	secs := c.cfg.PushIntervalSeconds
+	secs := int64(c.cfg.PushIntervalSeconds)
+	if c.pushCeiling != nil {
+		// Compose against the node's OWN (pre-governance) value, never the
+		// overlaid one the config carried at startup: composing against the
+		// overlaid value would ratchet, so an org that RAISED its ceiling
+		// (60 -> 300) would leave a running node at 60 until a restart.
+		secs = c.pushLocal
+	}
 	if secs <= 0 {
 		secs = config.DefaultPushIntervalSeconds
 	}
+	if c.pushCeiling != nil {
+		secs = config.GovernanceLowerInt(secs, c.pushCeiling())
+	}
 	return time.Duration(secs) * time.Second
+}
+
+// SetPushIntervalGovernance installs the live org push-interval ceiling
+// (the resolved node-governance pin; the reader returns 0 when none is in
+// force) together with the node's own pre-governance interval it composes
+// against (0 = the default). It must be called before PushLoop starts; a nil
+// reader restores the configured interval alone.
+func (c *Client) SetPushIntervalGovernance(local int64, ceiling func() int64) {
+	c.pushLocal = local
+	c.pushCeiling = ceiling
 }
 
 // maxPushBytes returns the configured uncompressed batch ceiling, defaulted and

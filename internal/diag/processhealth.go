@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // ProcessHealth is the on-disk snapshot of a running daemon's
@@ -104,7 +104,7 @@ type ProcessHealth struct {
 	// slower than capture.
 	HandoffDepthMax  int64 `json:"handoff_depth_max,omitempty"`
 	FlushBacklogHits int64 `json:"flush_backlog_hits,omitempty"`
-	// NetworkAccountingMode is one of the processobs.NetworkAccounting*
+	// NetworkAccountingMode is one of the procmodel.NetworkAccounting*
 	// values — "off" (not requested), "unavailable" (requested, could not
 	// attach) or "tcp" (live, TCP payload bytes only).
 	NetworkAccountingMode string `json:"network_accounting_mode"`
@@ -208,7 +208,7 @@ type ProcessHealth struct {
 	// plane events, connect/disconnect/retransmit, UDP); a zero decoded count
 	// on its own is what a decoder that just started looks like. The signal
 	// is the conjunction, and it has exactly one owner:
-	// processobs.CapturerDecodeStats.NothingClassified, reached from here via
+	// procmodel.CapturerDecodeStats.NothingClassified, reached from here via
 	// CapturerDecodeNothingClassified so no surface re-derives it.
 	TransportCapturerDecoded int64 `json:"transport_capturer_decoded,omitempty"`
 	TransportCapturerIgnored int64 `json:"transport_capturer_ignored,omitempty"`
@@ -224,8 +224,8 @@ type ProcessHealth struct {
 // It says NOTHING about presence: the counters are meaningless unless
 // TransportCapturerDecodeReported is true, and every caller here gates on that
 // first.
-func (h ProcessHealth) CapturerDecodeStats() processobs.CapturerDecodeStats {
-	return processobs.CapturerDecodeStats{
+func (h ProcessHealth) CapturerDecodeStats() procmodel.CapturerDecodeStats {
+	return procmodel.CapturerDecodeStats{
 		NetworkDropped:            h.TransportCapturerDropped,
 		NetworkUnsupportedVersion: h.TransportCapturerUnsupportedVersion,
 		NetworkDecoded:            h.TransportCapturerDecoded,
@@ -394,7 +394,7 @@ func (h ProcessHealth) Age(now time.Time) time.Duration {
 // are real. It is a convenience over TransportState — the state string is the
 // carried fact, so no consumer keeps a second boolean beside it.
 func (h ProcessHealth) TransportConfigured() bool {
-	return h.TransportState == processobs.TransportStateConfigured
+	return h.TransportState == procmodel.TransportStateConfigured
 }
 
 // CaptureLine renders the capture-yield half of the record — what the daemon
@@ -420,7 +420,7 @@ func (h ProcessHealth) CaptureLine() string {
 		line += "; no drops recorded"
 	}
 	if h.SinkRetained > 0 {
-		line += fmt.Sprintf("; %d run(s) RETAINED — the sink is failing transiently and capture is being buffered, not lost", h.SinkRetained)
+		line += fmt.Sprintf("; %d run(s) RETAINED - the sink is failing transiently and capture is being buffered, not lost", h.SinkRetained)
 	}
 	if h.SinkFlushMaxMs > 0 || h.QueueDepthMax > 0 {
 		line += fmt.Sprintf("; peak flush %dms, peak queue %d", h.SinkFlushMaxMs, h.QueueDepthMax)
@@ -482,7 +482,7 @@ func staleQualified(h ProcessHealth, now time.Time, msg string) string {
 	if !h.Stale(now) {
 		return msg
 	}
-	return fmt.Sprintf("%s [as of the daemon's last report %s ago — STALE]", msg, h.Age(now).Round(time.Second))
+	return fmt.Sprintf("%s [as of the daemon's last report %s ago - STALE]", msg, h.Age(now).Round(time.Second))
 }
 
 // Stale reports whether the record is older than ProcessHealthStaleAfter —
@@ -506,26 +506,26 @@ func (h ProcessHealth) Stale(now time.Time) bool {
 // An empty/unknown mode is reported as unknown rather than guessed.
 func (h ProcessHealth) NetworkAccountingLine() string {
 	switch h.NetworkAccountingMode {
-	case processobs.NetworkAccountingOff:
+	case procmodel.NetworkAccountingOff:
 		// The backend's own reason already names the config key, so use it
 		// when present rather than printing the key twice.
 		if h.NetworkAccountingReason != "" {
-			return "off — not requested: " + h.NetworkAccountingReason
+			return "off - not requested: " + h.NetworkAccountingReason
 		}
-		return "off — not requested ([observer.process.network].process_bytes)"
-	case processobs.NetworkAccountingUnavailable:
+		return "off - not requested ([observer.process.network].process_bytes)"
+	case procmodel.NetworkAccountingUnavailable:
 		reason := h.NetworkAccountingReason
 		if reason == "" {
 			reason = "no reason reported by the backend"
 		}
-		return "UNAVAILABLE — requested but per-process bytes are NOT measured: " + reason
-	case processobs.NetworkAccountingTCP:
-		return "live (tcp) — TCP payload bytes only; UDP/QUIC and Windows-side " +
+		return "UNAVAILABLE - requested but per-process bytes are NOT measured: " + reason
+	case procmodel.NetworkAccountingTCP:
+		return "live (tcp) - TCP payload bytes only; UDP/QUIC and Windows-side " +
 			"processes are not counted, so a QUIC-heavy workload legitimately reads near zero"
 	case "":
-		return "unknown — the daemon reported no accounting mode"
+		return "unknown - the daemon reported no accounting mode"
 	default:
-		return fmt.Sprintf("%s — unrecognised accounting mode", h.NetworkAccountingMode)
+		return fmt.Sprintf("%s - unrecognised accounting mode", h.NetworkAccountingMode)
 	}
 }
 
@@ -601,24 +601,24 @@ func (h ProcessHealth) CapturerDecodeLine() string {
 	}
 	switch {
 	case h.TransportCapturerDropped > 0 && h.TransportCapturerUnsupportedVersion > 0:
-		return fmt.Sprintf("DECODE FAILURES — the capturer refused %d network event(s) as short or unexpectedly shaped "+
+		return fmt.Sprintf("DECODE FAILURES - the capturer refused %d network event(s) as short or unexpectedly shaped "+
 			"and %d more for an event version its layout table does not describe; the per-process byte totals from that "+
 			"host are WRONG, not merely missing, and the payload-layout assumptions need re-checking against the live provider",
 			h.TransportCapturerDropped, h.TransportCapturerUnsupportedVersion)
 	case h.TransportCapturerDropped > 0:
-		return fmt.Sprintf("DECODE FAILURES — the capturer refused %d network event(s) as short or unexpectedly shaped; "+
+		return fmt.Sprintf("DECODE FAILURES - the capturer refused %d network event(s) as short or unexpectedly shaped; "+
 			"the per-process byte totals from that host are WRONG, not merely missing, and the payload-length assumption "+
 			"needs re-checking against the live provider", h.TransportCapturerDropped)
 	case h.TransportCapturerUnsupportedVersion > 0:
-		return fmt.Sprintf("DECODE FAILURES — the capturer refused %d network event(s) whose event version its layout "+
+		return fmt.Sprintf("DECODE FAILURES - the capturer refused %d network event(s) whose event version its layout "+
 			"table does not describe; the OS has shipped a new template and this build's field offsets may no longer apply",
 			h.TransportCapturerUnsupportedVersion)
 	case h.CapturerDecodeNothingClassified():
-		return fmt.Sprintf("NO DATA EVENTS CLASSIFIED — the capturer refused nothing, but it also accepted nothing: "+
+		return fmt.Sprintf("NO DATA EVENTS CLASSIFIED - the capturer refused nothing, but it also accepted nothing: "+
 			"%d event(s) were classified as not-a-data-event and %d as data. Ignoring events is normal on its own; "+
 			"ignoring ALL of them is not, and it means the byte totals from that host are a flat zero that every "+
 			"refusal check reads as healthy. If the host was moving TCP traffic, the provider's event ids no longer "+
-			"match this build's layout table; if it was idle, this is not yet evidence either way — drive TCP traffic "+
+			"match this build's layout table; if it was idle, this is not yet evidence either way - drive TCP traffic "+
 			"and re-read",
 			h.TransportCapturerIgnored, h.TransportCapturerDecoded)
 	default:
@@ -627,15 +627,15 @@ func (h ProcessHealth) CapturerDecodeLine() string {
 }
 
 func (h ProcessHealth) transportLineBody(now time.Time) string {
-	if h.TransportState == processobs.TransportStateUnavailable {
+	if h.TransportState == procmodel.TransportStateUnavailable {
 		reason := h.TransportUnavailableReason
 		if reason == "" {
 			reason = "no reason reported by the daemon"
 		}
-		return "UNAVAILABLE — a cross-OS capture transport was requested ([observer.process.etw].enabled) " +
+		return "UNAVAILABLE - a cross-OS capture transport was requested ([observer.process.etw].enabled) " +
 			"but is NOT running, so no elevated capturer can connect: " + reason
 	}
-	if h.TransportState != processobs.TransportStateConfigured {
+	if h.TransportState != procmodel.TransportStateConfigured {
 		return ""
 	}
 	at := ""
@@ -645,34 +645,34 @@ func (h ProcessHealth) transportLineBody(now time.Time) string {
 	switch {
 	case h.TransportAuthFailures > 0 && h.TransportConnections == 0:
 		return fmt.Sprintf(
-			"AUTH FAILURE — %d connection(s)%s were REFUSED and none authenticated; %s. The cause is NOT assumed here: "+
+			"AUTH FAILURE - %d connection(s)%s were REFUSED and none authenticated; %s. The cause is NOT assumed here: "+
 				"candidates are a mismatched shared token (make [observer.process.etw].token, or the file named by "+
 				".token_path, identical on both sides), the two halves running different observer versions, or an "+
 				"unrelated local process probing this port (a WSL loopback bind is reachable from the whole Windows host). "+
-				"The reason above is the one the daemon actually recorded — read it first",
+				"The reason above is the one the daemon actually recorded - read it first",
 			h.TransportAuthFailures, at, h.authReasonClause(),
 		)
 	case h.TransportConnected:
-		line := fmt.Sprintf("live — an elevated capturer is connected%s (%s; %d connection(s) so far)",
+		line := fmt.Sprintf("live - an elevated capturer is connected%s (%s; %d connection(s) so far)",
 			at, sinceOrUnknown(h.TransportLastConnectAt, now, "connected"), h.TransportConnections)
 		if h.TransportAuthFailures > 0 {
-			line += fmt.Sprintf("; %d earlier connection(s) were refused at the handshake — %s",
+			line += fmt.Sprintf("; %d earlier connection(s) were refused at the handshake - %s",
 				h.TransportAuthFailures, h.authReasonClause())
 		}
 		return line
 	case h.TransportConnections > 0:
-		line := fmt.Sprintf("DISCONNECTED — no capturer is streaming now%s (%s, %s; %d connection(s) so far)",
+		line := fmt.Sprintf("DISCONNECTED - no capturer is streaming now%s (%s, %s; %d connection(s) so far)",
 			at,
 			sinceOrUnknown(h.TransportLastConnectAt, now, "last connected"),
 			sinceOrUnknown(h.TransportLastDisconnectAt, now, "disconnected"),
 			h.TransportConnections)
 		if h.TransportAuthFailures > 0 {
-			line += fmt.Sprintf("; %d connection(s) were refused at the handshake — %s",
+			line += fmt.Sprintf("; %d connection(s) were refused at the handshake - %s",
 				h.TransportAuthFailures, h.authReasonClause())
 		}
 		return line
 	default:
-		return "waiting — no capturer has ever connected" + at +
+		return "waiting - no capturer has ever connected" + at +
 			": normal until the elevated Windows capturer starts, and permanent if its Scheduled Task was never set up"
 	}
 }

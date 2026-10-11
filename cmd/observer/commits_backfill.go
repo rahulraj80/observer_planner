@@ -122,7 +122,7 @@ func backfillCommits(ctx context.Context, database *sql.DB, args commitsBackfill
 			if serr != nil {
 				status = "error: " + serr.Error()
 			}
-			fmt.Fprintf(out, "  commits: %s — %d commits, %d inserted (%s)\n", r.RootPath, res.CommitsSeen, res.Inserted, status)
+			fmt.Fprintf(out, "  commits: %s - %d commits, %d inserted (%s)\n", r.RootPath, res.CommitsSeen, res.Inserted, status)
 		}
 	}
 	return rep, nil

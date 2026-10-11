@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/cloudcontract"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -61,7 +61,7 @@ type CloudStatusResponse struct {
 	// reported by the server at sync and is NOT stored node-side, so the UI
 	// renders an honest placeholder rather than a fabricated number.
 	AllowanceKnown bool `json:"allowance_known"`
-	// Descriptor is the static manual-only honesty statement.
+	// Descriptor is the static honesty statement about how uploads happen.
 	Descriptor string `json:"descriptor"`
 	// SignIn is the LOCAL sign-in state (credential presence + backend +
 	// whether a client id resolves), read through the injected
@@ -179,8 +179,8 @@ func (s *Server) handleCloudStatus(w http.ResponseWriter, r *http.Request) {
 			Background:       policy.Background,
 			PolicyVersion:    policy.PolicyVersion,
 			Source:           policy.Source,
-			UpdatedAt:        cloudRFC3339(policy.UpdatedAt),
-			Since:            cloudRFC3339(policy.Since),
+			UpdatedAt:        dashapi.CloudRFC3339(policy.UpdatedAt),
+			Since:            dashapi.CloudRFC3339(policy.Since),
 		}
 	}
 
@@ -218,8 +218,8 @@ func (s *Server) handleCloudStatus(w http.ResponseWriter, r *http.Request) {
 	// on any error, incl. a pre-117 schema — the honest "never" state.
 	if last, ok, err := st.GetCloudSyncLast(ctx); err == nil && ok {
 		resp.LastSync = &CloudSyncLastView{
-			StartedAt:       cloudRFC3339(last.StartedAt),
-			FinishedAt:      cloudRFC3339(last.FinishedAt),
+			StartedAt:       dashapi.CloudRFC3339(last.StartedAt),
+			FinishedAt:      dashapi.CloudRFC3339(last.FinishedAt),
 			OK:              last.OK,
 			Sent:            last.Sent,
 			WaitingProvider: last.WaitingProvider,
@@ -239,7 +239,7 @@ func (s *Server) handleCloudStatus(w http.ResponseWriter, r *http.Request) {
 				DailyCap: last.DailyCap, MonthlyCap: last.MonthlyCap,
 				DigestWeekly:         cloudIntPtrToBoolPtr(last.DigestWeekly),
 				ResultsRetentionDays: last.ResultsRetentionDays,
-				AsOf:                 cloudRFC3339(last.FinishedAt),
+				AsOf:                 dashapi.CloudRFC3339(last.FinishedAt),
 			}
 		}
 	}
@@ -248,7 +248,7 @@ func (s *Server) handleCloudStatus(w http.ResponseWriter, r *http.Request) {
 	resp.Active = resp.ReceiptsTotal > 0 || resp.OutboxTotal > 0 || resp.ResultsTotal > 0 || resp.HasSynced
 	// Sign-in presence through the injected seam (cloud_account.go). nil-safe:
 	// an unwired dashboard omits the block.
-	resp.SignIn = s.opts.CloudAccount.signInView()
+	resp.SignIn = s.opts.CloudAccount.SignInView()
 	writeJSON(w, resp)
 }
 
@@ -370,9 +370,9 @@ func (s *Server) handleCloudSession(w http.ResponseWriter, r *http.Request) {
 		resp.Excluded = true
 		switch resp.Authority {
 		case "org":
-			resp.ExcludedReason = "org-owned session — excluded from personal cloud enrichment"
+			resp.ExcludedReason = "org-owned session - excluded from personal cloud enrichment"
 		default:
-			resp.ExcludedReason = "unknown data authority (org-owned or captured before classification) — excluded from personal cloud enrichment"
+			resp.ExcludedReason = "unknown data authority (org-owned or captured before classification) - excluded from personal cloud enrichment"
 		}
 	}
 
@@ -387,8 +387,8 @@ func (s *Server) handleCloudSession(w http.ResponseWriter, r *http.Request) {
 				RetryCount: it.RetryCount,
 				LastError:  it.LastError,
 				ReceiptID:  it.ReceiptID,
-				CreatedAt:  cloudRFC3339(it.CreatedAt),
-				UpdatedAt:  cloudRFC3339(it.UpdatedAt),
+				CreatedAt:  dashapi.CloudRFC3339(it.CreatedAt),
+				UpdatedAt:  dashapi.CloudRFC3339(it.UpdatedAt),
 			})
 			if it.ReceiptID != "" {
 				receiptIDs[it.ReceiptID] = struct{}{}
@@ -409,7 +409,7 @@ func (s *Server) handleCloudSession(w http.ResponseWriter, r *http.Request) {
 				ID:          rcpt.ID,
 				Purpose:     rcpt.Purpose,
 				Invalidated: rcpt.InvalidatedAt != nil,
-				CreatedAt:   cloudRFC3339(rcpt.CreatedAt),
+				CreatedAt:   dashapi.CloudRFC3339(rcpt.CreatedAt),
 			})
 		}
 	}
@@ -419,7 +419,7 @@ func (s *Server) handleCloudSession(w http.ResponseWriter, r *http.Request) {
 	if rerr == nil && ok {
 		rv := &CloudResultView{
 			SchemaVersion: res.SchemaVersion,
-			ReceivedAt:    cloudRFC3339(res.ReceivedAt),
+			ReceivedAt:    dashapi.CloudRFC3339(res.ReceivedAt),
 			ModelRoute:    res.Provenance.ModelRoute,
 			Result:        json.RawMessage(res.ResultJSON),
 		}
@@ -428,7 +428,7 @@ func (s *Server) handleCloudSession(w http.ResponseWriter, r *http.Request) {
 			for field, o := range overrides {
 				rv.Overrides[field] = CloudOverrideView{
 					UserValue: o.UserValue,
-					UpdatedAt: cloudRFC3339(o.UpdatedAt),
+					UpdatedAt: dashapi.CloudRFC3339(o.UpdatedAt),
 				}
 			}
 		}
@@ -437,15 +437,6 @@ func (s *Server) handleCloudSession(w http.ResponseWriter, r *http.Request) {
 
 	resp.Progress = s.cloudEnrichmentProgress(ctx, st, []string{id})[id]
 	writeJSON(w, resp)
-}
-
-// cloudRFC3339 renders a time as RFC3339 UTC, or "" for the zero time so the
-// handler never emits "0001-01-01…" for an unset stamp.
-func cloudRFC3339(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
 }
 
 // cloudIntPtrToBoolPtr converts store.CloudSyncLast.DigestWeekly's 0/1 *int

@@ -36,6 +36,21 @@ func TestAPISessionMCPCalls(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("status %d %s", rec.Code, rec.Body)
 	}
+	if compiledOutInTest("agentaccess.relay") {
+		// A build without the relay links no record chain to read
+		// (store/mcprelay_omit.go): the panel answers an empty list of the
+		// same shape, never an error (D-535).
+		var empty struct {
+			Calls  []json.RawMessage `json:"calls"`
+			Totals struct {
+				Calls int `json:"calls"`
+			} `json:"totals"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &empty); err != nil || len(empty.Calls) != 0 || empty.Totals.Calls != 0 {
+			t.Fatalf("relay compiled out: want an empty call list, got %s", rec.Body)
+		}
+		return
+	}
 	var resp struct {
 		SessionID string `json:"session_id"`
 		Calls     []struct {

@@ -1,0 +1,16 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "proj_abc",
+      "object": "organization.project",
+      "name": "Project example",
+      "created_at": 1711471533,
+      "archived_at": null,
+      "status": "active"
+    }
+  ],
+  "first_id": "proj-abc",
+  "last_id": "proj-xyz",
+  "has_more": false
+}

@@ -262,3 +262,24 @@ func TestRender_ListsEveryRowAndSummary(t *testing.T) {
 		t.Errorf("render missing summary/honesty footer:\n%s", out)
 	}
 }
+
+// TestMatrix_ReapplyNotesNameTheDashboardControl pins T-374: a coverage note
+// that tells the reader to re-apply the relay wrap names the MCP access
+// card's relay actions (the cell renders on that card), with the CLI verb
+// only as its twin, never as the sole instruction.
+func TestMatrix_ReapplyNotesNameTheDashboardControl(t *testing.T) {
+	t.Parallel()
+	seen := 0
+	for _, r := range rules {
+		if !strings.Contains(r.note, "mcp-relay enable") {
+			continue
+		}
+		seen++
+		if !strings.Contains(r.note, "MCP access card") {
+			t.Errorf("note %q names the CLI verb but not the MCP access card's relay actions", r.note)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no re-apply note found; the table changed shape, update this test")
+	}
+}

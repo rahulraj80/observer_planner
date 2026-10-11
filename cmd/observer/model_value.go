@@ -25,12 +25,12 @@ func newModelValueCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "model-value",
-		Short: "Model Value Report — observed cost/latency/outcome per model × turn-kind (§R7.2/§R17)",
+		Short: "Model Value Report - observed cost/latency/outcome per model × turn-kind (§R7.2/§R17)",
 		Long: "Aggregates the deduped proxy∪JSONL substrate into per model × turn-kind\n" +
 			"× project cells (volume, cost/turn, latency p50/p95, error rate,\n" +
 			"tool-failure rate) and grades pairwise deltas against the highest-tier\n" +
 			"baseline with sample sizes and 95% confidence bands.\n\n" +
-			"Attribution is correlational — the report says so on every output.\n\n" +
+			"Attribution is correlational - the report says so on every output.\n\n" +
 			"--save-calibration persists the cells into the node-local\n" +
 			"model_calibration table (migration 042) for the routing surfaces.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -109,12 +109,12 @@ func calibrationRows(rep modelvalue.Report) []store.ModelCalibrationRow {
 // printModelValue renders the human report: caveat first, then the
 // global cells, deltas with verdicts, and optionally per-project cells.
 func printModelValue(w io.Writer, rep modelvalue.Report, showProjects bool) {
-	fmt.Fprintf(w, "Model Value Report — last %d days (generated %s)\n\n",
+	fmt.Fprintf(w, "Model Value Report - last %d days (generated %s)\n\n",
 		rep.WindowDays, rep.GeneratedAt.Format("2006-01-02 15:04:05Z07:00"))
 	fmt.Fprintf(w, "NOTE: %s\n\n", rep.Caveat)
 
 	if len(rep.GlobalCells) == 0 {
-		fmt.Fprintln(w, "No turns in the window — nothing to report.")
+		fmt.Fprintln(w, "No turns in the window - nothing to report.")
 		return
 	}
 
@@ -149,7 +149,7 @@ func printModelValue(w io.Writer, rep modelvalue.Report, showProjects bool) {
 	}
 
 	if len(rep.Subagents) > 0 {
-		fmt.Fprintln(w, "Sub-agent recommendations (§R10.3 — read-only, nothing is written):")
+		fmt.Fprintln(w, "Sub-agent recommendations (§R10.3 - read-only, nothing is written):")
 		tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
 		fmt.Fprintln(tw, "  SUBAGENT\tCURRENT\tTIER\tSUGGESTED\tREASON\tEVIDENCE")
 		for _, s := range rep.Subagents {

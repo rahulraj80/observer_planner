@@ -40,7 +40,7 @@ func TestTitleOnlyLocksTagsAndDescription(t *testing.T) {
 	}
 	for _, lf := range locked {
 		if lf.Reason == "" {
-			t.Errorf("locked field %q has empty reason — honest-disabled copy required", lf.Field)
+			t.Errorf("locked field %q has empty reason - honest-disabled copy required", lf.Field)
 		}
 	}
 

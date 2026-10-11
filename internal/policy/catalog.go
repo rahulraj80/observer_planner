@@ -32,6 +32,9 @@ type RuleInfo struct {
 	// Overridable reports the org-granted override grant
 	// (Rule.Overridable). Always false on an individual node.
 	Overridable bool
+	// EnforceCappedBy is Rule.EnforceCappedBy: the layer whose explicit
+	// `enforce = false` caps the row at FLAG, "" when uncapped.
+	EnforceCappedBy string
 }
 
 // Catalog returns summaries of the BUILT-IN rule rows in table order.
@@ -62,7 +65,7 @@ func ruleInfos(rules []Rule) []RuleInfo {
 			ID: r.ID, Category: r.Category, Severity: r.Severity,
 			Observe: r.Observe, Enforce: r.Enforce, Doc: r.Doc,
 			Advice: r.Advice, Source: source, Enforced: r.Enforced,
-			Overridable: r.Overridable,
+			Overridable: r.Overridable, EnforceCappedBy: r.EnforceCappedBy,
 		})
 	}
 	return out

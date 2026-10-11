@@ -105,10 +105,10 @@ func (s *Server) remoteBackendHandler(rc RemoteController) http.Handler {
 func (s *Server) ListenAndServeTailnetBackend(ctx context.Context, addr string) error {
 	rc := s.opts.Remote
 	if rc == nil || !rc.Ready() {
-		return errors.New("dashboard: refusing to start the tailscale backend without a Ready() [remote] substrate (auth + host allow-list + rate limit) — this closes the tailnet-serve-to-loopback trust trap (plan §4.4)")
+		return errors.New("dashboard: refusing to start the tailscale backend without a Ready() [remote] substrate (auth + host allow-list + rate limit) - this closes the tailnet-serve-to-loopback trust trap (plan §4.4)")
 	}
 	if !hostIsLoopback(hostnameOnly(addr)) {
-		return fmt.Errorf("dashboard: tailscale backend addr %q must be an explicit loopback address — `tailscale serve` forwards to loopback and a non-loopback backend would be directly reachable (plan §4.4)", addr)
+		return fmt.Errorf("dashboard: tailscale backend addr %q must be an explicit loopback address - `tailscale serve` forwards to loopback and a non-loopback backend would be directly reachable (plan §4.4)", addr)
 	}
 	srv := &http.Server{
 		Addr:              addr,
@@ -119,9 +119,8 @@ func (s *Server) ListenAndServeTailnetBackend(ctx context.Context, addr string) 
 	go func() { errCh <- srv.ListenAndServe() }()
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		stopHTTPServer(srv)
+		return nil
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil

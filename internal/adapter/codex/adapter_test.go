@@ -2015,9 +2015,9 @@ func TestParseSessionFile_ItemCompletedAgentMessage(t *testing.T) {
 // TestParseSessionFile_ItemCompletedNonAgentMessageIgnored pins the
 // deliberate exclusion of the other item_completed sub-types: Reasoning and
 // CommandExecution are exact-count duplicates of the response_item
-// "reasoning" / "custom_tool_call(+output)" entries captured elsewhere, and
-// UserMessage is not a confirmed gap — handling any of them here would
-// double-count or is unproven, so only AgentMessage produces a ToolEvent.
+// "reasoning" / "custom_tool_call(+output)" entries captured elsewhere, so handling
+// them here would double-count. (UserMessage is handled since T-559; see
+// itemusermessage_test.go.)
 func TestParseSessionFile_ItemCompletedNonAgentMessageIgnored(t *testing.T) {
 	t.Parallel()
 
@@ -2028,7 +2028,6 @@ func TestParseSessionFile_ItemCompletedNonAgentMessageIgnored(t *testing.T) {
 		`{"timestamp":"2026-09-02T11:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`,
 		`{"timestamp":"2026-09-02T11:00:01.100Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-1","item":{"type":"Reasoning","id":"rs_1","content":[{"type":"text","text":"thinking..."}]}}}`,
 		`{"timestamp":"2026-09-02T11:00:01.200Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-1","item":{"type":"CommandExecution","id":"cmd_1","content":[{"type":"text","text":"ls -la"}]}}}`,
-		`{"timestamp":"2026-09-02T11:00:01.300Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"turn-1","item":{"type":"UserMessage","id":"um_1","content":[{"type":"text","text":"do the thing"}]}}}`,
 		``,
 	}, "\n")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -2045,7 +2044,7 @@ func TestParseSessionFile_ItemCompletedNonAgentMessageIgnored(t *testing.T) {
 		for i, evt := range res.ToolEvents {
 			summary = append(summary, formatEventSummary(i, evt))
 		}
-		t.Fatalf("tool events: %d want 0 (Reasoning/CommandExecution/UserMessage item_completed rows must not emit)\n%s",
+		t.Fatalf("tool events: %d want 0 (Reasoning/CommandExecution item_completed rows must not emit)\n%s",
 			len(res.ToolEvents), strings.Join(summary, "\n"))
 	}
 }

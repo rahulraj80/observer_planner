@@ -92,7 +92,7 @@ func TestTranscriptBuildersScrubEveryContentField(t *testing.T) {
 				if strings.Contains(f.got, plantedKey) {
 					t.Errorf("%s leaks the planted key: %q", f.name, f.got)
 				}
-				if f.got != "" && !strings.Contains(f.got, scrub.Redacted) {
+				if f.got != "" && !scrub.HasRedaction(f.got) {
 					t.Errorf("%s = %q, want a %s marker", f.name, f.got, scrub.Redacted)
 				}
 			}

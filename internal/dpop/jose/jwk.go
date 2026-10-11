@@ -47,7 +47,11 @@ func PublicJWK(pub any, alg, kid string) (JWK, error) {
 	case ed25519.PublicKey:
 		k = JWK{Kty: "OKP", Crv: "Ed25519", X: b64.EncodeToString(p)}
 	case *ecdsa.PublicKey:
-		k = JWK{Kty: "EC", Crv: "P-256", X: b64.EncodeToString(pad32(p.X)), Y: b64.EncodeToString(pad32(p.Y))}
+		x, y, err := p256Coordinates(p)
+		if err != nil {
+			return JWK{}, err
+		}
+		k = JWK{Kty: "EC", Crv: "P-256", X: b64.EncodeToString(x), Y: b64.EncodeToString(y)}
 	case *rsa.PublicKey:
 		k = JWK{Kty: "RSA", N: b64.EncodeToString(p.N.Bytes()), E: b64.EncodeToString(big.NewInt(int64(p.E)).Bytes())}
 	}
@@ -56,12 +60,19 @@ func PublicJWK(pub any, alg, kid string) (JWK, error) {
 	return k, nil
 }
 
-// pad32 renders a P-256 coordinate as exactly 32 big-endian bytes (RFC 7518
-// §6.2.1.2 requires the full field width).
-func pad32(v *big.Int) []byte {
-	out := make([]byte, 32)
-	v.FillBytes(out)
-	return out
+// p256Coordinates renders a P-256 public key's coordinates as exactly 32
+// big-endian bytes each (RFC 7518 §6.2.1.2 requires the full field width).
+// It reads them from the uncompressed SEC 1 encoding (0x04 || X || Y), which
+// is fixed width, instead of the raw X / Y fields Go 1.26 deprecates.
+func p256Coordinates(p *ecdsa.PublicKey) (x, y []byte, err error) {
+	b, err := p.Bytes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("jose.PublicJWK: %w", err)
+	}
+	if len(b) != 65 || b[0] != 4 {
+		return nil, nil, fmt.Errorf("jose.PublicJWK: not an uncompressed P-256 point (%d bytes)", len(b))
+	}
+	return b[1:33], b[33:65], nil
 }
 
 // DecodeJWK strictly parses a PUBLIC JWK document. A document carrying any

@@ -258,9 +258,137 @@ export function fmtCompact(n: number | null | undefined): string {
   return compactFmt.format(n);
 }
 
+// ---------------------------------------------------------------------------
+// Developer cost display (operator ruling 2026-10-02).
+//
+// "Admins always see cost. Admins can choose whether developers see cost or
+// only token usage." The org admin's ONE display setting reaches an enrolled
+// developer's node as a signed document (GET /api/agent/display-policy); the
+// node dashboard reads the verified value once at boot (GET /api/cost-display)
+// and calls setCostDisplayMode. That is the ONE place the mode is set.
+//
+// THE ADMIN DASHBOARD (web2) NEVER SETS IT, so every web2 render of fmtUSD /
+// fmtCost / defaultRenderCost stays in dollars by construction - pinned by
+// web2/src/lib/adminAlwaysDollars.test.ts, which fails if any web2 source
+// names setCostDisplayMode.
+//
+// In "tokens" mode:
+//   - fmtCost(usd, tokens) renders the token usage behind a figure
+//     ("212k tok") when the caller has it, and COST_HIDDEN when it does not;
+//   - a bare fmtUSD(n) has no token count to show, so it renders COST_HIDDEN
+//     rather than a dollar figure the org asked developers not to see. A
+//     dollar amount is never converted into tokens: that would be a
+//     fabricated number.
+// It is a PRESENTATION choice, not an access control: the node still
+// computes and stores cost, and its CLI still prints dollars.
+// ---------------------------------------------------------------------------
+
+export type CostDisplayMode = "usd" | "tokens";
+
+let costDisplayMode: CostDisplayMode = "usd";
+
+// COST_HIDDEN is what a dollar figure renders as in tokens mode when the
+// surface has no token count to show instead: the same "no value" glyph every
+// formatter in this file already uses, never "$0" and never a guess.
+export const COST_HIDDEN = "—";
+
+/** setCostDisplayMode is called ONLY by the node dashboard's boot-time
+ *  CostDisplayGate with the org's verified choice. web2 must never call it. */
+export function setCostDisplayMode(mode: CostDisplayMode): void {
+  costDisplayMode = mode === "tokens" ? "tokens" : "usd";
+}
+
+export function getCostDisplayMode(): CostDisplayMode {
+  return costDisplayMode;
+}
+
+function fmtTok(tokens: number): string {
+  return `${compactFmt.format(tokens)} tok`;
+}
+
+/** fmtCostAs is the pure form of fmtCost: render one cost figure under an
+ *  EXPLICIT mode (a preview of what developers will see, a test). */
+export function fmtCostAs(
+  mode: CostDisplayMode,
+  usd: number | null | undefined,
+  tokens?: number | null,
+  precise = false,
+): string {
+  if (mode === "tokens") {
+    return tokens != null && Number.isFinite(tokens) ? fmtTok(tokens) : COST_HIDDEN;
+  }
+  if (usd == null || !Number.isFinite(usd)) return "—";
+  return (precise ? currencyPreciseFmt : currencyFmt).format(usd);
+}
+
+/** fmtCost renders a cost figure together with the token usage behind it:
+ *  dollars normally, the token count when the org chose token usage for
+ *  developers' dashboards. Prefer it over fmtUSD wherever the tokens are in
+ *  scope. */
+export function fmtCost(
+  usd: number | null | undefined,
+  tokens?: number | null,
+  precise = false,
+): string {
+  return fmtCostAs(costDisplayMode, usd, tokens, precise);
+}
+
 export function fmtUSD(n: number | null | undefined, precise = false): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return (precise ? currencyPreciseFmt : currencyFmt).format(n);
+  return fmtCostAs(costDisplayMode, n, undefined, precise);
+}
+
+// ---------------------------------------------------------------------------
+// The cost AFFORDANCES around a figure (labels, $ toggles, dollar-only
+// columns / tiles / charts) follow the same mode as the figures above. A
+// surface never switches on the mode itself; it asks one of these:
+//
+//   dollarsShown()             - false in tokens mode: hide a dollar-only
+//                                tile, chart or column that has no token
+//                                count to show instead.
+//   costLabel(usd, tokens)     - the wording of a cost-bearing heading
+//                                ("Total $" vs "Total tok").
+//   withoutDollars(items, f)   - drop the dollar-only entries of a list (a
+//                                toggle's "$" option, a table's "$" columns).
+//   costChoice(v, dollar, fb)  - the effective selection of a toggle whose
+//                                stored choice is a dollar option.
+//
+// All four are identities in "usd" mode, so web2 (which never sets the mode)
+// is unaffected by construction.
+// ---------------------------------------------------------------------------
+
+/** dollarsShown is false when the page renders cost as token usage. */
+export function dollarsShown(): boolean {
+  return costDisplayMode === "usd";
+}
+
+/** costLabel picks the wording of a cost-bearing heading or option. */
+export function costLabel(usd: string, tokens: string): string {
+  return costDisplayMode === "tokens" ? tokens : usd;
+}
+
+/** withoutDollars drops the dollar-only entries of a list in tokens mode
+ *  (a copy either way, so a caller may not mutate the source). */
+export function withoutDollars<T>(items: readonly T[], isDollar: (item: T) => boolean): T[] {
+  return costDisplayMode === "tokens" ? items.filter((i) => !isDollar(i)) : [...items];
+}
+
+/** costChoice resolves a stored toggle selection: a dollar option falls back
+ *  to `fallback` in tokens mode (the option is not offered there). */
+export function costChoice<V>(choice: V, dollarChoices: readonly V[], fallback: V): V {
+  return costDisplayMode === "tokens" && dollarChoices.includes(choice) ? fallback : choice;
+}
+
+// DOLLAR_AMOUNT matches a dollar figure inside prose: "$4", "$1,234.56",
+// "$0.0040", "$12k" (a leading sign or tilde stays outside the match).
+const DOLLAR_AMOUNT = /\$\s?\d[\d,]*(?:\.\d+)?(?:[kKmMbB](?![a-zA-Z]))?/g;
+
+/** maskDollarAmounts hides the dollar figures inside server-authored prose
+ *  (a suggestion's title or nudge, a routing explanation) in tokens mode:
+ *  each amount becomes COST_HIDDEN, the words around it stay. Prose cannot
+ *  be re-denominated client-side, so this is a hide, never a conversion. The
+ *  identity in dollars mode. */
+export function maskDollarAmounts(text: string): string {
+  return costDisplayMode === "tokens" ? text.replace(DOLLAR_AMOUNT, COST_HIDDEN) : text;
 }
 
 // fmtTaskUSD is the Tasks-feature (docs/task-tracking.md) currency
@@ -272,6 +400,7 @@ export function fmtUSD(n: number | null | undefined, precise = false): string {
 // ways.
 export function fmtTaskUSD(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
+  if (costDisplayMode === "tokens") return COST_HIDDEN;
   if (n > 0 && n < 0.01) return fmtUSD(n, true);
   return fmtUSD(n);
 }
@@ -410,9 +539,9 @@ export function fmtDateRange(
   const sameMonth = sameYear && a.getMonth() === b.getMonth();
   if (sameMonth && a.getDate() === b.getDate()) return dateOnlyFmt.format(a);
   const md = cachedDateTimeFormat("en-US", { month: "short", day: "numeric" });
-  if (sameMonth) return `${md.format(a)}–${b.getDate()}, ${b.getFullYear()}`;
-  if (sameYear) return `${md.format(a)} – ${md.format(b)}, ${b.getFullYear()}`;
-  return `${dateOnlyFmt.format(a)} – ${dateOnlyFmt.format(b)}`;
+  if (sameMonth) return `${md.format(a)}-${b.getDate()}, ${b.getFullYear()}`;
+  if (sameYear) return `${md.format(a)} - ${md.format(b)}, ${b.getFullYear()}`;
+  return `${dateOnlyFmt.format(a)} - ${dateOnlyFmt.format(b)}`;
 }
 
 // fmtRelative renders how far an instant is from now: "just now" · "5 min

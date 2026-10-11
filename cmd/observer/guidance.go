@@ -683,7 +683,7 @@ func scrubGuidanceMetadata(scrubber *scrub.Scrubber, files []guidance.File) {
 	for i := range files {
 		files[i].Description = scrubber.String(files[i].Description)
 		for k, v := range files[i].Frontmatter {
-			files[i].Frontmatter[k] = scrubber.String(v)
+			files[i].Frontmatter[k] = scrubber.String(v) //nolint:gosec // G602: the index is bounds-checked above
 		}
 	}
 }
@@ -985,7 +985,7 @@ func newGuidanceCmd() *cobra.Command {
 			"definitions, slash commands, and conditionally-applied rules.\n\n" +
 			"The daemon refreshes this inventory every [guidance].rescan_minutes;\n" +
 			"`guidance scan` runs the same pass on demand. Only names, sizes, hashes\n" +
-			"and front-matter metadata are stored — never a file's body, and every\n" +
+			"and front-matter metadata are stored - never a file's body, and every\n" +
 			"stored description passes through the secret scrubber first.\n\n" +
 			"Your HOME-directory guidance (~/.claude/…, ~/.codex/…) applies to every\n" +
 			"project, so it is scanned once per pass and listed under the root \"~\";\n" +
@@ -1182,7 +1182,7 @@ func printGuidanceScan(cmd *cobra.Command, res guidancePassResult) {
 func printGuidanceScanTail(cmd *cobra.Command, res guidancePassResult) {
 	out := cmd.OutOrStdout()
 	if res.SkippedMissing > 0 {
-		fmt.Fprintf(out, "\n%d root(s) skipped — not a directory on this machine\n", res.SkippedMissing)
+		fmt.Fprintf(out, "\n%d root(s) skipped - not a directory on this machine\n", res.SkippedMissing)
 	}
 	if res.SkippedFiltered > 0 {
 		reasons := make([]string, 0, len(res.SkipReasons))
@@ -1197,10 +1197,10 @@ func printGuidanceScanTail(cmd *cobra.Command, res guidancePassResult) {
 		fmt.Fprintf(out, "%d root(s) filtered out (%s)\n", res.SkippedFiltered, strings.Join(parts, ", "))
 	}
 	if res.Incomplete > 0 {
-		fmt.Fprintf(out, "%d root(s) ran out of time budget — NOT persisted (a partial inventory would tombstone real files); retried next pass\n", res.Incomplete)
+		fmt.Fprintf(out, "%d root(s) ran out of time budget - NOT persisted (a partial inventory would tombstone real files); retried next pass\n", res.Incomplete)
 	}
 	if res.NotReached > 0 {
-		fmt.Fprintf(out, "%d root(s) not reached inside the pass budget — the next pass starts where this one stopped\n", res.NotReached)
+		fmt.Fprintf(out, "%d root(s) not reached inside the pass budget - the next pass starts where this one stopped\n", res.NotReached)
 	}
 	for _, r := range res.Roots {
 		for _, warn := range r.Warnings {
@@ -1230,7 +1230,7 @@ func printGuidanceList(cmd *cobra.Command, root string, rows []store.GuidanceRow
 		return a.RelPath < b.RelPath
 	})
 
-	fmt.Fprintf(out, "%s — %d guidance file(s)\n\n", root, len(sorted))
+	fmt.Fprintf(out, "%s - %d guidance file(s)\n\n", root, len(sorted))
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "TOOL\tKIND\tNAME\tPATH\tSIZE\tMODIFIED\tPRESENT")
 	for _, r := range sorted {

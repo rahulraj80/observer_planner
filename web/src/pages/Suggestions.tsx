@@ -13,7 +13,7 @@ import { HelpInd } from "@/components/HelpInd";
 import { HeroWordmark } from "@/components/HeroWordmark";
 import { useApi } from "@/lib/useApi";
 import { useFilters, windowLabel, windowParams } from "@/lib/filters";
-import { fmtShortId, fmtUSD } from "@/lib/format";
+import { costLabel, dollarsShown, fmtShortId, fmtUSD, maskDollarAmounts } from "@/lib/format";
 import type { AdvisorListResponse, AdvisorSuggestion } from "@/lib/types";
 import { VocabPill } from "@shared/lib/vocabPill";
 import { SUGGESTION_CATEGORY, SUGGESTION_SCOPE, SUGGESTION_SEVERITY } from "@/lib/vocabTones";
@@ -34,9 +34,10 @@ export function SuggestionsPage() {
   // Global filters (TopBar): window, tool, project — the suggestions
   // surface honors all three like every other page (no local duplicate
   // window control; operator feedback 2026-06-10).
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   // "all" maps to a far horizon (matches every sibling page; the backend
   // window is uncapped so this genuinely means all-time).
   const winParams = windowParams(win, customRange);
@@ -51,7 +52,7 @@ export function SuggestionsPage() {
   // window/tool/project or the local category) so a narrowed result set
   // never strands the user on an out-of-range, blank page. Mirrors
   // Actions.tsx / Sessions.tsx.
-  const filterKey = `${win}|${JSON.stringify(customRange)}|${tool}|${project}|${category}`;
+  const filterKey = `${win}|${JSON.stringify(customRange)}|${tool}|${project}|${model}|${category}`;
   useMemo(() => setPage(1), [filterKey]);
 
   const data = useApi<AdvisorListResponse>(
@@ -60,6 +61,7 @@ export function SuggestionsPage() {
       ...winParams,
       project: projectParam,
       tool: toolParam,
+      model: modelParam,
       category: category === "all" ? undefined : category,
       page,
       limit: PAGE_LIMIT,
@@ -67,7 +69,7 @@ export function SuggestionsPage() {
     // Every control re-fires the query (useApi refetches on deps, not on
     // params identity — the original page missed this and the window
     // control was dead).
-    [win, customRange, projectParam, toolParam, category, page],
+    [win, customRange, projectParam, toolParam, modelParam, category, page],
   );
   const rep = data.data;
   const suggestions = rep?.suggestions ?? [];
@@ -78,28 +80,35 @@ export function SuggestionsPage() {
       <PageHeader
         icon={navIcon("suggestions")}
         title="Suggestions"
-        sub="Prescriptive, dollar-quantified recommendations computed locally from your captured activity. Every number's arithmetic is shown."
+        sub={costLabel(
+          "Prescriptive, dollar-quantified recommendations computed locally from your captured activity. Every number's arithmetic is shown.",
+          "Prescriptive recommendations computed locally from your captured activity.",
+        )}
         helpId="tab.suggestions"
       />
 
       {/* Camera-ready pass (growth-review §4): "avoidable spend" is the
           screenshot-shaped headline number on this page — a subtle
           corner wordmark carries the crop. */}
-      <div className="relative grid grid-cols-1 gap-3 pb-4 sm:grid-cols-3">
+      {/* The avoidable-spend hero is dollars only: in the org's token-usage
+          view (format.ts cost affordances) the strip is the two counts. */}
+      <div className={dollarsShown() ? "relative grid grid-cols-1 gap-3 pb-4 sm:grid-cols-3" : "relative grid grid-cols-1 gap-3 pb-4 sm:grid-cols-2"}>
         <HeroWordmark />
-        <HeroStat
-          label={spendLabel}
-          helpId="tile.suggestions.avoidable"
-          icon={<MetricIcon metric="avoidableSpend" />}
-          loading={data.loading}
-          value={rep ? fmtUSD(rep.total_savings_usd) : "-"}
-          sub={
-            rep && rep.total_savings_min > 0
-              ? `+ ~${Math.round(rep.total_savings_min)} min of recoverable time`
-              : undefined
-          }
-          variant="accent"
-        />
+        {dollarsShown() && (
+          <HeroStat
+            label={spendLabel}
+            helpId="tile.suggestions.avoidable"
+            icon={<MetricIcon metric="avoidableSpend" />}
+            loading={data.loading}
+            value={rep ? fmtUSD(rep.total_savings_usd) : "-"}
+            sub={
+              rep && rep.total_savings_min > 0
+                ? `+ ~${Math.round(rep.total_savings_min)} min of recoverable time`
+                : undefined
+            }
+            variant="accent"
+          />
+        )}
         <HeroStat
           label="Open suggestions"
           icon={<MetricIcon metric="openSuggestions" />}
@@ -132,7 +141,7 @@ export function SuggestionsPage() {
           <SegmentedControl options={CATEGORIES} value={category} onChange={setCategory} size="sm" />
           <HelpInd id="glossary.suggestion_card" />
         </span>
-        {rep && category === "all" ? (
+        {rep && category === "all" && dollarsShown() ? (
           <div className="flex flex-wrap gap-2 text-[11px] text-fg-3">
             {Object.entries(rep.by_category ?? {})
               .filter(([, usd]) => usd > 0)
@@ -237,7 +246,9 @@ function SuggestionCard({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] font-semibold text-fg-0">{s.title}</span>
+            {/* Title, nudge and math are server-authored prose that can carry
+                dollar amounts: masked in the org's token-usage view. */}
+            <span className="text-[13px] font-semibold text-fg-0">{maskDollarAmounts(s.title)}</span>
             {/* Severity: one tone table (SUGGESTION_SEVERITY) as a glyph pill,
                 instead of colouring the title text. */}
             <VocabPill vocab="suggestionSeverity" table={SUGGESTION_SEVERITY} value={s.severity} />
@@ -245,18 +256,18 @@ function SuggestionCard({
             <Pill>{s.detector.replaceAll("_", " ")}</Pill>
             <ScopeChip s={s} />
           </div>
-          <p className="mt-2 text-[12px] leading-relaxed text-fg-2">{s.nudge}</p>
-          {open && s.evidence?.math ? (
+          <p className="mt-2 text-[12px] leading-relaxed text-fg-2">{maskDollarAmounts(s.nudge)}</p>
+          {open && s.evidence?.math && dollarsShown() ? (
             <p className="mt-2 rounded-1 bg-bg-3 px-2 py-1 font-mono text-caption text-fg-3">
               {s.evidence.math}
             </p>
           ) : null}
         </div>
         <div className="shrink-0 text-right">
-          {s.savings_usd ? (
+          {s.savings_usd && dollarsShown() ? (
             <div className="text-lead font-semibold text-success">{fmtUSD(s.savings_usd)}</div>
           ) : null}
-          {!s.savings_usd && s.savings_min ? (
+          {(!s.savings_usd || !dollarsShown()) && s.savings_min ? (
             <div className="text-[15px] font-semibold text-warn">~{Math.round(s.savings_min)} min</div>
           ) : null}
           <div className="text-[10px] uppercase tracking-wide text-fg-3">
@@ -272,7 +283,9 @@ function SuggestionCard({
               </Link>
             </div>
           ) : null}
-          {s.evidence?.math ? (
+          {/* The math is dollar arithmetic end to end: not offered in the
+              org's token-usage view. */}
+          {s.evidence?.math && dollarsShown() ? (
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}

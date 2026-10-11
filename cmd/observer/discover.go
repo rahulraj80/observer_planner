@@ -26,7 +26,7 @@ func newDiscoverCmd() *cobra.Command {
 		Use:   "discover",
 		Short: "Surface stale re-reads, redundant commands, and cross-tool redundancy",
 		Long: "Walks the captured action set and surfaces optimization opportunities.\n" +
-			"Stale-read waste is estimated as (file_size/4) × stale_count — a rough\n" +
+			"Stale-read waste is estimated as (file_size/4) × stale_count - a rough\n" +
 			"token proxy. Repeated commands track runs with no intervening edit.\n" +
 			"Cross-tool files are touched by more than one AI tool. Native vs Bash\n" +
 			"shows the native tool-use advantage over Bash-only compressors (RTK).",

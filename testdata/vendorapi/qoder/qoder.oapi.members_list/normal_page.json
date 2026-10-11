@@ -1,0 +1,23 @@
+{
+  "members": [
+    {
+      "id": "member_abc123",
+      "userId": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Alice",
+      "email": "alice@example.com",
+      "role": "org_admin",
+      "status": "ENABLED",
+      "joinedAt": "2025-06-01T08:00:00Z"
+    },
+    {
+      "id": "member_ghi789",
+      "userId": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Charlie",
+      "role": "org_member",
+      "status": "ENABLED",
+      "joinedAt": "2025-07-10T14:30:00Z"
+    }
+  ],
+  "maxResults": 20,
+  "nextToken": "eyJwYWdlIjogMn0="
+}

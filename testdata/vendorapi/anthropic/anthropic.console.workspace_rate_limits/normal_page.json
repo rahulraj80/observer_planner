@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "group": {
+        "id": "id",
+        "display_name": "display_name",
+        "type": "model_group"
+      },
+      "group_type": "batch",
+      "limits": [
+        {
+          "org_limit": 0,
+          "source": {
+            "type": "workspace"
+          },
+          "type": "type",
+          "value": 0
+        }
+      ],
+      "models": [
+        "string"
+      ],
+      "rate_limit_id": "rate_limit_id",
+      "type": "workspace_rate_limit",
+      "workspace_id": "workspace_id"
+    }
+  ],
+  "next_page": "next_page"
+}

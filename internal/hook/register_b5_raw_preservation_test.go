@@ -49,8 +49,8 @@ func TestRegisterCascade_PreservesSiblingKeysEventsAndEntryFields(t *testing.T) 
 	if res.Error != nil {
 		t.Fatalf("Register: %v", res.Error)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "pre_user_prompt" {
-		t.Fatalf("HooksAdded = %v, want [pre_user_prompt]", res.HooksAdded)
+	if len(res.HooksAdded) != len(cascadeEvents) || res.HooksAdded[0] != "pre_user_prompt" {
+		t.Fatalf("HooksAdded = %v, want pre_user_prompt first, one per cascadeEvents", res.HooksAdded)
 	}
 
 	body, err := os.ReadFile(path)
@@ -148,8 +148,8 @@ func TestUnregisterCascade_PreservesSiblingKeysEventsAndEntryFields(t *testing.T
 	if res.Error != nil {
 		t.Fatalf("Unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Fatalf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != len(cascadeEvents) {
+		t.Fatalf("HooksRemoved = %v, want one per registered event", res.HooksRemoved)
 	}
 
 	after, err := os.ReadFile(path)
@@ -306,8 +306,8 @@ func TestUnregisterPoolside_PreservesSiblingKeyAndEntryFields(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Unregister: %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Fatalf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != len(poolsideEvents) {
+		t.Fatalf("HooksRemoved = %v, want one per registered event", res.HooksRemoved)
 	}
 
 	after, err := os.ReadFile(path)

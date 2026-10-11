@@ -56,7 +56,7 @@ func TestEveryFixtureValidates(t *testing.T) {
 				t.Fatalf("schema_version %q, want %q", env.SchemaVersion, cloudcontract.EnvelopeSchemaVersion)
 			}
 			if env.Authority.Authority != dataauthority.AuthorityPersonal {
-				t.Fatalf("fixture authority %q — a proving fixture must be personal-authority "+
+				t.Fatalf("fixture authority %q - a proving fixture must be personal-authority "+
 					"(an org-authority envelope is INELIGIBLE and would prove nothing)", env.Authority.Authority)
 			}
 		})
@@ -97,7 +97,7 @@ func TestFixtureDigestsRoundTrip(t *testing.T) {
 				t.Fatalf("digests missing the sha256: prefix: %+v", digests)
 			}
 			if digests.EvidenceContent == digests.Upload {
-				t.Fatal("evidence and upload digests are equal — the two preimages must differ " +
+				t.Fatal("evidence and upload digests are equal - the two preimages must differ " +
 					"(the upload bytes carry the evidence digest, the preimage does not)")
 			}
 
@@ -107,7 +107,7 @@ func TestFixtureDigestsRoundTrip(t *testing.T) {
 				t.Fatalf("upload digest %q does not cover the upload bytes (%q)", digests.Upload, got)
 			}
 			if bytes.Contains(body, []byte(`"upload_digest"`)) {
-				t.Fatal("the upload bytes contain an upload_digest field — it would cover itself")
+				t.Fatal("the upload bytes contain an upload_digest field - it would cover itself")
 			}
 			if !bytes.Contains(body, []byte(digests.EvidenceContent)) {
 				t.Fatal("the upload bytes do not carry the evidence-content digest")
@@ -117,7 +117,7 @@ func TestFixtureDigestsRoundTrip(t *testing.T) {
 				t.Fatalf("EvidencePreimage: %v", err)
 			}
 			if bytes.Contains(preimage, []byte(`"evidence_content_digest"`)) {
-				t.Fatal("the evidence preimage contains evidence_content_digest — it would cover itself")
+				t.Fatal("the evidence preimage contains evidence_content_digest - it would cover itself")
 			}
 
 			// The serialized bytes must round-trip back into an equal envelope.
@@ -220,7 +220,7 @@ func TestInjectionCanaryCarriesTheBait(t *testing.T) {
 		"a99",          // an ungrounded ref the FE3 check must reject if the model cites it
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("injection_canary no longer contains %q — the FE2/FE3 proof is now vacuous", want)
+			t.Fatalf("injection_canary no longer contains %q - the FE2/FE3 proof is now vacuous", want)
 		}
 	}
 	// The bait must not make the envelope invalid — it has to actually reach the

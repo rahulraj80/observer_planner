@@ -105,6 +105,26 @@ func TestRenderUnit(t *testing.T) {
 	}
 }
 
+// TestUnitDescriptionNamesWhatRuns pins T-744: the Description names what
+// `observer start` runs on the node, so a no-proxy node's unit no longer says
+// "proxy"; nil keeps the full set (every earlier caller's unit unchanged).
+func TestUnitDescriptionNamesWhatRuns(t *testing.T) {
+	cases := []struct {
+		runs []string
+		want string
+	}{
+		{nil, "Description=SuperBased Observer (proxy + watcher + dashboard)\n"},
+		{[]string{"watcher", "dashboard"}, "Description=SuperBased Observer (watcher + dashboard)\n"},
+		{[]string{}, "Description=SuperBased Observer\n"},
+	}
+	for _, c := range cases {
+		got := RenderUnit(UnitOptions{ExecPath: "/usr/local/bin/observer", Scope: ScopeUser, Runs: c.runs})
+		if !strings.Contains(got, c.want) {
+			t.Errorf("runs %v: unit has no %q:\n%s", c.runs, c.want, got)
+		}
+	}
+}
+
 func TestUnitPath(t *testing.T) {
 	if got := UnitPath(ScopeUser, "/home/dev"); got != "/home/dev/.config/systemd/user/observer.service" {
 		t.Errorf("user UnitPath = %q", got)

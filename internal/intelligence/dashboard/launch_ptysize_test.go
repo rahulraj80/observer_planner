@@ -33,10 +33,10 @@ func TestPTYGeometryKnown(t *testing.T) {
 	}{
 		{"both dimensions known", ptyGeometry{rows: 40, cols: 120}, true},
 		{"known current size, unknown initial", ptyGeometry{rows: 24, cols: 80}, true},
-		{"all zero — not yet known", ptyGeometry{}, false},
+		{"all zero - not yet known", ptyGeometry{}, false},
 		{"rows only", ptyGeometry{rows: 40}, false},
 		{"cols only", ptyGeometry{cols: 120}, false},
-		{"initial only — current still unknown", ptyGeometry{initialRows: 24, initialCols: 80}, false},
+		{"initial only - current still unknown", ptyGeometry{initialRows: 24, initialCols: 80}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

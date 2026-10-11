@@ -1,0 +1,36 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].currency": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].interval": "VerifiedOfficial",
+    "data[].notification_channel": "VerifiedOfficial",
+    "data[].notification_channel.recipients": "VerifiedOfficial",
+    "data[].notification_channel.recipients[]": "VerifiedOfficial",
+    "data[].notification_channel.subject_prefix": "VerifiedOfficial",
+    "data[].notification_channel.type": "VerifiedOfficial",
+    "data[].object": "VerifiedOfficial",
+    "data[].threshold_amount": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "Inferred",
+    "last_id": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "92a1ec4994cac9589e83cde11b07b3850508eebebaaf8f5afea8b4b14ee27d81",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/spend_alerts",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId list-organization-spend-alerts. The official example is itself a terminal page, so this first page is that example with the paging flag set to \"more\" (has_more graded Inferred); last_page is the verbatim example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.org_spend_alerts"
+}

@@ -2,6 +2,8 @@ package guard
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -280,16 +282,95 @@ func TestExtractLatestUserPromptText_LatencyRegression(t *testing.T) {
 		t.Skip("wall-clock latency ceiling is not measurable under the race detector; ci.yml's static go job runs this without -race")
 	}
 	body := oneMiBPromptBody()
-	const iterations = 5
+	const iterations = 7
 	ceiling := extractLatencyBudget * extractLatencyTestHeadroom * raceLatencyMultiplier
-	start := time.Now()
+	// T-527: the extraction and a reference workload (json.Valid over the
+	// SAME body, the cheapest possible full pass over it) are timed
+	// interleaved, and each keeps its fastest sample. A loaded host slows
+	// both alike, so their ratio stays put while the absolute number moves.
+	extractMin, refMin := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
 	for i := 0; i < iterations; i++ {
+		start := time.Now()
 		text, ok := extractLatestUserPromptText(models.ProviderAnthropic, body)
+		if d := time.Since(start); d < extractMin {
+			extractMin = d
+		}
 		if !ok || !strings.Contains(text, "4242 4242 4242 4242") {
 			t.Fatalf("extraction result = %q/%v, want the final short message", text, ok)
 		}
+		start = time.Now()
+		if !json.Valid(body) {
+			t.Fatal("reference body is not valid JSON")
+		}
+		if d := time.Since(start); d < refMin {
+			refMin = d
+		}
 	}
-	if perOp := time.Since(start) / iterations; perOp > ceiling {
-		t.Fatalf("extractLatestUserPromptText: %v/op exceeds the CI regression ceiling of %v", perOp, ceiling)
+	if msg, fail := extractLatencyVerdict(extractMin, refMin, ceiling, extractLatencyMaxRatio); fail {
+		t.Fatal(msg)
+	} else {
+		t.Log(msg)
+	}
+}
+
+// extractLatencyMaxRatio bounds the extraction against the json.Valid
+// reference pass over the same body. Measured 4.4 to 4.8 on the lane VM
+// (2026-10-06, 15 ms against 3.2 ms); 10 is about 2x headroom, the same
+// headroom the absolute ceiling (30 ms against a 15 ms steady state) has.
+const extractLatencyMaxRatio = 10.0
+
+// extractLatencyVerdict is the T-527 load-tolerant regression rule. It
+// fails only when BOTH bounds are exceeded: the absolute ceiling (the
+// original signal, still decisive on a quiet machine) AND the ratio to
+// the reference pass measured in the same process (the signal that
+// survives host load, because contention inflates both timings alike).
+// A host at load 12 pushes the extraction to 47 to 71 ms but the
+// reference rises with it, so the ratio holds and the test passes; a
+// real regression (extra decodes, a quadratic walk) moves the ratio and
+// fails on any host. The returned message carries every number either way.
+func extractLatencyVerdict(extract, ref, ceiling time.Duration, maxRatio float64) (string, bool) {
+	ratio := math.Inf(1)
+	if ref > 0 {
+		ratio = float64(extract) / float64(ref)
+	}
+	overCeiling := extract > ceiling
+	overRatio := ratio > maxRatio
+	msg := fmt.Sprintf("extractLatestUserPromptText: best %v/op (ceiling %v), json.Valid reference best %v/op, ratio %.2f (max %.1f)",
+		extract, ceiling, ref, ratio, maxRatio)
+	return msg, overCeiling && overRatio
+}
+
+// TestExtractLatencyVerdict pins the T-527 rule with the numbers that
+// motivated it. The "loaded host" row is the flake: under the old
+// absolute-only rule (extract > ceiling) it failed.
+func TestExtractLatencyVerdict(t *testing.T) {
+	t.Parallel()
+	const ceiling = 30 * time.Millisecond
+	ms := func(f float64) time.Duration { return time.Duration(f * float64(time.Millisecond)) }
+	tests := []struct {
+		name      string
+		extract   time.Duration
+		ref       time.Duration
+		wantFail  bool
+		oldWouldF bool
+	}{
+		{"quiet host, steady state", ms(15), ms(3.2), false, false},
+		{"loaded host (load ~12), both timings inflated", ms(71), ms(15), false, true},
+		{"loaded host, worst observed sample", ms(71), ms(9), false, true},
+		{"real regression on a quiet host", ms(45), ms(3.2), true, true},
+		{"real regression on a loaded host", ms(160), ms(15), true, true},
+		{"ratio drift but still inside the absolute budget", ms(28), ms(2), false, false},
+		{"zero reference reading never excuses an over-ceiling run", ms(45), 0, true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.extract > ceiling; got != tc.oldWouldF {
+				t.Fatalf("old absolute rule = %v, row says %v", got, tc.oldWouldF)
+			}
+			msg, fail := extractLatencyVerdict(tc.extract, tc.ref, ceiling, extractLatencyMaxRatio)
+			if fail != tc.wantFail {
+				t.Fatalf("verdict fail=%v, want %v (%s)", fail, tc.wantFail, msg)
+			}
+		})
 	}
 }

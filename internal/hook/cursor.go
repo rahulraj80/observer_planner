@@ -1,3 +1,5 @@
+//go:build !sbo_omit_adapter_cursor
+
 package hook
 
 import (
@@ -106,6 +108,10 @@ func HandleCursorEventGuarded(eventName string, gd CursorEvaluator, persist func
 		handleCursorPromptSubmit(body, truncated, gd, persist, sink, sc, stdout, stderr, deadline)
 		return
 	}
+	if dialect, ok := cursorToolGateEvents[eventName]; ok {
+		handleCursorToolGate(eventName, dialect, body, truncated, gd, persist, sink, sc, stdout, stderr, deadline)
+		return
+	}
 
 	permission := "allow"
 	var verdict guard.ActionVerdict
@@ -158,6 +164,37 @@ func HandleCursorEventGuarded(eventName string, gd CursorEvaluator, persist func
 	}
 }
 
+// cursorToolGateEvents maps the Cursor events answered through the
+// tool-gate table (HandleToolGate) to their dialect: the universal
+// preToolUse, whose reply shape (permission + user/agent message) and
+// scope (the classes the per-tool before* events do not gate) differ from
+// the before* permission events below.
+var cursorToolGateEvents = map[string]string{
+	cursor.EventPreToolUse: ToolGateDialectCursor,
+}
+
+// handleCursorToolGate answers a tool-gate event through HandleToolGate,
+// then runs the SAME post-reply capture every other cursor channel gets (a
+// denied attempt is still an attempt worth recording). gd nil (guard off)
+// is the dialect's allow, byte-identical to the unguarded reply.
+func handleCursorToolGate(eventName, dialect string, body []byte, truncated bool, gd CursorEvaluator, persist func(guard.ActionVerdict), sink CursorSink, sc *scrub.Scrubber, stdout, stderr io.Writer, deadline time.Duration) {
+	var ev guard.Evaluator
+	if gd != nil {
+		ev = gd
+	}
+	res := HandleToolGate(ToolGateRequest{
+		Tool: models.ToolCursor, Dialect: dialect, NativeEvent: eventName,
+		Label: "cursor:" + eventName, Body: body, Truncated: truncated,
+	}, ev, persist, stdout, stderr)
+	if !res.Replied {
+		WriteToolGateAllow(dialect, stdout)
+	}
+	processCursorEvent(eventName, body, sink, sc, stderr, deadline)
+	if res.RecordAfterReply != nil {
+		res.RecordAfterReply()
+	}
+}
+
 // handleCursorPromptSubmit routes beforeSubmitPrompt through
 // HandlePromptSubmitGuarded (the shared dialect table), then runs the
 // SAME post-reply capture (processCursorEvent) every other cursor
@@ -187,6 +224,13 @@ func handleCursorPromptSubmit(body []byte, bodyTruncated bool, gd CursorEvaluato
 	if after != nil {
 		after()
 	}
+}
+
+// CaptureCursorEvent is the post-reply capture half of the cursor hook,
+// for a caller that already replied (the tool-gate path answers preToolUse
+// before it opens the DB).
+func CaptureCursorEvent(eventName string, body []byte, sink CursorSink, sc *scrub.Scrubber, stderr io.Writer, deadline time.Duration) {
+	processCursorEvent(eventName, body, sink, sc, stderr, deadline)
 }
 
 // processCursorEvent is the post-reply capture half of the cursor
@@ -322,6 +366,13 @@ func processCursorEvent(eventName string, body []byte, sink CursorSink, sc *scru
 	if !ok {
 		return
 	}
+	if sink == nil {
+		// The database-free reply path (an afterAgentThought that only
+		// stashes): a row the builder still produced (a Cloud Agent's
+		// thought, cursor.ThoughtMintsRow) is landed by the caller's own
+		// post-reply capture, never here.
+		return
+	}
 	if ev.ProjectRoot == "" || ev.SessionID == "" {
 		fmt.Fprintf(stderr, "observer-hook: cursor %s missing project_root or session_id\n", eventName)
 		return
@@ -438,14 +489,6 @@ func cursorResponseTokens(body []byte, stderr io.Writer) []models.TokenEvent {
 	return []models.TokenEvent{tk}
 }
 
-// cursorReply is the response shape we emit. Cursor accepts both
-// "permission" (for tool gating) and "continue" (for prompt gating); extra
-// keys are ignored, so a single reply works across all events.
-type cursorReply struct {
-	Permission string `json:"permission,omitempty"`
-	Continue   bool   `json:"continue,omitempty"`
-}
-
 // BuildCursorEvent extracts a policy.Event from a Cursor pre-execution
 // hook payload, REUSING the adapter's own payload extraction
 // (cursor.BuildEvent — spec §6.1: reuse the per-client extraction the
@@ -503,7 +546,7 @@ func BuildCursorEvent(eventName string, body []byte, sc *scrub.Scrubber) (policy
 // The guard reply precedes this optional evidence write on every path.
 func recordCursorAccounts(eventName string, body []byte, sink CursorSink, stderr io.Writer, deadline time.Duration, at time.Time) {
 	observations := cursor.BuildAccountObservations(eventName, body, at)
-	if len(observations) == 0 {
+	if len(observations) == 0 || sink == nil {
 		return
 	}
 	if deadline <= 0 {

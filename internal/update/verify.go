@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,8 +32,32 @@ const SigningDomain = "sbo-update-manifest-v1"
 // sides cannot drift. It mirrors orgcontract.AnnouncementSigningMessage
 // down to the separator byte.
 func ManifestSigningMessage(manifestVersion int64, manifestHash string) []byte {
+	return manifestSigningMessage(SigningDomain, manifestVersion, manifestHash)
+}
+
+// SigningDomainV2 is the v2 manifest's domain tag. One org key signs both
+// schemas, so the domain is what keeps a v2 document from verifying on the
+// v1 rail (and the reverse): an old node can never be handed a document it
+// would misread, and a downgrade of the schema is a signature failure.
+const SigningDomainV2 = "sbo-update-manifest-v2"
+
+// ManifestSigningMessageV2 is ManifestSigningMessage under SigningDomainV2.
+func ManifestSigningMessageV2(manifestVersion int64, manifestHash string) []byte {
+	return manifestSigningMessage(SigningDomainV2, manifestVersion, manifestHash)
+}
+
+// SigningMessageFor returns the signing message for a schema: v2's domain
+// for SchemaV2, v1's for everything else.
+func SigningMessageFor(schema string, manifestVersion int64, manifestHash string) []byte {
+	if schema == SchemaV2 {
+		return ManifestSigningMessageV2(manifestVersion, manifestHash)
+	}
+	return ManifestSigningMessage(manifestVersion, manifestHash)
+}
+
+func manifestSigningMessage(domain string, manifestVersion int64, manifestHash string) []byte {
 	h := sha256.New()
-	h.Write([]byte(SigningDomain))
+	h.Write([]byte(domain))
 	h.Write([]byte{0})
 	h.Write([]byte(strconv.FormatInt(manifestVersion, 10)))
 	h.Write([]byte{0})
@@ -72,9 +97,22 @@ var (
 	ErrRequiredStop = errors.New("update: an intermediate version must be installed first")
 	// ErrNoArtifact — rule 9a: nothing built for this os/arch/kind.
 	ErrNoArtifact = errors.New("update: manifest has no artifact for this platform")
+	// ErrNoCustomArtifact - rule 9a for a custom build: the manifest carries
+	// no build of THIS node's component manifest for this platform. It
+	// wraps ErrNoArtifact (same blocked reason, no_artifact): a custom build
+	// updates only from its own manifest's build, never from another.
+	ErrNoCustomArtifact = fmt.Errorf("%w: a custom build updates only from a build of its own component manifest (ask the vendor build service for this version)", ErrNoArtifact)
 	// ErrUnsignedArtifact — rule 9b: empty upstream_sig. Fail-closed
 	// per review H0 until W6 produces vendor signatures.
 	ErrUnsignedArtifact = errors.New("update: artifact carries no vendor signature")
+	// ErrCeilingInvalid - rule 10: the local component ceiling failed a check.
+	ErrCeilingInvalid = errors.New("update: the local component ceiling failed a check, so updates are refused")
+	// ErrServerLacksDistroUpdates - rule 12 on a v1 manifest.
+	ErrServerLacksDistroUpdates = errors.New("update: the org server offers only the full build and this node may not take it")
+	// ErrDistroNotAllowed - rule 12: the target distro is not allowed.
+	ErrDistroNotAllowed = errors.New("update: the component policy or local ceiling does not allow this distro")
+	// ErrDistroEpochStale - rule 12: a distro change without a newer epoch.
+	ErrDistroEpochStale = errors.New("update: a distro change needs a distro_epoch ahead of the last applied one")
 )
 
 // VerifyInput is everything the nine rules need. Every value is
@@ -109,6 +147,32 @@ type VerifyInput struct {
 	// GOARCH fall back to this binary's own platform; empty Kind means
 	// KindAgent.
 	GOOS, GOARCH, Kind string
+	// Schema is the manifest schema this fetch expects: SchemaV1 (empty,
+	// the /manifest route) or SchemaV2 (the /manifest/v2 route). It picks
+	// the signing domain (rule 4) and is the ONLY schema rule 5 accepts,
+	// so a document of the other schema is ignored, never misread.
+	Schema string
+	// ReleaseIndexB64 / ReleaseIndexSig are the vendor-signed release
+	// index bytes (base64) and signature the v2 envelope carries (rule 11).
+	ReleaseIndexB64, ReleaseIndexSig string
+	// VendorKeys verify the release index; normally VendorPublicKeys().
+	VendorKeys []ed25519.PublicKey
+	// Distro is the node's distro context. Its zero value (Aware false)
+	// keeps the pre-modular behaviour exactly: rules 10 and 12 do not run
+	// and the full artifact is selected.
+	Distro DistroContext
+}
+
+// EnvelopeV2 is the v2 route's response: the signed manifest envelope plus
+// the vendor-signed release index, so one response holds all the trust
+// material (plan 5.6.1, third-pass M2).
+type EnvelopeV2 struct {
+	Envelope
+	// ReleaseIndexB64 is the index bytes, base64 (std encoding).
+	ReleaseIndexB64 string `json:"release_index"`
+	// ReleaseIndexSig is the vendor's base64 Ed25519 signature over
+	// ReleaseIndexSigningMessage.
+	ReleaseIndexSig string `json:"release_index_sig"`
 }
 
 // VerifyResult is what a caller acts on. It carries the decision, not
@@ -131,6 +195,13 @@ type VerifyResult struct {
 	// UpdateAvailable is true only when every rule passed AND the
 	// manifest's version is ahead of the installed one.
 	UpdateAvailable bool
+	// Distro is the distro of the selected artifact (full for v1).
+	Distro string
+	// DistroTransition reports that applying moves the node to another
+	// distro (rule 12 allowed it); DistroEpoch is the manifest's epoch the
+	// apply records when it succeeds.
+	DistroTransition bool
+	DistroEpoch      int64
 }
 
 // verifyRule is one row of the §3.2 table.
@@ -162,6 +233,9 @@ var verifyRules = []verifyRule{
 	{"7-downgrade", ruleDowngrade},
 	{"8-freshness", ruleFreshness},
 	{"9-artifact", ruleArtifact},
+	{"10-ceiling", ruleCeiling},
+	{"11-release-index", ruleReleaseIndex},
+	{"12-distro", ruleDistro},
 }
 
 // Verify walks the nine ordered rules of §3.2 and returns the decision.
@@ -245,7 +319,7 @@ func ruleKeyAgreement(p *verifyPass) error {
 		return nil // genuinely first pin
 	}
 	if p.env.KeyID != p.in.PinnedKeyID {
-		return fmt.Errorf("update.Verify: %w (pinned %q, offered %q) — re-enrol to rotate trust",
+		return fmt.Errorf("update.Verify: %w (pinned %q, offered %q) - re-enrol to rotate trust",
 			ErrKeyDisagreement, p.in.PinnedKeyID, p.env.KeyID)
 	}
 	return nil
@@ -269,7 +343,7 @@ func ruleSignature(p *verifyPass) error {
 	if err != nil {
 		return fmt.Errorf("update.Verify: %w: %w", ErrEnvelopeDecode, err)
 	}
-	msg := ManifestSigningMessage(mv, p.env.ManifestHash)
+	msg := SigningMessageFor(p.expectedSchema(), mv, p.env.ManifestHash)
 	if !ed25519.Verify(ed25519.PublicKey(pub), msg, sig) {
 		return fmt.Errorf("update.Verify: %w", ErrSignatureInvalid)
 	}
@@ -284,7 +358,7 @@ func ruleSchema(p *verifyPass) error {
 	if err != nil {
 		return fmt.Errorf("update.Verify: %w", err)
 	}
-	if schema != SchemaV1 {
+	if schema != p.expectedSchema() {
 		return fmt.Errorf("update.Verify: %w: %q", ErrUnknownSchema, schema)
 	}
 	m, err := DecodeManifest(p.manifestJSON)
@@ -318,6 +392,16 @@ func ruleDowngrade(p *verifyPass) error {
 	installed := p.in.InstalledVersion
 	if IsUpdateAvailable(installed, m.Version) {
 		return nil
+	}
+	// A distro transition may land on the SAME version (a same-version
+	// switch looks like a downgrade to this rule, plan 5.6). It is its own
+	// rule (12), never a bypass of this one: only an exactly equal version
+	// on a v2 manifest passes here, and rule 12 then demands the epoch and
+	// the policy and ceiling allowance.
+	if m.Schema == SchemaV2 && p.in.Distro.IsTransition() {
+		if cmp, ok := CompareSemver(m.Version, installed); ok && cmp == 0 {
+			return nil
+		}
 	}
 	// Not ahead. A dev or pre-release build is never told it is behind
 	// (semver.go), and it is never downgraded either.
@@ -395,11 +479,20 @@ func ruleArtifact(p *verifyPass) error {
 			goarch = carch
 		}
 	}
-	a, ok := SelectArtifact(p.res.Manifest, kind, goos, goarch)
+	distro := DistroFull
+	if p.res.Manifest.Schema == SchemaV2 {
+		distro = p.in.Distro.target()
+	}
+	a, ok := SelectArtifactFor(p.res.Manifest, kind, distro, goos, goarch)
 	if !ok {
 		p.res.State = StateBlocked
 		p.res.Reason = ReasonNoArtifact
-		return fmt.Errorf("update.Verify: %w (%s/%s/%s)", ErrNoArtifact, kind, goos, goarch)
+		if IsCustomDistro(distro) {
+			// A custom build never falls back to a prebuilt or another
+			// custom artifact (plan 5.3): only its own manifest's build.
+			return fmt.Errorf("update.Verify: %w (%s/%s/%s/%s)", ErrNoCustomArtifact, kind, distro, goos, goarch)
+		}
+		return fmt.Errorf("update.Verify: %w (%s/%s/%s/%s)", ErrNoArtifact, kind, distro, goos, goarch)
 	}
 	if !KnownArchiveType(a.ArchiveType) {
 		p.res.State = StateBlocked
@@ -412,6 +505,107 @@ func ruleArtifact(p *verifyPass) error {
 		return fmt.Errorf("update.Verify: %w (%s)", ErrUnsignedArtifact, a.Filename)
 	}
 	p.res.Artifact = a
+	p.res.Distro = NormalizeDistro(a.Distro)
+	p.res.DistroEpoch = p.res.Manifest.DistroEpoch
+	return nil
+}
+
+// expectedSchema is the schema this fetch accepts (v1 when unset).
+func (p *verifyPass) expectedSchema() string {
+	if p.in.Schema == SchemaV2 {
+		return SchemaV2
+	}
+	return SchemaV1
+}
+
+// ruleCeiling is rule 10 (distro-aware nodes only): while the OS-pinned
+// local component ceiling exists but failed a check, every update and
+// distro transition is refused (managedconfig.Result.UpdatesAllowed, plan
+// 6.2.2). A BLOCK, so the org board shows it: the machine owner fixes the
+// file, nothing else can.
+func ruleCeiling(p *verifyPass) error {
+	if !p.in.Distro.Aware || p.in.Distro.UpdatesAllowed {
+		return nil
+	}
+	p.res.State = StateBlocked
+	p.res.Reason = ReasonCeilingInvalid
+	return fmt.Errorf("update.Verify: %w", ErrCeilingInvalid)
+}
+
+// ruleReleaseIndex is rule 11 (v2 manifests only): the vendor-signed index
+// verifies against the compiled-in vendor key, its bytes hash to the
+// manifest's release_index_sha256, it describes this release, and it agrees
+// with the manifest about the chosen artifact's hash, platform, distro and
+// components digest. The org cannot assert any of those on its own.
+func ruleReleaseIndex(p *verifyPass) error {
+	m := p.res.Manifest
+	if m.Schema != SchemaV2 {
+		return nil
+	}
+	fail := func(err error) error {
+		p.res.State = StateBlocked
+		p.res.Reason = ReasonReleaseIndex
+		return fmt.Errorf("update.Verify: %w", err)
+	}
+	body, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.in.ReleaseIndexB64))
+	if err != nil || len(body) == 0 {
+		return fail(fmt.Errorf("%w: the v2 response carries no release index", ErrReleaseIndexInvalid))
+	}
+	if !strings.EqualFold(HashBytes(body), m.ReleaseIndexSHA256) {
+		return fail(fmt.Errorf("%w: the release index does not hash to the manifest's release_index_sha256", ErrReleaseIndexMismatch))
+	}
+	ix, err := VerifyReleaseIndex(body, p.in.ReleaseIndexSig, p.in.VendorKeys)
+	if err != nil {
+		return fail(err)
+	}
+	if ix.Version != m.Version {
+		return fail(fmt.Errorf("%w: the index is for %s, the manifest for %s", ErrReleaseIndexMismatch, ix.Version, m.Version))
+	}
+	if err := CheckArtifactAgainstIndex(ix, p.res.Artifact); err != nil {
+		return fail(err)
+	}
+	return nil
+}
+
+// ruleDistro is rule 12 (distro-aware nodes only), the distro transition
+// rule of plan 5.6 / 5.6.1:
+//
+//   - a v1 manifest (the new-node / old-server cell) is accepted only when
+//     the node runs full, wants full, and its ceiling permits full
+//     (LegacyFullAllowed); otherwise blocked{server_lacks_distro_updates};
+//   - a v2 manifest for the node's own distro is an ordinary update;
+//   - a v2 manifest that changes the distro needs the policy and ceiling
+//     allowance AND a distro_epoch ahead of the one the node last applied
+//     on this channel. Rule 7 already refused a lower version.
+func ruleDistro(p *verifyPass) error {
+	d := p.in.Distro
+	if !d.Aware {
+		return nil
+	}
+	m := p.res.Manifest
+	if m.Schema != SchemaV2 {
+		if d.LegacyFullAllowed && d.target() == DistroFull && NormalizeDistro(d.Current) == DistroFull {
+			return nil
+		}
+		p.res.State = StateBlocked
+		p.res.Reason = ReasonServerLacksDistroUpdates
+		return fmt.Errorf("update.Verify: %w (running %s, wanted %s)", ErrServerLacksDistroUpdates,
+			NormalizeDistro(d.Current), d.target())
+	}
+	if !d.IsTransition() {
+		return nil
+	}
+	if !d.TargetAllowed {
+		p.res.State = StateBlocked
+		p.res.Reason = ReasonDistroNotAllowed
+		return fmt.Errorf("update.Verify: %w: %s -> %s", ErrDistroNotAllowed, NormalizeDistro(d.Current), d.target())
+	}
+	if m.DistroEpoch <= d.Epoch {
+		p.res.State = StateBlocked
+		p.res.Reason = ReasonDistroEpochStale
+		return fmt.Errorf("update.Verify: %w (offered %d, applied %d)", ErrDistroEpochStale, m.DistroEpoch, d.Epoch)
+	}
+	p.res.DistroTransition = true
 	return nil
 }
 

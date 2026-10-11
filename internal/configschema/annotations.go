@@ -34,7 +34,8 @@ const (
 	// RestartLivePersist — live-applied AND persisted on save.
 	RestartLivePersist Restart = "live_persist"
 	// RestartNextSpawn — binds in a child process (an MCP subprocess, a
-	// launched terminal), not this daemon.
+	// launched terminal), or is re-read by this daemon on the next launch it
+	// authorizes (the [terminal.launch] policy, T-489), not at start-up.
 	RestartNextSpawn Restart = "next_spawn"
 	// RestartRequired — bind-at-start; the running daemon keeps the old value.
 	RestartRequired Restart = "restart"
@@ -78,15 +79,16 @@ func f(v float64) *float64 { return &v }
 // the UI renders is consistent.
 const (
 	ownerConfigMigrate = "`observer config migrate` (schema-version stamp; never hand-set)"
-	ownerOrgEnroll     = "`observer org enroll` / `observer org unenroll` (enrolment identity)"
+	ownerOrgEnroll     = "`observer enroll` / `observer unenroll` (enrolment identity)"
 	ownerPricingEditor = "the Settings → Pricing editor (PUT /api/config/pricing)"
 	ownerRoutingEditor = "the Settings → Routing rules editor / config.toml"
 	ownerExperiments   = "`observer experiment` (the [[experiments]] list)"
 	ownerGuardCloud    = "`observer guard cloud` / config.toml"
 	ownerFileOnly      = "config.toml directly (a compound table the generic editor does not render)"
-	ownerSSHProfiles   = "config.toml [[terminal.ssh.profiles]] (the dashboard profile editor is plan item P0-6, not yet shipped)"
+	ownerSSHProfiles   = "the Terminals > Settings > Remote systems editor (PUT /api/terminal/ssh/profiles) / config.toml [[terminal.ssh.profiles]]"
 	ownerLaunchTools   = "config.toml [launch.tools.<tool>] (per-tool launch overrides)"
 	ownerShellWrap     = "`observer shell-wrap enable|disable` / the Settings → Terminal \"Command wrapping\" card (writes these keys AND the shell files together)"
+	ownerComponents    = "`observer components select|add|remove` / `observer init --components` / Settings > Components (writes these keys AND runs the teardown of a removed component)"
 )
 
 // rules is THE annotation table. Ordered for reading, not for precedence —
@@ -299,8 +301,9 @@ var rules = []rule{
 	{prefix: "terminal.ws_ping_timeout_seconds", exact: true, prominence: ProminenceExpert},
 	{prefix: "terminal.ws_ping_failures_allowed", exact: true, prominence: ProminenceExpert},
 	{prefix: "terminal.status", prominence: ProminenceAdvanced},
-	// Execution allow-lists (§4.2).
-	{prefix: "terminal.launch", tier: TierSensitive},
+	// Execution allow-lists (§4.2). Read per launch through the daemon's live
+	// terminal config holder (T-489), so a save binds on the next launch.
+	{prefix: "terminal.launch", tier: TierSensitive, restart: RestartNextSpawn},
 	// Read per-launch by the CLI, not by this daemon (F6).
 	{prefix: "terminal.attach.route_proxy", exact: true, restart: RestartNextSpawn},
 	{prefix: "terminal.attach.default_on", exact: true, restart: RestartNextSpawn},
@@ -313,7 +316,9 @@ var rules = []rule{
 	{prefix: "terminal.sandbox.egress", exact: true, enum: []string{"", "host", "internet", "proxy_only", "none"}},
 	{prefix: "terminal.sandbox.prep_timeout_seconds", exact: true, tier: TierPlain, prominence: ProminenceAdvanced},
 	{prefix: "terminal.sandbox.workspace_retention_days", exact: true, tier: TierPlain},
-	{prefix: "terminal.ssh", tier: TierSensitive},
+	// Read per launch through the live terminal config holder (T-488), like
+	// terminal.launch: a profile or switch change binds on the next launch.
+	{prefix: "terminal.ssh", tier: TierSensitive, restart: RestartNextSpawn},
 	{prefix: "terminal.ssh.profiles", exact: true, tier: TierOwnerElsewhere, ownedBy: ownerSSHProfiles},
 
 	// ------------------------------------------------------------------ launch
@@ -324,6 +329,13 @@ var rules = []rule{
 	// the shell start-up files; the dedicated card/CLI writes both together.
 	// next_spawn: a change reaches the next shell the operator opens.
 	{prefix: "shell_wrap", tier: TierOwnerElsewhere, restart: RestartNextSpawn, section: "terminal", ownedBy: ownerShellWrap, prominence: ProminenceAdvanced},
+
+	// [components] (modular packaging P1): the node's component selection.
+	// Owner-elsewhere because a key write alone would skip the teardown of a
+	// removed component (hooks, MCP entries, routes, the browser host); the
+	// components service writes the keys and runs the teardown together.
+	// Restart-required: the daemon resolves the effective set once at start.
+	{prefix: "components", tier: TierOwnerElsewhere, restart: RestartRequired, section: "observer", ownedBy: ownerComponents, prominence: ProminenceAdvanced},
 
 	// --------------------------------------------------------------- codeintel
 	{prefix: "codeintel", tier: TierPlain, restart: RestartRequired, section: "intelligence"},

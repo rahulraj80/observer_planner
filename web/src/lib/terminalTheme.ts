@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  TERMINAL_MIN_CONTRAST,
   TERMINAL_THEMES,
   parseTerminalThemePref,
   resolveTerminalTheme,
@@ -40,6 +41,8 @@ export type TerminalThemeState = {
   name: TerminalThemeName;
   /** xterm.js theme object for `name`. */
   colors: TerminalColors;
+  /** xterm.js minimumContrastRatio for `name` (1 = colors pass through). */
+  minimumContrastRatio: number;
   setPref: (p: TerminalThemePref) => void;
 };
 
@@ -59,5 +62,11 @@ export function useTerminalTheme(): TerminalThemeState {
     setTerminalThemePref(p);
   }, []);
   const name = resolveTerminalTheme(pref, effective);
-  return { pref, name, colors: TERMINAL_THEMES[name], setPref };
+  return {
+    pref,
+    name,
+    colors: TERMINAL_THEMES[name],
+    minimumContrastRatio: TERMINAL_MIN_CONTRAST[name],
+    setPref,
+  };
 }

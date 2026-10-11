@@ -117,7 +117,7 @@ func newMuseCmd() *cobra.Command {
 				// (comparatively expensive) handoff render — the droid `exec`
 				// precedent.
 				if museHeadlessScan.leads(args) {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE muse session, but you forwarded a muse subcommand (e.g. `exec`) — drop it, or run the handover through `muse exec` yourself")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE muse session, but you forwarded a muse subcommand (e.g. `exec`) - drop it, or run the handover through `muse exec` yourself")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer muse: %v\n", err)
 					return err
 				}

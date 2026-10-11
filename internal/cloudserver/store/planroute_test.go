@@ -11,34 +11,49 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/cloudserver/store"
 )
 
-// The migration-0039 suite: plan v2 allowances (free 20/day, Plus 120/month) and
-// the PER-PLAN route pin, whose whole point is that a paid plan degrades to the
-// default model rather than to no service.
+// The migration-0039/0041 suite: the per-plan allowances (0039 v2, then 0041
+// v3: free 100/day + 3000/month, Plus 500/day + 15000/month) and the PER-PLAN
+// route pin, whose whole point is that a paid plan degrades to the default
+// model rather than to no service.
 
-const solRoute = "session_enrichment.sol.v1"
+const (
+	solRoute = "session_enrichment.sol.v1"
+	// gpt6LunaRoute is migration 0041's GPT-6 Luna route (D-299): the route
+	// both v3 plans pin, shipped inactive and unbound.
+	gpt6LunaRoute = "session_enrichment.gpt-6-luna.v1"
+	// lunaV1Route is the original feature default (0004).
+	lunaV1Route = "session_enrichment.luna.v1"
+)
 
 // bindSolRoute moves the seeded Sol route from its shipped state (inactive,
 // unbound) to the state an operator leaves it in after deploying gpt-5.6-sol:
 // bound and active.
 func bindSolRoute(t *testing.T, s *store.Store) {
 	t.Helper()
+	bindAndActivate(t, s, solRoute, "/arm/sol")
+}
+
+// bindAndActivate binds a seeded route to a synthetic Foundry endpoint and
+// activates it - the state an operator leaves a route in after deploying it.
+func bindAndActivate(t *testing.T, s *store.Store, routeID, arm string) {
+	t.Helper()
 	ctx := context.Background()
-	if err := s.SetRouteBinding(ctx, solRoute, store.RouteBinding{
-		TenantID: "tenant", SubscriptionID: "sub", ARMResourceID: "/arm/sol",
+	if err := s.SetRouteBinding(ctx, routeID, store.RouteBinding{
+		TenantID: "tenant", SubscriptionID: "sub", ARMResourceID: arm,
 		EndpointAudience: "https://cognitiveservices.azure.com/.default",
 		Endpoint:         "https://sbci-test-foundry.openai.azure.com", APIVersion: "2026-05-01",
 	}); err != nil {
-		t.Fatalf("SetRouteBinding(sol): %v", err)
+		t.Fatalf("SetRouteBinding(%s): %v", routeID, err)
 	}
-	if err := s.SetRouteActive(ctx, solRoute, true); err != nil {
-		t.Fatalf("SetRouteActive(sol, true): %v", err)
+	if err := s.SetRouteActive(ctx, routeID, true); err != nil {
+		t.Fatalf("SetRouteActive(%s, true): %v", routeID, err)
 	}
 }
 
-// TestFreePlanV2Allowance pins the LITERAL v2 free numbers (not just
-// "whatever DefaultFreePlanVersion points at"): daily 5 -> 20, monthly 100
-// unchanged, and no route pin.
-func TestFreePlanV2Allowance(t *testing.T) {
+// TestFreePlanV3Allowance pins the LITERAL v3 free numbers (not just
+// "whatever DefaultFreePlanVersion points at"): daily 20 -> 100, monthly
+// 100 -> 3000, concurrency unchanged, and the GPT-6 Luna route pinned.
+func TestFreePlanV3Allowance(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	acct := makeAccount(t, s)
@@ -47,22 +62,26 @@ func TestFreePlanV2Allowance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAllowance: %v", err)
 	}
-	if a.Plan.Name != store.PlanFree || a.Plan.Version != 2 {
-		t.Fatalf("fresh account resolves %s v%d, want free v2", a.Plan.Name, a.Plan.Version)
+	if a.Plan.Name != store.PlanFree || a.Plan.Version != 3 {
+		t.Fatalf("fresh account resolves %s v%d, want free v3", a.Plan.Name, a.Plan.Version)
 	}
-	if a.DailyCap != 20 || a.MonthlyCap != 100 || a.ConcurrencyCap != 2 {
-		t.Fatalf("free v2 caps = %d/%d/%d, want 20/100/2", a.DailyCap, a.MonthlyCap, a.ConcurrencyCap)
+	if a.DailyCap != 100 || a.MonthlyCap != 3000 || a.ConcurrencyCap != 2 {
+		t.Fatalf("free v3 caps = %d/%d/%d, want 100/3000/2", a.DailyCap, a.MonthlyCap, a.ConcurrencyCap)
 	}
-	if a.Plan.RouteID != "" {
-		t.Fatalf("free v2 route_id = %q, want empty (feature default)", a.Plan.RouteID)
+	if a.Plan.RouteID != gpt6LunaRoute {
+		t.Fatalf("free v3 route_id = %q, want %q", a.Plan.RouteID, gpt6LunaRoute)
+	}
+	if a.BudgetPool != "free" || a.Plan.Label != "Signed-in Free" {
+		t.Fatalf("free v3 pool/label = %q / %q, want free / Signed-in Free (copied from v2)", a.BudgetPool, a.Plan.Label)
 	}
 }
 
-// TestPlusPlanV2AllowanceAndRoutePin pins the paid side: monthly 500 -> 120 (the
-// COGS cap), daily/concurrency unchanged, the Sol route pinned, and the v1-only
-// columns (digest entitlement, retention window) carried forward by the
-// INSERT ... SELECT rather than silently reset to their defaults.
-func TestPlusPlanV2AllowanceAndRoutePin(t *testing.T) {
+// TestPlusPlanV3AllowanceAndRoutePin pins the paid side: 5x free on both
+// windows (500/day, 15000/month), concurrency 4 unchanged, the GPT-6 Luna
+// route pinned (the Sol pin is gone from the current version), and the
+// columns 0041 does not move (digest entitlement, retention window, label)
+// carried forward by the INSERT ... SELECT rather than silently reset.
+func TestPlusPlanV3AllowanceAndRoutePin(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	acct := makeAccount(t, s)
@@ -75,21 +94,81 @@ func TestPlusPlanV2AllowanceAndRoutePin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAllowance: %v", err)
 	}
-	if a.Plan.Version != 2 {
-		t.Fatalf("latest plus version = %d, want 2", a.Plan.Version)
+	if a.Plan.Version != 3 {
+		t.Fatalf("latest plus version = %d, want 3", a.Plan.Version)
 	}
-	if a.DailyCap != 25 || a.MonthlyCap != 120 || a.ConcurrencyCap != 4 {
-		t.Fatalf("plus v2 caps = %d/%d/%d, want 25/120/4", a.DailyCap, a.MonthlyCap, a.ConcurrencyCap)
+	if a.DailyCap != 500 || a.MonthlyCap != 15000 || a.ConcurrencyCap != 4 {
+		t.Fatalf("plus v3 caps = %d/%d/%d, want 500/15000/4", a.DailyCap, a.MonthlyCap, a.ConcurrencyCap)
 	}
-	if a.Plan.RouteID != solRoute {
-		t.Fatalf("plus v2 route_id = %q, want %q", a.Plan.RouteID, solRoute)
+	if a.Plan.RouteID != gpt6LunaRoute {
+		t.Fatalf("plus v3 route_id = %q, want %q", a.Plan.RouteID, gpt6LunaRoute)
 	}
 	if a.BudgetPool != "plus_beta" {
-		t.Fatalf("plus v2 pool = %q, want plus_beta (never the free pool)", a.BudgetPool)
+		t.Fatalf("plus v3 pool = %q, want plus_beta (never the free pool)", a.BudgetPool)
 	}
-	if !a.Plan.DigestWeekly || a.Plan.ResultsRetentionDays != 365 {
-		t.Fatalf("plus v2 carried digest_weekly=%v retention=%d, want true/365 copied from v1",
-			a.Plan.DigestWeekly, a.Plan.ResultsRetentionDays)
+	if !a.Plan.DigestWeekly || a.Plan.ResultsRetentionDays != 365 || a.Plan.Label != "Plus" {
+		t.Fatalf("plus v3 carried digest_weekly=%v retention=%d label=%q, want true/365/Plus copied from v2",
+			a.Plan.DigestWeekly, a.Plan.ResultsRetentionDays, a.Plan.Label)
+	}
+}
+
+// TestGPT6LunaRouteShipsInactiveThenBecomesTheDefault is the D-299 route
+// contract end to end: as shipped, both v3 plans pin the GPT-6 Luna route but
+// it is inactive and unbound, so jobs DEGRADE to the live luna.v1 default with
+// the fallback signalled (never a fleet-wide refusal); once an operator binds
+// and activates it, a pinned plan runs on it with no fallback, and it is also
+// the FEATURE default (route_version 2 outranks luna.v1's 1), which the
+// project-digest fallback follows.
+func TestGPT6LunaRouteShipsInactiveThenBecomesTheDefault(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+
+	r, err := s.RouteByID(ctx, gpt6LunaRoute)
+	if err != nil {
+		t.Fatalf("RouteByID(%s): %v", gpt6LunaRoute, err)
+	}
+	if r.Active || r.Endpoint != "" || r.APIVersion != "" {
+		t.Fatalf("gpt-6 luna as shipped = active:%v endpoint:%q api:%q, want inactive + unbound", r.Active, r.Endpoint, r.APIVersion)
+	}
+	if r.Deployment != "gpt-6-luna" || r.Dialect != "chat_completions" || r.RouteVersion != 2 || r.PromptVersion != 1 {
+		t.Fatalf("gpt-6 luna route = %+v, want deployment gpt-6-luna, chat_completions, route_version 2, prompt_version 1", r)
+	}
+	// max_output_tokens 1024 caps the answer length (operator ruling D-313, T-414).
+	if r.InputPricePerMTok != 0.10 || r.OutputPricePerMTok != 0.50 || r.MaxOutputTokens != 1024 {
+		t.Fatalf("gpt-6 luna snapshot = in %v out %v max %d, want 0.10 / 0.50 / 1024",
+			r.InputPricePerMTok, r.OutputPricePerMTok, r.MaxOutputTokens)
+	}
+	ks, err := s.KillSwitches(ctx, gpt6LunaRoute)
+	if err != nil || ks.RouteActive {
+		t.Fatalf("gpt-6 luna kill switch = %+v err=%v, want a seeded, inactive sentinel", ks, err)
+	}
+
+	// 1) As shipped: the pinned route degrades to luna.v1, signalled.
+	got, fb, err := s.ResolveRouteForPlan(ctx, store.FeatureSessionEnrichment, gpt6LunaRoute)
+	if err != nil {
+		t.Fatalf("ResolveRouteForPlan(inactive gpt-6 luna): %v", err)
+	}
+	if got.RouteID != lunaV1Route || !fb.Fell() || fb.Reason != store.PlanRouteInactive {
+		t.Fatalf("as shipped: served %q fallback %+v, want %q with an inactive fallback", got.RouteID, fb, lunaV1Route)
+	}
+	def, err := s.ResolveRoute(ctx, store.FeatureSessionEnrichment)
+	if err != nil || def.RouteID != lunaV1Route {
+		t.Fatalf("feature default as shipped = %q err=%v, want %q (the new route is inactive)", def.RouteID, err, lunaV1Route)
+	}
+
+	// 2) Bound + active: served directly, and it is the feature default.
+	bindAndActivate(t, s, gpt6LunaRoute, "/arm/gpt-6-luna")
+	got, fb, err = s.ResolveRouteForPlan(ctx, store.FeatureSessionEnrichment, gpt6LunaRoute)
+	if err != nil || got.RouteID != gpt6LunaRoute || fb.Fell() {
+		t.Fatalf("bound + active: served %q fallback %+v err=%v, want %q with no fallback", got.RouteID, fb, err, gpt6LunaRoute)
+	}
+	def, err = s.ResolveRoute(ctx, store.FeatureSessionEnrichment)
+	if err != nil || def.RouteID != gpt6LunaRoute {
+		t.Fatalf("feature default after activation = %q err=%v, want %q (route_version 2 wins)", def.RouteID, err, gpt6LunaRoute)
+	}
+	dig, err := s.ResolveRouteForFeature(ctx, store.FeatureProjectDigest)
+	if err != nil || dig.RouteID != gpt6LunaRoute {
+		t.Fatalf("digest fallback after activation = %q err=%v, want %q", dig.RouteID, err, gpt6LunaRoute)
 	}
 }
 
@@ -371,7 +450,7 @@ func TestFeatureDefaultCoverage(t *testing.T) {
 	// session_enrichment) and confirm coverage flips to false and ResolveRoute
 	// itself now fails - this is the exact single-activation outage mode an
 	// operator could cause mid-migration.
-	if err := s.SetRouteActive(ctx, "session_enrichment.luna.v1", false); err != nil {
+	if err := s.SetRouteActive(ctx, lunaV1Route, false); err != nil {
 		t.Fatalf("SetRouteActive(luna, false): %v", err)
 	}
 	coverage, err = s.FeatureDefaultCoverage(ctx)

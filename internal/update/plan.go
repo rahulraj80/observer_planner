@@ -3,7 +3,6 @@ package update
 import (
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -117,7 +116,9 @@ func BuildApplyPlan(in PlanInput) (ApplyPlan, error) {
 	if in.Artifact.Filename == "" {
 		return ApplyPlan{}, fmt.Errorf("update.BuildApplyPlan: no artifact selected")
 	}
-	if _, ok := SelectArtifact(in.Manifest, in.Artifact.Kind, in.Artifact.OS, in.Artifact.Arch); !ok {
+	// The artifact's OWN distro: a v2 manifest lists one row per distro per
+	// platform, and the apply carries the one rule 9 selected (full on v1).
+	if _, ok := SelectArtifactFor(in.Manifest, in.Artifact.Kind, NormalizeDistro(in.Artifact.Distro), in.Artifact.OS, in.Artifact.Arch); !ok {
 		return ApplyPlan{}, fmt.Errorf("update.BuildApplyPlan: artifact %s is not part of manifest %d",
 			in.Artifact.Filename, in.Manifest.ManifestVersion)
 	}
@@ -381,106 +382,4 @@ func DecideRollback(in RollbackInput) RollbackDecision {
 	// Unreachable: the last rule matches everything. Returning a
 	// refusal rather than a zero value keeps the fail-safe direction.
 	return RollbackDecision{Refuse: true, State: StateFailed, Reason: "no rollback rule matched"}
-}
-
-// Window is a local maintenance window, e.g. "02:00-05:00" in the
-// machine's own timezone. The zero value is "any time", which is what
-// an empty [update].window means.
-//
-// A window that wraps midnight ("22:00-02:00") is normal on a fleet
-// spread across timezones and is handled explicitly rather than by
-// accident.
-type Window struct {
-	// startMin and endMin are minutes since local midnight.
-	startMin, endMin int
-	// set distinguishes a configured window from the zero value.
-	set bool
-	// raw is the text the window was parsed from, for display.
-	raw string
-}
-
-// ParseWindow parses "HH:MM-HH:MM". An empty string yields the zero
-// window (always permitted), which is the documented meaning of an
-// empty [update].window.
-func ParseWindow(s string) (Window, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return Window{}, nil
-	}
-	parts := strings.Split(s, "-")
-	if len(parts) != 2 {
-		return Window{}, fmt.Errorf("update.ParseWindow: %q is not HH:MM-HH:MM", s)
-	}
-	start, err := parseClock(parts[0])
-	if err != nil {
-		return Window{}, fmt.Errorf("update.ParseWindow: %q: %w", s, err)
-	}
-	end, err := parseClock(parts[1])
-	if err != nil {
-		return Window{}, fmt.Errorf("update.ParseWindow: %q: %w", s, err)
-	}
-	if start == end {
-		return Window{}, fmt.Errorf("update.ParseWindow: %q is a zero-length window", s)
-	}
-	return Window{startMin: start, endMin: end, set: true, raw: s}, nil
-}
-
-// parseClock parses "HH:MM" into minutes since midnight.
-func parseClock(s string) (int, error) {
-	s = strings.TrimSpace(s)
-	hm := strings.Split(s, ":")
-	if len(hm) != 2 {
-		return 0, fmt.Errorf("%q is not HH:MM", s)
-	}
-	h, err := strconv.Atoi(hm[0])
-	if err != nil || h < 0 || h > 23 {
-		return 0, fmt.Errorf("%q has an out-of-range hour", s)
-	}
-	m, err := strconv.Atoi(hm[1])
-	if err != nil || m < 0 || m > 59 {
-		return 0, fmt.Errorf("%q has an out-of-range minute", s)
-	}
-	return h*60 + m, nil
-}
-
-// IsSet reports whether a window was configured.
-func (w Window) IsSet() bool { return w.set }
-
-// String renders the window as configured, or "any time".
-func (w Window) String() string {
-	if !w.set {
-		return "any time"
-	}
-	return w.raw
-}
-
-// Permits reports whether t (in its own location) falls inside the
-// window. The zero window permits everything.
-func (w Window) Permits(t time.Time) bool {
-	if !w.set {
-		return true
-	}
-	if t.IsZero() {
-		return false
-	}
-	mins := t.Hour()*60 + t.Minute()
-	if w.startMin < w.endMin {
-		return mins >= w.startMin && mins < w.endMin
-	}
-	// Wraps midnight.
-	return mins >= w.startMin || mins < w.endMin
-}
-
-// NextOpen returns the next instant the window is open at or after t.
-// When the window is open at t, t is returned unchanged, so a caller
-// can print "next open" without special-casing "now".
-func (w Window) NextOpen(t time.Time) time.Time {
-	if !w.set || w.Permits(t) {
-		return t
-	}
-	start := time.Date(t.Year(), t.Month(), t.Day(), w.startMin/60, w.startMin%60, 0, 0, t.Location())
-	if !start.After(t) {
-		start = start.AddDate(0, 0, 1)
-	}
-	return start
 }

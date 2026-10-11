@@ -1,3 +1,5 @@
+//go:build !sbo_omit_benchmark
+
 package store
 
 import (
@@ -356,67 +358,6 @@ func (s *Store) LoadSessionBilling(ctx context.Context, sessionID string) (Bench
 	return b, nil
 }
 
-// DeleteBenchmarkRun removes a run and all its child rows (scores, members,
-// attempts, then the run header) in one transaction. Backs
-// `observer benchmark delete` and the retention sweep.
-func (s *Store) DeleteBenchmarkRun(ctx context.Context, runID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("store.DeleteBenchmarkRun: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, stmt := range []string{
-		`DELETE FROM benchmark_scores WHERE run_id = ?`,
-		`DELETE FROM benchmark_session_members WHERE run_id = ?`,
-		`DELETE FROM benchmark_attempts WHERE run_id = ?`,
-		`DELETE FROM benchmark_runs WHERE run_id = ?`,
-	} {
-		if _, err := tx.ExecContext(ctx, stmt, runID); err != nil {
-			return fmt.Errorf("store.DeleteBenchmarkRun: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store.DeleteBenchmarkRun: commit: %w", err)
-	}
-	return nil
-}
-
-// PruneBenchmarkRows deletes benchmark runs (and their children) whose
-// started_at is older than retentionDays. ≤ 0 short-circuits (keep forever),
-// matching the cachetrack/handoff sweeps orchestrated by runRetention. Returns
-// the number of runs removed.
-func (s *Store) PruneBenchmarkRows(ctx context.Context, retentionDays int) (int64, error) {
-	if retentionDays <= 0 {
-		return 0, nil
-	}
-	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT run_id FROM benchmark_runs WHERE datetime(started_at) < datetime(?)`,
-		timestamp(cutoff))
-	if err != nil {
-		return 0, fmt.Errorf("store.PruneBenchmarkRows: list: %w", err)
-	}
-	var stale []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("store.PruneBenchmarkRows: scan: %w", err)
-		}
-		stale = append(stale, id)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("store.PruneBenchmarkRows: rows: %w", err)
-	}
-	for _, id := range stale {
-		if err := s.DeleteBenchmarkRun(ctx, id); err != nil {
-			return 0, err
-		}
-	}
-	return int64(len(stale)), nil
-}
-
 // AvgTurnCostUSD returns the mean billed cost per success turn for a model over
 // the last windowDays (0 = all time), for the dry-run cost estimate. ok=false
 // when the model has no billed history (the estimate then shows $0 for it).
@@ -443,11 +384,4 @@ func nullTime(t time.Time) any {
 		return nil
 	}
 	return timestamp(t)
-}
-
-func nullIntPtr(p *int) any {
-	if p == nil {
-		return nil
-	}
-	return *p
 }

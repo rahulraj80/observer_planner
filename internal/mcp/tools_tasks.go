@@ -32,7 +32,7 @@ func newGetSessionTasksTool(db *sql.DB, engine *cost.Engine, tasks config.TasksC
 func (*getSessionTasksTool) Name() string { return "get_session_tasks" }
 
 func (*getSessionTasksTool) Description() string {
-	return "Session-level task/todo/plan checklist tracking: per-task tokens, cost, elapsed time, action count, and lifecycle status (pending/in_progress/completed/vanished) for one session's todo/plan tool calls (claude-code TaskCreate/TaskUpdate/TodoWrite, codex update_plan, kiro-cli todo_list, copilot manage_todo_list, and others). Includes the between_tasks and shared buckets for token/action rows that couldn't be attributed to one specific task — only ~52% of a session's tokens are attributable to a single task on average, so those are first-class, not a rounding residual. Read-only, node-local, no new capture surface."
+	return "Session-level task/todo/plan checklist tracking: per-task tokens, cost, elapsed time, action count, and lifecycle status (pending/in_progress/completed/vanished) for one session's todo/plan tool calls (claude-code TaskCreate/TaskUpdate/TodoWrite, codex update_plan, kiro-cli todo_list, copilot manage_todo_list, and others). Includes the between_tasks and shared buckets for token/action rows that couldn't be attributed to one specific task - only ~52% of a session's tokens are attributable to a single task on average, so those are first-class, not a rounding residual. Read-only, node-local, no new capture surface."
 }
 
 func (*getSessionTasksTool) InputSchema() map[string]any {

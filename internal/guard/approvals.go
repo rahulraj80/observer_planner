@@ -70,11 +70,26 @@ func (g *Guard) approvalProjectRootHash(ev *policy.Event) string {
 	return HashProjectRoot(g.projectRootForSession(ev.SessionID))
 }
 
-// applyApprovals downgrades an ask/deny verdict to flag when an
-// active grant covers it. The downgrade is RECORDED on the verdict
-// (reason suffix + the returned bool drives the audit row's
-// degraded_from="approved" marker) — an approval is an audited
-// exception (§14.4 exception register), never a silent allow.
+// applyApprovals is the exception layer: the ordered table of request-
+// grants design §3.2, walked top down, first row that decides wins.
+//
+//	| # | condition                                          | result                                   |
+//	|---|----------------------------------------------------|------------------------------------------|
+//	| 1 | verdict below ask, or no rule id                   | unchanged                                |
+//	| 2 | ORG grant, effect exempt (gate lane only)          | flag, degraded_from=org_grant, grant_id  |
+//	| 3 | ORG grant, effect soften, verdict deny             | ask (orggrant.go: when a use is counted) |
+//	| 4 | local approval, rule not org-locked                | flag, degraded_from=approved             |
+//	| 5 | local approval, rule org-locked                    | unchanged + [org_locked ...]             |
+//	| 6 | else                                               | unchanged                                |
+//
+// The org grant is checked BEFORE the org-lock gate because it is the
+// organization speaking, but only a grant issued under the locked-rule
+// approval rule reaches a locked rule (the claim filters it, RuleLocked).
+// lane is the gate lane the verdict was produced on ("" for a post-hoc or
+// observe-only seam, where org grants never apply). Every downgrade is
+// RECORDED on the verdict (reason suffix + the outcome's degraded_from
+// marker and grant id) - an exception is audited (§14.4 exception
+// register), never a silent allow.
 //
 // ORG-LOCK GATE (Track B, override.go): where the org layer LOCKS a
 // rule - always on a managed node, and on an individual node for the
@@ -85,24 +100,33 @@ func (g *Guard) approvalProjectRootHash(ev *policy.Event) string {
 // audit row (and, under full-content sharing, the org) shows that a
 // local approval was refused rather than silently applied. Un-enrolled
 // nodes have no bundle, so nothing here changes for them.
-func (g *Guard) applyApprovals(v policy.Verdict, ev *policy.Event) (policy.Verdict, bool) {
-	if g.approvals == nil || v.Decision < policy.DecisionAsk || v.RuleID == "" {
-		return v, false
-	}
-	if !g.approvals(v.RuleID, ev.SessionID, g.approvalProjectRootHash(ev)) {
-		return v, false
+func (g *Guard) applyApprovals(v policy.Verdict, ev *policy.Event, lane string) (policy.Verdict, approvalOutcome) {
+	if v.Decision < policy.DecisionAsk || v.RuleID == "" {
+		return v, approvalOutcome{}
 	}
 	// The org layer changes only on a bundle reload, so reading the
 	// current snapshot here is stable in practice; the cost is one
 	// atomic pointer load on the already-rare blocking path.
 	es := g.set.Load()
-	if orgLockedVerdict(v, g.orgLocksVerdictRule(es, v.RuleID)) {
+	locked := orgLockedVerdict(v, g.orgLocksVerdictRule(es, v.RuleID))
+	localApproved := func() bool {
+		return g.approvals != nil && g.approvals(v.RuleID, ev.SessionID, g.approvalProjectRootHash(ev))
+	}
+	gv, out, handled := g.applyOrgGrant(es, v, ev, lane, locked, localApproved)
+	if handled {
+		return gv, out
+	}
+	v = gv
+	if !localApproved() {
+		return v, approvalOutcome{}
+	}
+	if locked {
 		v.Reason += " [org_locked: an org policy locks " + v.RuleID + "; the local approval was ignored]"
-		return v, false
+		return v, approvalOutcome{}
 	}
 	v.Decision = policy.DecisionFlag
 	v.Reason += " [approved: an operator grant covers this rule for this scope]"
-	return v, true
+	return v, approvalOutcome{degradedFrom: "approved"}
 }
 
 // HashProjectRoot returns the sha256 hex of a project root — the

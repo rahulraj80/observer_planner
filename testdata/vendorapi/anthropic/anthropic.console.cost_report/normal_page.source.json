@@ -1,0 +1,41 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].ending_at": "VerifiedOfficial",
+    "data[].results": "VerifiedOfficial",
+    "data[].results[]": "VerifiedOfficial",
+    "data[].results[].amount": "VerifiedOfficial",
+    "data[].results[].context_window": "VerifiedOfficial",
+    "data[].results[].cost_type": "VerifiedOfficial",
+    "data[].results[].currency": "VerifiedOfficial",
+    "data[].results[].description": "VerifiedOfficial",
+    "data[].results[].inference_geo": "VerifiedOfficial",
+    "data[].results[].model": "VerifiedOfficial",
+    "data[].results[].service_tier": "VerifiedOfficial",
+    "data[].results[].token_type": "VerifiedOfficial",
+    "data[].results[].workspace_id": "VerifiedOfficial",
+    "data[].starting_at": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "7ac50128a6a8febcfbd2b732eaf661c3db293888d5fe97bdc67cc2ef6a9b7429",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/cost_report",
+    "query": {
+      "starting_at": "2025-08-01T00:00:00Z"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example. amount is a decimal STRING in the lowest currency unit (cents).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.console.cost_report"
+}

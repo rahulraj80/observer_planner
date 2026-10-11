@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedSDK",
+    "data[]": "VerifiedSDK",
+    "data[].added_at": "VerifiedSDK",
+    "data[].email": "VerifiedSDK",
+    "data[].id": "VerifiedSDK",
+    "data[].name": "VerifiedSDK",
+    "data[].object": "VerifiedSDK",
+    "data[].role": "VerifiedSDK",
+    "first_id": "Inferred",
+    "has_more": "VerifiedSDK",
+    "last_id": "VerifiedSDK",
+    "object": "Inferred"
+  },
+  "fixture_sha256": "fbf23f10c38cddef0e383216455b7e5f67611ebf0db5de0b5e7d4451e40b82ca",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/users",
+    "query": {
+      "after": "user-SYNTH02"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized last page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "openai-python main, fetched 2026-10-07",
+  "source_kind": "sdk_type",
+  "source_sha256": "7f58b01a913417731ca6ada9f9a388d6d5d9dc34c3b2e395133c718bc9536530",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/admin/organization/organization_user.py",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.users"
+}

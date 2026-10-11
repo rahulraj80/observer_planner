@@ -1,3 +1,5 @@
+//go:build !sbo_omit_capture_browser
+
 package diag
 
 import (

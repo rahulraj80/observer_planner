@@ -317,7 +317,7 @@ const (
 // on Managed. On a managed node whose grant carries some but not all
 // extraction tokens, a tier the org body asked to raise reads here as raised
 // even though the seam will not raise it. The direction is deliberate: a
-// privacy surface that over-states what an organisation asked for is a false
+// privacy surface that over-states what an organization asked for is a false
 // alarm, one that under-states it is a false assurance.
 //
 // MergeBoolGated (below) closes this over-report for any caller that can

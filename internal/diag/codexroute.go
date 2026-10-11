@@ -13,6 +13,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/marmutapp/superbased-observer/internal/proxyroute"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // codex.proxy_route (post-Agent-Access backlog item 14): is codex's SELECTED
@@ -189,6 +190,7 @@ func checkCodexProviderRoute(homeDir, requirementsPath string) Check {
 	})
 
 	var details []string
+	var rems []remedy.Remediation
 	details = append(details, "config: "+cfgPath)
 	if sel.forced {
 		details = append(details, fmt.Sprintf(
@@ -219,7 +221,8 @@ func checkCodexProviderRoute(homeDir, requirementsPath string) Check {
 				"fix: the provider is admin-enforced; only a requirements change (a proxy-routed provider, or model_provider removed) restores proxy capture - otherwise accept session-log capture")
 		} else {
 			details = append(details,
-				"fix: route through the observer proxy with `observer init --codex` (writes model_provider=\""+proxyroute.ProviderName+"\"), or accept session-log capture for this provider")
+				"fix: route through the observer proxy with "+remedy.Quote(codexInit)+" (writes model_provider=\""+proxyroute.ProviderName+"\"), or accept session-log capture for this provider")
+			rems = append(rems, codexInit)
 		}
 	}
 
@@ -231,8 +234,11 @@ func checkCodexProviderRoute(homeDir, requirementsPath string) Check {
 			msg = "codex routes to the observer proxy, but a managed codex application network policy is expected to deny that plain-http loopback route"
 		}
 	}
-	return Check{Name: codexRouteCheckName, Status: status, Message: msg, Details: details}
+	return Check{Name: codexRouteCheckName, Status: status, Message: msg, Details: details, Remediations: rems}
 }
+
+// codexInit is the codex route remediation (`observer init --codex`).
+var codexInit = remedy.Of(remedy.InitTool, "codex")
 
 // codexProfileBypasses lists the codex profiles (legacy [profiles.<name>]
 // tables in config.toml, and <name>.config.toml overlays in codexHome) that

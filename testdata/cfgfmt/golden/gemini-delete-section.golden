@@ -1,0 +1,58 @@
+{
+  "general": {
+    "vimMode": true,
+    "preferredEditor": "code",
+    "sessionRetention": {
+      "enabled": true,
+      "maxAge": "30d",
+      "maxCount": 100
+    }
+  },
+  "ui": {
+    "theme": "GitHub",
+    "hideBanner": true,
+    "hideTips": false,
+    "customWittyPhrases": [
+      "You forget a thousand things every day. Make sure this is one of ’em",
+      "Connecting to AGI"
+    ]
+  },
+  "tools": {
+    "sandbox": "docker",
+    "discoveryCommand": "bin/get_tools",
+    "callCommand": "bin/call_tool",
+    "exclude": ["write_file"]
+  },
+  "mcpServers": {
+    "mainServer": {
+      "command": "bin/mcp_server.py"
+    },
+    "anotherServer": {
+      "command": "node",
+      "args": ["mcp_server.js", "--verbose"]
+    }
+  },
+  "privacy": {
+    "usageStatisticsEnabled": true
+  },
+  "model": {
+    "name": "gemini-1.5-pro-latest",
+    "maxSessionTurns": 10,
+    "summarizeToolOutput": {
+      "run_shell_command": {
+        "tokenBudget": 100
+      }
+    }
+  },
+  "context": {
+    "fileName": ["CONTEXT.md", "GEMINI.md"],
+    "includeDirectories": ["path/to/dir1", "~/path/to/dir2", "../path/to/dir3"],
+    "loadFromIncludeDirectories": true,
+    "fileFiltering": {
+      "respectGitIgnore": false
+    }
+  },
+  "advanced": {
+    "excludedEnvVars": ["DEBUG", "DEBUG_MODE", "NODE_ENV"]
+  }
+}

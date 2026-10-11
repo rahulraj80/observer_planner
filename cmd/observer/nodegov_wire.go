@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -18,8 +19,10 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/fsatomic"
 	"github.com/marmutapp/superbased-observer/internal/govern"
 	"github.com/marmutapp/superbased-observer/internal/govern/sidecar"
+	"github.com/marmutapp/superbased-observer/internal/grantverify"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/orgenrol"
 	"github.com/marmutapp/superbased-observer/internal/policyfam"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/nodegov"
 	"github.com/marmutapp/superbased-observer/internal/policystate"
@@ -96,13 +99,20 @@ func startupSidecarFrom(out config.GovernanceOutcome) startupSidecar {
 // governancePinnedHash is the content address of a pinned map alone. Both
 // sides of the pending_restart comparison go through it, so the comparison
 // can never be a map-iteration-order accident.
+//
+// HOT keys (config.GovernanceHotKey — today only the push-interval ceiling)
+// are left out: the daemon applies them live, so a changed value converges
+// without a restart and must never move the point to pending_restart.
 func governancePinnedHash(pinned map[string]any) string {
-	if len(pinned) == 0 {
-		return ""
-	}
 	keys := make([]string, 0, len(pinned))
 	for k := range pinned {
+		if config.GovernanceHotKey(k) {
+			continue
+		}
 		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return ""
 	}
 	sort.Strings(keys)
 	h := sha256.New()
@@ -167,6 +177,16 @@ type nodeGovernanceHandle struct {
 	lastWrittenAt   time.Time
 	// startup is the posture the RUNNING process was built from (§1.6).
 	startup startupSidecar
+	// featureExceptions reports the verified feature-access grants lifting
+	// pinned keys (request-grants G8, SetFeatureExceptions); nil = none.
+	featureExceptions func(ctx context.Context, keys []string, now time.Time) map[string]sidecar.Exception
+	// pageGrants reports the pages and tabs honoured page-access grants show
+	// (T-435, SetPageGrants); nil = none. Its answer is cached for
+	// pageGrantRefreshInterval because Effective runs on every dashboard
+	// request.
+	pageGrants      func(ctx context.Context, now time.Time) []string
+	pageGrantCache  []string
+	pageGrantReadAt time.Time
 
 	// effectivePins is the Track C item 3 reader: the effective value of
 	// every reportable pinnable key in the config THIS PROCESS is running.
@@ -304,11 +324,25 @@ func (h *nodeGovernanceHandle) WriteSidecar(ctx context.Context) {
 			return
 		}
 	}
-	if eff.Hash == lastHash && !lastAt.IsZero() && now.Sub(lastAt) < sidecarRefreshInterval {
+	file := sidecarFileFor(eff, writerVersion, now)
+	h.mu.Lock()
+	fx := h.featureExceptions
+	h.mu.Unlock()
+	exceptions := pinnedFeatureExceptions(ctx, fx, file.Pinned, now)
+	// The change key is the posture AND its exceptions: a grant arriving or
+	// lapsing rewrites the files at once even when the posture did not move.
+	written := eff.Hash + "|" + exceptionsDigest(exceptions)
+	if written == lastHash && !lastAt.IsZero() && now.Sub(lastAt) < sidecarRefreshInterval {
 		return
 	}
-	file := sidecarFileFor(eff, writerVersion, now)
+	// The sidecar first, then its exceptions file: a reader between the two
+	// writes sees a new posture hash with the old binding, which lifts
+	// nothing (every pin applies), never an exception for the wrong posture.
 	err := writeGovernanceSidecar(path, file)
+	var exErr error
+	if err == nil {
+		exErr = writeGovernanceExceptions(sidecar.ExceptionsPath(path), file.EffectiveHash, writerVersion, now, exceptions)
+	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -317,11 +351,98 @@ func (h *nodeGovernanceHandle) WriteSidecar(ctx context.Context) {
 		// Force the next tick to retry rather than sitting on a stale
 		// "written" marker.
 		h.lastWrittenHash, h.lastWrittenAt = "", time.Time{}
-		h.logger.Warn("governance: could not write the effective-settings file — this node is reporting NOT effective until it can",
+		h.logger.Warn("governance: could not write the effective-settings file - this node is reporting NOT effective until it can",
 			"path", path, "err", err)
 		return
 	}
-	h.lastWrittenHash, h.lastWrittenAt = eff.Hash, now
+	if exErr != nil {
+		// Not a governance failure: an exceptions file that did not land
+		// leaves every pin in force (the stricter reading). Retry next tick.
+		h.lastWrittenHash, h.lastWrittenAt = "", time.Time{}
+		h.logger.Warn("governance: could not write the feature-access exceptions file - every pinned setting stays in force until it can",
+			"path", sidecar.ExceptionsPath(path), "err", exErr)
+		return
+	}
+	h.lastWrittenHash, h.lastWrittenAt = written, now
+}
+
+// SetFeatureExceptions binds the feature-access grant reader (request-grants
+// G8): for the keys the posture pins, the verified grants that lift them and
+// until when. Called once at daemon construction, where the long-lived DB
+// handle exists; nil-safe.
+func (h *nodeGovernanceHandle) SetFeatureExceptions(fn func(ctx context.Context, keys []string, now time.Time) map[string]sidecar.Exception) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.featureExceptions = fn
+	h.lastWrittenHash, h.lastWrittenAt = "", time.Time{}
+	h.mu.Unlock()
+}
+
+// pinnedFeatureExceptions asks fx about the pinned keys (sorted) and keeps
+// only answers for keys that are pinned: an exception lifts a pin and never
+// sets a value. nil when nothing is pinned, nothing is bound or nothing is
+// lifted, so a node holding no feature grant writes the same bytes as
+// before.
+func pinnedFeatureExceptions(ctx context.Context, fx func(context.Context, []string, time.Time) map[string]sidecar.Exception, pinned map[string]any, now time.Time) map[string]sidecar.Exception {
+	if fx == nil || len(pinned) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(pinned))
+	for k := range pinned {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var out map[string]sidecar.Exception
+	for k, ex := range fx(ctx, keys, now) {
+		if _, ok := pinned[k]; !ok || ex.GrantID <= 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string]sidecar.Exception{}
+		}
+		out[k] = ex
+	}
+	return out
+}
+
+// exceptionsDigest is a stable digest of the exceptions map for change
+// detection.
+func exceptionsDigest(ex map[string]sidecar.Exception) string {
+	if len(ex) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(ex))
+	for k := range ex {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	sum := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(sum, "%s=%d@%s;", k, ex[k].GrantID, ex[k].Until)
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+// daemonFeatureExceptions is the production reader behind
+// SetFeatureExceptions: orgclient.FeatureGrantExceptions over the daemon's
+// own store (the same re-verified grant read the guard uses), each mapped
+// onto the instant it stops being honoured. Any failure is no exception.
+func daemonFeatureExceptions(st *store.Store) func(context.Context, []string, time.Time) map[string]sidecar.Exception {
+	return func(ctx context.Context, keys []string, now time.Time) map[string]sidecar.Exception {
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		got, err := orgclient.FeatureGrantExceptions(cctx, st, keys, now)
+		if err != nil || len(got) == 0 {
+			return nil
+		}
+		out := make(map[string]sidecar.Exception, len(got))
+		for k, ex := range got {
+			out[k] = sidecar.Exception{GrantID: ex.GrantID, Until: sidecar.FormatTime(time.Unix(0, ex.UntilNs))}
+		}
+		return out
+	}
 }
 
 // sidecarFileFor maps a resolved posture onto the on-disk shape.
@@ -390,6 +511,65 @@ func writeGovernanceSidecar(path string, file sidecar.File) error {
 	return nil
 }
 
+// writeGovernanceExceptions writes the feature-access exceptions file beside
+// the governance sidecar (request-grants G8), bound to the sidecar's
+// effective hash, with the same atomic write and read-back verification as
+// the sidecar. It is a SEPARATE file so the sidecar body stays readable by
+// released observers (a strict decoder refuses an unknown field and an
+// update rollback puts an older binary next to this file). With no
+// exception in force the file is removed; if it cannot be removed it is
+// overwritten with an empty set, so nothing stays lifted.
+func writeGovernanceExceptions(path, effectiveHash, writerVersion string, now time.Time, exceptions map[string]sidecar.Exception) error {
+	if path == "" {
+		return nil
+	}
+	if len(exceptions) == 0 {
+		rmErr := os.Remove(path)
+		if rmErr == nil || errors.Is(rmErr, os.ErrNotExist) {
+			return nil
+		}
+		exceptions = map[string]sidecar.Exception{}
+	}
+	raw, err := sidecar.EncodeExceptions(sidecar.ExceptionsFile{
+		Schema:        sidecar.ExceptionsMaxSchema,
+		WriterVersion: writerVersion,
+		WrittenAt:     sidecar.FormatTime(now),
+		EffectiveHash: effectiveHash,
+		Exceptions:    exceptions,
+	})
+	if err != nil {
+		return err
+	}
+	var lastErr error
+	for attempt := 0; attempt < sidecarWriteAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(sidecarWriteBackoff)
+		}
+		lastErr = fsatomic.WriteFile(path, raw, fsatomic.Options{
+			TempPattern: ".governance-exceptions-*.tmp",
+			Fsync:       true,
+		})
+		if lastErr == nil {
+			break
+		}
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	back, rerr := os.ReadFile(path) //nolint:gosec // the path is derived from the node's own resolved sidecar
+	if rerr != nil {
+		return fmt.Errorf("read back: %w", rerr)
+	}
+	decoded, derr := sidecar.DecodeExceptions(back)
+	if derr != nil {
+		return fmt.Errorf("read back: %w", derr)
+	}
+	if decoded.EffectiveHash != effectiveHash || exceptionsDigest(decoded.Exceptions) != exceptionsDigest(exceptions) {
+		return errors.New("read back: the exceptions file on disk does not match what was written")
+	}
+	return nil
+}
+
 // newNodeGovernanceHandle builds the seam over an identity loader. A nil
 // loader yields a handle that is permanently ungranted (dormant), which is
 // the correct behaviour for a build with no org client wired.
@@ -449,7 +629,7 @@ func (h *nodeGovernanceHandle) Apply(res orgclient.PolicyResourceResult) {
 	h.mu.Unlock()
 	h.WriteSidecar(context.Background())
 	if inert != "" {
-		h.logger.Info("policy resource: node.governance accepted but INERT — this node's dashboard is unchanged",
+		h.logger.Info("policy resource: node.governance accepted but INERT - this node's dashboard is unchanged",
 			"version", res.Version, "reason", inert)
 	}
 }
@@ -472,9 +652,10 @@ func (h *nodeGovernanceHandle) Clear() {
 }
 
 // InvalidateIdentity forces the next Effective to re-read the grant and the
-// live enrolment identity. start.go hands this to the org identity-changed
-// sink, so an `observer enroll` / `observer unenroll` in ANOTHER process is
-// observed immediately rather than at the next refresh interval.
+// live enrolment identity. start.go hands it to the dashboard's enrolment
+// manager, so an enrol, grant decision or leave made from Settings >
+// Enrolment shows at once. An `observer enroll` / `observer unenroll` in
+// ANOTHER process is still only observed at the next refresh interval.
 func (h *nodeGovernanceHandle) InvalidateIdentity() {
 	if h == nil {
 		return
@@ -498,7 +679,62 @@ func (h *nodeGovernanceHandle) Effective(ctx context.Context) govern.Effective {
 	h.mu.Lock()
 	delivered, grant, live := h.state.delivered, h.grant, h.live
 	h.mu.Unlock()
-	return govern.Resolve(delivered, grant, live, h.now())
+	eff := govern.Resolve(delivered, grant, live, h.now())
+	if eff.VisibilityActive() {
+		eff.GrantedPages = h.grantedPages(ctx)
+	}
+	return eff
+}
+
+// pageGrantRefreshInterval bounds how stale a page-access grant's arrival or
+// lapse can look on the dashboard.
+const pageGrantRefreshInterval = 5 * time.Second
+
+// grantedPages returns the cached page-access grant targets, re-reading them
+// when the cache is older than pageGrantRefreshInterval.
+func (h *nodeGovernanceHandle) grantedPages(ctx context.Context) []string {
+	h.mu.Lock()
+	fn, cached, at := h.pageGrants, h.pageGrantCache, h.pageGrantReadAt
+	now := h.now()
+	h.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	if !at.IsZero() && now.Sub(at) >= 0 && now.Sub(at) < pageGrantRefreshInterval {
+		return cached
+	}
+	got := fn(ctx, now)
+	h.mu.Lock()
+	h.pageGrantCache, h.pageGrantReadAt = got, now
+	h.mu.Unlock()
+	return got
+}
+
+// SetPageGrants binds the page-access grant reader (T-435). Called once at
+// daemon construction; nil-safe.
+func (h *nodeGovernanceHandle) SetPageGrants(fn func(ctx context.Context, now time.Time) []string) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.pageGrants = fn
+	h.pageGrantCache, h.pageGrantReadAt = nil, time.Time{}
+	h.mu.Unlock()
+}
+
+// daemonPageGrants is the production reader behind SetPageGrants: the
+// re-verified grant cache over the daemon's own store. Any failure is no
+// page shown.
+func daemonPageGrants(st *store.Store) func(context.Context, time.Time) []string {
+	return func(ctx context.Context, now time.Time) []string {
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		got, err := orgclient.PageGrants(cctx, st, now)
+		if err != nil {
+			return nil
+		}
+		return got
+	}
 }
 
 // refreshIdentity re-reads the grant + live identity when the cached copy is
@@ -518,7 +754,7 @@ func (h *nodeGovernanceHandle) refreshIdentity(ctx context.Context) {
 	defer h.mu.Unlock()
 	h.lastRefresh = h.now()
 	if err != nil {
-		h.logger.Warn("governance: could not read the enrolment grant — keeping the last known posture", "err", err)
+		h.logger.Warn("governance: could not read the enrolment grant - keeping the last known posture", "err", err)
 		return
 	}
 	h.grant, h.live = grant, live
@@ -565,7 +801,7 @@ type governanceFacts struct {
 
 	// GrantUnverified is TRUE when the resolver reported
 	// govern.StateGrantSignatureInvalid: the stored grant document no longer
-	// verifies under the organisation key this node holds (Track C item 1).
+	// verifies under the organization key this node holds (Track C item 1).
 	//
 	// WHICH WIRE FIELD CARRIES IT, AND WHY. It maps onto the node.governance
 	// row's EXISTING (delivered_unaccepted, sig_invalid) pair — the field
@@ -639,7 +875,7 @@ func (h *nodeGovernanceHandle) Facts(ctx context.Context) governanceFacts {
 		RunningHash:    startup.Hash,
 	}
 	// Resolve BEFORE the not-delivered early return: a tampered grant must be
-	// reported whether or not the organisation has published a body, and the
+	// reported whether or not the organization has published a body, and the
 	// resolver answers StateGrantSignatureInvalid in both cases (the
 	// integrity row precedes the no-policy row in the §3.7 table).
 	eff := h.Effective(ctx)
@@ -758,7 +994,7 @@ func newNodeGovernancePointReader(
 			// Track C item 1: a grant that no longer verifies outranks
 			// whatever the last FETCH did — nothing this rail delivered can
 			// be in force when the authority record behind it is not the one
-			// the organisation signed. See governanceFacts.GrantUnverified
+			// the organization signed. See governanceFacts.GrantUnverified
 			// for why this pair and not a new reason code.
 			reject = orgcontract.ReasonSigInvalid
 		}
@@ -861,10 +1097,15 @@ func governanceIdentityLoader(st *store.Store) func(ctx context.Context) (*gover
 			return nil, live, nil
 		}
 		grant := grantFromStore(row)
+		// The developer sees the org's NAME, never its id: the grant row
+		// stores the id in org_name, so prefer the enrolment's name (what
+		// `observer org status` prints). Display only; integrity below
+		// verifies the stored row, not this field.
+		grant.OrgName = orgenrol.DisplayName(row.OrgID, enr.OrgServerURL, enr.OrgName, row.OrgName)
 		// Track C item 1: RE-VERIFY the stored grant on every identity
 		// refresh, not only at enrolment. A key-material read failure is
 		// "unchecked", never "invalid" — see verifyStoredGrantIntegrity.
-		grant.Integrity = verifyStoredGrantIntegrity(ctx, st, enr.OrgServerURL, row)
+		grant.Integrity, grant.ConsentEvidence = verifyStoredGrantIntegrity(ctx, st, enr.OrgServerURL, enr.Tenancy, row)
 		return grant, live, nil
 	}
 }
@@ -889,12 +1130,21 @@ func governanceIdentityLoader(st *store.Store) func(ctx context.Context) (*gover
 // actually signed. RenewEnrolmentGrant moves the WORKING expires_at forward
 // inside that window and leaves the signature untouched, so verifying
 // against the working clock would make every renewed grant look tampered.
-func verifyStoredGrantIntegrity(ctx context.Context, st *store.Store, orgURL string, row store.EnrolmentGrant) govern.GrantIntegrity {
+func verifyStoredGrantIntegrity(ctx context.Context, st *store.Store, orgURL, tenancy string, row store.EnrolmentGrant) (govern.GrantIntegrity, govern.ConsentEvidence) {
 	pub, ok, err := orgclient.OrgPolicyPublicKeyFor(ctx, st, orgURL)
 	if err != nil || !ok {
-		return govern.GrantIntegrityUnchecked
+		return govern.GrantIntegrityUnchecked, govern.ConsentEvidenceUnverified
 	}
-	doc := orgcontract.StoredGrantDocument{
+	return storedGrantIntegrity(row, tenancy, pub)
+}
+
+// storedGrantIntegrity is the pure half of verifyStoredGrantIntegrity: it
+// maps the store row onto the stored grant document and hands it to
+// grantverify.Verify, the ONE verifier the daemon and `observer doctor`
+// share (the signed-consent candidate table, GRANT-INTEG-2, and the consent
+// evidence each candidate proves, Sol A3-03, live there).
+func storedGrantIntegrity(row store.EnrolmentGrant, tenancy string, pub ed25519.PublicKey) (govern.GrantIntegrity, govern.ConsentEvidence) {
+	return grantverify.Verify(orgcontract.StoredGrantDocument{
 		OrgID:                 row.OrgID,
 		OrgServerURL:          row.OrgServerURL,
 		KeyPinSHA256:          row.KeyPinSHA256,
@@ -905,15 +1155,9 @@ func verifyStoredGrantIntegrity(ctx context.Context, st *store.Store, orgURL str
 		ConsentActor:          row.ConsentActor,
 		Signature:             row.Signature,
 		ReplacementGeneration: row.ReplacementGeneration,
-	}
-	switch err := orgcontract.VerifyStoredGrant(doc, pub); {
-	case err == nil:
-		return govern.GrantIntegrityValid
-	case errors.Is(err, orgcontract.ErrStoredGrantUncheckable):
-		return govern.GrantIntegrityUnchecked
-	default:
-		return govern.GrantIntegrityInvalid
-	}
+		InitialComponents:     row.InitialComponents,
+		InitialProof:          row.InitialComponentsProof,
+	}, tenancy, pub)
 }
 
 // formatStoredGrantTime renders a stored grant timestamp back into the exact
@@ -965,40 +1209,86 @@ func grantFromStore(row store.EnrolmentGrant) *govern.Grant {
 // leaves this node ungoverned, which is the same answer it would give if the
 // resource had never been published.
 func loadNodeGovernanceLKG(ctx context.Context, cfg config.Config, st *store.Store, ngov *nodeGovernanceHandle, logger *slog.Logger) {
+	_ = loadNodeGovernanceLKGStatus(ctx, cfg, st, ngov, logger)
+}
+
+// lkgStatus is what loadNodeGovernanceLKGStatus found (T-395). The daemon
+// paths ignore it (their answer is "ungoverned unless installed", by design);
+// `observer config set` dispatches on it so a posture it cannot read is never
+// reported as an unmanaged machine.
+type lkgStatus int
+
+const (
+	// lkgNoStore: no store or handle was given.
+	lkgNoStore lkgStatus = iota
+	// lkgEnrolmentUnreadable: the enrolment or its generation could not be
+	// read from the database.
+	lkgEnrolmentUnreadable
+	// lkgNotEnrolled: no enrolment, or a tombstoned (left) generation, or an
+	// enrolment that never received a generation.
+	lkgNotEnrolled
+	// lkgFamilyNotAccepted: the operator does not accept node.governance.
+	lkgFamilyNotAccepted
+	// lkgNoPolicy: enrolled, and no node.governance resource was ever
+	// applied here (no cache and no durable state).
+	lkgNoPolicy
+	// lkgUnverified: a node.governance resource WAS applied (durable state
+	// exists) but its cache is missing, fails verification or disagrees
+	// with the durable floor.
+	lkgUnverified
+	// lkgInstalled: the verified cache was installed.
+	lkgInstalled
+)
+
+// loadNodeGovernanceLKGStatus is loadNodeGovernanceLKG reporting what it
+// found. It installs exactly when loadNodeGovernanceLKG always has.
+func loadNodeGovernanceLKGStatus(ctx context.Context, cfg config.Config, st *store.Store, ngov *nodeGovernanceHandle, logger *slog.Logger) lkgStatus {
 	if st == nil || ngov == nil {
-		return
+		return lkgNoStore
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 	enr, err := st.LoadEnrolment(ctx)
-	if err != nil || enr == nil {
-		return
+	if err != nil {
+		return lkgEnrolmentUnreadable
+	}
+	if enr == nil {
+		return lkgNotEnrolled
 	}
 	orgKey := orgclient.OrgKey(enr.OrgServerURL, enr.OrgID)
 	genRow, ok, err := st.LoadEnrolmentGeneration(ctx, orgKey)
-	if err != nil || !ok || genRow.Tombstoned {
-		return
+	if err != nil {
+		return lkgEnrolmentUnreadable
+	}
+	if !ok || genRow.Tombstoned {
+		return lkgNotEnrolled
 	}
 	// node.governance bodies never declare a RequiredCapabilities entry (the
 	// judge capability is an admission.input/egress concern), so this loader
-	// carries no live-capability set — nil keeps the subset check trivially
+	// carries no live-capability set; nil keeps the subset check trivially
 	// satisfied for this family and never depends on the admission runtime,
 	// which this node-governance path does not have a handle to.
 	opts := policyResourceOptionsFor(cfg, nil)
 	if !containsString(policyfam.FamilyNodeGovernance, opts.AcceptFamilies) {
-		return
+		return lkgFamilyNotAccepted
+	}
+	stateRow, hasState, serr := st.LoadPolicyResourceState(ctx, orgKey, policyfam.FamilyNodeGovernance)
+	if serr != nil {
+		return lkgEnrolmentUnreadable
 	}
 	path := filepath.Join(opts.CacheDir, orgKey, strconv.FormatInt(genRow.Generation, 10),
 		policyfam.FamilyNodeGovernance+".json")
 	cached, cerr := verifyCachedPolicyResource(ctx, st, enr.OrgServerURL, policyfam.FamilyNodeGovernance, path, opts.NodeAttrs)
 	if cerr != nil {
-		return
+		if hasState {
+			return lkgUnverified
+		}
+		return lkgNoPolicy
 	}
-	stateRow, hasState, serr := st.LoadPolicyResourceState(ctx, orgKey, policyfam.FamilyNodeGovernance)
-	if serr != nil || !hasState || stateRow.Generation != genRow.Generation ||
+	if !hasState || stateRow.Generation != genRow.Generation ||
 		cached.resource.Version != stateRow.FloorVersion || cached.digest != stateRow.MsgDigest {
-		return
+		return lkgUnverified
 	}
 	enforceAllowed, inertReason := policyResourceEnforceGate(policyfam.FamilyNodeGovernance, cached.spec, opts.PreauthorizeEnforce)
 	ngov.Apply(orgclient.PolicyResourceResult{
@@ -1009,4 +1299,5 @@ func loadNodeGovernanceLKG(ctx context.Context, cfg config.Config, st *store.Sto
 	})
 	logger.Info("governance: installed verified node.governance cache", "version", cached.resource.Version,
 		"enforce_allowed", enforceAllowed)
+	return lkgInstalled
 }

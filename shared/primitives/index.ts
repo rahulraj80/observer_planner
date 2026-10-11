@@ -19,22 +19,41 @@ export {
 } from "./SurfaceBadge";
 export { SegmentedControl, type Segment } from "./SegmentedControl";
 export { GranularityControl } from "./GranularityControl";
-export { TabStrip, type TabDef } from "./Tabs";
+export { TabStrip, TabPanel, useTabVisited, tabDomId, panelDomId, type TabDef } from "./Tabs";
+export {
+  resolveTab,
+  nextTabId,
+  focusableTabId,
+  shownTabs,
+  usableTabs,
+  auditedNote,
+  tabPanelState,
+  latchVisited,
+  type TabRuleInput,
+  type TabPanelState,
+} from "./tabsModel";
+export { SectionRail, type SectionRailItem, type SectionRailGroup } from "./SectionRail";
+export { isRailLink, pickRailSection, railItems, shownRailGroups } from "./sectionRailModel";
+export { StatStrip } from "./StatStrip";
+export { useStripScroll, StripEndPad } from "./useStripScroll";
 export { SlideOver } from "./SlideOver";
 export { TruncatedPath } from "./TruncatedPath";
 export { Toggle } from "./Toggle";
 export { ActiveFilterChips, type FilterChip } from "./ActiveFilterChips";
 export { ComboChip, type ComboOption } from "./ComboChip";
 export { EntityMultiPicker, type EntityMultiPickerOption } from "./EntityMultiPicker";
+export { SinglePicker, toPickerOptions } from "./SinglePicker";
 export { DateRangePopover } from "./DateRangePopover";
 export { ModelDot } from "./ModelDot";
 export { ModelMark } from "./ModelMark";
 export { ModelId } from "./ModelId";
+export { ModelFilterChip } from "./ModelFilterChip";
 export { HostMark, IdpMark } from "./BrandGlyphs";
 export { BrandMark, BrandLoader } from "./BrandMark";
 export { Icon, type IconSize } from "./Icon";
 export { DensityBar, type DensitySegment } from "./DensityBar";
 export { DensityToggle } from "./DensityToggle";
+export { ThemeToggle } from "./ThemeToggle";
 export {
   Skeleton,
   ChartSkeleton,
@@ -47,6 +66,7 @@ export { HelpSlotProvider, useHelpSlot } from "./helpSlot";
 export {
   Button,
   buttonClasses,
+  buttonDisabledLook,
   type ButtonProps,
   type ButtonSize,
   type ButtonVariant,
@@ -68,7 +88,7 @@ export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { EmptyIllustration, ILLUSTRATION_TITLES, type IllustrationKind } from "./EmptyIllustration";
 export { Spinner, InlineLoading } from "./Spinner";
 export { ErrorState } from "./ErrorState";
-export { Obs, type ObsState } from "./Obs";
+export { Obs, Mascot, toMascotState, type ObsState, type MascotState } from "./Obs";
 export { PermissionDenied, ReadOnlyBanner } from "./PermissionDenied";
 export { LiveDot, type LiveTone } from "./LiveDot";
 export { Modal } from "./Modal";
@@ -85,7 +105,9 @@ export {
   formatJsonPreview,
   type JsonPreviewProps,
 } from "./JsonPreview";
-export { ConfirmButton, type ConfirmButtonProps } from "./ConfirmButton";
+export { ConfirmButton, type ConfirmButtonProps, type ConfirmReason } from "./ConfirmButton";
+export { OneTimeSecret } from "./OneTimeSecret";
+export { SetupChecklist, type SetupChecklistStep } from "./SetupChecklist";
 export {
   PageTransition,
   Stagger,
@@ -97,5 +119,10 @@ export {
   staleClass,
   spotlightHandlers,
 } from "./Motion";
-export { SectionNav, type SectionNavItem } from "./SectionNav";
+export { SectionNav, type SectionNavItem, type SectionNavGutter } from "./SectionNav";
+// The filter row's palette chip and the top bar's link tools, promoted from
+// the node dashboard so both dashboards carry them (T-451 / T-452).
+export { SearchChip } from "./SearchChip";
+export { PageLinkTools } from "./PageLinkTools";
 export { TokenBar } from "./TokenBar";
+export { CodeEditor, diagnosticRange, type CodeEditorProps, type CodeLanguage, type CodeDiagnostic } from "./CodeEditor";

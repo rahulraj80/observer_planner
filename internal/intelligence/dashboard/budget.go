@@ -3,6 +3,8 @@ package dashboard
 import (
 	"net/http"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 )
 
 // Budget guardrails v2 (usability arc P6.3 / review §8.2): month-to-
@@ -120,7 +122,7 @@ func scopeFor(root string, budget, mtd, projection float64) budgetScope {
 // Sessions list. Rows without a resolvable project count toward the global
 // total only.
 func (s *Server) monthToDateCostByProject(r *http.Request, monthStart time.Time) (float64, map[string]float64, error) {
-	turns, err := s.spendTurns(r.Context(), monthStart, time.Time{}, "", "", nil)
+	turns, err := s.spendTurns(r.Context(), monthStart, time.Time{}, dashapi.SpendScope{}, nil)
 	if err != nil {
 		return 0, nil, err
 	}

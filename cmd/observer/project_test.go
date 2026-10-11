@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -151,7 +151,7 @@ func TestFormatROIValue(t *testing.T) {
 // real numbers.
 func TestPrintProjectDetail_TasksAvailability(t *testing.T) {
 	t.Run("unavailable", func(t *testing.T) {
-		var d dashboard.ProjectDetail
+		var d dashapi.ProjectDetail
 		d.Tasks.Total = 99
 		d.Tasks.Done = 50
 		d.Tasks.CostUSD = 123.45
@@ -168,7 +168,7 @@ func TestPrintProjectDetail_TasksAvailability(t *testing.T) {
 	})
 
 	t.Run("available", func(t *testing.T) {
-		var d dashboard.ProjectDetail
+		var d dashapi.ProjectDetail
 		d.Tasks.Total = 10
 		d.Tasks.Done = 4
 		d.Tasks.CostUSD = 2.5
@@ -192,12 +192,12 @@ func TestPrintProjectDetail_TasksAvailability(t *testing.T) {
 // says so instead of printing an empty table.
 func TestPrintProjectSkills(t *testing.T) {
 	var empty strings.Builder
-	printProjectSkills(&empty, dashboard.ProjectSkills{RootPath: "/r", WindowDays: 30})
+	printProjectSkills(&empty, dashapi.ProjectSkills{RootPath: "/r", WindowDays: 30})
 	if !strings.Contains(empty.String(), "No skills found") || !strings.Contains(empty.String(), "not scanned yet") {
 		t.Errorf("empty output = %q", empty.String())
 	}
 
-	var p dashboard.ProjectSkills
+	var p dashapi.ProjectSkills
 	raw := `{"root_path":"/r","window_days":30,"capture":{"observed_since":"2026-09-20T00:00:00Z","git":{"state":"ok","reflog_since":"2026-09-01T00:00:00Z"}},
 	 "skills":[
 	  {"key":"project:.claude/skills/deploy","scope":"project","name":"deploy",

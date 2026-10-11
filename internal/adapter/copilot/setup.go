@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,6 +44,13 @@ type Logger interface {
 // which Go's encoding/json refuses. We use github.com/tailscale/hujson
 // to roundtrip safely while preserving the user's comments and
 // formatting.
+// PrepareCapture implements adapter.CaptureStartupPreparer: the watcher
+// builder calls it once per start for an active Copilot adapter, which turns
+// the debug log on (EnsureDebugEnabled).
+func (a *Adapter) PrepareCapture(ctx context.Context, logger *slog.Logger, homes []crossmount.HomeRoot) {
+	EnsureDebugEnabled(ctx, logger, homes)
+}
+
 func EnsureDebugEnabled(ctx context.Context, logger Logger, homes []crossmount.HomeRoot) {
 	for _, h := range homes {
 		if ctx.Err() != nil {

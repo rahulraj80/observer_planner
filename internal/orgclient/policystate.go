@@ -17,6 +17,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/machineid"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // P0-6 effective-policy-state reverse channel, agent sender side
@@ -116,7 +117,18 @@ func (c *ReportSeqCounter) readPersisted() int64 {
 // `omitempty` on PolicyStateReport.
 func (c *Client) ManagedMachineIdentity(ctx context.Context) string {
 	enr, err := c.store.LoadEnrolment(ctx)
-	if err != nil || enr == nil || !enr.IsManaged() {
+	if err != nil {
+		return ""
+	}
+	return managedMachineIdentityOf(enr)
+}
+
+// managedMachineIdentityOf is ManagedMachineIdentity over an enrolment the
+// caller already holds (the leave notice runs after the enrolment generation
+// is fenced, so it must not re-read the row). "" for nil, an unmanaged
+// enrolment, or a machine-id resolution error.
+func managedMachineIdentityOf(enr *store.Enrolment) string {
+	if enr == nil || !enr.IsManaged() {
 		return ""
 	}
 	mid, err := machineid.ForOrg(enr.OrgID)

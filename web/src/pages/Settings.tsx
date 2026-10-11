@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import {
   Button,
   Card,
   ChartShell,
   ConfirmButton,
+  EntityMultiPicker,
   ErrorState,
   Icon,
   InlineLoading,
@@ -14,37 +15,52 @@ import {
   Pill,
   ReadOnlyBanner,
   Select,
+  SectionRail,
   SettingRow,
+  SinglePicker,
   SlideOver,
   Table,
   Textarea,
   Tooltip,
   SuccessCheck,
+  type SectionRailGroup,
 } from "@/components/primitives";
 import { HelpInd } from "@/components/HelpInd";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import { Summary } from "@/components/Summary";
 import type { Tone } from "@shared/lib/tone";
-import { BUILTIN_PROFILE_NAMES, SECTION_SPECS, type SectionSpec } from "./settings/sectionSpecs";
+import { BUILTIN_PROFILE_NAMES, COMPRESS_TYPES, SECTION_SPECS, type SectionSpec } from "./settings/sectionSpecs";
+import { joinList, keepSelected, splitList } from "@/lib/pickerOptions";
+import { usePricedModels } from "@/lib/usePickerSources";
 import { StructuredConfigSection } from "./settings/StructuredConfigSection";
 import { SchemaSection } from "./settings/SchemaSection";
 import { AntigravityHelperCard } from "./settings/AntigravityHelperCard";
 import { ETWCapturerCard } from "./settings/ETWCapturerCard";
 import { ShellWrapCard } from "./settings/ShellWrapCard";
+import { CodeIntelCard } from "./settings/CodeIntelCard";
+import { ToolProfilesCard } from "./settings/ToolProfilesCard";
+import { ProjectProfilesCard } from "./settings/ProjectProfilesCard";
 import { RepriceCard } from "./settings/RepriceCard";
 import { ConnectedToolsSection } from "./settings/ConnectedToolsSection";
 import { CloudIntelligenceSection } from "./settings/CloudIntelligenceSection";
+import { OrgIntelSection } from "./settings/OrgIntelSection";
+import { OrgDigestsCard } from "@/components/OrgDigestsCard";
 import { EnrolmentSection } from "./settings/EnrolmentSection";
 import { HealthSection } from "./settings/HealthSection";
 import { StorageSection } from "./settings/StorageSection";
 import { ChartState } from "@/components/ChartState";
 import { CommunityLinksMini } from "@/components/CommunityCard";
+import { useComponentState } from "@/lib/useComponents";
+import { absentSettingsSections } from "@/lib/componentState";
 import {
   ArrowRightLeft,
+  Boxes,
   BrainCircuit,
   Cable,
   CalendarClock,
   Clock,
   Cloud,
+  CloudCog,
   Coins,
   Cpu,
   DatabaseBackup,
@@ -80,7 +96,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { fetchJSON } from "@/lib/api";
+import { fetchJSON, localConfirmHeaders } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { markRestartPending } from "@/lib/restartPending";
 import { useApi } from "@/lib/useApi";
 import { useConfigSchema, type ConfigSchemaDescriptor } from "@/lib/configSchema";
@@ -89,8 +106,10 @@ import {
   isSettingsReadOnly,
   governedOrgLabel,
   useGovernance,
+  useGovernanceVisibility,
   type Governance,
 } from "@/lib/governance";
+import { settingsOfferedWhileUnresolved } from "@/lib/visibility";
 import { fmtDateTime, fmtInt, fmtUSD } from "@/lib/format";
 import type {
   BackfillJob,
@@ -122,6 +141,7 @@ type SectionId =
   | "storage"
   | "enrolment"
   | "cloud"
+  | "intel"
   | "observer"
   | "watcher"
   | "freshness"
@@ -164,7 +184,7 @@ type SectionDef = {
   // soft = consumed lazily by the next job, no restart needed.
   // restart = daemon must restart to bind the new value.
   status: "hot" | "soft" | "restart";
-  // The section's lucide glyph, rendered through <Icon> in the SectionNav
+  // The section's lucide glyph, rendered through <Icon> in the SettingsRail
   // row. Every section carries its OWN icon (no two share one, pinned by
   // lib/settingsIcons.test.ts) so the nav reads at a glance; where a
   // section configures a page that has a nav entry (Compression, Routing,
@@ -218,7 +238,7 @@ const SECTIONS: SectionDef[] = [
       summary:
         "Per-tool integration matrix: every AI tool observer supports, with live detected / capturing / hooks / MCP / proxied state. All probes are read-only - nothing on this panel writes AI-client config.",
       whenModified:
-        "Checking why a tool isn't showing data, after installing a new AI tool, or before/after running `observer init`.",
+        "Checking why a tool isn't showing data, after installing a new AI tool, or before and after running Set up.",
       behavior:
         "Pure reads, computed per request: directory probes for detection, dry-run registry probes for hooks/MCP, routing-config reads for the proxy column. Refresh re-probes immediately.",
     },
@@ -261,11 +281,11 @@ const SECTIONS: SectionDef[] = [
     icon: Users,
     about: {
       summary:
-        "Teams & Org Visibility. When enrolled, this agent shares content-free activity rollups (counts, costs, timings, paths - never prompt text or tool output) with your organisation's SuperBased server. View exactly what was last shared, or unenrol.",
+        "Teams & Org Visibility. Enrol this machine in your organization's SuperBased server (enrolment code, link, or sign-in with your organization account), accept or decline the organization's governance request, see what is shared and push now, or leave. An individual enrolment shares counts, costs, timings and hashes unless you opt in to more; an organization-managed enrolment shares full content.",
       whenModified:
-        "Joining or leaving an organisation. Enrol with `observer enroll <org-url> <token>`; unenrol from here or with `observer unenroll`.",
+        "Joining, re-joining or leaving an organization. Everything here is also available from the CLI (`observer enroll`, `observer org status`, `observer org push-status`, `observer org push-now`, `observer org backfill`, `observer org resync`, `observer org grant show`, `observer unenroll`) and runs the same code.",
       behavior:
-        "Unenrol deletes the local enrolment + keychain credentials immediately; a running daemon's push loop stops within one interval. Nothing already shared with the server is deleted.",
+        "Enrolling checks the server is reachable before the one-time code is spent, writes the default [org_client] block to config.toml, and stores the credential in the OS keychain (or a 0600 file). A daemon that started before enrolment needs a restart to run its push loop; Push now works either way. Leaving deletes the local enrolment + credentials immediately; nothing already shared with the server is deleted.",
     },
   },
   {
@@ -284,6 +304,21 @@ const SECTIONS: SectionDef[] = [
     },
   },
   {
+    id: "intel",
+    label: "Org enrichment",
+    group: "edit",
+    status: "hot",
+    icon: CloudCog,
+    about: {
+      summary:
+        "Cloud Intelligence run by the organization this machine is enrolled with, on the organization's own server and model: whether it is on, which provider and model, what evidence it sees, and your consent. On an organization-managed machine this is a notice; on an individual enrolment nothing is sent until you accept.",
+      whenModified:
+        "Reviewing what your organization runs, accepting its terms (or new terms after it widened them), or withdrawing. The same actions are `observer intel status`, `observer intel accept` and `observer intel disable`.",
+      behavior:
+        "Accept records exactly the terms shown (their digest is checked, so a text that changed since it was shown is refused), turns `[intelligence].org_enrichment` on and tells the organization's server. Withdraw records the withdrawal, turns the key off and removes results cached under the old consent. When the organization requires this consent, the alternative is leaving the organization (Settings, Enrolment). Takes effect on the next sync, no restart.",
+    },
+  },
+  {
     id: "intelligence",
     label: "Intelligence",
     group: "edit",
@@ -291,9 +326,9 @@ const SECTIONS: SectionDef[] = [
     icon: BrainCircuit,
     about: {
       summary:
-        "Summary model, monthly budget cap, and the in-process code index ([codeintel]). These power the Analysis tab's headline KPIs and the MCP `get_session_summary` tool.",
+        "Summary model, monthly budget cap, and code intelligence (the in-process code index, [codeintel]), which is off by default and turned on with one click in its card. These power the Analysis tab's headline KPIs and the MCP `get_session_summary` tool; code intelligence powers the MCP symbol tools and code-aware compression.",
       whenModified:
-        "Switching to a cheaper Haiku for summaries, raising/lowering the budget cap, or enabling/disabling the code index (codeintel.enabled).",
+        "Switching to a cheaper Haiku for summaries, raising/lowering the budget cap, or turning code intelligence on or off (codeintel.enabled).",
       behavior:
         "Save writes config.toml; consumers bind the value at daemon startup, so a `observer serve` restart is required for the new value to take effect.",
     },
@@ -418,9 +453,9 @@ const SECTIONS: SectionDef[] = [
     icon: Share2,
     about: {
       summary:
-        "What this node shares with an org server when enrolled: share mode (metadata-only by default - hashes and counts, never raw content), per-action target exceptions, project scope lists, push cadence. Raw-content sharing (full_content/admin_managed) is node opt-in only, never server-forced; the reporting-tier shares (e.g. routing_summary, obs.summary) are node opt-in, or can be raised by the org on a managed node via node governance policy.",
+        "What this node shares with an org server when enrolled: share mode (metadata-only by default - hashes and counts, never raw content), per-action target exceptions, project scope lists, push cadence. On an individual node, raw-content sharing (full_content/admin_managed) is node opt-in only, never server-forced; on an organization-managed node, full content ships by the organization's enrolment grant. The reporting-tier shares (e.g. routing_summary, obs.summary) are node opt-in, or can be raised by the org on a managed node via node governance policy.",
       whenModified:
-        "Opting into (or out of) full-content sharing, scoping which projects push, or tuning push cadence. Enrolment itself stays with `observer enroll` / the Enrolment section.",
+        "Opting into (or out of) full-content sharing, scoping which projects push, or tuning push cadence. Enrolment itself lives in the Enrolment section.",
       behavior:
         "Saves write this node's config.toml only - the enrolment identity (server URL, keychain) is deliberately untouchable from here. The push loop binds config at daemon start: restart to apply.",
     },
@@ -523,11 +558,11 @@ const SECTIONS: SectionDef[] = [
     icon: ListTodo,
     about: {
       summary:
-        "Session-level todo/plan checklist tracking — decodes TaskCreate/TodoWrite/update_plan/manage_todo_list and similar tool calls already captured into a per-task lifecycle + cost report (the session detail Tasks tab, and Analysis's Tasks section).",
+        "Session-level todo/plan checklist tracking - decodes TaskCreate/TodoWrite/update_plan/manage_todo_list and similar tool calls already captured into a per-task lifecycle + cost report (the session detail Tasks tab, and Analysis's Tasks section).",
       whenModified:
         "Disabling the engine, switching how whole-list-rewrite tools are matched across snapshots, changing how concurrent in-progress tasks are attributed, folding sub-agent usage into the parent's open task, backfilling on start, or bounding retention.",
       behavior:
-        "Restart required — SetTasksEnabled/SetTasksOptions bind once at daemon startup, same as every section except pricing/profiles. Retrofit historical sessions with `observer backfill --tasks` (also in the Backfill panel below).",
+        "Restart required - SetTasksEnabled/SetTasksOptions bind once at daemon startup, same as every section except pricing/profiles. Retrofit historical sessions with `observer backfill --tasks` (also in the Backfill panel below).",
     },
   },
   {
@@ -620,7 +655,7 @@ const SECTIONS: SectionDef[] = [
 
 /**
  * sectionIcon returns a Settings section's glyph from the SECTIONS table, so
- * a section's card title and its SectionNav row show the same icon and
+ * a section's card title and its rail row show the same icon and
  * cannot drift.
  */
 function sectionIcon(id: SectionId): LucideIcon | undefined {
@@ -653,14 +688,21 @@ export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("section");
   // Governed nodes may have Settings sub-sections hidden or locked
-  // read-only by their organization. gov.data is {active: false, ...}
-  // (or null while loading) on an ordinary solo node, and every
-  // isSettingsHidden/isSettingsReadOnly call below is a no-op in that
-  // case — so visibleSections === SECTIONS and readOnly === false
-  // everywhere, matching today's behavior exactly.
+  // read-only by their organization. gov.data is {active: false, ...} on an
+  // ordinary solo node, and every isSettingsHidden/isSettingsReadOnly call
+  // below is a no-op in that case. Until the posture is KNOWN the rail fails
+  // closed (Sol A4-05): only the floor sections (Enrolment, Organization) are
+  // offered and the broad config read waits, so a slow or failing
+  // /api/governance never shows a section the organization hid.
   const gov = useGovernance();
+  const { posture } = useGovernanceVisibility();
+  // A section whose component is not in this build (L1, T-681) edits config
+  // that is only ever reported, never obeyed, so the rail leaves it out.
+  const absent = new Set(absentSettingsSections(useComponentState().data?.view));
   const visibleSections = SECTIONS.filter(
-    (s) => !isSettingsHidden(gov.data, s.id),
+    (s) =>
+      !absent.has(s.id) &&
+      (posture === "ready" ? !isSettingsHidden(gov.data, s.id) : settingsOfferedWhileUnresolved(s.id)),
   );
   const fallback = visibleSections[0]?.id ?? "pricing";
   const active: SectionId = visibleSections.some((s) => s.id === requested)
@@ -670,7 +712,7 @@ export function SettingsPage() {
     setSearchParams(id === "pricing" ? {} : { section: id }, { replace: true });
   };
   const [helpOpen, setHelpOpen] = useState(true);
-  const config = useApi<ConfigResponse>("/api/config");
+  const config = useApi<ConfigResponse>(posture === "ready" ? "/api/config" : null);
   // The daemon's config schema drives every schema-rendered section
   // (owner-local route; null on a remote view, which the renderer says).
   const schema = useConfigSchema();
@@ -678,7 +720,10 @@ export function SettingsPage() {
   const readOnly = isSettingsReadOnly(gov.data, active);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // Below lg the page is one column that scrolls as a whole; at lg each
+    // column scrolls on its own. (A fixed-height single-column grid squeezed
+    // the overflow-auto section and help rows to a sliver under the rail.)
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:overflow-y-visible">
       <SettingsHeader
         configPath={config.data?.config_path ?? ""}
         helpOpen={helpOpen}
@@ -686,14 +731,28 @@ export function SettingsPage() {
       />
       <div
         className={clsx(
-          "grid min-h-0 flex-1 gap-0",
+          "grid flex-none gap-0 lg:min-h-0 lg:flex-1",
           helpOpen
             ? "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_300px]"
             : "grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]",
         )}
       >
         <aside className="border-r border-line-1 bg-bg-1 p-4">
-          <SectionNav
+          {/* Settings > Components (modular packaging plan 7.2) is its own
+              route, never a SECTIONS row: it is not a governed config
+              section, and every NotInstalled page links to it. */}
+          <Link
+            to="/settings/components"
+            data-testid="settings-components-link"
+            className="mb-4 flex items-center gap-2 rounded-2 border border-line-2 bg-bg-2 px-3 py-2 text-small text-fg-1 hover:bg-bg-3"
+          >
+            <Icon icon={Boxes} size={14} />
+            <span className="min-w-0 flex-1">
+              Components
+              <span className="block text-caption text-fg-3">What runs on this machine</span>
+            </span>
+          </Link>
+          <SettingsRail
             active={active}
             onChange={setActive}
             sections={visibleSections}
@@ -722,7 +781,13 @@ export function SettingsPage() {
           <CommunityLinksMini />
         </aside>
 
-        <main className="min-w-0 overflow-y-auto p-4 sm:p-6">
+        <main className="min-w-0 p-4 sm:p-6 lg:overflow-y-auto">
+          {posture === "unavailable" && (
+            <ReadOnlyBanner className="mb-4">
+              The dashboard could not read which settings are available on this machine, so only
+              Enrolment and Organization are shown.
+            </ReadOnlyBanner>
+          )}
           {readOnly && (
             <ReadOnlyBanner className="mb-4">
               Managed by {governedOrgLabel(gov.data)} - changes to this section cannot be saved from
@@ -746,10 +811,13 @@ export function SettingsPage() {
           {active === "health" && <HealthSection icon={sectionIcon("health")} />}
           {active === "storage" && <StorageSection icon={sectionIcon("storage")} />}
           {active === "enrolment" && <EnrolmentSection icon={sectionIcon("enrolment")} />}
-          {active === "cloud" && <CloudIntelligenceSection icon={sectionIcon("cloud")} />}
+          {active === "cloud" && <CloudIntelligenceSection icon={sectionIcon("cloud")} readOnly={readOnly} />}
+          {active === "intel" && <OrgIntelSection icon={sectionIcon("intel")} readOnly={readOnly} />}
+          {active === "intel" && <OrgDigestsCard icon={sectionIcon("intel")} />}
           {active === "intelligence" && (
             <IntelligenceSection
               config={config.data}
+              schema={schema.data}
               loading={config.loading}
               error={config.error}
               denied={config.denied}
@@ -765,6 +833,7 @@ export function SettingsPage() {
             active !== "storage" &&
             active !== "enrolment" &&
             active !== "cloud" &&
+            active !== "intel" &&
             active !== "intelligence" && (
               <SectionView
                 section={active}
@@ -829,7 +898,7 @@ function SettingsHeader({
 
 function AboutSectionRail({ def }: { def: SectionDef }) {
   return (
-    <aside className="overflow-y-auto border-l border-line-1 bg-bg-1 px-4 py-5">
+    <aside className="border-l border-line-1 bg-bg-1 px-4 py-5 lg:overflow-y-auto">
       <div className="mb-3 flex items-center gap-2">
         <h2 className="text-[12.5px] font-semibold text-fg-1">
           About this section
@@ -862,7 +931,7 @@ function AboutBlock({ label, body }: { label: string; body: string }) {
   );
 }
 
-function SectionNav({
+function SettingsRail({
   active,
   onChange,
   sections,
@@ -900,54 +969,40 @@ function SectionNav({
       items: list.filter((s) => s.plane === "admin"),
     },
   ].filter((g) => g.items.length > 0);
+  // Rendered through the shared SectionRail (promoted from this function,
+  // platform tabs F2): the vertical rail at lg+, a scrolling chip row below lg
+  // (where this page's grid stacks), the active section kept in view.
+  const railGroups: SectionRailGroup<SectionId>[] = groups.map((g) => ({
+    id: g.id,
+    label: g.label,
+    items: g.items.map((s) => ({
+      id: s.id,
+      label: s.label,
+      icon: s.icon,
+      trailing: (
+        <>
+          {isSettingsReadOnly(gov, s.id) && (
+            <Tooltip content="Managed by your organization">
+              <span className="shrink-0 text-fg-3" aria-label="Managed by your organization">
+                <Icon icon={Lock} size={11} />
+              </span>
+            </Tooltip>
+          )}
+          <Pill variant={STATUS_TONE[s.status]} className="shrink-0">
+            {STATUS_LABEL[s.status]}
+          </Pill>
+        </>
+      ),
+    })),
+  }));
   return (
-    <nav className="flex flex-col gap-4">
-      {groups.map((g) => (
-        <div key={g.id}>
-          <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-3">
-            {g.label}
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {g.items.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => onChange(s.id)}
-                className={clsx(
-                  "flex items-center gap-2 rounded-2 px-2 py-1.5 text-left text-[12px] transition-colors",
-                  active === s.id
-                    ? "bg-bg-3 text-fg-0"
-                    : "text-fg-2 hover:bg-bg-2 hover:text-fg-1",
-                )}
-              >
-                <span
-                  className={clsx(
-                    "grid h-5 w-5 shrink-0 place-items-center rounded-1",
-                    active === s.id
-                      ? "bg-bg-4 text-accent"
-                      : "bg-bg-2 text-fg-3",
-                  )}
-                  aria-hidden
-                >
-                  <Icon icon={s.icon} size={13} />
-                </span>
-                <span className="min-w-0 flex-1 truncate">{s.label}</span>
-                {isSettingsReadOnly(gov, s.id) && (
-                  <Tooltip content="Managed by your organization">
-                    <span className="shrink-0 text-fg-3" aria-label="Managed by your organization">
-                      <Icon icon={Lock} size={11} />
-                    </span>
-                  </Tooltip>
-                )}
-                <Pill variant={STATUS_TONE[s.status]} className="shrink-0">
-                  {STATUS_LABEL[s.status]}
-                </Pill>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </nav>
+    <SectionRail
+      groups={railGroups}
+      value={active}
+      onChange={onChange}
+      ariaLabel="Settings sections"
+      collapseBelow="lg"
+    />
   );
 }
 
@@ -1012,9 +1067,12 @@ function PricingSection({
     if (!config) return;
     setSave({ state: "saving" });
     try {
+      // base_etag (T-639): the etag of the config this table was seeded
+      // from, so a config.toml changed since is refused with 409 rather
+      // than overwritten.
       const res = await fetchJSON<{ saved: boolean; warnings?: string[] }>(
         "/api/config/pricing",
-        undefined,
+        { base_etag: config.config_etag ?? "" },
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -1477,7 +1535,7 @@ function formatWeekdays(days: number[]): string {
     labels.push(
       start === prev
         ? WEEKDAY_ABBR[start]
-        : `${WEEKDAY_ABBR[start]}–${WEEKDAY_ABBR[prev]}`,
+        : `${WEEKDAY_ABBR[start]}-${WEEKDAY_ABBR[prev]}`,
     );
     start = d;
     prev = d;
@@ -1504,7 +1562,7 @@ function formatPeakSchedule(schedule: PeakSchedule): string {
       groups.set(key, g);
       order.push(key);
     }
-    g.times.push(`${w.start_utc}–${w.end_utc}`);
+    g.times.push(`${w.start_utc}-${w.end_utc}`);
   }
   return order
     .map((key) => {
@@ -2008,8 +2066,19 @@ function JobStatusPill({ status }: { status: string }) {
 
 // ============================================================ Intelligence
 
+// The keys the hand-written Intelligence form (and the Code intelligence
+// card) already edit, so the schema-driven "More settings" card below them
+// never renders the same key twice.
+const INTELLIGENCE_FORM_FIELDS = new Set([
+  "Intelligence.SummaryModel",
+  "Intelligence.APIKeyEnv",
+  "Intelligence.MonthlyBudgetUSD",
+  "CodeIntel.Enabled",
+]);
+
 function IntelligenceSection({
   config,
+  schema,
   loading,
   error,
   denied,
@@ -2018,6 +2087,7 @@ function IntelligenceSection({
   readOnly,
 }: {
   config: ConfigResponse | null;
+  schema: ConfigSchemaDescriptor | null;
   loading: boolean;
   error: Error | null;
   denied?: boolean;
@@ -2027,6 +2097,7 @@ function IntelligenceSection({
 }) {
   const intel = config?.config?.Intelligence;
   const [summaryModel, setSummaryModel] = useState("");
+  const pricedModels = usePricedModels();
   const [apiKeyEnv, setApiKeyEnv] = useState("");
   const [monthlyBudget, setMonthlyBudget] = useState(0);
   const [save, setSave] = useState<{
@@ -2044,19 +2115,11 @@ function IntelligenceSection({
   async function saveSection() {
     setSave({ state: "saving" });
     try {
-      const res = await fetchJSON<{ saved: boolean; restart_required: boolean }>(
-        "/api/config/section/intelligence",
-        undefined,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            SummaryModel: summaryModel,
-            APIKeyEnv: apiKeyEnv,
-            MonthlyBudgetUSD: monthlyBudget,
-          }),
-        },
-      );
+      const res = await saveConfigSection("intelligence", {
+        SummaryModel: summaryModel,
+        APIKeyEnv: apiKeyEnv,
+        MonthlyBudgetUSD: monthlyBudget,
+      });
       if (!res.saved) throw new Error("server did not confirm save");
       if (res.restart_required) markRestartPending("intelligence");
       setSave({
@@ -2113,14 +2176,15 @@ function IntelligenceSection({
         height={200}
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Summary model" hint="Used by `observer summarize` for session summaries.">
-            <Input
-              mono
-              type="text"
+          <Field label="Summary model" hint="Used for session summaries (Summarize now, below). Pick a priced model, or type another id.">
+            <SinglePicker
+              options={keepSelected(pricedModels.options, summaryModel ? [summaryModel] : [])}
               value={summaryModel}
-              onChange={(e) => setSummaryModel(e.target.value)}
-              placeholder="claude-haiku-4-5-20251001"
-              className="h-8"
+              onChange={setSummaryModel}
+              allowFree
+              loading={pricedModels.loading}
+              placeholder="Pick a model…"
+              ariaLabel="Summary model"
             />
           </Field>
           <Field label="API key env" hint="Env var name to read the summary API key from.">
@@ -2147,6 +2211,46 @@ function IntelligenceSection({
               Current: <strong>{fmtUSD(monthlyBudget)}</strong>
             </div>
           </Field>
+        </div>
+        {/* `observer summarize` as a dashboard job (backlog item 6): the
+            same command, run with this section's saved model and key
+            variable. It is an outbound call with the operator's own key, so
+            the confirm step says exactly that. */}
+        <div className="mt-4 rounded-3 border border-line-2 bg-bg-2 p-4 text-[11.5px]">
+          <div className="text-[12px] font-semibold text-fg-1">Summarize sessions now</div>
+          <p className="m-0 mt-0.5 text-fg-3">
+            Writes a short summary for every session that has none, using the saved summary
+            model. Save this section first if you just changed it.
+          </p>
+          <CommandJobButton
+            job="summarize"
+            className="mt-2"
+            disabled={readOnly}
+            confirmLabel="Send sessions to the model?"
+            // no-bare-usd:allow (not money: an environment variable name)
+            armedNote={`Sends a digest of each unsummarized session (action types, file paths and commands as stored) to ${intel?.SummaryModel || "the summary model"}, using the key in $${intel?.APIKeyEnv || "ANTHROPIC_API_KEY"}.`}
+            runningLabel="Summarizing…"
+            doneText="Summaries written."
+          >
+            Summarize now
+          </CommandJobButton>
+        </div>
+        {/* Code intelligence is opt-in (D-307): one click turns it on,
+            no command to run. */}
+        <CodeIntelCard config={config} readOnly={readOnly} onSaved={onReload} />
+        {/* Every other key the schema places in this section ([codeintel]
+            tuning, [predict], [guidance], [projects], scoring) - this
+            bespoke section rendered none of them before. */}
+        <div className="mt-4">
+          <SchemaSection
+            section="intelligence"
+            config={config}
+            schema={schema}
+            readOnly={readOnly}
+            excludeFieldPaths={INTELLIGENCE_FORM_FIELDS}
+            onSaved={onReload}
+            compact
+          />
         </div>
       </ChartState>
     </ChartShell>
@@ -2213,7 +2317,9 @@ function SectionView({
               <PruneNowCard />
             ) : section === "profiles" ? (
               <>
-                <CustomProfilesCard config={config} onChanged={onReload} />
+                <ToolProfilesCard readOnly={readOnly} onChanged={onReload} />
+                <ProjectProfilesCard readOnly={readOnly} />
+                <CustomProfilesCard config={config} onChanged={onReload} readOnly={readOnly} />
                 <ProfilesReferenceCard />
               </>
             ) : section === "mcp" ? (
@@ -2344,11 +2450,7 @@ function RoutingRulesEditorCard({ readOnly }: { readOnly?: boolean }) {
     try {
       const cfg = await fetchJSON<{ config: { Routing: Record<string, unknown> } }>("/api/config");
       const sec = { ...cfg.config.Routing, RulesTOML: text };
-      await fetchJSON("/api/config/section/routing", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sec),
-      });
+      await saveConfigSection("routing", sec);
       markRestartPending("routing");
       setSaved(true);
     } catch (e) {
@@ -2509,9 +2611,19 @@ function MCPValueMeterCard() {
                   {fmtInt(m.overhead_tokens_estimate)} tokens
                 </strong>{" "}
                 across this window's turns. If you rarely query observer
-                mid-session, <code className="font-mono">observer init
-                --skip-mcp</code> (or removing the MCP entries via the
-                Connected-tools wizard) drops the tax; capture is unaffected.
+                mid-session, removing observer&apos;s MCP entry from your AI
+                clients drops the tax; capture is unaffected. Remove it under{" "}
+                <Link
+                  to="/settings?section=tools"
+                  className="text-accent underline decoration-dotted decoration-accent/50 underline-offset-[3px] hover:decoration-accent"
+                >
+                  Connected tools
+                </Link>
+                : Set up, then &quot;Remove Observer&apos;s wiring
+                from &lt;tool&gt;&quot;, then MCP server, then Remove. That takes
+                out only the MCP entry (CLI twin:{" "}
+                <code className="font-mono">observer uninstall --&lt;tool&gt;
+                --skip-hooks</code>).
               </p>
             )}
             {m.by_tool.length > 0 && (
@@ -2556,9 +2668,11 @@ function MCPValueMeterCard() {
 function CustomProfilesCard({
   config,
   onChanged,
+  readOnly = false,
 }: {
   config: ConfigResponse | null;
   onChanged: () => void;
+  readOnly?: boolean;
 }) {
   const names = config?.profile_names ?? [];
   const userProfiles = names.filter(
@@ -2579,7 +2693,7 @@ function CustomProfilesCard({
     try {
       await fetchJSON("/api/config/profiles", undefined, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: await localConfirmHeaders(),
         body: JSON.stringify({ name: newName, from: newFrom }),
       });
       setNewName("");
@@ -2601,6 +2715,7 @@ function CustomProfilesCard({
     try {
       await fetchJSON(`/api/config/profiles/${name}`, undefined, {
         method: "DELETE",
+        headers: await localConfirmHeaders(),
       });
       setConfirmDelete(null);
       if (open === name) setOpen(null);
@@ -2620,8 +2735,9 @@ function CustomProfilesCard({
       <p className="mb-3 text-[11px] leading-snug text-fg-3">
         Your own named parameter sets, stored as TOML files next to the
         config (one per profile). Start from a built-in, adjust the keys
-        that matter, then assign it above (or per tool / per project via
-        the CLI). Edits apply to new sessions automatically. Deleting a
+        that matter, then assign it above, per provider or per tool (a
+        repository can also pin its own in its .observer/config.toml).
+        Edits apply to new sessions automatically. Deleting a
         profile that is still assigned falls back to your master
         parameters with a daemon warning.
       </p>
@@ -2651,12 +2767,12 @@ function CustomProfilesCard({
                   variant={confirmDelete === name ? "danger" : "secondary"}
                   iconLeft={Trash2}
                   onClick={() => remove(name)}
-                  disabled={busy}
+                  disabled={busy || readOnly}
                 >
                   {confirmDelete === name ? "Confirm delete" : "Delete"}
                 </Button>
               </div>
-              {open === name && <ProfileEditor name={name} />}
+              {open === name && <ProfileEditor name={name} readOnly={readOnly} />}
             </div>
           ))}
         </div>
@@ -2687,7 +2803,7 @@ function CustomProfilesCard({
           className="!w-auto"
           options={names}
         />
-        <Button variant="primary" iconLeft={Plus} onClick={create} disabled={!validName || busy}>
+        <Button variant="primary" iconLeft={Plus} onClick={create} disabled={!validName || busy || readOnly}>
           Create
         </Button>
         {newName && !validName && (
@@ -2707,7 +2823,7 @@ function CustomProfilesCard({
 const PROFILE_EDIT_KEYS: {
   key: string;
   label: string;
-  kind: "select" | "number" | "text";
+  kind: "select" | "number" | "text" | "list";
   options?: string[];
   pick: (r: ProfileShowResponse) => string;
 }[] = [
@@ -2733,7 +2849,8 @@ const PROFILE_EDIT_KEYS: {
   {
     key: "compression.conversation.compress_types",
     label: "Compress types",
-    kind: "text",
+    kind: "list",
+    options: COMPRESS_TYPES,
     pick: (r) => (r.resolved.Conversation?.CompressTypes ?? []).join(", "),
   },
   {
@@ -2748,7 +2865,7 @@ const PROFILE_EDIT_KEYS: {
 // resolved against the master config, lets the user adjust the
 // headline keys, and applies changed keys one PATCH each (the
 // `observer profile set` seam — same validation, same allow-list).
-function ProfileEditor({ name }: { name: string }) {
+function ProfileEditor({ name, readOnly = false }: { name: string; readOnly?: boolean }) {
   const [data, setData] = useState<ProfileShowResponse | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -2792,7 +2909,7 @@ function ProfileEditor({ name }: { name: string }) {
       for (const key of changedKeys) {
         await fetchJSON(`/api/config/profiles/${name}`, undefined, {
           method: "PATCH",
-          headers: { "content-type": "application/json" },
+          headers: await localConfirmHeaders(),
           body: JSON.stringify({ key, value: draft[key] }),
         });
       }
@@ -2834,6 +2951,17 @@ function ProfileEditor({ name }: { name: string }) {
                 }
                 options={k.options ?? []}
               />
+            ) : k.kind === "list" ? (
+              <EntityMultiPicker
+                options={keepSelected(
+                  (k.options ?? []).map((o) => ({ id: o, label: o })),
+                  splitList(draft[k.key] ?? ""),
+                )}
+                value={splitList(draft[k.key] ?? "")}
+                onChange={(next) => setDraft((d) => ({ ...d, [k.key]: joinList(next) }))}
+                placeholder="Pick…"
+                ariaLabel={k.label}
+              />
             ) : (
               <Input
                 mono
@@ -2852,22 +2980,129 @@ function ProfileEditor({ name }: { name: string }) {
           variant="primary"
           size="sm"
           onClick={apply}
-          disabled={changedKeys.length === 0 || busy}
+          disabled={changedKeys.length === 0 || busy || readOnly}
         >
           {busy ? "Applying…" : "Apply changes"}
         </Button>
         <span className="text-[10.5px] text-fg-4">
-          Values shown resolved against your master config. Other keys:{" "}
-          <code className="font-mono">
-            observer profile set {name} &lt;key&gt; &lt;value&gt;
-          </code>
+          Values shown resolved against your master config.
         </span>
         {savedMsg && (
           <SuccessCheck label={savedMsg} className="!text-[11px]" />
         )}
         {err && <span className="text-[11px] text-danger">{err}</span>}
       </div>
+      <ProfileOtherKey name={name} onSet={() => void load()} />
+      <ResolvedProfileParams toml={data.resolved_toml} />
     </div>
+  );
+}
+
+// ProfileOtherKey sets any compression.* key on a custom profile: the
+// `observer profile set <name> <key> <value>` path (the same PATCH, so the
+// same allow-list and value validation refuse an unknown key or a bad
+// value before anything is written).
+function ProfileOtherKey({ name, onSet }: { name: string; onSet: () => void }) {
+  const schema = useConfigSchema();
+  // The settable keys: every compression.* scalar leaf the daemon's schema
+  // lists (the same allow-list the PATCH validates against).
+  const keyOptions = useMemo(
+    () =>
+      (schema.data?.leaves ?? [])
+        .filter((l) => l.path.startsWith("compression.") && !l.secret && !l.deprecated)
+        .map((l) => ({ id: l.path, label: l.path.slice("compression.".length), sublabel: l.kind })),
+    [schema.data],
+  );
+  const [key, setKey] = useState("");
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  async function set() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await fetchJSON(`/api/config/profiles/${name}`, undefined, {
+        method: "PATCH",
+        headers: await localConfirmHeaders(),
+        body: JSON.stringify({ key: key.trim(), value }),
+      });
+      setMsg({ ok: true, text: `Set ${key.trim()}.` });
+      setKey("");
+      setValue("");
+      onSet();
+    } catch (e: unknown) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mt-3 border-t border-line-1 pt-2">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-3">Other key</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SinglePicker
+          options={keyOptions}
+          value={key}
+          onChange={setKey}
+          loading={schema.loading}
+          placeholder="Pick a compression key…"
+          ariaLabel="Compression key"
+          className="w-full sm:w-72"
+        />
+        <Input
+          mono
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="value"
+          aria-label="Value"
+          className="w-full sm:w-40"
+        />
+        <Button variant="secondary" size="sm" onClick={() => void set()} disabled={busy || !key.trim().startsWith("compression.")}>
+          {busy ? "Setting…" : "Set key"}
+        </Button>
+        {msg && <span className={clsx("text-[11px]", msg.ok ? "text-success" : "text-danger")}>{msg.text}</span>}
+      </div>
+      <p className="m-0 mt-1 text-[10.5px] text-fg-4">
+        Any compression.* key. Unknown keys and invalid values are refused before anything is written.
+      </p>
+    </div>
+  );
+}
+
+// ResolvedProfileParams is `observer profile show <name>`: every parameter
+// the profile resolves to against the master config, not just the headline
+// keys the editor exposes. The server renders it with the CLI's own encoder,
+// so the keys are the config keys "Other key" accepts.
+function ResolvedProfileParams({ toml }: { toml: string | undefined }) {
+  if (!toml) return null;
+  return (
+    <details className="mt-3 border-t border-line-1 pt-2 text-[11px]">
+      <Summary className="w-fit text-fg-3 hover:text-fg-2">All resolved parameters</Summary>
+      <ResolvedToml text={toml} />
+    </details>
+  );
+}
+
+function ResolvedToml({ text }: { text: string }) {
+  return (
+    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-2 border border-line-1 bg-bg-3 p-2 font-mono text-[10.5px] text-fg-2">
+      {text}
+    </pre>
+  );
+}
+
+// BuiltinProfileParams loads a built-in profile's resolved parameters on
+// demand for the reference card.
+function BuiltinProfileParams({ name }: { name: string }) {
+  const [open, setOpen] = useState(false);
+  const r = useApi<ProfileShowResponse>(open ? `/api/config/profiles/${name}` : null);
+  return (
+    <details onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <Summary className="w-fit text-[11px] text-accent hover:underline">All parameters</Summary>
+      {r.data?.resolved_toml && <ResolvedToml text={r.data.resolved_toml} />}
+      {r.error && <p className="m-0 mt-1 text-[11px] text-danger">{r.error.message}</p>}
+    </details>
   );
 }
 
@@ -2916,15 +3151,18 @@ function ProfilesReferenceCard() {
           <tr key={r.name} className="border-t border-line-1">
             <td className="py-1.5 pr-3 font-mono text-fg-1">{r.name}</td>
             <td className="py-1.5 pr-3 text-fg-2">{r.tunedFor}</td>
-            <td className="py-1.5 font-mono text-[11px] text-fg-3">{r.headline}</td>
+            <td className="py-1.5 font-mono text-[11px] text-fg-3">
+              {r.headline}
+              <BuiltinProfileParams name={r.name} />
+            </td>
           </tr>
         ))}
       </Table>
       <p className="mt-2 text-[11px] leading-snug text-fg-3">
-        Full resolved parameters: <code className="font-mono text-fg-2">observer profile show &lt;name&gt;</code>.
-        Assignments apply to new sessions immediately; the wrong pairing can
-        break provider caching - the per-provider defaults are the measured
-        safe choices.
+        All parameters opens every value the profile resolves to against your
+        master config. Assignments apply to new sessions immediately; the
+        wrong pairing can break provider caching, and the per-provider
+        defaults are the measured safe choices.
       </p>
     </Card>
   );

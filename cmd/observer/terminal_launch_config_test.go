@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -52,7 +54,7 @@ func TestLaunchConfigArgs(t *testing.T) {
 		extra   []string
 		want    []string
 	}{
-		{"no daemon config — argv unchanged", "", nil, nil},
+		{"no daemon config - argv unchanged", "", nil, nil},
 		{"no daemon config with caller args", "", []string{"--resume", "s1"}, nil},
 		{"explicit daemon config", "/etc/observer/q1.toml", nil, []string{"--config", "/etc/observer/q1.toml"}},
 		{"explicit daemon config alongside caller args", "/q1.toml", []string{"--resume", "s1"}, []string{"--config", "/q1.toml"}},

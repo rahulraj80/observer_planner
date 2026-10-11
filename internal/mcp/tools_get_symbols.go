@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
 	"github.com/marmutapp/superbased-observer/internal/codeintel/parse/livesym"
+	"github.com/marmutapp/superbased-observer/internal/codeintelapi"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 )
 
@@ -66,16 +66,16 @@ const totalBodyCapBytes = 200 * 1024
 
 type getSymbolsTool struct {
 	opts  GetSymbolsOptions
-	cg    codeintel.Provider
+	cg    codeintelapi.Provider
 	audit audit.Writer
 }
 
-func newGetSymbolsTool(opts GetSymbolsOptions, cg codeintel.Provider, w audit.Writer) Tool {
+func newGetSymbolsTool(opts GetSymbolsOptions, cg codeintelapi.Provider, w audit.Writer) Tool {
 	if w == nil {
 		w = audit.NewNoopWriter()
 	}
 	if cg == nil {
-		cg = codeintel.Unavailable()
+		cg = codeintelapi.Unavailable()
 	}
 	return &getSymbolsTool{
 		opts:  opts.withDefaults(),
@@ -89,7 +89,7 @@ func (*getSymbolsTool) Name() string { return "get_symbols" }
 func (*getSymbolsTool) Description() string {
 	return "Batched symbol lookup across the project's code index. Returns symbol " +
 		"bodies + metadata for {file, name?, kind?, fqn?} requests, all in one MCP " +
-		"turn — far cheaper than spawning `cat | grep` per symbol through the shell " +
+		"turn - far cheaper than spawning `cat | grep` per symbol through the shell " +
 		"tool. Discovery mode: omit `name` and the response lists every user-facing " +
 		"symbol in the file (without body) so you can pick which bodies to actually " +
 		"fetch. When the code index is stale or missing for a file, that " +
@@ -143,7 +143,7 @@ func (*getSymbolsTool) InputSchema() map[string]any {
 						"include_nearby": map[string]any{
 							"type":        "integer",
 							"minimum":     0,
-							"description": "When > 0, adds nearby_symbols: [{name, kind, start_line}] to each match — up to N symbols defined just before AND N just after (by start_line) in the same file. Default 0 (omitted). Capped server-side at 20 each side.",
+							"description": "When > 0, adds nearby_symbols: [{name, kind, start_line}] to each match - up to N symbols defined just before AND N just after (by start_line) in the same file. Default 0 (omitted). Capped server-side at 20 each side.",
 						},
 					},
 					"required": []string{"file"},
@@ -287,6 +287,12 @@ func (t *getSymbolsTool) Invoke(ctx context.Context, raw json.RawMessage) (any, 
 		out.Degraded = true
 		// V7-17: surface the same signal in-band as a closed-set tag.
 		out.Warnings = appendWarning(out.Warnings, WarningIndexUnavailable)
+		if codeintelapi.IsDisabled(t.cg) {
+			// D-307: off by choice; the regex fallback below still
+			// answers, and the note says how the user turns the index on.
+			out.Warnings = appendWarning(out.Warnings, WarningCodeIntelDisabled)
+			out.Note = codeIntelDisabledNote
+		}
 	}
 	// Corpus archival P2.3: "no index" and "this project's index is in cold
 	// storage" are different situations with different fixes, and the regex
@@ -368,19 +374,25 @@ func (t *getSymbolsTool) handleOne(ctx context.Context, args getSymbolsArgs, req
 	// no body); the agent gets SOMETHING vs. nothing. Degraded flag
 	// stays true so the agent calibrates trust.
 	if !t.cg.Available() {
+		// D-307: name the cause when the module is off by choice; the
+		// envelope carries the codeintel_disabled tag + how to turn it on.
+		why := "code index unavailable"
+		if codeintelapi.IsDisabled(t.cg) {
+			why = "code intelligence is off"
+		}
 		resp.Degraded = true
-		resp.Reason = "code index unavailable; matches are regex-derived approximations"
+		resp.Reason = why + "; matches are regex-derived approximations"
 		resp.envelopeWarning = WarningIndexUnavailable
 		liveSyms, langUnsupported, parseErr := livesym.Parse(abs)
 		if langUnsupported {
 			resp.envelopeWarning = WarningRegexFallbackLanguageUnsupported
-			resp.Reason = "code index unavailable; file extension unsupported by regex fallback"
+			resp.Reason = why + "; file extension unsupported by regex fallback"
 			return resp
 		}
 		if parseErr != nil {
 			// Fall through to empty matches — same as pre-v1.7.16
 			// behavior. Operator sees the parse error in audit reason.
-			resp.Reason = "code index unavailable; regex fallback failed to parse file"
+			resp.Reason = why + "; regex fallback failed to parse file"
 			return resp
 		}
 		resp.Matches = matchLiveSymbols(rel, abs, liveSyms, req)
@@ -431,7 +443,7 @@ func (t *getSymbolsTool) handleOne(ctx context.Context, args getSymbolsArgs, req
 
 	// V7-17 item 1: pre-fetch the file's full symbol list once when
 	// IncludeNearby is opted into; serves every match without N+1.
-	var nearbyPool []codeintel.Symbol
+	var nearbyPool []codeintelapi.Symbol
 	if req.IncludeNearby > 0 {
 		nearbyPool, _ = t.cg.SymbolsInFile(ctx, abs)
 	}
@@ -471,7 +483,7 @@ func (t *getSymbolsTool) handleOne(ctx context.Context, args getSymbolsArgs, req
 // `is_exported` ranking factor from V7-15 design is DEFERRED — the
 // codeintel schema doesn't carry it. Documented in the operator
 // reference + plan §10 risks.
-func rankMatches(matches []codeintel.SymbolMatch) {
+func rankMatches(matches []codeintelapi.SymbolMatch) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].StartLine != matches[j].StartLine {
 			return matches[i].StartLine < matches[j].StartLine
@@ -486,7 +498,7 @@ func rankMatches(matches []codeintel.SymbolMatch) {
 	})
 }
 
-func buildMatch(m codeintel.SymbolMatch, rootResolved string, includeBody bool, totalBodyBytes *int) symbolMatch {
+func buildMatch(m codeintelapi.SymbolMatch, rootResolved string, includeBody bool, totalBodyBytes *int) symbolMatch {
 	sm := symbolMatch{
 		Name:      m.Name,
 		FQN:       m.FQN,
@@ -597,7 +609,7 @@ func resolvedPath(resp getSymbolsResponse, fallback string) string {
 // V7-17 item 1.
 const maxIncludeNearby = 20
 
-func nearbySymbolsAround(pool []codeintel.Symbol, anchorStart int, anchorName string, n int) []symbolNearby {
+func nearbySymbolsAround(pool []codeintelapi.Symbol, anchorStart int, anchorName string, n int) []symbolNearby {
 	if len(pool) == 0 || n <= 0 {
 		return nil
 	}
@@ -646,7 +658,7 @@ func nearbySymbolsAround(pool []codeintel.Symbol, anchorStart int, anchorName st
 // V7-17 item 4: the agent sees the drift instead of trusting stale
 // numbers. Pairs with the index_stale warning emitted at the
 // envelope level.
-func attachDriftSignal(rel, abs string, idx []codeintel.SymbolMatch, live []livesym.Symbol) []symbolMatch {
+func attachDriftSignal(rel, abs string, idx []codeintelapi.SymbolMatch, live []livesym.Symbol) []symbolMatch {
 	out := make([]symbolMatch, 0, len(idx))
 	liveByName := map[string]livesym.Symbol{}
 	for _, ls := range live {

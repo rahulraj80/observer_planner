@@ -268,7 +268,7 @@ func (c *Client) enrolmentTrustFor(ctx context.Context, rails []railPin) (enrolm
 				continue
 			}
 			c.railPinDriftOnce.Do(func() {
-				c.logger.Warn("org distribution key: a fetch rail holds a key that is not the enrolment pin — treating it as stale; it re-pins on its next accepted document",
+				c.logger.Warn("org distribution key: a fetch rail holds a key that is not the enrolment pin - treating it as stale; it re-pins on its next accepted document",
 					"rail", p.rail, "rail_key", prefix8(p.key), "enrolment_pin", hash[:16])
 			})
 			break
@@ -313,7 +313,7 @@ func (c *Client) acceptOfferedKeyChange(ctx context.Context, rail, cached, offer
 			"rail", rail, "was", prefix8(cached), "now", prefix8(offered))
 		return nil
 	}
-	return fmt.Errorf("%w (pinned %s… by the %s rail, got %s…) — refusing; re-enrol to rotate trust",
+	return fmt.Errorf("%w (pinned %s… by the %s rail, got %s…) - refusing; re-enrol to rotate trust",
 		errPinMismatch, prefix8(cached), rail, prefix8(offered))
 }
 
@@ -435,21 +435,54 @@ func (c *Client) loadRailPins(ctx context.Context) ([]railPin, error) {
 // enrolment resolution can consult them without recursing into itself.
 func (c *Client) railCachePins(ctx context.Context) ([]railPin, error) {
 	var rails []railPin
-	rp, ok, err := c.store.GetOrgRoutingPolicy(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if ok && rp.ServerPubkey != "" {
-		rails = append(rails, railPin{rail: routingPolicyRail, key: rp.ServerPubkey})
-	}
-	ann, ok, err := c.store.GetOrgAnnouncement(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if ok && ann.ServerPubkey != "" {
-		rails = append(rails, railPin{rail: announcementRail, key: ann.ServerPubkey})
+	for _, src := range railPinSources {
+		key, ok, err := src.read(ctx, c.store)
+		if err != nil {
+			return nil, err
+		}
+		if ok && key != "" {
+			rails = append(rails, railPin{rail: src.rail, key: key})
+		}
 	}
 	return rails, nil
+}
+
+// railPinSources is every fetch rail whose cached document carries the org's
+// signing key, in pin order. Each signs with the same org identity, so its
+// pin constrains the others exactly like theirs do. One row per rail
+// (table-driven so a rail a merge drops is loud: TestRailPinSourcesCoverEveryKeyedRail).
+var railPinSources = []struct {
+	rail string
+	read func(ctx context.Context, st *store.Store) (string, bool, error)
+}{
+	{routingPolicyRail, func(ctx context.Context, st *store.Store) (string, bool, error) {
+		r, ok, err := st.GetOrgRoutingPolicy(ctx)
+		return r.ServerPubkey, ok, err
+	}},
+	{announcementRail, func(ctx context.Context, st *store.Store) (string, bool, error) {
+		r, ok, err := st.GetOrgAnnouncement(ctx)
+		return r.ServerPubkey, ok, err
+	}},
+	{displayPolicyRail, func(ctx context.Context, st *store.Store) (string, bool, error) {
+		r, ok, err := st.GetOrgDisplayPolicy(ctx)
+		return r.ServerPubkey, ok, err
+	}},
+	// The access-grant rail (request grants).
+	{accessGrantRail, func(ctx context.Context, st *store.Store) (string, bool, error) {
+		r, ok, err := st.GetAccessGrantState(ctx)
+		return r.ServerPubkey, ok, err
+	}},
+	// The org AI tool policy rail (adapter config P6).
+	{agentConfigPolicyRail, func(ctx context.Context, st *store.Store) (string, bool, error) {
+		r, ok, err := st.GetOrgAgentConfigPolicy(ctx)
+		return r.ServerPubkey, ok, err
+	}},
+	// The org Cloud Intelligence consent requirement rail (ci-parity phase
+	// 1): its cached terms carry the same org key (Integration 6).
+	{intelRequirementRail, func(ctx context.Context, st *store.Store) (string, bool, error) {
+		r, ok, err := st.GetOrgIntelRequirement(ctx)
+		return r.ServerPubkey, ok, err
+	}},
 }
 
 // checkOrgKeyIdentity refuses an offered signing key that disagrees
@@ -486,7 +519,7 @@ func (c *Client) checkOrgKeyIdentity(ctx context.Context, ownRail, offered strin
 		if trust.key == offered {
 			return nil
 		}
-		return fmt.Errorf("%w (pinned %s… at enrolment, the %s rail was offered %s…) — refusing; re-enrol to rotate trust",
+		return fmt.Errorf("%w (pinned %s… at enrolment, the %s rail was offered %s…) - refusing; re-enrol to rotate trust",
 			errPinMismatch, prefix8(trust.key), ownRail, prefix8(offered))
 	}
 	// H1: a `#policy-key` HASH with no key behind it still CONSTRAINS every
@@ -498,10 +531,10 @@ func (c *Client) checkOrgKeyIdentity(ctx context.Context, ownRail, offered strin
 	if trust.hash != "" {
 		raw, derr := base64.StdEncoding.DecodeString(offered)
 		if derr != nil || len(raw) != ed25519.PublicKeySize {
-			return fmt.Errorf("%w (the %s rail offered an unreadable key) — refusing", errPinMismatch, ownRail)
+			return fmt.Errorf("%w (the %s rail offered an unreadable key) - refusing", errPinMismatch, ownRail)
 		}
 		if orgcontract.PublicKeyPinHash(raw) != trust.hash {
-			return fmt.Errorf("%w (pinned sha256 %s… at enrolment, the %s rail offered %s… which hashes to %s…) — refusing; re-enrol to rotate trust",
+			return fmt.Errorf("%w (pinned sha256 %s… at enrolment, the %s rail offered %s… which hashes to %s…) - refusing; re-enrol to rotate trust",
 				errPinMismatch, prefix12(trust.hash), ownRail, prefix8(offered),
 				prefix12(orgcontract.PublicKeyPinHash(raw)))
 		}
@@ -511,7 +544,7 @@ func (c *Client) checkOrgKeyIdentity(ctx context.Context, ownRail, offered strin
 		if p.rail == ownRail || p.key == offered {
 			continue
 		}
-		return fmt.Errorf("%w (pinned %s… by the %s rail, got %s…) — refusing; one org has one signing key, re-enrol to rotate trust",
+		return fmt.Errorf("%w (pinned %s… by the %s rail, got %s…) - refusing; one org has one signing key, re-enrol to rotate trust",
 			errPinMismatch, prefix8(p.key), p.rail, prefix8(offered))
 	}
 	return nil

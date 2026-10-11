@@ -148,7 +148,9 @@ func TestEnterpriseDefaultBodyIsValidJSON(t *testing.T) {
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		t.Fatalf("the default body is not valid JSON: %v", err)
 	}
-	if probe["schema"] != float64(MaxSchema) {
-		t.Errorf("schema = %v, want %d", probe["schema"], MaxSchema)
+	// The LOWEST schema that carries pins and shares (SchemaFor), never
+	// MaxSchema: a schema-3 default body would strand every pre-3 agent.
+	if probe["schema"] != float64(2) {
+		t.Errorf("schema = %v, want 2", probe["schema"])
 	}
 }

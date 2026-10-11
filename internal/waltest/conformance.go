@@ -263,7 +263,7 @@ func conformQuarantine(t *testing.T, factory Factory) {
 		t.Fatalf("final drain: %v", err)
 	}
 	if len(final) != 0 {
-		t.Errorf("quarantine-at-MaxAttempts: row still drained after %d failures — the attempt_count < MaxAttempts clause must exclude it (got %d rows)", cfg.MaxAttempts, len(final))
+		t.Errorf("quarantine-at-MaxAttempts: row still drained after %d failures - the attempt_count < MaxAttempts clause must exclude it (got %d rows)", cfg.MaxAttempts, len(final))
 	}
 }
 

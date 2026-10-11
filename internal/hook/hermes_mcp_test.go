@@ -349,13 +349,14 @@ func TestWriteYAMLMap_PreservesPermissionBits(t *testing.T) {
 	}
 }
 
-// TestRegisterHermesPluginEnabledThenMCP_BackupIsPreInitOriginal pins the
+// TestRegisterHermesPluginEnabledThenMCP_KeepsOperatorBytes pins the
 // combined-writers case: `observer init --hermes` runs
 // RegisterHermesPluginEnabled followed by RegisterHermesMCP against the
-// SAME config.yaml in one process (see cmd/observer/init.go). The .bak
-// must reflect the file as it was before EITHER write ran — not the
-// intermediate state left after the first call already rewrote it.
-func TestRegisterHermesPluginEnabledThenMCP_BackupIsPreInitOriginal(t *testing.T) {
+// SAME config.yaml in one process (see cmd/observer/init.go). config.yaml
+// holds provider keys, so both writers edit only their own node (review
+// T-384): the operator's keys and comment survive and no backup copy of
+// the file is made.
+func TestRegisterHermesPluginEnabledThenMCP_KeepsOperatorBytes(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
@@ -370,12 +371,11 @@ func TestRegisterHermesPluginEnabledThenMCP_BackupIsPreInitOriginal(t *testing.T
 	if _, err := RegisterHermesMCP(opts); err != nil {
 		t.Fatalf("RegisterHermesMCP: %v", err)
 	}
-	backup, err := os.ReadFile(path + ".bak")
-	if err != nil {
-		t.Fatalf("expected .bak file: %v", err)
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("a credential-file writer left a backup copy: stat err = %v", err)
 	}
-	if string(backup) != original {
-		t.Errorf("backup content = %q, want pre-init original %q", backup, original)
+	if got, _ := os.ReadFile(path); !strings.Contains(string(got), "model: claude-sonnet-4.6") || !strings.Contains(string(got), "# operator comment") {
+		t.Errorf("the operator's lines were rewritten:\n%s", got)
 	}
 	// Sanity: both writes actually landed (plugins.enabled + mcp_servers),
 	// otherwise the test would trivially pass without exercising the

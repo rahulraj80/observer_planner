@@ -8,9 +8,13 @@ import {
   SegmentedControl,
   Select,
   SettingRow,
+  SinglePicker,
   SlideOver,
   Toggle,
 } from "@/components/primitives";
+import { type OverrideEditorMode, overrideEditorView } from "@/lib/guardEditorMode";
+import { keepSelected } from "@/lib/pickerOptions";
+import { GUARD_RULE_OPTIONS, useMCPServerOptions } from "@/lib/usePickerSources";
 import {
   type Decision,
   type GuardOverrideRow,
@@ -18,7 +22,6 @@ import {
   DECISIONS,
   GUARD_CATEGORIES,
   GUARD_EVENT_KINDS,
-  GUARD_RULE_CATALOG,
   GUARD_SINKS,
   GUARD_TAINT_SOURCES,
   SEVERITIES,
@@ -60,6 +63,10 @@ export type RuleEditorProps =
       open: boolean;
       onClose: () => void;
       kind: "override";
+      // How the editor was opened (T-762): "add" lets the rule be picked;
+      // "preset" and "edit" keep it locked to the row's rule. Never inferred
+      // from `initial`, which "+ Add override" also passes (a blank row).
+      mode: OverrideEditorMode;
       initial?: GuardOverrideRow;
       allowWeaken: boolean;
       onSave: (row: GuardOverrideRow) => void;
@@ -73,6 +80,7 @@ export function RuleEditor(props: RuleEditorProps) {
 function OverrideEditor({
   open,
   onClose,
+  mode,
   initial,
   allowWeaken,
   onSave,
@@ -80,36 +88,31 @@ function OverrideEditor({
   const [row, setRow] = useState<GuardOverrideRow>(initial ?? { rule: "", decision: "", enforce: true });
   const info = guardRuleInfo(row.rule);
   const decisionOpts = guardDecisionOptionsFor(row.rule, allowWeaken);
+  const view = overrideEditorView(mode, initial?.rule ?? row.rule);
 
   return (
     <SlideOver
       open={open}
       onClose={onClose}
-      title={initial ? `Edit override - ${initial.rule}` : "Override a built-in rule"}
+      title={view.title}
       subtitle="Tunes an existing rule's decision/enforce. No matcher - overrides can't redefine what a rule matches, only how it decides."
       width={520}
     >
       <div className="space-y-4 p-5">
         <SettingRow label="Rule" layout="stack">
-          <Input
-            list="rule-editor-catalog"
+          <SinglePicker
+            options={keepSelected(GUARD_RULE_OPTIONS, row.rule ? [row.rule] : [], "Custom rule")}
             value={row.rule}
-            onChange={(e) => {
-              const rule = e.target.value;
+            onChange={(rule) => {
               const opts = guardDecisionOptionsFor(rule, allowWeaken);
               setRow((r) => ({ ...r, rule, decision: r.decision && opts.includes(r.decision) ? r.decision : "" }));
             }}
-            placeholder="rule id (e.g. R-110)"
-            mono
-            disabled={!!initial}
+            allowFree
+            freeLabel="Custom rule id"
+            placeholder="Pick a rule…"
+            ariaLabel="Rule"
+            disabled={view.ruleLocked}
           />
-          <datalist id="rule-editor-catalog">
-            {GUARD_RULE_CATALOG.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.category} · {r.severity} - {r.doc}
-              </option>
-            ))}
-          </datalist>
           {info && (
             <p className="mt-1 text-[11px] leading-snug text-fg-3">
               {info.doc} Built-in floor: observe={info.observe}, enforce={info.enforce}.
@@ -140,11 +143,11 @@ function OverrideEditor({
       <div className="flex items-center gap-2 border-t border-line-1 px-5 py-3">
         <Button
           variant="primary"
-          iconLeft={initial ? undefined : Plus}
+          iconLeft={view.isNew ? Plus : undefined}
           disabled={!row.rule.trim()}
           onClick={() => onSave(row)}
         >
-          {initial ? "Save override" : "Add override"}
+          {view.saveLabel}
         </Button>
         <Button variant="secondary" onClick={onClose}>
           Cancel
@@ -157,6 +160,7 @@ function OverrideEditor({
 function CustomRuleEditor({ open, onClose, initial, onSave }: Extract<RuleEditorProps, { kind: "rule" }>) {
   const [row, setRow] = useState<GuardRuleRow>(initial ?? emptyGuardRuleRow());
   const problems = guardRuleRowProblems(row);
+  const mcpServers = useMCPServerOptions(open && row.scope === "event");
 
   return (
     <SlideOver
@@ -314,10 +318,14 @@ function CustomRuleEditor({ open, onClose, initial, onSave }: Extract<RuleEditor
             </div>
             <div className="grid grid-cols-2 gap-3">
               <SettingRow label="mcp_server" layout="stack">
-                <Input
+                <SinglePicker
+                  options={keepSelected(mcpServers.options, row.event.mcp_server ? [row.event.mcp_server] : [])}
                   value={row.event.mcp_server}
-                  onChange={(e) => setRow((r) => ({ ...r, event: { ...r.event, mcp_server: e.target.value } }))}
-                  mono
+                  onChange={(mcp_server) => setRow((r) => ({ ...r, event: { ...r.event, mcp_server } }))}
+                  allowFree
+                  loading={mcpServers.loading}
+                  placeholder="Pick a server…"
+                  ariaLabel="mcp_server"
                 />
               </SettingRow>
               <SettingRow label="mcp_tool" layout="stack">

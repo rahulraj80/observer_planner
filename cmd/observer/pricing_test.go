@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_pricing_feed
+
 package main
 
 import (
@@ -6,12 +8,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/pricingfeed"
@@ -89,17 +88,6 @@ func signedFeed(t *testing.T, priv ed25519.PrivateKey, feedVersion int64, inputR
 	}
 	env.Signature = sig
 	return env
-}
-
-func feedTestStore(t *testing.T) (*store.Store, *sql.DB) {
-	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "observer.db")
-	database, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	return store.New(database), database
 }
 
 // The ladder: a signed 200 applies; a 304 keeps; an unsigned body is refused

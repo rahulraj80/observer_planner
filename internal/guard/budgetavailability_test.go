@@ -100,11 +100,15 @@ func TestProxyBudgetLookupFailureAfterTTL(t *testing.T) {
 		return BudgetSnapshot{DailyUSD: 0.1}, ok
 	})
 	now := time.Now().UTC()
+	// The cache ages on the guard's clock, not the request's (T-413).
+	clock := newFakeBudgetClock(now)
+	g.budgetClock = clock.Now
 	body := []byte(`{"model":"test","messages":[]}`)
 	if res := g.ScanProxyRequest("openai", body, "session", now); res.Deny {
 		t.Fatalf("under cap denied: %+v", res)
 	}
 	ok = false
+	clock.Advance(budgetCacheTTL + time.Second)
 	res := g.ScanProxyRequest("openai", body, "session", now.Add(budgetCacheTTL+time.Second))
 	if !res.Deny || !strings.Contains(res.DenyReason, "accounting is unavailable") {
 		t.Fatalf("stale successful lookup masked the error: %+v", res)

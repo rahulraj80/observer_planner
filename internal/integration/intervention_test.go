@@ -2,6 +2,7 @@ package integration
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -338,5 +339,89 @@ func TestInterventionForUnknownTool(t *testing.T) {
 
 	if surfaces, ok := InterventionFor("not-a-tool"); ok || surfaces != nil {
 		t.Fatalf("InterventionFor(unknown) = %+v, %v", surfaces, ok)
+	}
+}
+
+// TestInterventionNodeOneCutoffDeclarations pins T-693: one row per tool the
+// managed hard budget refused on demo node 1 (D-445, D-453) and per other
+// registry row found in the same state there. Each row states the binding
+// shape grounded read-only on node 1 (2026-10-08) and whether the surface
+// keeps a usage source; a surface without one (poolside) must say why.
+func TestInterventionNodeOneCutoffDeclarations(t *testing.T) {
+	t.Parallel()
+
+	type worker struct {
+		kind            WorkerDiscoveryKind
+		relative, inner string
+	}
+	cases := []struct {
+		id          string
+		native      bool
+		interp      []InterpreterKind
+		workers     []worker
+		nativeNames []string
+		usage       bool
+	}{
+		{"junie/cli", true, nil, []worker{
+			{WorkerVersionedDirectory, "../share/junie/versions", "junie-app/bin/junie"},
+			{WorkerVersionedDirectory, "../share/junie/versions", "junie/bin/junie"},
+		}, nil, true},
+		{"crush/cli", true, nil, []worker{{WorkerExactRelative, "bin/crush", ""}}, nil, true},
+		{"cline-cli/cli", true, nil, []worker{
+			{WorkerExactRelative, ".cline", ""},
+			{WorkerExactRelative, "../node_modules/@cline/cli-linux-x64/bin/cline", ""},
+			{WorkerExactRelative, "../node_modules/@cline/cli-linux-arm64/bin/cline", ""},
+			{WorkerExactRelative, "../../@cline/cli-linux-x64/bin/cline", ""},
+			{WorkerExactRelative, "../../@cline/cli-linux-arm64/bin/cline", ""},
+		}, nil, true},
+		{"aider/cli", false, []InterpreterKind{InterpreterPython}, nil, nil, true},
+		{"grok/cli", true, nil, nil, []string{"grok-linux-x86_64"}, true},
+		{"prime-agent/cli", true, []InterpreterKind{InterpreterNode}, nil, nil, true},
+		{"poolside/cli", true, nil, nil, nil, true},
+	}
+	for _, tc := range cases {
+		surface := interventionSurfaceByID(t, tc.id)
+		binding := surface.Binding
+		if binding.UnsupportedReason != "" || binding.AllowNative != tc.native || !slices.Equal(binding.Interpreters, tc.interp) ||
+			!slices.Equal(binding.NativeNames, tc.nativeNames) || surface.NativeUsage.Available() != tc.usage {
+			t.Errorf("%s binding = %+v usage=%q", tc.id, binding, surface.NativeUsage)
+		}
+		if len(binding.Workers) != len(tc.workers) {
+			t.Errorf("%s workers = %+v", tc.id, binding.Workers)
+			continue
+		}
+		for i, want := range tc.workers {
+			got := binding.Workers[i]
+			if got.Kind != want.kind || got.Relative != want.relative || got.Inner != want.inner || got.Prefix != "" {
+				t.Errorf("%s worker %d = %+v, want %+v", tc.id, i, got, want)
+			}
+		}
+		if tc.id == "cline-cli/cli" && !slices.Equal(binding.LaunchOverrideEnv, []string{"CLINE_BIN_PATH"}) ||
+			tc.id == "junie/cli" && !slices.Equal(binding.LaunchOverrideEnv, []string{"JUNIE_DATA"}) {
+			t.Errorf("%s launch override env = %v", tc.id, binding.LaunchOverrideEnv)
+		}
+		if !tc.usage && strings.TrimSpace(surface.Note) == "" {
+			t.Errorf("%s has no usage source and no note saying why", tc.id)
+		}
+	}
+}
+
+// TestInterventionVersionedDirectoryWorkersAreWellFormed keeps every
+// versioned-directory declaration inside its own shape: a relative directory
+// and a relative inner path, never a prefix.
+func TestInterventionVersionedDirectoryWorkersAreWellFormed(t *testing.T) {
+	t.Parallel()
+
+	for _, surface := range AllInterventionSurfaces() {
+		for _, worker := range surface.Binding.Workers {
+			if worker.Kind != WorkerVersionedDirectory {
+				continue
+			}
+			if worker.Relative == "" || worker.Inner == "" || worker.Prefix != "" ||
+				strings.HasPrefix(worker.Relative, "/") || strings.HasPrefix(worker.Inner, "/") ||
+				strings.Contains(worker.Inner, "..") {
+				t.Errorf("surface %q versioned-directory worker = %+v", surface.ID, worker)
+			}
+		}
 	}
 }

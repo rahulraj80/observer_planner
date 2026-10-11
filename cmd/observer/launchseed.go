@@ -7,7 +7,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -137,7 +137,7 @@ func recordLaunchSeed(dbPath, tool, dir string, pid int, warn interface{ Write([
 		return
 	}
 	defer database.Close()
-	if err := store.New(database).InsertLaunchSeed(ctx, processobs.LaunchSeed{
+	if err := store.New(database).InsertLaunchSeed(ctx, procmodel.LaunchSeed{
 		PID:   pid,
 		Tool:  seedTool,
 		CWD:   seedCWD,

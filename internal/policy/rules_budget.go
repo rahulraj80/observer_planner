@@ -58,12 +58,7 @@ func matchCostOver(value func(*Event) float64, limit func(*Config) float64, unav
 		if got < lim || (got == lim && !atLimitBlocks) {
 			return false, ""
 		}
-		comparison := " exceeds the $"
-		if got == lim {
-			comparison = " has reached the $"
-		}
-		return true, scope + " spend $" + strconv.FormatFloat(got, 'f', 2, 64) +
-			comparison + strconv.FormatFloat(lim, 'f', 2, 64) + " budget" + baselineNote(base > 0)
+		return true, usdBudgetReason(scope, got, lim, baselineNote(base > 0))
 	}
 }
 
@@ -578,12 +573,7 @@ func subjectCapBreach(ev *Event, sc BudgetSubjectCap, usage BudgetWindowAmounts,
 	if got < lim || (got == lim && !sc.Hard) {
 		return false, ""
 	}
-	comparison := " exceeds the $"
-	if got == lim {
-		comparison = " has reached the $"
-	}
-	return true, subjectLabel(sc) + " spend $" + strconv.FormatFloat(got, 'f', 2, 64) +
-		comparison + strconv.FormatFloat(lim, 'f', 2, 64) + " budget" + baselineNote(subjectBaselineUSD(sc) > 0)
+	return true, usdBudgetReason(subjectLabel(sc), got, lim, baselineNote(subjectBaselineUSD(sc) > 0))
 }
 
 // subjectBaselineUSD / subjectBaselineTokens are this cap's cross-machine

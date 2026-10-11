@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals_ssh && !sbo_omit_terminals
+
 // ssh.go — `observer ssh <profile>` CLI parity with the dashboard's SSH
 // remote-system instance switcher
 // (docs/plans/ssh-remote-profiles-plan-2026-08-27.md §11 Phase C, items
@@ -42,7 +44,7 @@ func newSSHCmd() *cobra.Command {
 		Short: "Connect to a configured [[terminal.ssh.profiles]] remote system",
 		Long: "Builds the exact ssh argv the dashboard's SSH instance switcher uses for\n" +
 			"the named profile and runs it as an interactive login attached to this\n" +
-			"terminal (docs/ssh-terminals.md). Config-only — does not require\n" +
+			"terminal (docs/ssh-terminals.md). Config-only - does not require\n" +
 			"`observer start` to be running.\n\n" +
 			"--print shows the composed argv (shell-quoted) without connecting.\n" +
 			"--test runs the same bounded, non-interactive connectivity probe the\n" +
@@ -100,7 +102,7 @@ func runSSH(_ context.Context, name string, opts sshCmdOptions) error {
 	// attach_standalone.go and launch_dashboard.go's terminalLaunchPolicy.
 	if !cfg.Terminal.Enabled || !cfg.Terminal.SSH.Enabled {
 		fmt.Fprintln(opts.stderr,
-			"observer ssh: remote-system terminals are disabled — set [terminal.ssh].enabled = true\n"+
+			"observer ssh: remote-system terminals are disabled - set [terminal.ssh].enabled = true\n"+
 				"(and [terminal].enabled = true) in your config.toml. See docs/ssh-terminals.md.")
 		return exitErr(1)
 	}
@@ -109,7 +111,7 @@ func runSSH(_ context.Context, name string, opts sshCmdOptions) error {
 	if len(profiles) == 0 {
 		fmt.Fprintln(opts.stderr,
 			"observer ssh: no [[terminal.ssh.profiles]] are configured. Add at least one\n"+
-				"profile to config.toml — see docs/ssh-terminals.md.")
+				"profile to config.toml - see docs/ssh-terminals.md.")
 		return exitErr(1)
 	}
 
@@ -177,7 +179,7 @@ func runSSHTest(profile sshprofile.Profile, sshOpts sshprofile.Options, opts ssh
 	case result.KnownHostsOK:
 		fmt.Fprintln(opts.stdout, "known_hosts: known")
 	default:
-		fmt.Fprintf(opts.stdout, "known_hosts: NOT known yet — the first `observer ssh %s` login will prompt to accept the host key\n", profile.Name)
+		fmt.Fprintf(opts.stdout, "known_hosts: NOT known yet - the first `observer ssh %s` login will prompt to accept the host key\n", profile.Name)
 	}
 
 	if result.AuthOK {

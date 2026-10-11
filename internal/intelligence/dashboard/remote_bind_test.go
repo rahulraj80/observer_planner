@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -9,7 +11,6 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/remoteauth"
 )
 
 // readyController is a minimal RemoteController that reports Ready() = true so
@@ -22,7 +23,7 @@ func (r readyController) AllowedHosts() []string             { return []string{"
 func (r readyController) Principal(*http.Request) Capability { return CapabilityPublic }
 func (r readyController) AllowTerminal() bool                { return false }
 func (r readyController) Routes() []ExtraRoute               { return nil }
-func (r readyController) Sessions() []remoteauth.SessionInfo { return nil }
+func (r readyController) Sessions() []RemoteSessionInfo      { return nil }
 func (r readyController) RevokeSession(string) bool          { return false }
 func (r readyController) RotateSessions() error              { return nil }
 func (r readyController) ReloadSecret(string)                {}
@@ -53,7 +54,7 @@ func TestNonLoopbackBindRefusedWithoutAuth(t *testing.T) {
 	for _, addr := range []string{"0.0.0.0:8080", "10.0.0.5:8081", "192.168.1.20:8080", "[::]:8080"} {
 		err := s.ListenAndServe(ctx, addr)
 		if err == nil {
-			t.Fatalf("non-loopback bind %q was ALLOWED without auth — the §4.6 fail-closed rule regressed", addr)
+			t.Fatalf("non-loopback bind %q was ALLOWED without auth - the §4.6 fail-closed rule regressed", addr)
 		}
 		if !strings.Contains(err.Error(), "refusing to bind") {
 			t.Errorf("bind %q refusal message = %q, want the actionable §4.6 message", addr, err.Error())
@@ -69,11 +70,11 @@ func TestNonLoopbackBindRefusedWithoutAuth(t *testing.T) {
 func TestNoSilentZeroZero(t *testing.T) {
 	// No substrate → refused.
 	if err := remoteExposureAllowed("0.0.0.0:8080", nil); err == nil {
-		t.Fatal("0.0.0.0 bind permitted with a nil controller — silent bind-all regression")
+		t.Fatal("0.0.0.0 bind permitted with a nil controller - silent bind-all regression")
 	}
 	// A non-ready controller is treated the same as none (fail closed).
 	if err := remoteExposureAllowed("0.0.0.0:8080", readyController{ready: false}); err == nil {
-		t.Fatal("0.0.0.0 bind permitted with a not-ready controller — the predicate must require Ready()")
+		t.Fatal("0.0.0.0 bind permitted with a not-ready controller - the predicate must require Ready()")
 	}
 	// A ready controller re-permits it (Phase 2 will actually wire this).
 	if err := remoteExposureAllowed("0.0.0.0:8080", readyController{ready: true}); err != nil {
@@ -87,7 +88,7 @@ func TestNoSilentZeroZero(t *testing.T) {
 func TestLoopbackBindUnchanged(t *testing.T) {
 	for _, addr := range []string{"127.0.0.1:8080", "localhost:8081", "[::1]:8080", "127.0.0.2:9000"} {
 		if err := remoteExposureAllowed(addr, nil); err != nil {
-			t.Errorf("loopback bind %q was refused — the local single-user path must be unchanged: %v", addr, err)
+			t.Errorf("loopback bind %q was refused - the local single-user path must be unchanged: %v", addr, err)
 		}
 	}
 	// A loopback bind must serve (start + immediate ctx-cancel returns nil).

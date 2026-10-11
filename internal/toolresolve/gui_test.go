@@ -72,7 +72,7 @@ func TestResolveGUIProbeOnlySkipsPathAndSharedTables(t *testing.T) {
 	}
 	for _, c := range res.Considered {
 		if c.Path == p("/usr/bin/editor") || c.Path == p("/home/u/.local/bin/editor") {
-			t.Errorf("ProbeOnly row considered %s — the PATH/shared ladder must not run", c.Path)
+			t.Errorf("ProbeOnly row considered %s - the PATH/shared ladder must not run", c.Path)
 		}
 	}
 }

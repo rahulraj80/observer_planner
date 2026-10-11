@@ -29,11 +29,32 @@ const CHIP_TONE = {
   ],
 } as const;
 
+/**
+ * The page gutter the sticky row bleeds into, so its underline and backdrop
+ * reach the edges of the app's <main> while the chips stay aligned with the
+ * page content. Pick the one that matches the app shell's own padding.
+ */
+export type SectionNavGutter = "default" | "org" | "none";
+
+// Literal class strings per gutter (Tailwind cannot see built names).
+//   default: px-4 / sm:px-6 - the node dashboard (web) and the portal (webcloud)
+//   org:     px-3 / sm:px-6 - the org dashboard's <main> (web2 Layout.tsx)
+//   none:    no bleed, for a row inside a card or a padded container
+export const SECTION_NAV_GUTTER: Record<SectionNavGutter, string> = {
+  default: "-mx-4 px-4 sm:-mx-6 sm:px-6",
+  org: "-mx-3 px-3 sm:-mx-6 sm:px-6",
+  none: "",
+};
+
 export function SectionNav({
   items,
+  gutter = "default",
   className,
 }: {
   items: SectionNavItem[];
+  /** The app gutter to bleed into. Default "default" (px-4 / sm:px-6); web2
+   *  pages pass "org" (px-3 / sm:px-6). */
+  gutter?: SectionNavGutter;
   className?: string;
 }) {
   const [active, setActive] = useState(items[0]?.id ?? "");
@@ -61,7 +82,8 @@ export function SectionNav({
     <nav
       aria-label="On this page"
       className={clsx(
-        "sticky top-0 z-20 -mx-4 flex gap-1.5 overflow-x-auto border-b border-line-1 bg-bg-0/85 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6",
+        "sticky top-0 z-20 flex gap-1.5 overflow-x-auto border-b border-line-1 bg-bg-0/85 py-2 backdrop-blur",
+        SECTION_NAV_GUTTER[gutter],
         className,
       )}
     >

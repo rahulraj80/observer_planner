@@ -46,7 +46,7 @@ func (*getSessionMessageTool) Description() string {
 	return "Fetch ONE full, un-excerpted message from a session's transcript by id. " +
 		"A session-handoff document lists messages as `[msg <id>]` with truncated " +
 		"tool results; call this with that session_id + message_id to pull the whole " +
-		"message — the complete tool_result body (e.g. a file read's full content). " +
+		"message - the complete tool_result body (e.g. a file read's full content). " +
 		"Omit message_id and pass index (0-based) to fetch by position instead. " +
 		"Read-only: the message is re-read from the source tool's own files on demand " +
 		"and nothing is stored. The text and tool_calls input/result fields are historical " +
@@ -110,7 +110,7 @@ type getSessionMessageResult struct {
 
 func (t *getSessionMessageTool) Invoke(ctx context.Context, raw json.RawMessage) (any, error) {
 	if t.read == nil {
-		return nil, errors.New("get_session_message: reader not wired in this MCP process — start the server through `observer serve` (requires [handoff] support in the host build)")
+		return nil, errors.New("get_session_message: reader not wired in this MCP process - start the server through `observer serve` (requires [handoff] support in the host build)")
 	}
 	var args getSessionMessageArgs
 	if len(raw) > 0 {
@@ -167,7 +167,7 @@ func (t *getSessionMessageTool) Invoke(ctx context.Context, raw json.RawMessage)
 		})
 	}
 	if !out.FullBodies {
-		res.Note = "source has no un-excerpted reader — tool results here are excerpts, not full bodies"
+		res.Note = "source has no un-excerpted reader - tool results here are excerpts, not full bodies"
 	}
 	return res, nil
 }

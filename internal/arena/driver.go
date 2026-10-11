@@ -10,12 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/shellwrapsvc"
+	"github.com/marmutapp/superbased-observer/internal/shimguard"
 )
 
 // driver.go — headless one-shot drivers for the grounded harness set. The
@@ -107,9 +108,13 @@ func executeDrive(ctx context.Context, bin string, spec *integration.HeadlessSpe
 	if err != nil {
 		return driveResult{}, fmt.Errorf("arena.executeDrive: %w", err)
 	}
-	args, sessionID, outPath := buildDriveArgv(spec, req, model)
+	modelArgs, modelEnv, err := modelDelivery(req.Tool, model)
+	if err != nil {
+		return driveResult{}, fmt.Errorf("arena.executeDrive: %w", err)
+	}
+	args, sessionID, outPath := buildDriveArgv(spec, req, modelArgs)
 
-	stdout, captured, res, err := spawnDrive(ctx, bin, args, spec, req)
+	stdout, captured, res, err := spawnDrive(ctx, bin, args, modelEnv, spec, req)
 	if err != nil {
 		return driveResult{}, err
 	}
@@ -125,10 +130,12 @@ func executeDrive(ctx context.Context, bin string, spec *integration.HeadlessSpe
 // request's prompt/model/context files — one branch per capability the spec
 // declares (session-id minting + skip-permissions for the stdout-JSON lane,
 // workspace-write flags for the file-output lane, positional context files,
-// the output-file flag). Returns the argv, the session id minted for a
-// stdout-JSON lane (empty otherwise), and the output-file path for a lane
-// that extracts its answer from a file (empty otherwise).
-func buildDriveArgv(spec *integration.HeadlessSpec, req driveRequest, model string) (args []string, sessionID string, outPath string) {
+// the output-file flag). modelArgs are the argv tokens modelDelivery composed
+// for the selected model (nil for the harness default or an env-delivered
+// model). Returns the argv, the session id minted for a stdout-JSON lane
+// (empty otherwise), and the output-file path for a lane that extracts its
+// answer from a file (empty otherwise).
+func buildDriveArgv(spec *integration.HeadlessSpec, req driveRequest, modelArgs []string) (args []string, sessionID string, outPath string) {
 	args = make([]string, 0, len(spec.Lead)+len(spec.OutputArgs)+8)
 	args = append(args, spec.Lead...)
 
@@ -151,11 +158,7 @@ func buildDriveArgv(spec *integration.HeadlessSpec, req driveRequest, model stri
 	} else {
 		args = append(args, req.Prompt)
 	}
-	if model != "" {
-		if flag := modelFlagFor(req.Tool); flag != "" {
-			args = append(args, flag, model)
-		}
-	}
+	args = append(args, modelArgs...)
 	args = append(args, spec.OutputArgs...)
 	if spec.ContextMode == integration.HeadlessContextPositional {
 		args = append(args, req.ContextFiles...)
@@ -178,7 +181,7 @@ func buildDriveArgv(spec *integration.HeadlessSpec, req driveRequest, model stri
 // never produced an outcome at all (setup, start, or attribution failure) —
 // distinct from a non-zero harness exit, which is folded into the returned
 // driveResult instead.
-func spawnDrive(ctx context.Context, bin string, args []string, spec *integration.HeadlessSpec, req driveRequest) (stdout []byte, captured bool, res driveResult, err error) {
+func spawnDrive(ctx context.Context, bin string, args, modelEnv []string, spec *integration.HeadlessSpec, req driveRequest) (stdout []byte, captured bool, res driveResult, err error) {
 	dctx := ctx
 	if req.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -192,6 +195,9 @@ func spawnDrive(ctx context.Context, bin string, args []string, spec *integratio
 	if req.ProxyURL != "" {
 		env = append(env, proxyEnvFor(req.Tool, req.ProxyURL)...)
 	}
+	// An env-delivered model (ModelSpec.Kind == ModelEnv) rides here, after
+	// the inherited environment so the selection wins over a stale export.
+	env = append(env, modelEnv...)
 	if req.ConfigDir != "" && spec.Result == integration.HeadlessResultStdoutJSON {
 		// claude-code lane only: isolated config dir + the CC-under-proxy
 		// recovery flag carried over from the benchmark driver's
@@ -414,18 +420,72 @@ func proxyEnvFor(tool, proxyURL string) []string {
 	}
 }
 
-// modelFlagFor resolves the model delivery flag through the registry's
-// ModelSpec (arg-kind only; env-kind tools get their model via the env
-// lane which the launcher family already covers).
-func modelFlagFor(tool string) string {
+// modelDelivery composes how a selected model reaches a headless harness -
+// argv tokens (ModelArg) or an env pair (ModelEnv) - through the registry's
+// one pure seam, integration.ModelLaunch, so the Arena and the New Terminal
+// picker share the same validation (no leading '-', no whitespace or control
+// characters). ModelSpec.Lead is dropped: it names the interactive launcher's
+// subcommand, and the headless argv carries its own (HeadlessSpec.Lead).
+//
+// An empty model delivers nothing (the harness default). A model for a tool
+// with no grounded mechanism is an error: before this, the drive silently
+// dropped it and the run record claimed a model the harness never received.
+func modelDelivery(tool, model string) (args, env []string, err error) {
+	if strings.TrimSpace(model) == "" {
+		return nil, nil, nil
+	}
 	ic, ok := integration.For(tool)
-	if !ok || ic.Model.Kind != integration.ModelArg {
-		return ""
+	if !ok || ic.Model.Kind == integration.ModelNone {
+		return nil, nil, fmt.Errorf("%s has no grounded model override; leave its model on the default", tool)
 	}
-	if ic.Model.Flag != "" {
-		return ic.Model.Flag
+	spec := ic.Model
+	spec.Lead = nil
+	args, env, err = integration.ModelLaunch(spec, model)
+	if err != nil {
+		return nil, nil, fmt.Errorf("model for %s: %w", tool, err)
 	}
-	return "--model"
+	return args, env, nil
+}
+
+// ResolveModel validates a model selection for an Arena harness and returns
+// the model the drive will actually use: "" (the harness's own default), the
+// routed lane's grounded default when the selection is empty and the lane pins
+// a provider prefix, or the trimmed selection. proxyURL is the Arena runner's
+// proxy base ("" = a direct drive). StartRun records the resolved value, so a
+// run's record names the model each candidate and the judge ran on.
+func ResolveModel(tool, model, proxyURL string) (string, error) {
+	ic, ok := integration.For(tool)
+	if !ok || ic.Headless == nil {
+		return "", fmt.Errorf("tool %q has no grounded headless contract", tool)
+	}
+	resolved, err := headlessModelFor(ic.Headless, driveRequest{Tool: tool, Model: model, ProxyURL: proxyURL})
+	if err != nil {
+		return "", err
+	}
+	if _, _, err := modelDelivery(tool, resolved); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+// Harnesses lists the registry rows the Arena can drive (a grounded headless
+// contract), sorted by tool id.
+func Harnesses() []string {
+	var out []string
+	for _, c := range integration.Capabilities() {
+		if c.Headless != nil {
+			out = append(out, c.Tool)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// HarnessInstalled reports whether the harness's binary resolves on this host
+// (the same lookup StartRun's validation runs).
+func HarnessInstalled(tool string) bool {
+	_, err := driveBinaryFor(tool)
+	return err == nil
 }
 
 // resolveToolBinary locates the real tool binary via the registry ladder,
@@ -440,7 +500,7 @@ func resolveToolBinary(tool string) (string, error) {
 	for _, name := range ic.Binary.Names.Unix {
 		// Skip a command-wrapping shim: the arena sets up its own routing
 		// and must run the vendor binary, not `observer <tool>`.
-		if p, err := shellwrapsvc.LookPath(name); err == nil {
+		if p, err := shimguard.LookPath(name); err == nil {
 			return p, nil
 		} else {
 			lastErr = err

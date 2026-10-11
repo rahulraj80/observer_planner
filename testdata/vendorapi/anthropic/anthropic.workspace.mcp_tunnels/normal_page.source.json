@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].archived_at": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].display_name": "VerifiedOfficial",
+    "data[].domain": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "46348a80d6f84c703855c506f533958215b261ee329cdf012c960b974a299e4e",
+  "http": {
+    "method": "GET",
+    "path": "/v1/tunnels",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/tunnels.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated MCP tunnels API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "8228f092b0d0437239a785ff61dc9bea01b572c3c03186c7f46d19f13fefdee3",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/tunnels.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.workspace.mcp_tunnels"
+}

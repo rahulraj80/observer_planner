@@ -62,7 +62,7 @@ func TestHandleSessionVerbosity(t *testing.T) {
 	}
 	var resp VerbosityResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 
 	if !resp.AuthoredCaptured {

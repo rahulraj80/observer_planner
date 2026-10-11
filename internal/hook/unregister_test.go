@@ -138,9 +138,24 @@ func TestUnregisterClaudeCodeChecksumMismatch(t *testing.T) {
 		t.Fatalf("Register: %v", res.Error)
 	}
 
-	// Simulate user editing settings.json after install.
+	// An edit outside the hooks subtree is the user's own (settings.json
+	// is credential-bearing, so the checksum covers the hooks only, D-268)
+	// and does not trip the guard.
 	body, _ := os.ReadFile(path)
 	edited := bytes.Replace(body, []byte("\n}"), []byte(",\n  \"theme\": \"dark\"\n}"), 1)
+	if err := os.WriteFile(path, edited, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if dry := r.opts.DryRun; !dry {
+		r.opts.DryRun = true
+		if res := r.Unregister("claude-code"); res.Error != nil || !res.ChecksumMatch {
+			t.Fatalf("an edit outside hooks tripped the guard: %+v", res)
+		}
+		r.opts.DryRun = false
+	}
+
+	// Simulate the user editing the hooks after install.
+	edited = bytes.Replace(edited, []byte("\"hooks\": {"), []byte("\"hooks\": {\n    \"Mine\": [],"), 1)
 	if err := os.WriteFile(path, edited, 0o600); err != nil {
 		t.Fatal(err)
 	}

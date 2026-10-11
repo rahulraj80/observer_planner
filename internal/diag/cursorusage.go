@@ -10,6 +10,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/cursorusage"
 	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // cursorUsageWindow bounds the sessions checkCursorUsage looks at.
@@ -69,16 +70,25 @@ func checkCursorUsage(ctx context.Context, database *sql.DB, wiring cursorusage.
 	}
 	sort.Slice(reasons, func(i, j int) bool { return counts[reasons[i]] > counts[reasons[j]] })
 	var parts, details []string
+	var rems []remedy.Remediation
+	seen := map[remedy.Remediation]bool{}
 	for _, r := range reasons {
 		parts = append(parts, fmt.Sprintf("%d %s", counts[r], strings.ReplaceAll(string(r), "_", " ")))
 		details = append(details, fmt.Sprintf("%s: %d session(s), e.g. %s - %s", r, counts[r], examples[r], cursorusage.Remedy(r)))
+		for _, fix := range cursorusage.Remediations(r) {
+			if !seen[fix] {
+				seen[fix] = true
+				rems = append(rems, fix)
+			}
+		}
 	}
 	details = append(details, "usage for these sessions is unknown, not zero; the session page names the events that fired")
 	return Check{
-		Name:    name,
-		Status:  StatusWarn,
-		Message: fmt.Sprintf("%d Cursor session(s) in the last 14 days recorded activity but no token usage (%s)", total, strings.Join(parts, ", ")),
-		Details: details,
+		Name:         name,
+		Status:       StatusWarn,
+		Message:      fmt.Sprintf("%d Cursor session(s) in the last 14 days recorded activity but no token usage (%s)", total, strings.Join(parts, ", ")),
+		Details:      details,
+		Remediations: rems,
 	}
 }
 

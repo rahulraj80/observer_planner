@@ -23,7 +23,7 @@ const ToolName = "windsurf"
 // ungroundedWarning is the single Warning every ParseSessionFile returns.
 // It names the fixture README so an operator who somehow reaches this code
 // path lands on the step-in recipe rather than on a silent empty result.
-const ungroundedWarning = "windsurf: store shape not yet grounded — no rows emitted; see testdata/windsurf/README.md (step-in P8)"
+const ungroundedWarning = "windsurf: store shape not yet grounded - no rows emitted; see testdata/windsurf/README.md (step-in P8)"
 
 // Adapter is the Cascade skeleton adapter. It declares real watch roots and
 // a real file-shape predicate, and parses nothing — see the package doc for

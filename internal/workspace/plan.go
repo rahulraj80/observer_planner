@@ -122,7 +122,7 @@ func planCloneRemote(req Request) (Steps, error) {
 // with whatever branch ProjectRoot already has checked out.
 func planWorktree(req Request) (Steps, error) {
 	if !req.AllowWorktreeSource {
-		return Steps{}, fmt.Errorf("workspace.Plan: worktree source requires allow_worktree_source (it needs the main repo's .git bound read-write, and attribution points at the main repo, not the sandboxed copy — off by default)")
+		return Steps{}, fmt.Errorf("workspace.Plan: worktree source requires allow_worktree_source (it needs the main repo's .git bound read-write, and attribution points at the main repo, not the sandboxed copy - off by default)")
 	}
 	if err := validateAbsPath("ProjectRoot", req.ProjectRoot); err != nil {
 		return Steps{}, err

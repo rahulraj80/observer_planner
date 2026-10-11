@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -148,7 +150,7 @@ func TestFunnelRefusesExecuteRoute(t *testing.T) {
 	// Same capability over a normal (non-funnel) tailnet request: authorized
 	// through authz on first use (proves the funnel refusal didn't consume it).
 	if code := call(false); code == http.StatusUnauthorized || code == http.StatusForbidden {
-		t.Fatalf("non-funnel execute request blocked by authz (%d) — funnel refusal wrongly consumed the capability", code)
+		t.Fatalf("non-funnel execute request blocked by authz (%d) - funnel refusal wrongly consumed the capability", code)
 	}
 }
 
@@ -157,13 +159,13 @@ func TestFunnelRefusesExecuteRoute(t *testing.T) {
 func TestTailnetBackendRefusesWithoutReadySubstrate(t *testing.T) {
 	s := newRemoteTestServer(t, Options{})
 	if err := s.ListenAndServeTailnetBackend(t.Context(), "127.0.0.1:0"); err == nil {
-		t.Error("backend started without a Ready() substrate — must fail closed")
+		t.Error("backend started without a Ready() substrate - must fail closed")
 	}
 
 	rc, _ := newReadyRemoteController(t)
 	s2 := newRemoteTestServer(t, Options{Remote: rc})
 	if err := s2.ListenAndServeTailnetBackend(t.Context(), "0.0.0.0:9999"); err == nil {
-		t.Error("backend bound a non-loopback addr — the tailnet backend must be loopback-only")
+		t.Error("backend bound a non-loopback addr - the tailnet backend must be loopback-only")
 	}
 }
 

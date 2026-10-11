@@ -151,11 +151,11 @@ func TestSidecarWriteFailureForcesInert(t *testing.T) {
 	h, _ := sidecarTestHandle(t, filepath.Join(blocker, "nested"), `{"schema":2,"pinned":{"guard.enabled":true}}`, startupSidecar{})
 
 	if h.SidecarWriteErr() == nil {
-		t.Fatal("the write did not fail — the fixture proves nothing")
+		t.Fatal("the write did not fail - the fixture proves nothing")
 	}
 	facts := h.Facts(context.Background())
 	if facts.InertReason == "" {
-		t.Fatal("a node that cannot write its effective-settings file reported NO inert reason — it would ack `effective` while no process can read the pins")
+		t.Fatal("a node that cannot write its effective-settings file reported NO inert reason - it would ack `effective` while no process can read the pins")
 	}
 	// P4-2: a write failure gets its OWN reason, distinct from
 	// not_preauthorized — the posture WAS authorized (govern.Resolve applied
@@ -325,7 +325,7 @@ func TestReadOnlyObserverDirDoesNotReportEffective(t *testing.T) {
 		t.Fatalf("point reader: %v", err)
 	}
 	if facts.EnforceMode != "observe" || facts.InertReason == "" {
-		t.Fatalf("point facts = %+v, want observe/inert — a node that cannot materialize the posture must not report enforce", facts)
+		t.Fatalf("point facts = %+v, want observe/inert - a node that cannot materialize the posture must not report enforce", facts)
 	}
 }
 
@@ -347,7 +347,7 @@ func TestPinnedChangeReportsPendingRestart(t *testing.T) {
 		t.Fatalf("cached = %d, want the delivered 14", facts.CachedAcceptedVersion)
 	}
 	if facts.RunningVersion >= facts.CachedAcceptedVersion {
-		t.Fatalf("running = %d, cached = %d — pending_restart is derived from running < cached, so this node would overclaim `effective`",
+		t.Fatalf("running = %d, cached = %d - pending_restart is derived from running < cached, so this node would overclaim `effective`",
 			facts.RunningVersion, facts.CachedAcceptedVersion)
 	}
 	// The collector's own rule (R3-B2): a zero running version means an
@@ -414,7 +414,7 @@ func TestSectionsOnlyChangeStaysHot(t *testing.T) {
 		t.Fatalf("point reader: %v", err)
 	}
 	if facts.RunningVersion != facts.CachedAcceptedVersion {
-		t.Fatalf("a sections-only body reported pending_restart (%+v) — hiding a page mutates the live surface immediately", facts)
+		t.Fatalf("a sections-only body reported pending_restart (%+v) - hiding a page mutates the live surface immediately", facts)
 	}
 }
 
@@ -459,7 +459,7 @@ func TestHookFailsOpenOnMalformedSidecar(t *testing.T) {
 			cmd.Stdin = readerOf(`{"session_id":"s1","tool_name":"Read","tool_input":{"file_path":"/tmp/x"},"cwd":"/tmp"}`)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				t.Fatalf("the hook FAILED against a %s sidecar (%v) — a non-zero PreToolUse exit blocks the developer's tool call:\n%s", name, err, out)
+				t.Fatalf("the hook FAILED against a %s sidecar (%v) - a non-zero PreToolUse exit blocks the developer's tool call:\n%s", name, err, out)
 			}
 			if containsGovernanceNoise(string(out)) {
 				t.Fatalf("the hook wrote about governance to stderr:\n%s", out)

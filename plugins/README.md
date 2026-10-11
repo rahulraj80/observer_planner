@@ -170,7 +170,7 @@ and Command Code has a registrar of its very own
 
 - MCP server id: `observer`
 - MCP launch (canonical, all registrars agree): `observer serve`
-- Claude Code hook events (22): ConfigChange, CwdChanged, InstructionsLoaded, Notification, PermissionDenied, PermissionRequest, PostCompact, PostToolBatch, PostToolUse, PostToolUseFailure, PreCompact, PreToolUse, SessionEnd, SessionStart, Setup, Stop, StopFailure, SubagentStart, SubagentStop, UserPromptExpansion, UserPromptSubmit, WorktreeRemove
+- Claude Code hook events (24): ConfigChange, CwdChanged, InstructionsLoaded, Notification, PermissionDenied, PermissionRequest, PostCompact, PostToolBatch, PostToolUse, PostToolUseFailure, PreCompact, PreToolUse, SessionEnd, SessionStart, Setup, Stop, StopFailure, SubagentStart, SubagentStop, TaskCompleted, TaskCreated, UserPromptExpansion, UserPromptSubmit, WorktreeRemove
 - Codex MCP entry (from `~/.codex/config.toml`'s `[mcp_servers.observer]`): `observer serve`
 - Droid MCP entry (from `~/.factory/mcp.json`): `observer serve`
 - Command Code MCP entry (from `~/.commandcode/mcp.json`): `observer serve`

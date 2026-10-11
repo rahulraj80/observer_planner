@@ -16,7 +16,7 @@ import (
 // refuses the mint because [server].member_invites is false there. It is a
 // terminal, honest answer — not a retryable failure — and the dashboard
 // renders it as disabled copy naming the exact server key.
-var ErrInvitesDisabled = errors.New("orgclient: the organisation does not allow member invites")
+var ErrInvitesDisabled = errors.New("orgclient: the organization does not allow member invites")
 
 // ErrInviteCapReached is returned when this user has already minted their
 // monthly allowance of invites on the org server.

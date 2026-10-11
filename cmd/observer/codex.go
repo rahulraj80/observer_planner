@@ -67,7 +67,7 @@ func newCodexCmd() *cobra.Command {
 		Long: "Wraps `codex` with `-c openai_base_url='\"<proxy>/v1\"'` injected\n" +
 			"into argv so the Responses API request lands at the observer proxy.\n" +
 			"Both auth paths (API-key sk-... and ChatGPT-Plus JWT) flow through\n" +
-			"the same override — the proxy detects the bearer shape and routes\n" +
+			"the same override - the proxy detects the bearer shape and routes\n" +
 			"to api.openai.com vs chatgpt.com/backend-api/codex/responses\n" +
 			"automatically.\n\n" +
 			"All arguments after the subcommand are forwarded to codex. Use\n" +
@@ -117,7 +117,7 @@ func newCodexCmd() *cobra.Command {
 	cmd.Flags().StringVar(&proxyURL, "proxy", "", "Override the observer proxy URL (default: http://127.0.0.1:<cfg.proxy.port>)")
 	cmd.Flags().StringVar(&codexPath, "codex-path", "", "Path to the codex binary (default: resolve `codex` on PATH)")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false,
-		"Terminate detected shared codex app-servers (e.g., VS Code Codex extension) before exec. Operator-hostile but bounded — see docs/codex-shared-app-server-gotcha.md.")
+		"Terminate detected shared codex app-servers (e.g., VS Code Codex extension) before exec. Operator-hostile but bounded - see docs/codex-shared-app-server-gotcha.md.")
 	cmd.Flags().BoolVar(&noAppServerCheck, "no-app-server-check", false,
 		"Skip pre- and post-flight detection of shared codex app-servers. For scripts that have verified the host is clean.")
 	cmd.Flags().BoolVar(&detectOnly, "detect-only", false,
@@ -156,7 +156,7 @@ func newCodexCmd() *cobra.Command {
 	// combinable with --attach (the daemon owns the resumed PTY).
 	if capCodex, _ := integration.For("codex"); capCodex.Resume.Kind == integration.ResumeNative {
 		cmd.Flags().StringVar(&resume, "resume", "",
-			"Resume a CLOSED codex session by its id: launches `codex resume <id>`, reattaching the tool's REAL prior session — NOT a distilled fork. Composes with proxy routing (`codex -c openai_base_url=… resume <id>`). Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
+			"Resume a CLOSED codex session by its id: launches `codex resume <id>`, reattaching the tool's REAL prior session - NOT a distilled fork. Composes with proxy routing (`codex -c openai_base_url=… resume <id>`). Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
 	}
 	return cmd
 }
@@ -214,8 +214,10 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 	}
 
 	// P6 item 5: refuse a bare launch of an org-disallowed tool (node.features
-	// tools.disallow). "codex" is codex's integration-registry key.
-	if err := refuseIfToolDisallowedCfg(cfg, "codex", opts.stderr); err != nil {
+	// tools.disallow). "codex" is codex's integration-registry key. A PEEK
+	// here (review M3-10): an attached launch is counted by the daemon's
+	// inner `observer codex`, the bare path below counts it itself.
+	if err := refuseIfToolDisallowedPeekCfg(cfg, "codex", opts.stderr); err != nil {
 		return err
 	}
 
@@ -278,6 +280,10 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 	if outcome.handled {
 		return attachErr
 	}
+	// The bare path starts codex itself: count the grant use here (M3-10).
+	if err := refuseIfToolDisallowedCfg(cfg, "codex", opts.stderr); err != nil {
+		return err
+	}
 
 	// Native resume (session-attach design Phase 3): `observer codex --resume
 	// <id>` prepends the `resume <id>` subcommand to codex's argv. The final
@@ -305,7 +311,7 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 		defer release()
 		opts.codexArgs = injectCodexResume(opts.codexArgs, opts.resume)
 		fmt.Fprintf(opts.stderr,
-			"observer codex: native resume — reattaching session %s via `codex resume` (real session, not a fork)\n",
+			"observer codex: native resume - reattaching session %s via `codex resume` (real session, not a fork)\n",
 			opts.resume)
 		// Session-attach Phase 2 (P2-1): when this is a daemon-spawned launcher
 		// (a live OOB channel), announce the RESUMED session id on the trusted
@@ -330,7 +336,7 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 			// Detection failure is non-fatal — surface so the operator
 			// can investigate, then continue with the normal exec path.
 			fmt.Fprintf(opts.stderr,
-				"observer codex: warning — could not enumerate shared codex app-servers: %v (continuing without pre-flight check)\n",
+				"observer codex: warning - could not enumerate shared codex app-servers: %v (continuing without pre-flight check)\n",
 				derr)
 		}
 		preflight = procs
@@ -410,7 +416,7 @@ func runCodexLauncher(ctx context.Context, opts codexLauncherOptions) error {
 	configOffenders := codexConfigsRoutingToProxy(effectiveCodexHomeRoots(), proxyURL, activeProfile)
 	if foreign := codexConfigsRoutingToProxy(codexForeignHomeRoots(), proxyURL, activeProfile); len(foreign) > 0 {
 		fmt.Fprintf(opts.stderr,
-			"observer codex: note — a cross-mount codex config still routes to the observer proxy (%s) but will NOT be loaded by this launch (effective CODEX_HOME is %s); ignoring it for the routing decision. Remove it if it's stale.\n",
+			"observer codex: note - a cross-mount codex config still routes to the observer proxy (%s) but will NOT be loaded by this launch (effective CODEX_HOME is %s); ignoring it for the routing decision. Remove it if it's stale.\n",
 			strings.Join(foreign, ", "), effectiveCodexHome())
 	}
 	switch fb := decideProxyFallback(proxyFallbackInputs{
@@ -508,6 +514,9 @@ func runCodexChild(ctx context.Context, opts codexLauncherOptions, proxyURL stri
 	// on the CHILD's PATH; widen it with the shim's own dir + the login-only
 	// dirs the resolver saw (additive; the daemon PATH survives in order).
 	child.Env = applyChildPATH(scrubOOBEnv(os.Environ()), daemonLoginPathDirs(), bin)
+	if evidence.Route == budgetLaunchRouteObserverProxy {
+		child.Env = withOTelRouteMarker(child.Env, "codex") // T-536: this run's export is proxied
+	}
 	child.Dir = continueDir // "" inherits the caller's cwd; set by --continue-from to the source project root
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
@@ -655,11 +664,11 @@ func codexLaunchArgs(opts codexLauncherOptions, codexArgs []string, proxyURL str
 // proxyDownAdvice).
 var codexRouteSkipNotices = map[proxyFallbackReason]func(proxyURL string, daemonChild bool) string{
 	reasonNoProxyRouteClean: func(string, bool) string {
-		return "observer codex: --no-proxy-route set — launching codex WITHOUT the -c openai_base_url proxy override (turns are NOT captured)."
+		return "observer codex: --no-proxy-route set - launching codex WITHOUT the -c openai_base_url proxy override (turns are NOT captured)."
 	},
 	reasonProxyDownClean: func(proxyURL string, daemonChild bool) string {
 		return fmt.Sprintf(
-			"observer codex: proxy not reachable at %s — launching codex WITHOUT the -c openai_base_url proxy override (turns are NOT captured for this run; %s).",
+			"observer codex: proxy not reachable at %s - launching codex WITHOUT the -c openai_base_url proxy override (turns are NOT captured for this run; %s).",
 			proxyURL, proxyDownAdvice(daemonChild))
 	},
 }
@@ -817,7 +826,7 @@ func rejectIncompatibleCodexAttachFlags(opts codexLauncherOptions) error {
 func rejectIncompatibleCodexResumeFlags(opts codexLauncherOptions) error {
 	switch {
 	case opts.continueFrom != "":
-		return errors.New("observer codex: --resume (native, reattaches the REAL session) is mutually exclusive with --continue-from (distilled fork into a NEW session) — pick one")
+		return errors.New("observer codex: --resume (native, reattaches the REAL session) is mutually exclusive with --continue-from (distilled fork into a NEW session) - pick one")
 	case opts.carry != "":
 		return errors.New("observer codex: --carry only applies to --continue-from and cannot be combined with --resume")
 	case opts.fromMessage != 0:
@@ -858,7 +867,7 @@ func runDetectOnly(stderr interface{ Write([]byte) (int, error) }, procs []codex
 		fmt.Fprintln(stderr, "observer codex: no shared codex app-servers detected; proxy capture should be reliable.")
 		return nil
 	}
-	fmt.Fprintf(stderr, "observer codex: detected %d shared codex app-server(s) — V5-1 bypass risk:\n", len(procs))
+	fmt.Fprintf(stderr, "observer codex: detected %d shared codex app-server(s) - V5-1 bypass risk:\n", len(procs))
 	for _, p := range procs {
 		fmt.Fprintf(stderr, "  PID %-6d  %-16s  %s\n", p.PID, p.Source, displayPath(p))
 	}
@@ -875,10 +884,10 @@ func runExclusiveTermination(ctx context.Context, stderr interface{ Write([]byte
 	fmt.Fprintf(stderr, "observer codex: terminating %d shared codex app-server(s) per --exclusive:\n", len(procs))
 	for _, p := range procs {
 		if err := codexipc.Terminate(ctx, p.PID); err != nil {
-			fmt.Fprintf(stderr, "  PID %-6d  %-16s  — failed: %v\n", p.PID, p.Source, err)
+			fmt.Fprintf(stderr, "  PID %-6d  %-16s - failed: %v\n", p.PID, p.Source, err)
 			continue
 		}
-		fmt.Fprintf(stderr, "  PID %-6d  %-16s  — terminated\n", p.PID, p.Source)
+		fmt.Fprintf(stderr, "  PID %-6d  %-16s - terminated\n", p.PID, p.Source)
 	}
 	fmt.Fprintln(stderr, "observer codex: re-launch your VS Code Codex extension / Codex Desktop manually after this run.")
 }
@@ -893,7 +902,7 @@ func emitPreflightWarning(stderr interface{ Write([]byte) (int, error) }, procs 
 		pidParts = append(pidParts, fmt.Sprintf("PID %d (%s)", p.PID, p.Source))
 	}
 	fmt.Fprintf(stderr,
-		"observer codex: detected %d shared codex app-server(s) — %s; capture may be incomplete. "+
+		"observer codex: detected %d shared codex app-server(s) - %s; capture may be incomplete. "+
 			"Pass --exclusive to terminate them before this run, --no-app-server-check to silence, "+
 			"or see docs/codex-shared-app-server-gotcha.md.\n",
 		len(procs), strings.Join(pidParts, ", "))
@@ -1011,7 +1020,7 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 	if r.ProxyReachable {
 		fmt.Fprintf(stderr, "  PASS  proxy reachable at %s\n", r.ProxyURL)
 	} else {
-		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s — start `observer start` or `observer proxy start`\n", r.ProxyURL)
+		fmt.Fprintf(stderr, "  FAIL  proxy NOT reachable at %s - start `observer start` or `observer proxy start`\n", r.ProxyURL)
 		failed++
 	}
 
@@ -1022,7 +1031,7 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 		for _, p := range r.PreflightProcs {
 			labels = append(labels, fmt.Sprintf("PID %d (%s)", p.PID, p.Source))
 		}
-		fmt.Fprintf(stderr, "  FAIL  V5-1: %d shared codex app-server(s) running — %s. Pass --exclusive to terminate them, or close the VS Code Codex extension / Codex Desktop.\n",
+		fmt.Fprintf(stderr, "  FAIL  V5-1: %d shared codex app-server(s) running - %s. Pass --exclusive to terminate them, or close the VS Code Codex extension / Codex Desktop.\n",
 			len(r.PreflightProcs), strings.Join(labels, ", "))
 		failed++
 	}
@@ -1040,10 +1049,10 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 			case configTOMLMissingFile:
 				detail = "file missing"
 			case configTOMLProviderMismatch:
-				fmt.Fprintf(stderr, "  FAIL  %s — model_provider=%q base_url=%q (want %s). Point that provider at the proxy or run `observer init --codex --force`.\n", m.ConfigPath, m.Provider, m.CurrentValue, m.WantURL)
+				fmt.Fprintf(stderr, "  FAIL  %s - model_provider=%q base_url=%q (want %s). Point that provider at the proxy or run `observer init --codex --force`.\n", m.ConfigPath, m.Provider, m.CurrentValue, m.WantURL)
 				continue
 			}
-			fmt.Fprintf(stderr, "  FAIL  V6-2: %s — %s. Pass --write-config to auto-fix (creates a .bak before mutating).\n", m.ConfigPath, detail)
+			fmt.Fprintf(stderr, "  FAIL  V6-2: %s - %s. Pass --write-config to auto-fix (creates a .bak before mutating).\n", m.ConfigPath, detail)
 		}
 		failed++
 	}
@@ -1052,7 +1061,7 @@ func runCodexVerify(stderr interface{ Write([]byte) (int, error) }, r codexVerif
 		fmt.Fprintln(stderr, "observer codex --verify: all checks passed; `observer codex` should capture every turn.")
 		return nil
 	}
-	fmt.Fprintf(stderr, "observer codex --verify: %d check(s) failed — fix above and re-verify.\n", failed)
+	fmt.Fprintf(stderr, "observer codex --verify: %d check(s) failed - fix above and re-verify.\n", failed)
 	return exitErr(1)
 }
 

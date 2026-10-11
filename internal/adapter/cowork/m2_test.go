@@ -145,7 +145,7 @@ func TestSidechain_CrossReferencedFromSubagentFiles(t *testing.T) {
 // sidechain set (no actions flagged).
 func TestSidechain_NoSubagentFilesYieldsEmptySet(t *testing.T) {
 	t.Parallel()
-	got := collectSidechainUUIDs("/nonexistent/instance/dir")
+	got, _ := collectSidechainUUIDs(context.Background(), "/nonexistent/instance/dir")
 	if len(got) != 0 {
 		t.Fatalf("collectSidechainUUIDs(missing)=%v want empty", got)
 	}

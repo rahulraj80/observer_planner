@@ -24,9 +24,9 @@ func TestGetRoutingStatus_EmptyNode(t *testing.T) {
 	if enforced, _ := out["enforcement_available"].(bool); enforced {
 		t.Error("enforcement_available = true in P0")
 	}
-	templates := out["templates"].([]any)
-	if len(templates) != 6 {
-		t.Errorf("templates = %d, want 6 (§R6.4)", len(templates))
+	templates, _ := out["templates"].([]any)
+	if len(templates) != wantRoutingTemplates {
+		t.Errorf("templates = %d, want %d (§R6.4; 0 without proxy.routing)", len(templates), wantRoutingTemplates)
 	}
 	if int(out["router_decisions"].(float64)) != 0 || int(out["model_calibration_rows"].(float64)) != 0 {
 		t.Errorf("counters = %v / %v, want 0 / 0", out["router_decisions"], out["model_calibration_rows"])

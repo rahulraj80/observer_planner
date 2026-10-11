@@ -59,18 +59,36 @@ func AliasName(goos string) string {
 type ArtifactKey struct {
 	// Kind is the artifact family (KindAgent).
 	Kind string
+	// Distro is the prebuilt node distro, EMPTY for full (plan 5.6). The
+	// full build keys as "" so every v1 artifact, and every key a caller
+	// built before distros existed, keys exactly as it always did.
+	Distro string
 	// OS and Arch are NORMALIZED (see NormalizeOS / NormalizeArch), so
 	// a manifest written with release-asset spellings ("win32", "x64")
 	// keys the same as one written with Go spellings.
 	OS, Arch string
 }
 
-// String renders the key as "kind/os/arch" for error messages.
-func (k ArtifactKey) String() string { return fmt.Sprintf("%s/%s/%s", k.Kind, k.OS, k.Arch) }
+// String renders the key as "kind/os/arch" for the full build and
+// "kind/distro/os/arch" for any other distro, for error messages.
+func (k ArtifactKey) String() string {
+	if k.Distro == "" {
+		return fmt.Sprintf("%s/%s/%s", k.Kind, k.OS, k.Arch)
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", k.Kind, k.Distro, k.OS, k.Arch)
+}
+
+// distroKey is the key spelling of a distro: "" for full.
+func distroKey(d string) string {
+	if n := NormalizeDistro(d); n != DistroFull {
+		return n
+	}
+	return ""
+}
 
 // KeyOf returns the normalized key of an artifact row.
 func KeyOf(a Artifact) ArtifactKey {
-	return ArtifactKey{Kind: a.Kind, OS: NormalizeOS(a.OS), Arch: NormalizeArch(a.Arch)}
+	return ArtifactKey{Kind: a.Kind, Distro: distroKey(a.Distro), OS: NormalizeOS(a.OS), Arch: NormalizeArch(a.Arch)}
 }
 
 // osAliases maps every spelling seen across the release pipeline, the
@@ -128,8 +146,18 @@ func CurrentPlatform() (string, string) {
 // A missing row is not an error shape the caller invents: verify rule 9
 // turns it into blocked{no_artifact}, which is what the org board shows
 // for a platform this release did not build.
+//
+// It selects the FULL build, which is the only distro a v1 manifest
+// carries; SelectArtifactFor selects another distro from a v2 manifest.
 func SelectArtifact(m Manifest, kind, goos, goarch string) (Artifact, bool) {
-	want := ArtifactKey{Kind: kind, OS: NormalizeOS(goos), Arch: NormalizeArch(goarch)}
+	return SelectArtifactFor(m, kind, DistroFull, goos, goarch)
+}
+
+// SelectArtifactFor returns the artifact row for one kind/distro/os/arch.
+// It never falls back to another distro: a node asking for minimal must
+// never be handed the full build because minimal was not published.
+func SelectArtifactFor(m Manifest, kind, distro, goos, goarch string) (Artifact, bool) {
+	want := ArtifactKey{Kind: kind, Distro: distroKey(distro), OS: NormalizeOS(goos), Arch: NormalizeArch(goarch)}
 	for _, a := range m.Artifacts {
 		if KeyOf(a) == want {
 			return a, true

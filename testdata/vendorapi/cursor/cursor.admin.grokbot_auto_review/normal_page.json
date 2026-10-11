@@ -1,0 +1,11 @@
+{
+  "enforced": true,
+  "rules": {
+    "allow": [
+      "Read-only git commands"
+    ],
+    "block": [
+      "Publishing releases"
+    ]
+  }
+}

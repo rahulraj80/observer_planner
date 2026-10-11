@@ -1,0 +1,26 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "enforced": "VerifiedOfficial",
+    "rules": "VerifiedOfficial",
+    "rules.allow": "VerifiedOfficial",
+    "rules.allow[]": "VerifiedOfficial",
+    "rules.block": "VerifiedOfficial",
+    "rules.block[]": "VerifiedOfficial"
+  },
+  "fixture_sha256": "b240a4679630ed78117bcdb4b0f1480d5f24804ba8f87062787922fb6d608676",
+  "http": {
+    "method": "GET",
+    "path": "/grok-bot/auto-review",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get Enforce Auto-Review\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Admin API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "d6cf7e1dd3314a1b28f4ac1f699c255c0fd0b6acbff5c0d03cfb7b0837325cd3",
+  "source_url": "https://cursor.com/docs/account/teams/admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.grokbot_auto_review"
+}

@@ -11,7 +11,15 @@ import type {
 type Props = TooltipProps<ValueType, NameType> & {
   labelKey?: string;
   labelFormatter?: (raw: string) => string;
-  formatItem?: (name: string, value: number) => string;
+  // formatItem receives the item's whole payload row as a third argument (the
+  // org dashboard's W4b), so a caller can render a figure in another
+  // denomination (tokens) whose count lives on the row, not on the plotted
+  // value. Two-argument callers are unaffected.
+  formatItem?: (
+    name: string,
+    value: number,
+    row: Record<string, number | string>,
+  ) => string;
   extra?: (row: Record<string, number | string>) => string | null;
   // Item order. "reverse" (default) lists the last-drawn series first,
   // which matches a stack read top-down. "value" lists largest first, for
@@ -51,7 +59,11 @@ export function ChartTooltip({
               />
               <span className="flex-1">
                 {formatItem
-                  ? formatItem(String(p.name), Number(p.value ?? 0))
+                  ? formatItem(
+                      String(p.name),
+                      Number(p.value ?? 0),
+                      (p.payload ?? row) as Record<string, number | string>,
+                    )
                   : `${p.name}: ${p.value}`}
               </span>
             </li>

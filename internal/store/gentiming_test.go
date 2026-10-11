@@ -113,9 +113,23 @@ func TestSelectUnpushedSince_GenTimingSettle(t *testing.T) {
 		{"a later row in the session settles the earlier one; the later is held", []models.TokenEvent{
 			tok("", "a", "s1", models.ToolClaudeCode, fresh, 0), tok("", "b", "s1", models.ToolClaudeCode, fresh, 0),
 		}, settle, []string{"a"}},
-		{"a held row stops the lane: rows behind it wait", []models.TokenEvent{
+		// 2026-10-02 (P3): the holdback is scoped to the held row's own
+		// session. A held row never delays another session's ready row; it
+		// ships with it unstamped and the re-send lane (migration 140)
+		// carries the stamp when it lands.
+		{"a held row never delays another session's ready row", []models.TokenEvent{
 			tok("", "a", "s1", models.ToolClaudeCode, fresh, 0), tok("", "b", "s2", models.ToolCodex, fresh, 0),
+		}, settle, []string{"a", "b"}},
+		{"held rows at the tail are all held", []models.TokenEvent{
+			tok("", "a", "s1", models.ToolClaudeCode, fresh, 0), tok("", "b", "s2", models.ToolClaudeCode, fresh, 0),
 		}, settle, nil},
+		{"a ready row ships every held row ahead of it", []models.TokenEvent{
+			tok("", "a", "s1", models.ToolClaudeCode, fresh, 0), tok("", "b", "s2", models.ToolClaudeCode, fresh, 0),
+			tok("", "c", "s3", models.ToolCodex, fresh, 0),
+		}, settle, []string{"a", "b", "c"}},
+		{"held rows after the last ready row stay held", []models.TokenEvent{
+			tok("", "a", "s1", models.ToolCodex, fresh, 0), tok("", "b", "s2", models.ToolClaudeCode, fresh, 0),
+		}, settle, []string{"a"}},
 		{"a tool outside the transcript set is never held", []models.TokenEvent{tok("", "a", "s1", models.ToolCodex, fresh, 0)}, settle, []string{"a"}},
 		{"zero value disables the holdback", []models.TokenEvent{tok("", "a", "s1", models.ToolClaudeCode, fresh, 0)}, PushSettle{}, []string{"a"}},
 	}

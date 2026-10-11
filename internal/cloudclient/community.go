@@ -119,16 +119,16 @@ func (c *Client) UploadCommunity(ctx context.Context, req CommunityUploadRequest
 	// agreed to, and shipping it "so the upload succeeds" would be the consent
 	// check failing open. Refuse here, before anything leaves.
 	if req.ConsentGeneration < 1 {
-		return CommunityUploadResponse{}, fmt.Errorf("%s: consent generation %d is not positive — a standing-grant upload must carry the grant's generation", pfx, req.ConsentGeneration)
+		return CommunityUploadResponse{}, fmt.Errorf("%s: consent generation %d is not positive - a standing-grant upload must carry the grant's generation", pfx, req.ConsentGeneration)
 	}
 	if req.DataDictionaryDigest == "" {
-		return CommunityUploadResponse{}, fmt.Errorf("%s: empty data-dictionary digest — a standing-grant upload must carry the schema digest the grant bound", pfx)
+		return CommunityUploadResponse{}, fmt.Errorf("%s: empty data-dictionary digest - a standing-grant upload must carry the schema digest the grant bound", pfx)
 	}
 	if req.SourceWindowRule == "" {
-		return CommunityUploadResponse{}, fmt.Errorf("%s: empty source-window rule — a standing-grant upload must declare the window rule the grant bound", pfx)
+		return CommunityUploadResponse{}, fmt.Errorf("%s: empty source-window rule - a standing-grant upload must declare the window rule the grant bound", pfx)
 	}
 	if req.DeclaredTimezone == "" {
-		return CommunityUploadResponse{}, fmt.Errorf("%s: empty declared timezone — a standing-grant upload must declare the timezone the grant bound", pfx)
+		return CommunityUploadResponse{}, fmt.Errorf("%s: empty declared timezone - a standing-grant upload must declare the timezone the grant bound", pfx)
 	}
 
 	idem := communityIdempotencyKey(c.dev.thumbprint, req.Digest)

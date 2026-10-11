@@ -104,9 +104,79 @@ func TestDestructiveRules(t *testing.T) {
 			home: `C:\Users\u`, cwd: `C:\Users\u\proj`, root: `C:\Users\u\proj`,
 			wantRule: "R-101", wantEnforce: DecisionDeny,
 		},
+		// A home directory under an allowlisted location (/tmp/** by
+		// default: CI runners, sandboxes, throwaway test homes) must not
+		// turn the home / root-depth arms into an exempt temp-dir delete;
+		// only the outside-the-project arm is allow_paths-exemptible.
+		{name: "R-101 hit: home under tmp", cmd: "rm -rf ~", home: "/tmp/h", root: "/tmp/h/proj", wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: $HOME under tmp", cmd: `rm -rf $HOME`, home: "/tmp/h", root: "/tmp/h/proj", wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: home wildcard under tmp", cmd: "rm -rf ~/*", home: "/tmp/h", root: "/tmp/h/proj", wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: home plus tmp path", cmd: "rm -rf /tmp/build ~", home: "/tmp/h", root: "/tmp/h/proj", wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 safe: tmp sibling with home under tmp", cmd: "rm -rf /tmp/build", home: "/tmp/h", root: "/tmp/h/proj"},
 		{name: "R-101 safe: tmp allowlisted", cmd: "rm -rf /tmp/build"},
 		{name: "R-101 safe: cache allowlisted", cmd: "rm -rf ~/.cache/observer"},
 		{name: "R-101 near-miss: inside project", cmd: "rm -rf ./build"},
+		// Sol A2-04 (as narrowed): shell expansion the lexer cannot perform.
+		// A braced or quoted home variable is the home directory. Any other
+		// unexpanded expansion is judged as if it were EMPTY: catastrophic
+		// only where that lands on a root, the home directory or a root-depth
+		// wildcard; `$VAR/<named subpath>` goes through the normal rules. A
+		// single-quoted or escaped `$` is a literal, not an expansion.
+		{name: "R-101 hit: quoted braced HOME", cmd: `rm -rf "${HOME}"`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: braced HOME slash", cmd: `rm -rf ${HOME}/`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: braced HOME wildcard", cmd: `rm -rf "${HOME}"/*`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: bare variable", cmd: `rm -rf $TARGET`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: quoted bare variable", cmd: `rm -rf "$TARGET"`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: braced bare variable", cmd: `rm -rf "${TARGET}"`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: variable slash", cmd: `rm -rf "$DIR/"`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: variable wildcard", cmd: `rm -rf "$DIR"/*`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: variable dot", cmd: `rm -rf $DIR/.`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: variable dotdot", cmd: `rm -rf ${DIR}/..`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: root then variable", cmd: `rm -rf /$DIR`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: home then variable", cmd: `rm -rf $HOME/$SUB`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: two bare variables", cmd: `rm -rf "$A$B"`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: command substitution operand", cmd: "rm -rf ./$(echo ..)/..", wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 hit: backtick operand", cmd: "rm -rf `pwd`/..", wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 near-miss: variable with a named subpath", cmd: `rm -rf "$BUILD_DIR/out"`},
+		{name: "R-101 near-miss: braced variable with a named subpath and glob", cmd: `rm -rf "${BUILD_DIR}"/out/*`},
+		{name: "R-101 near-miss: variable as the last project segment", cmd: `rm -rf ./build/${SUB}`},
+		{name: "R-101 near-miss: single-quoted dollar is a literal", cmd: `rm -rf '$TARGET'`},
+		{name: "R-101 near-miss: escaped dollar is a literal", cmd: `rm -rf \$TARGET`},
+		{name: "R-101 near-miss: escaped dollar inside double quotes", cmd: `rm -rf "\$TARGET/"`},
+		{
+			name: "R-101 hit: powershell env home", cmd: `Remove-Item -Recurse -Force $env:USERPROFILE`, dialect: DialectPowerShell,
+			home: `C:\Users\u`, root: `C:\Users\u\proj`,
+			wantRule: "R-101", wantEnforce: DecisionDeny,
+		},
+		{
+			name: "R-101 hit: powershell bare scoped variable", cmd: `Remove-Item -Recurse -Force $env:TARGET`, dialect: DialectPowerShell,
+			home: `C:\Users\u`, root: `C:\Users\u\proj`,
+			wantRule: "R-101", wantEnforce: DecisionDeny,
+		},
+		{
+			name: "R-101 near-miss: powershell single-quoted dollar", cmd: `Remove-Item -Recurse -Force '$env:TARGET'`, dialect: DialectPowerShell,
+			home: `C:\Users\u`, root: `C:\Users\u\proj`,
+		},
+		{
+			name: "R-101 near-miss: powershell variable with a named subpath", cmd: `Remove-Item -Recurse -Force $env:BUILD\out`, dialect: DialectPowerShell,
+			home: `C:\Users\u`, root: `C:\Users\u\proj`,
+		},
+		{
+			name: "R-101 hit: cmd bare variable", cmd: `rd /s /q %APPDATA%`, dialect: DialectCmd,
+			home: `C:\Users\u`, root: `C:\Users\u\proj`,
+			wantRule: "R-101", wantEnforce: DecisionDeny,
+		},
+		{
+			name: "R-101 near-miss: cmd variable with a named subpath", cmd: `rd /s /q %APPDATA%\x`, dialect: DialectCmd,
+			home: `C:\Users\u`, root: `C:\Users\u\proj`,
+		},
+		{name: "R-101 near-miss: percent is literal outside cmd", cmd: "rm -rf ./build/%X%"},
+		// The literal offsets follow the argv through stripped assignments
+		// and wrappers.
+		{name: "R-101 near-miss: literal dollar after a wrapper", cmd: `FOO=1 sudo rm -rf '$TARGET'`},
+		{name: "R-101 hit: bare variable after a wrapper", cmd: `FOO=1 sudo rm -rf "$TARGET"`, wantRule: "R-101", wantEnforce: DecisionDeny},
+		{name: "R-101 near-miss: variable on a non-recursive rm", cmd: `rm -f "$TARGET"`},
+		{name: "R-101 near-miss: literal dollar-free percent", cmd: "rm -rf ./build/100%"},
 		{name: "R-101 near-miss: not recursive", cmd: "rm /etc/nginx/nginx.conf"},
 
 		// --- R-102: VCS / project-root delete ---
@@ -198,4 +268,62 @@ func TestDestructiveRules(t *testing.T) {
 		{name: "R-142 near-miss: posix format script", cmd: "format --check ./src"},
 	}
 	runRuleCases(t, cases, KindShellExec, "run_command")
+}
+
+// TestR101ThroughSymlink pins Sol A2-04's second bypass: a delete whose
+// operand is lexically inside the project but whose existing prefix is a
+// symlink to the home directory (or out of the project) is judged by
+// where it resolves, through the injected resolver.
+func TestR101ThroughSymlink(t *testing.T) {
+	links := map[string]string{
+		"/home/u/proj/out": "/home/u",
+		"/home/u/proj/etc": "/etc",
+		"/home/u/proj/lib": "/home/u/proj/vendor/lib",
+	}
+	resolve := func(p string) string {
+		for from, to := range links {
+			if p == from {
+				return to
+			}
+			if len(p) > len(from) && p[:len(from)+1] == from+"/" {
+				return to + p[len(from):]
+			}
+		}
+		return ""
+	}
+	for _, tc := range []struct {
+		name, cmd string
+		want      string
+	}{
+		{"home contents through a symlink", "rm -rf ./out/*", "R-101"},
+		{"home itself through a symlink", "rm -rf out", "R-101"},
+		{"outside the project through a symlink", "rm -rf ./etc/nginx", "R-101"},
+		{"symlink that stays inside the project", "rm -rf ./lib/x", ""},
+		{"plain inside path", "rm -rf ./build", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, err := New(Config{Mode: ModeEnforce, Home: "/home/u", ResolveLinks: resolve})
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := eng.Evaluate(Event{
+				Kind: KindShellExec, Target: tc.cmd, Cwd: "/home/u/proj", ProjectRoot: "/home/u/proj",
+				SessionID: "s1", Now: time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC),
+			})
+			if v.RuleID != tc.want {
+				t.Fatalf("rule = %q (%s), want %q", v.RuleID, v.Reason, tc.want)
+			}
+			if tc.want != "" && v.Decision != DecisionDeny {
+				t.Errorf("decision = %s, want deny", v.Decision)
+			}
+		})
+	}
+	// Without a resolver the engine stays lexical (the pure default).
+	eng, err := New(Config{Mode: ModeEnforce, Home: "/home/u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := eng.Evaluate(Event{Kind: KindShellExec, Target: "rm -rf ./out/*", Cwd: "/home/u/proj", ProjectRoot: "/home/u/proj", Now: time.Now()}); v.RuleID == "R-101" {
+		t.Error("a lexical engine resolved a symlink it was never told about")
+	}
 }

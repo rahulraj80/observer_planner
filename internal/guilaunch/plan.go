@@ -74,10 +74,46 @@ type Plan struct {
 	// cold-start-only app whose running instance will not re-read its
 	// environment). Empty only when an unqualified wrap applied.
 	WrapNote string
+	// WrapReason is the STRUCTURED cause behind WrapApplied=false — a closed
+	// vocabulary a UI can phrase from without parsing WrapNote. Empty
+	// (WrapReasonNone) exactly when the wrap applied. It is set by the same
+	// wrap rule that sets WrapApplied and WrapNote, so the three can never
+	// disagree.
+	WrapReason WrapReason
 	// Notes are launch-composition advisories unrelated to the wrap (today:
 	// a project directory ignored because the app takes no such argument).
 	Notes []string
 }
+
+// WrapReason is the closed vocabulary of "why this launch's routing wrap does
+// not reach the app". It is wire-stable (the dashboard ships it as
+// routing_reason), so values are only ever added, never renamed.
+type WrapReason string
+
+const (
+	// WrapReasonNone — the wrap applied; routing reaches the app.
+	WrapReasonNone WrapReason = ""
+	// WrapReasonInteropEnvNotPropagated — a WSL daemon launched a Windows app
+	// across the interop boundary; the daemon's environment does not cross it.
+	WrapReasonInteropEnvNotPropagated WrapReason = "interop_env_not_propagated"
+	// WrapReasonPackagedAppNoEnv — an explorer-launched packaged app inherits
+	// no environment from the daemon.
+	WrapReasonPackagedAppNoEnv WrapReason = "packaged_app_no_env"
+	// WrapReasonHandoffLauncher — the resolved launcher hands the request to an
+	// already-running instance; no new process receives the environment.
+	WrapReasonHandoffLauncher WrapReason = "handoff_launcher"
+	// WrapReasonNoProxyURL — no observer proxy URL was resolved to inject.
+	WrapReasonNoProxyURL WrapReason = "no_proxy_url"
+	// WrapReasonNoRoutingVars — a child-env row declares no variables (a
+	// registry defect the integration coverage test pins).
+	WrapReasonNoRoutingVars WrapReason = "no_routing_vars"
+	// WrapReasonConfigWrite — routing is written into the app's own config by
+	// the config-lane writer (`observer init`), not delivered at launch.
+	WrapReasonConfigWrite WrapReason = "config_write"
+	// WrapReasonNoMechanism — the row has no grounded base-URL mechanism (a
+	// WrapNone row, or an unknown wrap kind: the honest zero).
+	WrapReasonNoMechanism WrapReason = "no_wrap_mechanism"
+)
 
 // mechanism names the launch SHAPE the argv rules selected. It exists so the
 // wrap table can branch on the fact that matters — an explorer-launched
@@ -172,8 +208,56 @@ func takesProjectDir(spec integration.GUILaunchSpec, in Inputs) bool {
 type wrapResult struct {
 	env     []string
 	applied bool
+	reason  WrapReason
 	note    string
 }
+
+// childEnvBlocker is one row of the ordered child-env blocker table: the FIRST
+// row whose match fires decides why an environment wrap cannot reach the app.
+// Every row branches on a launch CAPABILITY (interop boundary, launch
+// mechanism, hand-off launcher, resolved proxy URL, declared variables) —
+// never on a product id (CLAUDE.md #3/#5).
+type childEnvBlocker struct {
+	reason WrapReason
+	note   string
+	match  func(integration.GUILaunchSpec, Inputs, mechanism) bool
+}
+
+var childEnvBlockers = []childEnvBlocker{
+	{
+		reason: WrapReasonInteropEnvNotPropagated,
+		note:   "interop launch: environment is not propagated across the WSL boundary (WSLENV not set)",
+		match:  func(_ integration.GUILaunchSpec, in Inputs, _ mechanism) bool { return in.ViaInterop },
+	},
+	{
+		reason: WrapReasonPackagedAppNoEnv,
+		note:   "explorer-launched packaged app inherits no environment",
+		match:  func(_ integration.GUILaunchSpec, _ Inputs, mech mechanism) bool { return mech == mechPackagedApp },
+	},
+	{
+		reason: WrapReasonHandoffLauncher,
+		note:   "the resolved launcher is a hand-off client that asks an already-running instance to open the folder - no new process receives the routing environment",
+		match: func(spec integration.GUILaunchSpec, in Inputs, _ mechanism) bool {
+			return isHandoffLauncher(spec, in.Bin)
+		},
+	},
+	{
+		reason: WrapReasonNoProxyURL,
+		note:   "no observer proxy URL resolved - nothing to inject",
+		match:  func(_ integration.GUILaunchSpec, in Inputs, _ mechanism) bool { return in.ProxyURL == "" },
+	},
+	{
+		// A WrapChildEnv row with no variables is a registry defect the
+		// integration coverage test pins; report it honestly rather than
+		// claiming an empty wrap took.
+		reason: WrapReasonNoRoutingVars,
+		note:   "no routing variables are declared for this row",
+		match:  func(spec integration.GUILaunchSpec, _ Inputs, _ mechanism) bool { return len(spec.Wrap.Env) == 0 },
+	},
+}
+
+// noMechanismNote is the WrapNone floor's note when the row states no reason.
+const noMechanismNote = "no routing wrap: this app has no grounded base-URL mechanism"
 
 // wrapRule is one row of the WrapKind table. Unlike launchRules this is a
 // LOOKUP (the kind is a closed vocabulary), so a missing kind is the honest
@@ -187,20 +271,10 @@ var wrapRules = []wrapRule{
 	{
 		kind: integration.WrapChildEnv,
 		apply: func(spec integration.GUILaunchSpec, in Inputs, mech mechanism) wrapResult {
-			switch {
-			case in.ViaInterop:
-				return wrapResult{note: "interop launch: environment is not propagated across the WSL boundary (WSLENV not set)"}
-			case mech == mechPackagedApp:
-				return wrapResult{note: "explorer-launched packaged app inherits no environment"}
-			case isHandoffLauncher(spec, in.Bin):
-				return wrapResult{note: "the resolved launcher is a hand-off client that asks an already-running instance to open the folder - no new process receives the routing environment"}
-			case in.ProxyURL == "":
-				return wrapResult{note: "no observer proxy URL resolved — nothing to inject"}
-			case len(spec.Wrap.Env) == 0:
-				// A WrapChildEnv row with no variables is a registry defect the
-				// integration coverage test pins; report it honestly rather
-				// than claiming an empty wrap took.
-				return wrapResult{note: "no routing variables are declared for this row"}
+			for _, b := range childEnvBlockers {
+				if b.match(spec, in, mech) {
+					return wrapResult{reason: b.reason, note: b.note}
+				}
 			}
 			env := make([]string, 0, len(spec.Wrap.Env))
 			for _, v := range spec.Wrap.Env {
@@ -216,7 +290,7 @@ var wrapRules = []wrapRule{
 			if tool == "" {
 				tool = spec.ID
 			}
-			return wrapResult{note: fmt.Sprintf(
+			return wrapResult{reason: WrapReasonConfigWrite, note: fmt.Sprintf(
 				"route is written by the %s config-lane writer (`observer init`), not at launch", tool)}
 		},
 	},
@@ -224,9 +298,9 @@ var wrapRules = []wrapRule{
 		kind: integration.WrapNone,
 		apply: func(spec integration.GUILaunchSpec, _ Inputs, _ mechanism) wrapResult {
 			if reason := strings.TrimSpace(spec.Wrap.Reason); reason != "" {
-				return wrapResult{note: reason}
+				return wrapResult{reason: WrapReasonNoMechanism, note: reason}
 			}
-			return wrapResult{note: "no routing wrap: this app has no grounded base-URL mechanism"}
+			return wrapResult{reason: WrapReasonNoMechanism, note: noMechanismNote}
 		},
 	},
 }
@@ -291,7 +365,7 @@ func Compose(spec integration.GUILaunchSpec, in Inputs) (Plan, error) {
 	// with a note — rather than failing a launch the app would happily perform.
 	if in.ProjectRoot != "" && !spec.ProjectDirArgv {
 		plan.Notes = append(plan.Notes,
-			"this app takes no project-directory argument — the requested directory was ignored")
+			"this app takes no project-directory argument - the requested directory was ignored")
 	}
 
 	// explorer shell:AppsFolder takes no further arguments, so operator args
@@ -304,6 +378,7 @@ func Compose(spec integration.GUILaunchSpec, in Inputs) (Plan, error) {
 	res := applyWrap(spec, in, rule.mech)
 	plan.Env = res.env
 	plan.WrapApplied = res.applied
+	plan.WrapReason = res.reason
 	plan.WrapNote = res.note
 	return plan, nil
 }
@@ -322,7 +397,7 @@ func matchLaunchRule(spec integration.GUILaunchSpec, in Inputs) (launchRule, boo
 // in the ColdStartOnly caveat. An unknown kind falls back to the WrapNone rule
 // — the honest zero, never an assumed wrap.
 func applyWrap(spec integration.GUILaunchSpec, in Inputs, mech mechanism) wrapResult {
-	res := wrapResult{note: "no routing wrap: this app has no grounded base-URL mechanism"}
+	res := wrapResult{reason: WrapReasonNoMechanism, note: noMechanismNote}
 	for _, r := range wrapRules {
 		if r.kind == spec.Wrap.Kind {
 			res = r.apply(spec, in, mech)
@@ -347,7 +422,7 @@ func joinNotes(parts ...string) string {
 			kept = append(kept, p)
 		}
 	}
-	return strings.Join(kept, " — ")
+	return strings.Join(kept, " - ")
 }
 
 // isHandoffLauncher reports whether bin has one of the row's

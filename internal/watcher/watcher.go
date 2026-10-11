@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -35,9 +37,13 @@ type Logger interface {
 // Watcher drives session-file ingestion for every registered adapter, both
 // one-shot (Scan) and continuous (Watch).
 type Watcher struct {
-	store    *store.Store
-	registry *adapter.Registry
-	logger   Logger
+	// ingestNotify, when set, is told after every successful ingest that
+	// inserted rows (SetIngestNotifier). Atomic so the daemon may install it
+	// while the watcher runs.
+	ingestNotify atomic.Pointer[func(tokens, actions int)]
+	store        *store.Store
+	registry     *adapter.Registry
+	logger       Logger
 	// nativePredicate maps an adapter name to its native-tool predicate
 	// used for setting actions.is_native_tool.
 	nativePredicate map[string]func(rawToolName string) bool
@@ -66,6 +72,18 @@ type Watcher struct {
 	// race; inter-file contention is still handled by SQLite's
 	// busy_timeout backoff.
 	fileLocks sync.Map // map[string]*sync.Mutex
+	// chunkStalls remembers, per path, the cursor at which a bounded
+	// window of an over-cap tail made no progress (one record longer than
+	// the window); the oversize gate skips the file at that offset
+	// (oversizechunk.go, T-413).
+	chunkStalls sync.Map // map[string]int64
+	// scanGate admits ONE background full scan at a time (Watch's
+	// initial, refresh and poll scans, via gatedScan). A trigger that
+	// finds a scan already running is dropped: the running walk covers
+	// the same roots, and the next poll scan picks up anything it passed
+	// before the file appeared. The explicit Scan / Rescan / RefreshRoots
+	// entry points do not take it.
+	scanGate sync.Mutex
 	// warningDedup suppresses repeated adapter warnings with the same
 	// (adapter, path, message) tuple within a TTL window. The
 	// antigravity adapter, on Windows, emits the same OSCrypt /
@@ -93,6 +111,13 @@ type Watcher struct {
 	fsw       *fsnotify.Watcher
 	byRoot    map[string]adapter.Adapter
 	refreshCh chan struct{} // buffered 1; nudges Watch to re-apply + Scan
+	// pendingRoots holds the roots an applyDetectedRoots call has claimed
+	// and is registering without liveMu (T-413), so a concurrent call
+	// does not walk them twice. Guarded by liveMu.
+	pendingRoots map[string]struct{}
+	// addRoot registers one root recursively; nil means addRecursive.
+	// A test substitutes a slow one to prove startup does not wait on it.
+	addRoot func(watchAdder, string) addRecursiveResult
 
 	// rootCache memoizes each adapter's identity-deduped watch roots
 	// against a fingerprint of the RAW WatchPaths slice they were
@@ -276,13 +301,35 @@ type rootBinding struct {
 //
 // Registration ONLY — it never walks. Callers that want the new root's
 // pre-existing backlog captured go through hotAddRoots.
-func (w *Watcher) applyDetectedRoots() []rootBinding {
+//
+// THE RECURSIVE REGISTRATION RUNS WITHOUT liveMu (T-413). addRecursive
+// walks every directory under a root, and on a WSL node half the roots are
+// on the Windows DrvFs mount where that walk is slow: the 2026-10-05 node
+// spent about two minutes registering roots at startup. Holding liveMu for
+// that long stalled everything else that takes it (event dispatch through
+// snapshotByRoot, the poller's periodic re-detect). Candidates are claimed
+// under the lock (pendingRoots keeps two concurrent callers from walking
+// the same root), walked unlocked, and recorded under the lock again.
+//
+// THE WALK STOPS ON ctx (T-553). A stop that lands while a slow root is
+// still being walked used to wait for the whole tree: Watch reaches its
+// ctx.Done case only after this returns, so a daemon could release its ports
+// on SIGTERM and keep walking DrvFs for minutes with the DB open. The adder
+// handed to the walk refuses every Add once ctx is done, addRecursive stops
+// on that refusal, and no further root is started. Roots a cancelled pass did
+// not finish are released from pendingRoots and left out of byRoot, so the
+// next live pass (there is none after a stop) would retry them.
+func (w *Watcher) applyDetectedRoots(ctx context.Context) []rootBinding {
 	w.liveMu.Lock()
-	defer w.liveMu.Unlock()
-	if w.fsw == nil || w.byRoot == nil {
+	fsw := w.fsw
+	if fsw == nil || w.byRoot == nil {
+		w.liveMu.Unlock()
 		return nil
 	}
-	var added []rootBinding
+	if w.pendingRoots == nil {
+		w.pendingRoots = map[string]struct{}{}
+	}
+	var todo []rootBinding
 	for _, a := range w.registry.Detected(w.allow) {
 		for _, root := range w.watchRoots(a) {
 			if root == "" {
@@ -291,36 +338,70 @@ func (w *Watcher) applyDetectedRoots() []rootBinding {
 			if _, ok := w.byRoot[root]; ok {
 				continue
 			}
-			addRes := addRecursive(w.fsw, root)
-			if addRes.RootErr != nil {
-				w.logger.Warn("watcher.applyDetectedRoots: add path",
-					"adapter", a.Name(), "root", root, "err", addRes.RootErr)
+			if _, ok := w.pendingRoots[root]; ok {
 				continue
 			}
-			// One WARN per root per pass for partial failures: the root
-			// IS registered and its watched subtree keeps delivering, so
-			// this is a gap to report, not a reason to drop the root.
-			if addRes.Failed > 0 {
-				w.logger.Warn("watcher.applyDetectedRoots: some subdirectories could not be watched",
-					"adapter", a.Name(), "root", root,
-					"watched", addRes.Added, "failed", addRes.Failed, "err", addRes.FirstErr)
+			w.pendingRoots[root] = struct{}{}
+			todo = append(todo, rootBinding{adapter: a, root: root})
+		}
+	}
+	w.liveMu.Unlock()
+
+	addRoot := w.addRoot
+	if addRoot == nil {
+		addRoot = addRecursive
+	}
+	adder := cancelAwareAdder{ctx: ctx, next: fsw}
+	var added []rootBinding
+	for i, rb := range todo {
+		a, root := rb.adapter, rb.root
+		if ctx.Err() != nil {
+			// Stopped: release the claims this pass will not walk.
+			w.liveMu.Lock()
+			for _, rest := range todo[i:] {
+				delete(w.pendingRoots, rest.root)
 			}
+			w.liveMu.Unlock()
+			break
+		}
+		addRes := addRoot(adder, root)
+		w.liveMu.Lock()
+		delete(w.pendingRoots, root)
+		live := w.fsw == fsw && w.byRoot != nil && ctx.Err() == nil
+		if live && addRes.RootErr == nil {
 			w.byRoot[root] = a
-			added = append(added, rootBinding{adapter: a, root: root})
-			// A root that does not exist is registered anyway —
-			// addRecursive's WalkDir swallows the stat error, and
-			// adapters return canonical roots regardless of install
-			// state — but it is not news. Only an EXISTING root is
-			// worth an operator's attention at Info; the rest are
-			// bookkeeping and belong at Debug, where they stop
-			// drowning the real hot-add events in the journal.
-			if info, err := dirStat(root); err == nil && info.IsDir() {
-				w.logger.Info("watcher: hot-added watch root",
-					"adapter", a.Name(), "root", root)
-			} else {
-				w.logger.Debug("watcher: hot-added watch root (absent)",
-					"adapter", a.Name(), "root", root)
-			}
+		}
+		w.liveMu.Unlock()
+		if !live {
+			continue // Watch returned while this root was being walked
+		}
+		if addRes.RootErr != nil {
+			w.logger.Warn("watcher.applyDetectedRoots: add path",
+				"adapter", a.Name(), "root", root, "err", addRes.RootErr)
+			continue
+		}
+		// One WARN per root per pass for partial failures: the root
+		// IS registered and its watched subtree keeps delivering, so
+		// this is a gap to report, not a reason to drop the root.
+		if addRes.Failed > 0 {
+			w.logger.Warn("watcher.applyDetectedRoots: some subdirectories could not be watched",
+				"adapter", a.Name(), "root", root,
+				"watched", addRes.Added, "failed", addRes.Failed, "err", addRes.FirstErr)
+		}
+		added = append(added, rb)
+		// A root that does not exist is registered anyway —
+		// addRecursive's WalkDir swallows the stat error, and
+		// adapters return canonical roots regardless of install
+		// state — but it is not news. Only an EXISTING root is
+		// worth an operator's attention at Info; the rest are
+		// bookkeeping and belong at Debug, where they stop
+		// drowning the real hot-add events in the journal.
+		if info, err := dirStat(root); err == nil && info.IsDir() {
+			w.logger.Info("watcher: hot-added watch root",
+				"adapter", a.Name(), "root", root)
+		} else {
+			w.logger.Debug("watcher: hot-added watch root (absent)",
+				"adapter", a.Name(), "root", root)
 		}
 	}
 	return added
@@ -346,7 +427,7 @@ func (w *Watcher) applyDetectedRoots() []rootBinding {
 // inherits the identity dedup of watchRoots — the bindings ARE the
 // deduped roots, and a root already in byRoot is never re-added.
 func (w *Watcher) hotAddRoots(ctx context.Context) int {
-	added := w.applyDetectedRoots()
+	added := w.applyDetectedRoots(ctx)
 	for _, b := range added {
 		if ctx.Err() != nil {
 			break
@@ -409,6 +490,20 @@ func (w *Watcher) snapshotByRoot() map[string]adapter.Adapter {
 // drops every transcript cache observation — which is why non-proxied
 // sessions had no cache_entries. Idempotent; nil is a no-op disable.
 func (w *Watcher) SetCacheEngine(e *cachetrack.Engine) { w.store.SetCacheEngine(e) }
+
+// SetIngestNotifier installs the daemon's "new rows committed" callback
+// (2026-10-02 budget-latency arc, P3): it fires after an ingest that inserted
+// at least one token or action row (Ingest's counts, which include an
+// idempotent re-write of an existing row), with the two counts, so the org push loop
+// and the budget-warning service react to transcript-only tools the way they
+// react to proxied turns. The callback must not block. nil disables.
+func (w *Watcher) SetIngestNotifier(fn func(tokens, actions int)) {
+	if fn == nil {
+		w.ingestNotify.Store(nil)
+		return
+	}
+	w.ingestNotify.Store(&fn)
+}
 
 // SetRootCommitResolver wires the lazy root-commit exec (Project Identity
 // Resolver v2, docs/plans/project-identity-resolver-v2-plan-2026-09-06.md
@@ -497,31 +592,185 @@ func (w *Watcher) ScanFile(ctx context.Context, path string, forceFromZero bool)
 	return ScanResult{}, fmt.Errorf("watcher.ScanFile: no enabled adapter recognizes %s", path)
 }
 
+// scan walks every detected adapter's roots and processes their session
+// files, interleaving FILES across adapters round-robin (T-412): one file
+// of adapter 1, one of adapter 2, ..., then the next file of each. Before
+// this, adapters were walked one after another, so a single slow tree
+// (166 Claude Code subagent transcripts, 747 MB, at ~1 s per FTS write)
+// held every other tool's backlog (Codex, Cursor) for the whole pass, and
+// every daemon restart repeated it.
+//
+// Processing stays SERIAL (one processFile at a time, on this goroutine):
+// only the directory walks run ahead, one goroutine per adapter, handing
+// paths over an unbuffered channel. So the writer concurrency and the
+// per-file cursor semantics are exactly the old ones; only the order in
+// which files of DIFFERENT adapters are visited changes. Within one
+// adapter the walk order is unchanged.
 func (w *Watcher) scan(ctx context.Context, forceFromZero bool) (ScanResult, error) {
 	var res ScanResult
 	detected := w.registry.Detected(w.allow)
 	if len(detected) == 0 {
-		w.logger.Info("watcher.Scan: no adapters detected — nothing to do")
+		w.logger.Info("watcher.Scan: no adapters detected - nothing to do")
 		return res, nil
 	}
+	walkCtx, cancel := context.WithCancel(ctx)
+	var walkers sync.WaitGroup
+	defer func() {
+		cancel()
+		walkers.Wait()
+	}()
+	type scanLane struct {
+		adapter adapter.Adapter
+		files   <-chan string
+	}
+	lanes := make([]scanLane, 0, len(detected))
 	for _, a := range detected {
-		for _, root := range w.watchRoots(a) {
-			r := w.walkRoot(ctx, a, root, forceFromZero)
-			res.FilesProcessed += r.FilesProcessed
-			res.Errors += r.Errors
+		files := make(chan string)
+		lanes = append(lanes, scanLane{adapter: a, files: files})
+		walkers.Add(1)
+		go func(a adapter.Adapter) {
+			defer walkers.Done()
+			defer close(files)
+			for _, root := range w.watchRoots(a) {
+				if walkCtx.Err() != nil {
+					return
+				}
+				w.walkRootFiles(walkCtx, a, root, func(path string) bool {
+					select {
+					case files <- path:
+						return true
+					case <-walkCtx.Done():
+						return false
+					}
+				})
+			}
+		}(a)
+	}
+	// Round-robin over the lanes that HAVE a file ready (P3-40): the lane
+	// after the one just served is offered first, but a lane whose walker is
+	// still between two matching files (a sparse tree on a slow filesystem)
+	// is skipped rather than waited on. Only when no lane is ready does the
+	// loop block, and then on every live lane at once.
+	next := 0
+	for len(lanes) > 0 {
+		if ctx.Err() != nil {
+			return res, nil
 		}
+		idx, path, ok, got := -1, "", false, false
+		for k := 0; k < len(lanes) && !got; k++ {
+			i := (next + k) % len(lanes)
+			select {
+			case path, ok = <-lanes[i].files:
+				idx, got = i, true
+			default:
+			}
+		}
+		if !got {
+			cases := make([]reflect.SelectCase, 0, len(lanes)+1)
+			for _, l := range lanes {
+				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(l.files)})
+			}
+			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())})
+			chosen, v, recvOK := reflect.Select(cases)
+			if chosen == len(lanes) {
+				return res, nil
+			}
+			idx, ok = chosen, recvOK
+			if recvOK {
+				path = v.String()
+			}
+		}
+		if !ok {
+			// This adapter's walk is finished.
+			lanes = append(lanes[:idx], lanes[idx+1:]...)
+			if len(lanes) > 0 {
+				if idx < next {
+					next--
+				}
+				next %= len(lanes)
+			}
+			continue
+		}
+		w.scanOneFile(ctx, lanes[idx].adapter, path, forceFromZero, &res)
+		next = (idx + 1) % len(lanes)
 	}
 	return res, nil
 }
 
+// gatedScan runs one background full scan unless another is already
+// running (scanGate), logging the outcome. trigger names the caller for
+// the log line.
+func (w *Watcher) gatedScan(ctx context.Context, trigger string) {
+	if !w.scanGate.TryLock() {
+		w.logger.Debug("watcher: full scan already running, trigger dropped", "trigger", trigger)
+		return
+	}
+	defer w.scanGate.Unlock()
+	started := time.Now()
+	res, err := w.scan(ctx, false)
+	if err != nil && ctx.Err() == nil {
+		w.logger.Warn("watcher: full scan failed", "trigger", trigger, "err", err)
+		return
+	}
+	if trigger == "initial" && ctx.Err() == nil {
+		w.logger.Info("watcher: initial scan complete",
+			"files", res.FilesProcessed, "errors", res.Errors,
+			"took_ms", time.Since(started).Milliseconds())
+	}
+}
+
+// fileBusy reports whether another goroutine is processing path right now
+// (its per-file lock is held). The cursor poller skips such a file instead
+// of queueing behind it: the holder is already catching that file up, and
+// waiting would stall every file after it in the poll pass (T-412). A
+// file that frees up a moment later is retried on the next tick.
+func (w *Watcher) fileBusy(path string) bool {
+	muRaw, ok := w.fileLocks.Load(path)
+	if !ok {
+		return false
+	}
+	mu := muRaw.(*sync.Mutex)
+	if mu.TryLock() {
+		mu.Unlock()
+		return false
+	}
+	return true
+}
+
+// scanOneFile is the per-file step shared by every walk: process the file
+// and count the outcome. A failure is logged and counted, never fatal to
+// the walk.
+func (w *Watcher) scanOneFile(ctx context.Context, a adapter.Adapter, path string, forceFromZero bool, res *ScanResult) {
+	if err := w.processFile(ctx, a, path, forceFromZero); err != nil {
+		res.Errors++
+		w.logger.Warn("watcher.Scan: process failed",
+			"adapter", a.Name(), "path", path, "err", err)
+		return
+	}
+	res.FilesProcessed++
+}
+
 // walkRoot walks ONE (adapter, root) pair and processes every session
-// file under it. The single walk implementation shared by the full scan
-// (scan, over every detected adapter's roots) and the scoped hot-add
-// walk (hotAddRoots, over just the roots that appeared) — so a file
-// picked up by either path takes the identical processFile route,
-// cursor semantics included.
+// file under it, serially. Used by the scoped hot-add walk (hotAddRoots,
+// over just the roots that appeared); the full scan uses the same
+// walkRootFiles filter and the same scanOneFile step, so a file picked up
+// by either path takes the identical processFile route, cursor semantics
+// included.
 func (w *Watcher) walkRoot(ctx context.Context, a adapter.Adapter, root string, forceFromZero bool) ScanResult {
 	var res ScanResult
+	w.walkRootFiles(ctx, a, root, func(path string) bool {
+		w.scanOneFile(ctx, a, path, forceFromZero, &res)
+		return true
+	})
+	return res
+}
+
+// walkRootFiles walks ONE (adapter, root) pair and calls visit for every
+// session file the scan should process: a regular entry the adapter
+// recognizes and, when SkipModifiedBefore is set, last written inside the
+// window. visit returning false stops the walk. This is the single filter
+// every scan path shares.
+func (w *Watcher) walkRootFiles(ctx context.Context, a adapter.Adapter, root string, visit func(path string) bool) {
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -562,20 +811,15 @@ func (w *Watcher) walkRoot(ctx context.Context, a adapter.Adapter, root string, 
 				return nil
 			}
 		}
-		if err := w.processFile(ctx, a, path, forceFromZero); err != nil {
-			res.Errors++
-			w.logger.Warn("watcher.Scan: process failed",
-				"adapter", a.Name(), "path", path, "err", err)
-			return nil
+		if !visit(path) {
+			return fs.SkipAll
 		}
-		res.FilesProcessed++
 		return nil
 	})
 	if walkErr != nil && !errors.Is(walkErr, ctx.Err()) {
 		w.logger.Warn("watcher.Scan: walk failed",
 			"adapter", a.Name(), "root", root, "err", walkErr)
 	}
-	return res
 }
 
 // ScanResult is the summary of a scan invocation.
@@ -585,7 +829,8 @@ type ScanResult struct {
 }
 
 // Watch starts an fsnotify watch on every detected adapter's roots (plus an
-// initial Scan) and keeps ingesting until ctx is cancelled.
+// initial Scan, run in the background alongside the poller and the event
+// loop) and keeps ingesting until ctx is cancelled.
 //
 // Unlike the pre-RefreshRoots idle path, an empty Detected set at start no
 // longer parks forever on ctx.Done: the event loop + poller always run so
@@ -611,33 +856,52 @@ func (w *Watcher) Watch(ctx context.Context) error {
 	w.byRoot = map[string]adapter.Adapter{}
 	w.liveMu.Unlock()
 
-	// Registration only: the initial full Scan directly below walks every
-	// one of these roots anyway, so paying hotAddRoots' scoped walk here
-	// would walk the whole tree twice at startup.
-	if n := len(w.applyDetectedRoots()); n == 0 {
-		w.logger.Info("watcher.Watch: no adapters detected yet — waiting for RefreshRoots / root re-detect")
+	// Initial scan, in the BACKGROUND (T-412). It used to run here to
+	// completion before the poller and the fsnotify loop below started, so
+	// one slow tree held every other tool's live writes until the whole
+	// backlog was parsed - for days on a large node, and again on every
+	// restart. Now the poller and fsnotify serve live writes while the
+	// backlog catches up. Racing them is the same race fsnotify and the
+	// poller always had: processFile serializes per file and is idempotent
+	// (cursor + the (source_file, source_event_id) UNIQUE index).
+	//
+	// backgroundScans is joined before Watch returns, so no scan outlives
+	// the caller's store.
+	//
+	// The detector and the poller below are joined before Watch returns
+	// (T-553), like the background scans: both can be mid-walk (a hot-add,
+	// a poll scan) when the stop lands, and an unjoined walk outlived Watch
+	// and kept the watcher's DB handle busy while the daemon closed it.
+	// loopCtx also ends them, AND the background scans (P3-35), when Watch
+	// returns for a reason other than ctx (fsnotify closing its channels),
+	// so the joins cannot wait for a whole scan on an uncancelled context.
+	// Deferred in this order so stopLoops runs first, then both joins.
+	loopCtx, stopLoops := context.WithCancel(ctx)
+	var loops sync.WaitGroup
+	defer loops.Wait()
+	var backgroundScans sync.WaitGroup
+	defer backgroundScans.Wait()
+	defer stopLoops()
+	startScan := func(trigger string) {
+		backgroundScans.Add(1)
+		go func() {
+			defer backgroundScans.Done()
+			w.gatedScan(loopCtx, trigger)
+		}()
 	}
+	startScan("initial")
 
-	// Initial scan, so existing files are caught up before watching.
-	if _, err := w.Scan(ctx); err != nil {
-		return err
-	}
-
-	// Drain any RefreshRoots signal that arrived before fsw was live so
-	// we don't leave a stale nudge that would only re-Scan once.
-	select {
-	case <-w.refreshCh:
-		_ = w.hotAddRoots(ctx)
-		if _, err := w.Scan(ctx); err != nil {
-			return err
-		}
-	default:
-	}
+	// A RefreshRoots signal that arrived before fsw was live is handled by
+	// the event loop's refreshCh case below like any later one.
 
 	// Standalone root re-detection. Independent of the poller so a node
 	// that disabled polling still hot-adds (and walks) a store that
 	// appears after the daemon started.
-	go w.runRootDetector(ctx)
+	loops.Add(1)
+	go func() {
+		defer loops.Done()
+		w.runRootDetector(loopCtx)
+	}()
 
 	// Polling fallback. fsnotify is documented to drop events on busy or
 	// virtualized filesystems (e.g. WSL2 reading from a Windows NTFS
@@ -654,7 +918,23 @@ func (w *Watcher) Watch(ctx context.Context) error {
 	// source_event_id) UNIQUE index), so racing fsnotify and the poller
 	// is safe.
 	if w.pollInterval > 0 {
-		go w.runPoller(ctx)
+		loops.Add(1)
+		go func() {
+			defer loops.Done()
+			w.runPoller(loopCtx)
+		}()
+	}
+
+	// Registration only: the initial full Scan above walks every one of
+	// these roots anyway, so paying hotAddRoots' scoped walk here would
+	// walk the whole tree twice at startup. It runs AFTER the scan and the
+	// poller have started (T-413): the recursive fsnotify registration of
+	// a slow (DrvFs) tree took about two minutes on the 2026-10-05 node,
+	// and nothing was ingested until it finished. Live fsnotify events are
+	// served from the loop below once it returns; until then the scan and
+	// the poller cover every root.
+	if n := len(w.applyDetectedRoots(ctx)); n == 0 {
+		w.logger.Info("watcher.Watch: no adapters detected yet - waiting for RefreshRoots / root re-detect")
 	}
 
 	type debounceKey struct {
@@ -678,9 +958,9 @@ func (w *Watcher) Watch(ctx context.Context) error {
 			return nil
 		case <-w.refreshCh:
 			_ = w.hotAddRoots(ctx)
-			if _, err := w.Scan(ctx); err != nil && ctx.Err() == nil {
-				w.logger.Warn("watcher.Watch: refresh scan failed", "err", err)
-			}
+			// Off the event loop, so fsnotify events keep draining while
+			// it walks; skipped if a full scan is already running.
+			startScan("refresh")
 		case err, ok := <-fsw.Errors:
 			if !ok {
 				return nil
@@ -772,8 +1052,11 @@ func symlinkLeafEscapes(path string, roots []string) (bool, string) {
 }
 
 func (w *Watcher) processFile(ctx context.Context, a adapter.Adapter, path string, forceFromZero bool) error {
-	_, err := w.processFileMode(ctx, a, path, forceFromZero, false)
-	return err
+	out, err := w.processFileFrom(ctx, a, path, forceFromZero, false, 0)
+	if err != nil || !forceFromZero {
+		return err
+	}
+	return w.rescanRemainingWindows(ctx, a, path, out)
 }
 
 // processFileStrict is the reconciliation variant of processFile. It keeps
@@ -806,7 +1089,15 @@ func (w *Watcher) processFileStrict(ctx context.Context, a adapter.Adapter, path
 }
 
 func (w *Watcher) processFileMode(ctx context.Context, a adapter.Adapter, path string, forceFromZero, strict bool) (out budgetCaptureFileOutcome, err error) {
-	if w.skipProcessFile(ctx, a, path, forceFromZero, strict, &out) {
+	return w.processFileFrom(ctx, a, path, forceFromZero, strict, 0)
+}
+
+// processFileFrom is processFileMode with a resume offset for a forced
+// from-zero pass: resumeAt is where this window starts (0 for the first one).
+// It is ignored when forceFromZero is false (the persisted cursor decides).
+func (w *Watcher) processFileFrom(ctx context.Context, a adapter.Adapter, path string, forceFromZero, strict bool, resumeAt int64) (out budgetCaptureFileOutcome, err error) {
+	skip, readLimit := w.skipProcessFile(ctx, a, path, forceFromZero, strict, &out)
+	if skip {
 		return out, nil
 	}
 
@@ -832,7 +1123,7 @@ func (w *Watcher) processFileMode(ctx context.Context, a adapter.Adapter, path s
 		return out, nil
 	}
 
-	var off int64
+	off := resumeAt
 	if !forceFromZero {
 		var getErr error
 		off, getErr = w.store.GetCursor(ctx, path)
@@ -856,7 +1147,7 @@ func (w *Watcher) processFileMode(ctx context.Context, a adapter.Adapter, path s
 		}
 	}
 	out.startOffset = off
-	res, parseErr := a.ParseSessionFile(ctx, path, off)
+	res, parseErr := a.ParseSessionFile(adapter.WithParseByteLimit(ctx, readLimit), path, off)
 	if parseErr != nil {
 		if strict {
 			out.parseError = parseErr
@@ -880,6 +1171,10 @@ func (w *Watcher) processFileMode(ctx context.Context, a adapter.Adapter, path s
 	if strict {
 		out.strictResult = &res
 		return out, nil
+	}
+	if readLimit > 0 {
+		w.noteChunkProgress(a, path, off, res)
+		out.windowed, out.windowEnd = true, res.NewOffset
 	}
 	w.logProcessWarnings(a, path, res.Warnings)
 	if ingestErr := w.ingestProcessResult(ctx, a, res); ingestErr != nil {
@@ -908,8 +1203,9 @@ func (w *Watcher) processFileMode(ctx context.Context, a adapter.Adapter, path s
 
 // skipProcessFile applies the pre-parse safety gates shared by ordinary and
 // strict processing. It returns true when the caller must stop before opening
-// the source.
-func (w *Watcher) skipProcessFile(ctx context.Context, a adapter.Adapter, path string, forceFromZero, strict bool, out *budgetCaptureFileOutcome) bool {
+// the source. readLimit > 0 asks the caller to bound the parse to that many
+// bytes past the cursor (an over-cap tail read in windows, T-413).
+func (w *Watcher) skipProcessFile(ctx context.Context, a adapter.Adapter, path string, forceFromZero, strict bool, out *budgetCaptureFileOutcome) (skip bool, readLimit int64) {
 	// Refuse a symlink whose target escapes the watch root before opening it.
 	// fsnotify + WalkDir only gate on the path PREFIX (HasPathPrefix does not
 	// resolve symlinks, by design — a watch root may itself be a symlink), so a
@@ -922,7 +1218,7 @@ func (w *Watcher) skipProcessFile(ctx context.Context, a adapter.Adapter, path s
 			w.logger.Warn("watcher.processFile: skipping symlink whose target escapes the watch root",
 				"path", path, "resolved", real)
 		}
-		return true
+		return true, 0
 	}
 
 	// DoS guard: skip a file larger than the configured cap before parsing.
@@ -952,11 +1248,11 @@ func (w *Watcher) skipProcessFile(ctx context.Context, a adapter.Adapter, path s
 	// file on every tick, and for those the TOTAL size is the allocation.
 	// The zero value keeps the pre-existing total-size behaviour.
 	if w.maxFileBytes <= 0 {
-		return false
+		return false, 0
 	}
 	fi, statErr := os.Stat(path)
 	if statErr != nil || fi.Size() <= w.maxFileBytes {
-		return false
+		return false, 0
 	}
 	sem := fileCursorSemantics(a, path)
 	if !sem.Kind.SizeGateMeaningful() {
@@ -964,7 +1260,7 @@ func (w *Watcher) skipProcessFile(ctx context.Context, a adapter.Adapter, path s
 			w.logger.Info("watcher.processFile: oversize watermark store exempt from size gate",
 				"path", path, "size", fi.Size(), "max", w.maxFileBytes)
 		}
-		return false
+		return false, 0
 	}
 	// A cursor read failure (or a forced from-zero pass) leaves off at 0,
 	// so the delta is the whole file and the gate stays closed — the
@@ -981,7 +1277,23 @@ func (w *Watcher) skipProcessFile(ctx context.Context, a adapter.Adapter, path s
 				"path", path, "size", fi.Size(), "cursor", off,
 				"unread", OversizeUnreadDelta(fi.Size(), off), "max", w.maxFileBytes)
 		}
-		return false
+		return false, 0
+	}
+	// THE TAIL IS OVER THE CAP (T-413). Skipping it here was permanent
+	// capture loss once the watcher fell behind: the tail only grows, so
+	// the gate never reopened. An adapter that honours a per-parse read
+	// limit (ChunkedTail) instead reads it in windows of the cap, one per
+	// pass, so no single parse reads more than before. Strict reconciliation
+	// keeps the skip: it needs a complete parse, not a window. A window
+	// that made no progress (one record longer than the cap) is remembered
+	// and the file falls back to the skip at that offset.
+	if !strict && OversizeChunked(sem) && !w.chunkStalledAt(path, off) {
+		if w.warningDedup.Allow(a.Name() + "|" + path + "|<oversize-tail-chunked>") {
+			w.logger.Info("watcher.processFile: oversize tail read in bounded windows",
+				"path", path, "size", fi.Size(), "cursor", off,
+				"unread", OversizeUnreadDelta(fi.Size(), off), "window", w.maxFileBytes)
+		}
+		return false, w.maxFileBytes
 	}
 	out.oversize = true
 	// Deduped per (adapter, path) on the warning TTL: an append-only log
@@ -992,7 +1304,7 @@ func (w *Watcher) skipProcessFile(ctx context.Context, a adapter.Adapter, path s
 			"path", path, "size", fi.Size(), "cursor", off,
 			"streams_from_cursor", streams, "max", w.maxFileBytes)
 	}
-	return true
+	return true, 0
 }
 
 // OversizeUnreadDelta returns the byte count a SEEK-AND-STREAM parse of a
@@ -1092,7 +1404,7 @@ func (w *Watcher) ingestProcessResult(ctx context.Context, a adapter.Adapter, re
 	if native == nil {
 		native = func(string) bool { return false }
 	}
-	_, err := w.store.Ingest(ctx, res.ToolEvents, res.TokenEvents, store.IngestOptions{
+	ir, err := w.store.Ingest(ctx, res.ToolEvents, res.TokenEvents, store.IngestOptions{
 		IsNativeTool:        native,
 		Classifier:          w.classifier,
 		RecordFailures:      true,
@@ -1104,6 +1416,11 @@ func (w *Watcher) ingestProcessResult(ctx context.Context, a adapter.Adapter, re
 		SessionToolVersions: res.SessionToolVersions,
 		OutcomeUpdates:      res.OutcomeUpdates,
 	})
+	if err == nil && (ir.TokensInserted > 0 || ir.ActionsInserted > 0) {
+		if fn := w.ingestNotify.Load(); fn != nil {
+			(*fn)(ir.TokensInserted, ir.ActionsInserted)
+		}
+	}
 	return err
 }
 
@@ -1205,10 +1522,8 @@ func (w *Watcher) runPoller(ctx context.Context) {
 				// live fsnotify still misses Create/Write on the new tree.
 				// Registration only: the full Scan below covers the new
 				// tree, and runRootDetector owns the scoped hot-add walk.
-				_ = w.applyDetectedRoots()
-				if _, err := w.Scan(ctx); err != nil && ctx.Err() == nil {
-					w.logger.Warn("watcher.poll: full scan failed", "err", err)
-				}
+				_ = w.applyDetectedRoots(ctx)
+				w.gatedScan(ctx, "poll")
 				continue
 			}
 			if err := w.pollCursors(ctx); err != nil && ctx.Err() == nil {
@@ -1264,6 +1579,9 @@ func (w *Watcher) pollCursors(ctx context.Context) error {
 		if !a.IsSessionFile(c.SourceFile) {
 			w.logger.Warn("watcher.poll: root-matched adapter rejected file shape",
 				"adapter", a.Name(), "path", c.SourceFile)
+			continue
+		}
+		if w.fileBusy(c.SourceFile) {
 			continue
 		}
 		sem := fileCursorSemantics(a, c.SourceFile)
@@ -1449,6 +1767,13 @@ type addRecursiveResult struct {
 // watches already added leaked into the fsnotify watcher — and dropped
 // the root until the next poller retry. Losing one subdirectory is a
 // gap; losing the root's whole subtree is silent capture loss.
+//
+// The one refusal that DOES end the walk is a cancellation (T-553): the
+// adder applyDetectedRoots hands in (cancelAwareAdder) answers every Add with
+// the context error once the daemon is stopping, and walking the rest of a
+// slow tree to collect refusals is exactly the shutdown stall it exists to
+// prevent. The root is then reported unwatched (RootErr) so the caller does
+// not record a half-registered tree as live.
 func addRecursive(fsw watchAdder, root string) addRecursiveResult {
 	var res addRecursiveResult
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -1461,6 +1786,10 @@ func addRecursive(fsw watchAdder, root string) addRecursiveResult {
 			return nil
 		}
 		if addErr := fsw.Add(path); addErr != nil {
+			if errors.Is(addErr, context.Canceled) || errors.Is(addErr, context.DeadlineExceeded) {
+				res.RootErr = addErr
+				return fs.SkipAll
+			}
 			if path == root {
 				res.RootErr = addErr
 			} else {
@@ -1478,6 +1807,22 @@ func addRecursive(fsw watchAdder, root string) addRecursiveResult {
 		res.RootErr = walkErr
 	}
 	return res
+}
+
+// cancelAwareAdder is the watchAdder applyDetectedRoots hands to the
+// recursive registration walk: it refuses every Add with the context error
+// once ctx is done, which is what lets addRecursive stop mid-tree (T-553).
+type cancelAwareAdder struct {
+	ctx  context.Context
+	next watchAdder
+}
+
+// Add registers name with the wrapped watcher unless ctx is already done.
+func (c cancelAwareAdder) Add(name string) error {
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+	return c.next.Add(name)
 }
 
 func addIfDir(fsw *fsnotify.Watcher, path string) error {

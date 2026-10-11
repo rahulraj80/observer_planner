@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/taskflow"
 )
@@ -825,6 +826,24 @@ type TaskSessionRef struct {
 // sessions.tool) — empty means "no filter" on that dimension. All four
 // filters AND together when more than one is set.
 func (s *Store) SessionsWithTasksInWindow(ctx context.Context, since, until time.Time, projectID int64, projectRoot, tool string) ([]TaskSessionRef, error) {
+	return s.SessionsWithTasksInScope(ctx, since, until, TaskScope{ProjectID: projectID, ProjectRoot: projectRoot, Tool: tool})
+}
+
+// TaskScope is the dashboard's global filter set as the task rollup applies
+// it. ProjectID / ProjectRoot / Tool narrow by the session's own columns;
+// Model narrows to sessions that used the model (internal/modelfilter,
+// session grain). The zero value is unscoped.
+type TaskScope struct {
+	ProjectID   int64
+	ProjectRoot string
+	Tool        string
+	Model       string
+}
+
+// SessionsWithTasksInScope is SessionsWithTasksInWindow with the full
+// TaskScope (including the global Model filter).
+func (s *Store) SessionsWithTasksInScope(ctx context.Context, since, until time.Time, scope TaskScope) ([]TaskSessionRef, error) {
+	projectID, projectRoot, tool := scope.ProjectID, scope.ProjectRoot, scope.Tool
 	q := `
 		SELECT DISTINCT ti.session_id, s.tool, s.project_id
 		  FROM task_items ti
@@ -856,6 +875,9 @@ func (s *Store) SessionsWithTasksInWindow(ctx context.Context, since, until time
 		q += ` AND s.tool = ?`
 		args = append(args, tool)
 	}
+	mq, margs := modelfilter.AndSessionsUsing("s.id", scope.Model)
+	q += mq //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+	args = append(args, margs...)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store.SessionsWithTasksInWindow: %w", err)
@@ -946,6 +968,11 @@ func (s *Store) BackfillTaskItems(ctx context.Context, limit int) (TaskBackfillR
 	var cursorTs string
 	var cursorID int64
 	for {
+		// T-557: stop between pages when the caller (the daemon's start-up
+		// pass, or a CLI run) is cancelled.
+		if err := ctx.Err(); err != nil {
+			return res, fmt.Errorf("store.BackfillTaskItems: %w", err)
+		}
 		pageSize := taskBackfillPageSize
 		if limit > 0 {
 			remaining := limit - res.ActionsScanned

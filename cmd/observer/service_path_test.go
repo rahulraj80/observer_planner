@@ -14,6 +14,29 @@ import (
 	"testing"
 )
 
+// TestServiceRunsFollowsActiveComponents pins T-744 (node 2, rc.2): the unit
+// Description said "(proxy + watcher + dashboard)" on a minimal build with no
+// proxy. serviceRuns is the table walk, one case per row combination.
+func TestServiceRunsFollowsActiveComponents(t *testing.T) {
+	cases := []struct {
+		active []string
+		want   string
+	}{
+		{[]string{"capture.proxy", "ui.dashboard"}, "proxy watcher dashboard"},
+		{[]string{"ui.dashboard"}, "watcher dashboard"},
+		{nil, "watcher"},
+	}
+	for _, c := range cases {
+		on := map[string]bool{}
+		for _, id := range c.active {
+			on[id] = true
+		}
+		if got := strings.Join(serviceRuns(func(id string) bool { return on[id] }), " "); got != c.want {
+			t.Errorf("active %v: %q, want %q", c.active, got, c.want)
+		}
+	}
+}
+
 func TestUnitPathEnv(t *testing.T) {
 	tests := []struct {
 		name string

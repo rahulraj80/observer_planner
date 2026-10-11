@@ -1,0 +1,79 @@
+package shimguard
+
+import (
+	"errors"
+	"io"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"strings"
+)
+
+// ShimMarker is carried on the second line of every command-wrapping shim. It
+// is how a shim recognizes ANOTHER shim while walking PATH for the real
+// command, how the observer launchers' resolver skips shims
+// (toolresolve.Env.ExcludeMarker), and how the shell-wrap applier recognizes
+// files it owns in the shim directory (it never deletes a file that does not
+// carry it). internal/shellwrap re-exports it.
+const ShimMarker = "SBO-SHELLWRAP-SHIM"
+
+// IsShim reports whether a file's head bytes carry the shim marker.
+func IsShim(head []byte) bool {
+	return strings.Contains(string(head), ShimMarker)
+}
+
+// DefaultShimDir is the observer-owned shim directory under home, in goos's
+// path notation (backslashes for "windows", so a WSL daemon can name a
+// Windows home's directory).
+func DefaultShimDir(goos, home string) string {
+	if goos == "windows" {
+		return strings.Join([]string{home, ".observer", "shims"}, `\`)
+	}
+	return path.Join(home, ".observer", "shims")
+}
+
+// LookPath is exec.LookPath for callers that want the VENDOR binary: a hit
+// that is a command-wrapping shim (it carries ShimMarker) is skipped and the
+// PATH walk continues, so a shim named `claude` is never reported as "claude
+// is installed" nor run by a caller that sets up its own routing. Launchers
+// resolve through internal/toolresolve, which applies the same exclusion;
+// this is for the few call sites that use a bare PATH lookup.
+func LookPath(name string) (string, error) {
+	p, err := exec.LookPath(name)
+	if err != nil || !isShimFile(p) {
+		return p, err
+	}
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" || !filepath.IsAbs(dir) {
+			continue
+		}
+		// A path with a separator makes exec.LookPath check that one file
+		// (applying PATHEXT on Windows) instead of walking PATH again.
+		c, err := exec.LookPath(filepath.Join(dir, name))
+		if err == nil && !isShimFile(c) {
+			return c, nil
+		}
+	}
+	return "", &exec.Error{Name: name, Err: exec.ErrNotFound}
+}
+
+func isShimFile(p string) bool {
+	head, err := readHead(p, 512)
+	return err == nil && IsShim(head)
+}
+
+// readHead returns up to n leading bytes of a file.
+func readHead(p string, n int) ([]byte, error) {
+	f, err := os.Open(p) /* #nosec G304 -- a binary exec.LookPath itself located on PATH, never request-derived */ //nolint:gosec // G703: a binary exec.LookPath itself located on PATH
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	buf := make([]byte, n)
+	got, err := io.ReadFull(f, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return buf[:got], nil
+}

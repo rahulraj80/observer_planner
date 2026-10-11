@@ -1,0 +1,4 @@
+model = "gpt-6"
+
+[projects."/home/dev/example-project"]
+trust_level = "trusted"

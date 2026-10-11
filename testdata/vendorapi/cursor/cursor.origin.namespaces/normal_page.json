@@ -1,0 +1,20 @@
+{
+  "namespaces": [
+    {
+      "namespace": {
+        "slug": "acme",
+        "id": "ns_01k2ja2000e0080000000000p3",
+        "type": "team"
+      },
+      "viewerCanCreateRepositories": true
+    },
+    {
+      "namespace": {
+        "slug": "jane",
+        "id": "ns_01k2ja2000e0080000000000p4",
+        "type": "user"
+      },
+      "viewerCanCreateRepositories": false
+    }
+  ]
+}

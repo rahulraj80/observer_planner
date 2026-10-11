@@ -68,7 +68,7 @@ var ErrInsecureFallbackUnavailable = errors.New(
 	"cloudcred: secure credential storage is unavailable on this platform build " +
 		"(the OS keychain is unreachable and the plaintext file fallback has no " +
 		"verified ACL/reparse-point protection on this platform); the cloud CLI " +
-		"cannot store credentials here — retry once the OS keychain (e.g. Windows " +
+		"cannot store credentials here - retry once the OS keychain (e.g. Windows " +
 		"Credential Manager) is reachable",
 )
 

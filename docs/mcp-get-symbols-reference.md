@@ -34,11 +34,17 @@ enabled = false
 
 ## Prerequisites
 
-- **The project is indexed** by the in-process code index
-  (`internal/codeintel`; `[codeintel].enabled`, default on). `observer
+- **Code intelligence is turned on and the project is indexed** by the
+  in-process code index (`internal/codeintel`; `[codeintel].enabled`,
+  **default off** since 2026-10-05, D-307; turn it on in the dashboard
+  under Settings > Intelligence > Code intelligence). Once on, `observer
   start` indexes projects when `[codeintel.index].on_start` is set;
   `observer index <path>` indexes one on demand. Without an index,
-  `get_symbols` reports `degraded: true` per-request.
+  `get_symbols` reports `degraded: true` per-request; with code
+  intelligence off the envelope also carries the `codeintel_disabled`
+  warning and a `note` naming the Settings control, and each result's
+  `reason` starts "code intelligence is off" (the regex fallback still
+  answers).
 - **Path-safety knobs** come from `[intelligence.mcp.get_file]` — the
   same `allow_extensions` and `deny_paths` apply. One place to keep in
   sync.

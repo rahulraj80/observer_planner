@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -113,7 +114,7 @@ func TestCloudPreview(t *testing.T) {
 			t.Fatalf("invalid purpose → %d %q", rec.Code, rec.Body.String())
 		}
 	})
-	t.Run("ok — exact argv and passthrough output", func(t *testing.T) {
+	t.Run("ok - exact argv and passthrough output", func(t *testing.T) {
 		runner := &fakeCloudRunner{output: "the literal preview bytes\n----\nupload digest: sha256:x\n"}
 		srv, _ := newCloudConsentTestServer(t, &fakeCloudProbe{}, runner)
 		rec := postJSON(srv.handleCloudPreview, "/api/cloud/preview", `{"session_id":"sess-1","purpose":"bounded_context_enrichment"}`)
@@ -271,7 +272,7 @@ func TestCloudConsent(t *testing.T) {
 		}
 	})
 	t.Run("child failure surfaces cobra's Error line, not the bare exit status", func(t *testing.T) {
-		runner := &fakeCloudRunner{release: make(chan error, 1), output: "config: deprecation: k1 is deprecated\nError: no cloud base URL — pass --base-url\n"}
+		runner := &fakeCloudRunner{release: make(chan error, 1), output: "config: deprecation: k1 is deprecated\nError: no cloud base URL - pass --base-url\n"}
 		runner.release <- errors.New("exit status 1")
 		srv, _ := newCloudConsentTestServer(t, &fakeCloudProbe{}, runner)
 		rec := postJSON(srv.handleCloudConsent, "/api/cloud/consent",
@@ -281,7 +282,7 @@ func TestCloudConsent(t *testing.T) {
 		}
 		var resp CloudConsentResponse
 		_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-		if resp.OK || resp.ExitError != "no cloud base URL — pass --base-url" {
+		if resp.OK || resp.ExitError != "no cloud base URL - pass --base-url" {
 			t.Fatalf("resp = %+v", resp)
 		}
 		if strings.Contains(resp.Output, "config: deprecation:") {
@@ -332,7 +333,7 @@ func TestCloudConsentGrants(t *testing.T) {
 		seedCloudReceipt(t, database, "bounded_context_enrichment", store.CloudGrantPerUpload, false)
 		seedCloudReceipt(t, database, "structural_activity_insights", store.CloudGrantStanding, true) // revoked
 
-		srv.opts.CloudAccount.grantable = func() []CloudGrantable {
+		srv.opts.CloudAccount.Grantable = func() []CloudGrantable {
 			return []CloudGrantable{
 				{Purpose: "structural_activity_insights", OK: true},
 				{Purpose: "bounded_context_enrichment", OK: false, Reason: "per-session only"},
@@ -563,7 +564,7 @@ func TestCloudStripStartupNotices(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := cloudStripStartupNotices(tc.in); got != tc.want {
+			if got := dashapi.CloudStripStartupNotices(tc.in); got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
@@ -587,7 +588,7 @@ func TestCloudChildError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := cloudChildError(tc.output, tc.err); got != tc.want {
+			if got := dashapi.CloudChildError(tc.output, tc.err); got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})

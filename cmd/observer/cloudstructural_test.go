@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -288,7 +290,7 @@ func TestCloudConsentListIsContentFree(t *testing.T) {
 	if !strings.Contains(out, "No consent receipts") {
 		t.Errorf("empty list should say so plainly:\n%s", out)
 	}
-	if !strings.Contains(out, "not grantable —") {
+	if !strings.Contains(out, "not grantable -") {
 		t.Errorf("empty list should still say which purposes are locked and why:\n%s", out)
 	}
 
@@ -485,7 +487,7 @@ func TestCloudSyncWithoutStandingGrantCapturesAndSendsNothing(t *testing.T) {
 	if f.structuralUploads != 0 {
 		t.Fatalf("a snapshot was uploaded with no standing grant (%d uploads)", f.structuralUploads)
 	}
-	if !strings.Contains(out, "Structural: skipped — no standing grant") {
+	if !strings.Contains(out, "Structural: skipped - no standing grant") {
 		t.Errorf("sync must say why the rail did nothing:\n%s", out)
 	}
 
@@ -604,10 +606,10 @@ func TestCloudCaptureExcludesNonPersonalSessions(t *testing.T) {
 		t.Fatalf("decode snapshot: %v", err)
 	}
 	if snap.SessionCount != 1 {
-		t.Errorf("session_count = %d, want 1 — the org session must not be counted", snap.SessionCount)
+		t.Errorf("session_count = %d, want 1 - the org session must not be counted", snap.SessionCount)
 	}
 	if snap.ActionCount != 3 {
-		t.Errorf("action_count = %d, want 3 — the org session's actions must not be summed", snap.ActionCount)
+		t.Errorf("action_count = %d, want 3 - the org session's actions must not be summed", snap.ActionCount)
 	}
 }
 

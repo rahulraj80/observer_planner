@@ -60,10 +60,60 @@ type Service struct {
 	// unknown). cmd wires the toolresolve ladder; with the shim exclusion
 	// in place that ladder never counts a shim as an install.
 	Installed func(id string) bool
+
+	// The WSL bridge target (TargetWindows, T-419): Windows shells on the
+	// machine whose WSL distro runs this process. See target.go.
+
+	// WindowsHome is the Windows user home as this process reaches it (a
+	// WSL drive-mount path such as /mnt/c/Users/<u>). "" = detect through
+	// crossmount (the one Windows home that belongs to the current Windows
+	// user). Tests set it to a temp dir under WindowsMountRoot.
+	WindowsHome string
+	// WindowsMountRoot is the WSL drive-mount root ("" = /mnt).
+	WindowsMountRoot string
+	// WSLDistro overrides $WSL_DISTRO_NAME (the distro a bridge shim names).
+	WSLDistro string
+	// IsWSL reports whether this process runs inside WSL (nil =
+	// crossmount.IsWSL). Ignored when WindowsHome is set.
+	IsWSL func() bool
+	// WindowsShellFolder returns the Windows user's raw User Shell Folders
+	// "Personal" value (the Documents folder that holds the PowerShell
+	// profiles). nil = `reg.exe query` through WSL interop.
+	WindowsShellFolder func() (string, error)
+	// WindowsInstalled reports whether an id is installed on the side its
+	// bridge shim runs (the Windows program for SideHost, the distro for
+	// SideWSL). nil = unknown.
+	WindowsInstalled func(id string, side shellwrap.Side) bool
+}
+
+// Target names whose shells a call manages.
+type Target string
+
+// Targets.
+const (
+	// TargetNative: the shells of the OS this process runs on (the default).
+	TargetNative Target = ""
+	// TargetWindows: the Windows shells of the machine whose WSL distro runs
+	// this process (the WSL bridge target).
+	TargetWindows Target = "windows"
+)
+
+// ParseTarget resolves a target name. "", "native" and "local" are the
+// native target.
+func ParseTarget(name string) (Target, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "native", "local":
+		return TargetNative, nil
+	case "windows":
+		return TargetWindows, nil
+	}
+	return "", fmt.Errorf("shellwrapsvc: unknown target %q (want native or windows)", name)
 }
 
 // Request is one apply / preview.
 type Request struct {
+	// Target selects whose shells are managed ("" = native).
+	Target Target `json:"target,omitempty"`
 	// Tools are ids to wrap, or shellwrap.AllTools. Empty = wrap nothing
 	// (applying it is the same as Disable).
 	Tools []string `json:"tools"`
@@ -90,6 +140,10 @@ type Change struct {
 
 	after []byte
 	mode  fs.FileMode
+	// local is the path this process writes or removes (Path on a native
+	// target; the drive-mount path on the WSL bridge target; the symlink
+	// target of a start-up file).
+	local string
 }
 
 // Change actions.
@@ -217,14 +271,20 @@ func (s Service) documentsLookup(home string) shellwrap.DocumentsLookup {
 	return l
 }
 
-func (s Service) shimDir(h shellwrap.Host, cfg config.Config) string {
-	d := strings.TrimSpace(cfg.ShellWrap.ShimDir)
+// shimDirFor resolves a target's shim directory in the target's own path
+// notation: the recorded override (with a leading ~ meaning the target home),
+// else <home>/.observer/shims.
+func shimDirFor(h shellwrap.Host, view config.ShellWrapTargetConfig) string {
+	d := strings.TrimSpace(view.ShimDir)
 	switch {
 	case d == "":
 		return shellwrap.DefaultShimDir(h)
 	case d == "~":
 		return h.Home
 	case strings.HasPrefix(d, "~/") || strings.HasPrefix(d, `~\`):
+		if h.GOOS == "windows" {
+			return h.Join(h.Home, strings.ReplaceAll(d[2:], "/", `\`))
+		}
 		return filepath.Join(h.Home, d[2:])
 	}
 	return d
@@ -238,15 +298,15 @@ func (s Service) loadConfig(path string) (config.Config, error) {
 	return cfg, nil
 }
 
-// configuredSelection is the recorded choice in [shell_wrap].
-func configuredSelection(cfg config.Config) (tools []string, shells []shellwrap.Shell) {
-	for id, on := range cfg.ShellWrap.Tools {
+// configuredSelection is a target's recorded choice.
+func configuredSelection(view config.ShellWrapTargetConfig) (tools []string, shells []shellwrap.Shell) {
+	for id, on := range view.Tools {
 		if on {
 			tools = append(tools, id)
 		}
 	}
 	sort.Strings(tools)
-	for name, on := range cfg.ShellWrap.Shells {
+	for name, on := range view.Shells {
 		if sh, ok := shellwrap.ParseShell(name); on && ok {
 			shells = append(shells, sh)
 		}
@@ -255,16 +315,27 @@ func configuredSelection(cfg config.Config) (tools []string, shells []shellwrap.
 	return tools, shells
 }
 
-// Status reports the recorded choice against what is on disk. Read-only.
+// Status reports the native target's recorded choice against what is on
+// disk. Read-only.
 func (s Service) Status(ctx context.Context) (shellwrap.Status, error) {
+	return s.StatusFor(ctx, TargetNative)
+}
+
+// StatusFor reports target's recorded choice against what is on disk.
+// Read-only.
+func (s Service) StatusFor(ctx context.Context, target Target) (shellwrap.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return shellwrap.Status{}, err
 	}
-	h, err := s.Host()
+	home, err := s.home()
 	if err != nil {
 		return shellwrap.Status{}, err
 	}
-	cfg, err := s.loadConfig(s.configPath(h.Home))
+	cfg, err := s.loadConfig(s.configPath(home))
+	if err != nil {
+		return shellwrap.Status{}, err
+	}
+	te, err := s.targetEnv(cfg, target)
 	if err != nil {
 		return shellwrap.Status{}, err
 	}
@@ -272,35 +343,37 @@ func (s Service) Status(ctx context.Context) (shellwrap.Status, error) {
 	if err != nil {
 		return shellwrap.Status{}, err
 	}
-	return s.status(h, cfg, obs)
+	return s.status(te, obs)
 }
 
-func (s Service) status(h shellwrap.Host, cfg config.Config, obs string) (shellwrap.Status, error) {
-	shimDir := s.shimDir(h, cfg)
-	tools, shells := configuredSelection(cfg)
+func (s Service) status(te targetEnv, obs string) (shellwrap.Status, error) {
+	h := te.host
+	shimDir := te.shimDir()
+	tools, shells := configuredSelection(te.view)
 	plan := shellwrap.Plan{ShimDir: shimDir}
-	if cfg.ShellWrap.Enabled {
+	if te.view.Enabled {
 		p, err := shellwrap.BuildPlan(shellwrap.PlanInput{
-			Host: h, ShimDir: shimDir, ObserverPath: obs,
+			Host: h, ShimDir: shimDir, ObserverPath: obs, ConfigPath: te.shimConfig,
 			Selection: shellwrap.Selection{Tools: tools, Shells: shells},
-			Installed: s.Installed,
+			Installed: te.installed,
 		})
 		if err != nil {
 			return shellwrap.Status{}, err
 		}
 		plan = p
 	}
-	disk, _ := inspect(h, shimDir)
+	disk, _ := inspect(te, shimDir)
 	return shellwrap.ComputeStatus(shellwrap.StatusInput{
-		Host: h, Enabled: cfg.ShellWrap.Enabled, Plan: plan, Selected: tools,
-		ObserverPath: obs, Disk: disk, Installed: s.Installed,
+		Host: h, Enabled: te.view.Enabled, Plan: plan, Selected: tools,
+		ObserverPath: obs, Disk: disk, Installed: te.installed,
 	}), nil
 }
 
 // rcState is one candidate start-up file as read.
 type rcState struct {
-	path    string
-	target  string // where writes go (the symlink target, or path)
+	path    string // in the target's notation
+	local   string // the same file as this process reaches it
+	target  string // where writes go (the symlink target, or local)
 	exists  bool
 	content string
 	mode    fs.FileMode
@@ -308,9 +381,17 @@ type rcState struct {
 	err     error
 }
 
-func readRC(p string) rcState {
-	st := rcState{path: p, target: p, mode: 0o644}
-	fi, err := os.Lstat(p)
+// readRC reads one start-up file. local maps the target path to the path
+// this process reaches; an unreachable path is reported, never guessed at.
+func readRC(p string, local func(string) (string, error)) rcState {
+	st := rcState{path: p, mode: 0o644}
+	lp, err := local(p)
+	if err != nil {
+		st.err = err
+		return st
+	}
+	st.local, st.target = lp, lp
+	fi, err := os.Lstat(lp)
 	if errors.Is(err, fs.ErrNotExist) {
 		return st
 	}
@@ -319,7 +400,7 @@ func readRC(p string) rcState {
 		return st
 	}
 	if fi.Mode()&fs.ModeSymlink != 0 {
-		t, err := filepath.EvalSymlinks(p)
+		t, err := filepath.EvalSymlinks(lp)
 		if err != nil {
 			st.err = fmt.Errorf("a symlink whose target cannot be resolved (%w) - not touched", err)
 			return st
@@ -360,10 +441,11 @@ func readHead(p string, n int) ([]byte, error) {
 
 // inspectShims reads the marked shims in the shim directory. Symlinks and
 // anything without shellwrap.ShimMarker are not the applier's files and are
-// never returned.
-func inspectShims(shimDir string) []shellwrap.OnDiskShim {
+// never returned. Paths are reported in the target's notation (join), read
+// at the local directory.
+func inspectShims(shimDir, localDir string, join func(...string) string) []shellwrap.OnDiskShim {
 	out := []shellwrap.OnDiskShim{}
-	entries, err := os.ReadDir(shimDir)
+	entries, err := os.ReadDir(localDir)
 	if err != nil {
 		return out
 	}
@@ -371,29 +453,34 @@ func inspectShims(shimDir string) []shellwrap.OnDiskShim {
 		if !e.Type().IsRegular() {
 			continue
 		}
-		p := filepath.Join(shimDir, e.Name())
-		head, err := readHead(p, 512)
+		lp := filepath.Join(localDir, e.Name())
+		head, err := readHead(lp, 512)
 		if err != nil || !shellwrap.IsShim(head) {
 			continue
 		}
 		tool, command, version, _ := shellwrap.ParseMarkerLine(string(head))
-		full, err := os.ReadFile(p) /* #nosec G304 -- a marked shim inside the observer-owned shim directory */
+		full, err := os.ReadFile(lp) /* #nosec G304 -- a marked shim inside the observer-owned shim directory */
 		if err != nil {
 			continue
 		}
 		out = append(out, shellwrap.OnDiskShim{
-			FileName: e.Name(), Path: p, ToolID: tool, Command: command, Version: version, Content: string(full),
+			FileName: e.Name(), Path: join(shimDir, e.Name()), ToolID: tool, Command: command, Version: version, Content: string(full),
 		})
 	}
 	return out
 }
 
 // inspect reads the shim directory and every candidate start-up file.
-func inspect(h shellwrap.Host, shimDir string) (shellwrap.OnDisk, map[string]rcState) {
-	disk := shellwrap.OnDisk{ShimDir: shimDir, Shims: inspectShims(shimDir), RC: []shellwrap.OnDiskRC{}}
+func inspect(te targetEnv, shimDir string) (shellwrap.OnDisk, map[string]rcState) {
+	h := te.host
+	shims := []shellwrap.OnDiskShim{}
+	if localDir, err := te.local(shimDir); err == nil {
+		shims = inspectShims(shimDir, localDir, h.Join)
+	}
+	disk := shellwrap.OnDisk{ShimDir: shimDir, Shims: shims, RC: []shellwrap.OnDiskRC{}}
 	states := map[string]rcState{}
 	for _, p := range shellwrap.CandidateRCPaths(h) {
-		st := readRC(p)
+		st := readRC(p, te.local)
 		sh, _ := shellwrap.ShellForRCPath(p, h)
 		st.shell = sh
 		states[p] = st
@@ -437,29 +524,38 @@ func (s Service) Apply(ctx context.Context, req Request) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	return s.reconcile(ctx, shellwrap.Selection{Tools: req.Tools, Shells: shells}, req.DryRun, false)
+	return s.reconcile(ctx, req.Target, shellwrap.Selection{Tools: req.Tools, Shells: shells}, req.DryRun, false)
 }
 
-// Disable removes every shim and every marked block, restoring each start-up
-// file byte-for-byte, and records enabled = false (the per-tool choice is
-// kept so a later enable restores it).
+// Disable removes every native-target shim and marked block, restoring each
+// start-up file byte-for-byte, and records enabled = false (the per-tool
+// choice is kept so a later enable restores it).
 func (s Service) Disable(ctx context.Context, dryRun bool) (Outcome, error) {
-	return s.reconcile(ctx, shellwrap.Selection{}, dryRun, true)
+	return s.DisableFor(ctx, TargetNative, dryRun)
 }
 
-func (s Service) reconcile(ctx context.Context, sel shellwrap.Selection, dryRun, disable bool) (Outcome, error) {
+// DisableFor is Disable for one target.
+func (s Service) DisableFor(ctx context.Context, target Target, dryRun bool) (Outcome, error) {
+	return s.reconcile(ctx, target, shellwrap.Selection{}, dryRun, true)
+}
+
+func (s Service) reconcile(ctx context.Context, target Target, sel shellwrap.Selection, dryRun, disable bool) (Outcome, error) {
 	if err := ctx.Err(); err != nil {
 		return Outcome{}, err
 	}
 	applyMu.Lock()
 	defer applyMu.Unlock()
 
-	h, err := s.Host()
+	home, err := s.home()
 	if err != nil {
 		return Outcome{}, err
 	}
-	cfgPath := s.configPath(h.Home)
+	cfgPath := s.configPath(home)
 	cfg, err := s.loadConfig(cfgPath)
+	if err != nil {
+		return Outcome{}, err
+	}
+	te, err := s.targetEnv(cfg, target)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -467,38 +563,48 @@ func (s Service) reconcile(ctx context.Context, sel shellwrap.Selection, dryRun,
 	if err != nil {
 		return Outcome{}, err
 	}
-	shimDir := s.shimDir(h, cfg)
+	if err := te.checkObserver(obs); err != nil {
+		return Outcome{}, err
+	}
+	shimDir := te.shimDir()
 	plan, err := shellwrap.BuildPlan(shellwrap.PlanInput{
-		Host: h, ShimDir: shimDir, ObserverPath: obs, Selection: sel, Installed: s.Installed,
+		Host: te.host, ShimDir: shimDir, ObserverPath: obs, ConfigPath: te.shimConfig, Selection: sel, Installed: te.installed,
 	})
 	if err != nil {
 		return Outcome{}, err
 	}
-	disk, states := inspect(h, shimDir)
-	changes, err := computeChanges(plan, disk, states)
+	disk, states := inspect(te, shimDir)
+	changes, err := computeChanges(plan, disk, states, te)
 	if err != nil {
 		return Outcome{}, err
 	}
 	out := Outcome{DryRun: dryRun, Plan: plan, Changes: changes, ConfigPath: cfgPath, Notes: []string{}}
 	if dryRun {
 		out.Notes = append(out.Notes, "dry run - nothing was written")
-		out.Status, err = s.status(h, cfg, obs)
+		out.Status, err = s.status(te, obs)
 		return out, err
 	}
-	if err := execute(changes, shimDir, plan.Empty()); err != nil {
+	localDir, err := te.local(shimDir)
+	if err != nil {
 		return out, err
 	}
-	if err := recordChoice(cfgPath, cfg, plan, sel, disable); err != nil {
+	if err := execute(changes, localDir, plan.Empty()); err != nil {
+		return out, err
+	}
+	if err := recordChoice(cfgPath, cfg, plan, sel, disable, target); err != nil {
 		out.Notes = append(out.Notes, "the files were applied but the choice was not recorded in "+cfgPath+": "+err.Error())
 	}
 	if written := countWritten(changes); written > 0 {
-		out.Notes = append(out.Notes, "open a new shell (or re-source its start-up file) for the change to take effect")
+		out.Notes = append(out.Notes, te.reopenNote())
 	}
 	cfg2, err := s.loadConfig(cfgPath)
 	if err != nil {
 		cfg2 = cfg
 	}
-	out.Status, err = s.status(h, cfg2, obs)
+	if te2, err := s.targetEnv(cfg2, target); err == nil {
+		te = te2
+	}
+	out.Status, err = s.status(te, obs)
 	return out, err
 }
 
@@ -515,7 +621,7 @@ func countWritten(cs []Change) int {
 // computeChanges diffs the plan against the disk. It refuses (before any
 // write) when a start-up file it would have to touch cannot be read or
 // carries malformed markers.
-func computeChanges(plan shellwrap.Plan, disk shellwrap.OnDisk, states map[string]rcState) ([]Change, error) {
+func computeChanges(plan shellwrap.Plan, disk shellwrap.OnDisk, states map[string]rcState, te targetEnv) ([]Change, error) {
 	var changes []Change
 	planned := map[string]bool{}
 	onDisk := map[string]shellwrap.OnDiskShim{}
@@ -524,10 +630,14 @@ func computeChanges(plan shellwrap.Plan, disk shellwrap.OnDisk, states map[strin
 	}
 	for _, sh := range plan.Shims {
 		planned[sh.FileName] = true
-		c := Change{Path: sh.Path, Kind: "shim", Detail: sh.Content, after: []byte(sh.Content), mode: 0o755}
+		lp, err := te.local(sh.Path)
+		if err != nil {
+			return nil, fmt.Errorf("shellwrapsvc: %s: %w", sh.Path, err)
+		}
+		c := Change{Path: sh.Path, Kind: "shim", Detail: sh.Content, after: []byte(sh.Content), mode: 0o755, local: lp}
 		switch cur, ok := onDisk[sh.FileName]; {
 		case !ok:
-			if exists(sh.Path) {
+			if exists(lp) {
 				return nil, fmt.Errorf("shellwrapsvc: %s exists and is not an observer shim - move it away or pick another shim_dir", sh.Path)
 			}
 			c.Action = ActionCreate
@@ -540,7 +650,11 @@ func computeChanges(plan shellwrap.Plan, disk shellwrap.OnDisk, states map[strin
 	}
 	for _, d := range disk.Shims {
 		if !planned[d.FileName] {
-			changes = append(changes, Change{Path: d.Path, Kind: "shim", Action: ActionDelete})
+			lp, err := te.local(d.Path)
+			if err != nil {
+				return nil, fmt.Errorf("shellwrapsvc: %s: %w", d.Path, err)
+			}
+			changes = append(changes, Change{Path: d.Path, Kind: "shim", Action: ActionDelete, local: lp})
 		}
 	}
 
@@ -551,7 +665,7 @@ func computeChanges(plan shellwrap.Plan, disk shellwrap.OnDisk, states map[strin
 	for p, r := range wanted {
 		if _, ok := states[p]; !ok {
 			// Defensive: every planned path is a candidate path today.
-			st := readRC(p)
+			st := readRC(p, te.local)
 			st.shell = r.Shell
 			states[p] = st
 		}
@@ -573,8 +687,8 @@ func computeChanges(plan shellwrap.Plan, disk shellwrap.OnDisk, states map[strin
 			}
 			continue
 		}
-		c := Change{Path: p, Kind: "rc", Shell: string(st.shell), mode: st.mode}
-		if st.target != p {
+		c := Change{Path: p, Kind: "rc", Shell: string(st.shell), mode: st.mode, local: st.target}
+		if st.target != st.local {
 			c.Target = st.target
 		}
 		if isWanted {
@@ -626,7 +740,9 @@ func blockText(content string) string {
 }
 
 // execute performs the changes: shims first (so a PATH block never points at
-// a directory missing its shims), then start-up files, then deletions.
+// a directory missing its shims), then start-up files, then deletions. Every
+// path here is the LOCAL one (Change.local, and shimDir as this process
+// reaches it).
 func execute(changes []Change, shimDir string, planEmpty bool) error {
 	var errs []error
 	for _, c := range changes {
@@ -636,7 +752,7 @@ func execute(changes []Change, shimDir string, planEmpty bool) error {
 		if err := os.MkdirAll(shimDir, 0o755); err != nil { /* #nosec G301 -- the shim dir must be traversable by the operator's shells, like ~/.local/bin */
 			return fmt.Errorf("shellwrapsvc: mkdir %s: %w", shimDir, err)
 		}
-		if err := fsatomic.WriteFile(c.Path, c.after, fsatomic.Options{FilePerm: 0o755, DirPerm: 0o755, TempPattern: ".sbo-shim-*.tmp"}); err != nil {
+		if err := fsatomic.WriteFile(c.local, c.after, fsatomic.Options{FilePerm: 0o755, DirPerm: 0o755, TempPattern: ".sbo-shim-*.tmp"}); err != nil {
 			return fmt.Errorf("shellwrapsvc: write %s: %w", c.Path, err)
 		}
 	}
@@ -644,10 +760,7 @@ func execute(changes []Change, shimDir string, planEmpty bool) error {
 		if c.Kind != "rc" || c.Action == ActionUnchanged {
 			continue
 		}
-		target := c.Path
-		if c.Target != "" {
-			target = c.Target
-		}
+		target := c.local
 		if c.Action == ActionDelete {
 			if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				errs = append(errs, fmt.Errorf("shellwrapsvc: remove %s: %w", target, err))
@@ -664,7 +777,7 @@ func execute(changes []Change, shimDir string, planEmpty bool) error {
 	}
 	for _, c := range changes {
 		if c.Kind == "shim" && c.Action == ActionDelete {
-			if err := os.Remove(c.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := os.Remove(c.local); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				errs = append(errs, fmt.Errorf("shellwrapsvc: remove %s: %w", c.Path, err))
 			}
 		}
@@ -680,67 +793,100 @@ func execute(changes []Change, shimDir string, planEmpty bool) error {
 // configKeyRE is the closed spelling a tool id may take as a TOML bare key.
 var configKeyRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// recordChoice writes [shell_wrap] through config.PatchFile (scalar line
-// edits: comments and untouched lines survive byte-for-byte).
-func recordChoice(path string, cfg config.Config, plan shellwrap.Plan, sel shellwrap.Selection, disable bool) error {
+// targetConfigPrefix is where a target's choice lives in config.toml.
+func targetConfigPrefix(t Target) string {
+	if t == TargetWindows {
+		return "shell_wrap.windows"
+	}
+	return "shell_wrap"
+}
+
+// targetView returns a target's recorded choice.
+func targetView(cfg config.Config, t Target) config.ShellWrapTargetConfig {
+	if t == TargetWindows {
+		return cfg.ShellWrap.Windows
+	}
+	return cfg.ShellWrap.Native()
+}
+
+// setTargetView writes a target's choice back into cfg.
+func setTargetView(cfg *config.Config, t Target, v config.ShellWrapTargetConfig) {
+	if t == TargetWindows {
+		cfg.ShellWrap.Windows = v
+		return
+	}
+	cfg.ShellWrap.SetNative(v)
+}
+
+// recordChoice writes the target's [shell_wrap] keys through
+// config.PatchFile (scalar line edits: comments and untouched lines survive
+// byte-for-byte).
+func recordChoice(path string, cfg config.Config, plan shellwrap.Plan, sel shellwrap.Selection, disable bool, target Target) error {
 	var patches []config.Patch
+	prefix := targetConfigPrefix(target)
 	set := func(dotted string, v bool) {
 		rhs := "false"
 		if v {
 			rhs = "true"
 		}
-		patches = append(patches, config.Patch{Dotted: dotted, RHS: rhs, Scalar: true})
+		patches = append(patches, config.Patch{Dotted: prefix + "." + dotted, RHS: rhs, Scalar: true})
 	}
+	view := targetView(cfg, target)
 	enabled := !disable && !plan.Empty()
-	cfg.ShellWrap.Enabled = enabled
-	set("shell_wrap.enabled", enabled)
+	view.Enabled = enabled
+	set("enabled", enabled)
 	if !disable {
 		chosen := map[string]bool{}
 		for _, t := range plan.Tools {
 			chosen[t.ID] = true
 		}
-		if cfg.ShellWrap.Tools == nil {
-			cfg.ShellWrap.Tools = map[string]bool{}
+		tools := map[string]bool{}
+		for k, v := range view.Tools {
+			tools[k] = v
 		}
 		ids := map[string]bool{}
 		for id := range chosen {
 			ids[id] = true
 		}
-		for id := range cfg.ShellWrap.Tools {
+		for id := range tools {
 			ids[id] = true
 		}
 		for _, id := range sortedKeys(ids) {
 			if !configKeyRE.MatchString(id) {
 				continue
 			}
-			if cfg.ShellWrap.Tools[id] == chosen[id] && !chosen[id] {
+			if tools[id] == chosen[id] && !chosen[id] {
 				continue // already false: no churn
 			}
-			cfg.ShellWrap.Tools[id] = chosen[id]
-			set("shell_wrap.tools."+id, chosen[id])
+			tools[id] = chosen[id]
+			set("tools."+id, chosen[id])
 		}
+		view.Tools = tools
 		explicit := map[string]bool{}
 		for _, sh := range sel.Shells {
 			explicit[string(sh)] = true
 		}
-		if cfg.ShellWrap.Shells == nil {
-			cfg.ShellWrap.Shells = map[string]bool{}
+		shells := map[string]bool{}
+		for k, v := range view.Shells {
+			shells[k] = v
 		}
 		names := map[string]bool{}
 		for n := range explicit {
 			names[n] = true
 		}
-		for n := range cfg.ShellWrap.Shells {
+		for n := range shells {
 			names[n] = true
 		}
 		for _, n := range sortedKeys(names) {
-			if cfg.ShellWrap.Shells[n] == explicit[n] && !explicit[n] {
+			if shells[n] == explicit[n] && !explicit[n] {
 				continue
 			}
-			cfg.ShellWrap.Shells[n] = explicit[n]
-			set("shell_wrap.shells."+n, explicit[n])
+			shells[n] = explicit[n]
+			set("shells."+n, explicit[n])
 		}
+		view.Shells = shells
 	}
+	setTargetView(&cfg, target, view)
 	if _, err := config.PatchFile(path, cfg, patches); err != nil {
 		return err
 	}

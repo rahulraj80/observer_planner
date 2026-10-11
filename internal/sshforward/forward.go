@@ -115,9 +115,27 @@ type KnownHostsFunc func(p sshprofile.Profile) (known, checked bool)
 // working correctly, not a failure to run it.
 type TestRunnerFunc func(argv []string) (ok bool, stderrTail string, err error)
 
+// Config is the profile-bearing half of Options, as one value: the switch,
+// the operator-authored profiles and the connection knobs. Options.Source
+// returns it so the cmd layer's ONE owner of the [terminal.ssh] block (which
+// follows config.toml) feeds the switcher and the SSH terminal picker the same
+// list, with no daemon restart after a profile is added, edited or removed
+// (T-488).
+type Config struct {
+	Enabled    bool
+	Profiles   []sshprofile.Profile
+	SSHOptions sshprofile.Options
+}
+
 // Options configures a Manager. Every OS-touching field has a default in
 // spawn.go, so a test supplies fakes and nothing forks.
 type Options struct {
+	// Source, when set, is read on every call instead of the static
+	// Enabled / Profiles / SSHOptions below. A live forward whose profile was
+	// removed or changed in the source (or the whole surface switched off) is
+	// stopped the next time the Manager is consulted, so an edited profile
+	// can never keep forwarding to the machine it USED to name.
+	Source func() Config
 	// Enabled mirrors [terminal.ssh].enabled — the same visibility switch the
 	// SSH terminal picker uses. Profiles remain the authority.
 	Enabled bool
@@ -170,6 +188,9 @@ type Manager struct {
 
 // forward is the in-memory record of one instance's child process.
 type forward struct {
+	// profile is the exact profile the forward was opened for; a source
+	// change that no longer matches it retires the forward (retire).
+	profile   sshprofile.Profile
 	localPort int
 	state     State
 	errMsg    string
@@ -205,8 +226,45 @@ func New(opts Options) *Manager {
 	return &Manager{opts: opts, live: make(map[string]*forward)}
 }
 
+// config is the ONE read of the profile-bearing settings: the live Source
+// when wired, else the static Options fields.
+func (m *Manager) config() Config {
+	if m.opts.Source != nil {
+		return m.opts.Source()
+	}
+	return Config{Enabled: m.opts.Enabled, Profiles: m.opts.Profiles, SSHOptions: m.opts.SSHOptions}
+}
+
+// retire stops every live forward the current config no longer backs: its
+// profile was removed, its definition changed, or the surface is off. The
+// children are stopped OUTSIDE the lock. A Connect still in flight for a
+// retired slot notices in open() and stops its own child.
+func (m *Manager) retire(cfg Config) {
+	m.mu.Lock()
+	var stale []*forward
+	var names []string
+	for name, f := range m.live {
+		p, ok := sshprofile.Find(cfg.Profiles, name)
+		if cfg.Enabled && ok && p == f.profile {
+			continue
+		}
+		stale = append(stale, f)
+		names = append(names, name)
+		delete(m.live, name)
+	}
+	m.mu.Unlock()
+	for i, f := range stale {
+		if f.proc != nil {
+			_ = f.proc.Stop()
+		}
+		if m.opts.Logger != nil {
+			m.opts.Logger.Info("instance switcher: forward closed because its profile was removed or changed", "profile", names[i])
+		}
+	}
+}
+
 // Enabled reports the surface-visibility switch.
-func (m *Manager) Enabled() bool { return m != nil && m.opts.Enabled }
+func (m *Manager) Enabled() bool { return m != nil && m.config().Enabled }
 
 // List projects every configured profile plus its live forward state. It is a
 // READ of the same profile list Connect resolves against (one owner), so the
@@ -218,10 +276,12 @@ func (m *Manager) List() []Instance {
 	if m == nil {
 		return nil
 	}
+	cfg := m.config()
+	m.retire(cfg)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]Instance, 0, len(m.opts.Profiles))
-	for _, p := range m.opts.Profiles {
+	out := make([]Instance, 0, len(cfg.Profiles))
+	for _, p := range cfg.Profiles {
 		out = append(out, m.snapshotLocked(p))
 	}
 	return out
@@ -232,9 +292,11 @@ func (m *Manager) Get(name string) (Instance, bool) {
 	if m == nil {
 		return Instance{}, false
 	}
+	cfg := m.config()
+	m.retire(cfg)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	p, ok := sshprofile.Find(m.opts.Profiles, name)
+	p, ok := sshprofile.Find(cfg.Profiles, name)
 	if !ok {
 		return Instance{}, false
 	}
@@ -286,10 +348,15 @@ func LocalURL(localPort int) string {
 // different one — or reporting a port that answers nothing — would be worse
 // than refusing.
 func (m *Manager) Connect(name string) (Instance, error) {
-	if m == nil || !m.opts.Enabled {
+	if m == nil {
 		return Instance{}, ErrDisabled
 	}
-	profile, ok := sshprofile.Find(m.opts.Profiles, name)
+	cfg := m.config()
+	m.retire(cfg)
+	if !cfg.Enabled {
+		return Instance{}, ErrDisabled
+	}
+	profile, ok := sshprofile.Find(cfg.Profiles, name)
 	if !ok {
 		return Instance{}, fmt.Errorf("%w: %q", ErrUnknownProfile, name)
 	}
@@ -316,11 +383,11 @@ func (m *Manager) Connect(name string) (Instance, error) {
 		// A dead or failed forward is replaced, not reused.
 		delete(m.live, profile.Name)
 	}
-	pending := &forward{state: StateConnecting, exited: make(chan struct{})}
+	pending := &forward{profile: profile, state: StateConnecting, exited: make(chan struct{})}
 	m.live[profile.Name] = pending
 	m.mu.Unlock()
 
-	inst, err := m.open(profile, pending)
+	inst, err := m.open(profile, cfg.SSHOptions, pending)
 	if err != nil {
 		m.mu.Lock()
 		// Only clear the slot if it is still OURS — a concurrent Disconnect or
@@ -335,7 +402,7 @@ func (m *Manager) Connect(name string) (Instance, error) {
 }
 
 // open does the spawn + readiness wait for an already-claimed slot.
-func (m *Manager) open(profile sshprofile.Profile, pending *forward) (Instance, error) {
+func (m *Manager) open(profile sshprofile.Profile, opts sshprofile.Options, pending *forward) (Instance, error) {
 	if known, checked := m.opts.KnownHosts(profile); checked && !known {
 		return Instance{}, fmt.Errorf("%w: %s is not in known_hosts. Open an SSH terminal to this profile once and accept the host key, then connect again",
 			ErrHostKeyUnknown, profile.Target())
@@ -345,7 +412,7 @@ func (m *Manager) open(profile sshprofile.Profile, pending *forward) (Instance, 
 	if err != nil {
 		return Instance{}, fmt.Errorf("%w: allocate a local port: %w", ErrForwardFailed, err)
 	}
-	argv, err := sshprofile.ForwardArgv(profile, m.opts.SSHOptions, localPort)
+	argv, err := sshprofile.ForwardArgv(profile, opts, localPort)
 	if err != nil {
 		return Instance{}, fmt.Errorf("%w: %w", ErrInvalidProfile, err)
 	}
@@ -357,6 +424,14 @@ func (m *Manager) open(profile sshprofile.Profile, pending *forward) (Instance, 
 	m.mu.Lock()
 	pending.localPort = localPort
 	pending.proc = proc
+	// The profile may have been removed or edited while ssh was starting:
+	// retire() then dropped this slot without a child to stop. Stop it here,
+	// so no forward survives to a machine the config no longer names.
+	if cur, ok := m.live[profile.Name]; !ok || cur != pending {
+		m.mu.Unlock()
+		_ = proc.Stop()
+		return Instance{}, fmt.Errorf("%w: the profile changed while connecting", ErrForwardFailed)
+	}
 	m.mu.Unlock()
 
 	// One reaper per child: it is what turns a dead ssh into an honest
@@ -436,7 +511,9 @@ func (m *Manager) Disconnect(name string) error {
 	if m == nil {
 		return ErrDisabled
 	}
-	if _, ok := sshprofile.Find(m.opts.Profiles, name); !ok {
+	cfg := m.config()
+	m.retire(cfg)
+	if _, ok := sshprofile.Find(cfg.Profiles, name); !ok {
 		return fmt.Errorf("%w: %q", ErrUnknownProfile, name)
 	}
 	m.mu.Lock()
@@ -494,13 +571,38 @@ type TestResult struct {
 // known_hosts, is not an error: it is the honest, informative TestResult the
 // operator is asking for, reported with a nil error.
 func (m *Manager) Test(name string) (TestResult, error) {
-	if m == nil || !m.opts.Enabled {
+	if m == nil {
 		return TestResult{}, ErrDisabled
 	}
-	profile, ok := sshprofile.Find(m.opts.Profiles, name)
+	cfg := m.config()
+	if !cfg.Enabled {
+		return TestResult{}, ErrDisabled
+	}
+	profile, ok := sshprofile.Find(cfg.Profiles, name)
 	if !ok {
 		return TestResult{}, fmt.Errorf("%w: %q", ErrUnknownProfile, name)
 	}
+	return m.probe(profile, cfg.SSHOptions)
+}
+
+// TestProfile runs the same read-only probe as Test against a DRAFT profile
+// the operator is editing and has not saved yet (T-488: test-connect from the
+// profile editor before the save). It validates the draft exactly as config
+// load does (ValidateWithFS: syntax plus a stat of key_path, whose bytes are
+// never read), never opens a forward and leaves no state. It deliberately
+// ignores the Enabled switch: testing a profile is how an operator decides to
+// turn the surface on. Only the owner-local, confirm-token-gated editor route
+// reaches it.
+func (m *Manager) TestProfile(profile sshprofile.Profile) (TestResult, error) {
+	if m == nil {
+		return TestResult{}, ErrDisabled
+	}
+	return m.probe(profile, m.config().SSHOptions)
+}
+
+// probe is the shared body of Test and TestProfile.
+func (m *Manager) probe(profile sshprofile.Profile, opts sshprofile.Options) (TestResult, error) {
+	name := profile.Name
 	if err := profile.ValidateWithFS(); err != nil {
 		return TestResult{}, fmt.Errorf("%w: %w", ErrInvalidProfile, err)
 	}
@@ -508,7 +610,7 @@ func (m *Manager) Test(name string) (TestResult, error) {
 	var result TestResult
 	result.KnownHostsOK, result.KnownHostsChecked = m.opts.KnownHosts(profile)
 
-	argv, err := sshprofile.TestArgv(profile, m.opts.SSHOptions)
+	argv, err := sshprofile.TestArgv(profile, opts)
 	if err != nil {
 		return TestResult{}, fmt.Errorf("%w: %w", ErrInvalidProfile, err)
 	}

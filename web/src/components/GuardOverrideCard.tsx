@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/DataTable";
 import { ChartShell, Pill, Tooltip } from "@/components/primitives";
@@ -14,9 +15,10 @@ import { fmtDateTime, fmtShortId } from "@/lib/format";
 //     organization marked overridable, each with a one-click
 //     "Allow for this session" that creates the SCOPED, time-boxed
 //     approval the CLI's `observer guard approve --session` creates.
-//   - "Blocked by org policy": read-only. These cannot be overridden
-//     on this node at all, so the card says so instead of offering a
-//     button the daemon would refuse.
+//   - "Blocked by org policy": these cannot be overridden on this node,
+//     so the card offers the organization's request path instead
+//     (request-grants G4: "Request access" opens the Requests form
+//     prefilled from the event; nothing is sent until Send).
 //
 // The whole card HIDES when neither list has a row, which is always
 // the case on a node with no org policy bundle - the Security page
@@ -177,7 +179,7 @@ export function GuardOverrideCard() {
           // honesty the deny text carries on that lane. Never offer a
           // button the daemon would refuse.
           return (
-            <Tooltip content="This block arrived with no session id, so an override cannot be scoped to it. Re-run the request through a session-identified client, or ask your admin.">
+            <Tooltip content="This block arrived with no session id, so an override cannot be scoped to it. Re-run the request through a session-identified client, or request access from your organization.">
               <span
                 tabIndex={0}
                 className="cursor-help text-caption text-fg-3 underline decoration-dotted underline-offset-[3px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
@@ -202,6 +204,23 @@ export function GuardOverrideCard() {
           </Tooltip>
         );
       },
+    },
+  ];
+
+  const lockedColumns: ColumnDef<OverrideEvent, unknown>[] = [
+    ...BLOCK_COLUMNS,
+    {
+      id: "request",
+      header: "",
+      enableSorting: false,
+      meta: { align: "right" },
+      cell: ({ row }) => (
+        <Tooltip content={`Ask your organization for a time-limited exception to ${row.original.rule_id}. You see exactly what is sent before it goes.`}>
+          <Link className={actionBtn} to={`/requests?event=${row.original.id}`}>
+            Request access
+          </Link>
+        </Tooltip>
+      ),
     },
   ];
 
@@ -242,14 +261,15 @@ export function GuardOverrideCard() {
             Blocked by org policy
           </div>
           <p className="mb-1.5 text-[11px] text-fg-3">
-            These rules are locked by your organization. A local approval is refused, and an
-            existing one is ignored - ask your admin to mark the rule overridable.
+            These rules are locked by your organization. A local approval is refused and an existing
+            one is ignored. Request access to ask for a time-limited exception; a granted one reaches
+            this machine on its next sync and ends on its own.
           </p>
           <DataTable<OverrideEvent>
             data={locked}
-            columns={BLOCK_COLUMNS}
+            columns={lockedColumns}
             rowKey={(ev) => String(ev.id)}
-            minWidth={420}
+            minWidth={520}
           />
         </div>
       )}

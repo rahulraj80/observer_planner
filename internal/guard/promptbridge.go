@@ -74,9 +74,31 @@ import "github.com/marmutapp/superbased-observer/internal/policy"
 // concatenates them with "+" rather than silently picking one.
 func (g *Guard) ActionVerdictFromPrompt(pv PromptVerdict, em Emission, input ActionInput) ActionVerdict {
 	input.Target = pv.Fingerprint
+	input.PromptDigest = pv.CaptureDigest
 	verdict := pv.Verdict
 	if pv.Outcome != "" {
 		verdict.Reason = verdict.Reason + " [outcome=" + string(pv.Outcome) + "]"
+	}
+	// The developer action (promptaction.go) and the seam that judged
+	// the prompt, as stable suffixes: no migration, and reporting can
+	// tell "warned in band" from "flagged after send" from "proxy".
+	if pv.Action != PromptActionNone {
+		verdict.Reason += " [action=" + string(pv.Action) + "]"
+		if pv.ActionDegradedFrom != PromptActionNone {
+			verdict.Reason += " [wanted=" + string(pv.ActionDegradedFrom) + "]"
+		}
+	}
+	if pv.Lane != "" {
+		verdict.Reason += " [lane=" + pv.Lane + "]"
+	}
+	if pv.Action == PromptActionRedact {
+		// The prompt went through masked: record the non-blocking flag it
+		// was, the same decision the proxy lane's redact records.
+		verdict.Decision = policy.DecisionFlag
+	}
+	suppress := em.Permission != "deny"
+	if pv.Action != PromptActionNone {
+		suppress = pv.Action.SuppressesToast() && !(pv.Action == PromptActionWarn && pv.WarnIndirect)
 	}
 	es := g.set.Load()
 	return ActionVerdict{
@@ -87,7 +109,8 @@ func (g *Guard) ActionVerdictFromPrompt(pv PromptVerdict, em Emission, input Act
 		Enforced:      em.Enforced,
 		DegradedFrom:  combineDegradedFrom(pv.DegradedFrom, em.DegradedFrom),
 		GuardError:    pv.GuardError,
-		SuppressAlert: em.Permission != "deny",
+		SuppressAlert: suppress,
+		GrantID:       pv.GrantID,
 	}
 }
 

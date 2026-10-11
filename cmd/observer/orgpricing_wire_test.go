@@ -109,7 +109,7 @@ func TestResolvePricingSourceTable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := resolvePricingSource(tc.in); got != tc.want {
-				t.Errorf("resolvePricingSource = %q, want %q — %s", got, tc.want, tc.why)
+				t.Errorf("resolvePricingSource = %q, want %q - %s", got, tc.want, tc.why)
 			}
 		})
 	}
@@ -124,7 +124,7 @@ func TestNodePricingPostureIsAbsentUntilPublished(t *testing.T) {
 
 	nodePricingPosture.Store(nil)
 	if src, ver := nodePricingPostureFor(); src != "" || ver != 0 {
-		t.Fatalf("an unpublished posture reported (%q, %d) — 'not determined' must never render as a verdict", src, ver)
+		t.Fatalf("an unpublished posture reported (%q, %d) - 'not determined' must never render as a verdict", src, ver)
 	}
 
 	setNodePricingPosture(orgcontract.PricingSourceOrgAuthoritative, 12)

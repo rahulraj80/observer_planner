@@ -20,7 +20,7 @@ import (
 // anything other than ConsentValid. Submit cannot be reached without a Gate,
 // so this is the single choke point that turns "not consented" into "no
 // egress".
-var ErrNotConsented = errors.New("aggregateclient: rail not enabled or consent invalid — no submission")
+var ErrNotConsented = errors.New("aggregateclient: rail not enabled or consent invalid - no submission")
 
 // Gate is the proof-of-consent token Submit requires. It has no exported
 // fields and no other constructor than Authorize, so a caller cannot fabricate

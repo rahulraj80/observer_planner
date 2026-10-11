@@ -149,7 +149,7 @@ func TestInstanceConnect_NameOnlyWire(t *testing.T) {
 		t.Fatalf("manager saw %d connects, want 1", len(mgr.connectNames))
 	}
 	if got := mgr.connectNames[0]; got != "sb-devbox" {
-		t.Fatalf("manager saw name %q, want the PATH name %q — a body field must never be able to redirect the destination", got, "sb-devbox")
+		t.Fatalf("manager saw name %q, want the PATH name %q - a body field must never be able to redirect the destination", got, "sb-devbox")
 	}
 
 	var info InstanceInfo
@@ -265,7 +265,7 @@ func TestInstanceTest(t *testing.T) {
 		t.Fatalf("POST test = %d: %s", rr.Code, rr.Body)
 	}
 	if len(mgr.testNames) != 1 || mgr.testNames[0] != "sb-devbox" {
-		t.Fatalf("manager saw test names %v, want [sb-devbox] — a body field must never redirect the target", mgr.testNames)
+		t.Fatalf("manager saw test names %v, want [sb-devbox] - a body field must never redirect the target", mgr.testNames)
 	}
 	var result InstanceTestResult
 	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
@@ -325,10 +325,11 @@ func TestInstanceVerb_BadPaths(t *testing.T) {
 		{http.MethodPost, "/api/instances/sb-devbox", http.StatusNotFound},
 		{http.MethodPost, "/api/instances/sb-devbox/connect/extra", http.StatusNotFound},
 		// net/http's mux path-cleans a doubled slash before any handler runs, so
-		// this never reaches parseInstancePath. Pinned at 301 so the behaviour is
+		// this never reaches parseInstancePath. Pinned so the behaviour is
 		// recorded rather than mistaken for our own 404 — the empty-name case is
-		// covered directly in TestParseInstancePath.
-		{http.MethodPost, "/api/instances//connect", http.StatusMovedPermanently},
+		// covered directly in TestParseInstancePath. Go 1.26 (D-511) answers a
+		// non-GET path-clean with 307, which keeps the method (it was 301).
+		{http.MethodPost, "/api/instances//connect", http.StatusTemporaryRedirect},
 		{http.MethodPost, "/api/instances/sb-devbox/", http.StatusNotFound},
 		{http.MethodGet, "/api/instances/sb-devbox/connect", http.StatusMethodNotAllowed},
 		{http.MethodPost, "/api/instances", http.StatusMethodNotAllowed},
@@ -411,7 +412,7 @@ func TestInstanceFeatureGate(t *testing.T) {
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/instances/sb-devbox/disconnect", nil))
 		if rr.Code != 200 {
-			t.Fatalf("disconnect status = %d, want 200 — turning a capability OFF must never be org-blockable: %s", rr.Code, rr.Body)
+			t.Fatalf("disconnect status = %d, want 200 - turning a capability OFF must never be org-blockable: %s", rr.Code, rr.Body)
 		}
 		if len(mgr.disconnectNames) != 1 {
 			t.Fatalf("disconnect did not reach the manager: %v", mgr.disconnectNames)
@@ -450,7 +451,7 @@ func TestInstanceRoutesAreLocalOnly(t *testing.T) {
 			t.Fatalf("%s is not in the route-capability registry", pattern)
 		}
 		if got != CapabilityLocal {
-			t.Fatalf("%s capability = %v, want CapabilityLocal — a port forward into a third-party machine must not be remote-drivable", pattern, got)
+			t.Fatalf("%s capability = %v, want CapabilityLocal - a port forward into a third-party machine must not be remote-drivable", pattern, got)
 		}
 	}
 	// Contrast pin: an ordinary read really is VIEW, so this asserts a genuine

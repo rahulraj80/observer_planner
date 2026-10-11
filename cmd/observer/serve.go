@@ -1,3 +1,5 @@
+//go:build !sbo_omit_integration_mcp_server
+
 package main
 
 import (
@@ -20,6 +22,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 	"github.com/marmutapp/superbased-observer/internal/stash"
 	"github.com/marmutapp/superbased-observer/internal/stashalign"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // serveToolCallTimeout is the MCP-side read-transaction watchdog. MCP tools
@@ -92,6 +95,8 @@ func newServeCmd() *cobra.Command {
 				// get_session_message: re-read one un-excerpted message of a
 				// source session on demand (message-addressable handoff).
 				GetSessionMessage: messageReader(cfg, database),
+				// Tool results follow the developer cost display (T-204).
+				CostDisplay: newCostDisplayResolver(store.New(database)).Mode,
 			}
 			if cfg.Compression.Conversation.Stash.Enabled {
 				st, err := stash.New(stash.Options{
@@ -127,7 +132,7 @@ func newServeCmd() *cobra.Command {
 						default:
 							ok, hint := stashalign.CompareDirs(cfg.Compression.Conversation.Stash.Dir, proxyDir)
 							if !ok {
-								logger.Warn("mcp: stash dir mismatch with proxy — retrieve_stashed will see misses",
+								logger.Warn("mcp: stash dir mismatch with proxy - retrieve_stashed will see misses",
 									"hint", hint,
 									"mcp_dir", cfg.Compression.Conversation.Stash.Dir,
 									"proxy_dir", proxyDir,
@@ -167,7 +172,7 @@ func newServeCmd() *cobra.Command {
 				auditCloser = w
 			} else {
 				mcpOpts.AuditWriter = audit.NewNoopWriter()
-				logger.Info("mcp: audit log disabled — V7-12 tool calls will not be recorded")
+				logger.Info("mcp: audit log disabled - V7-12 tool calls will not be recorded")
 			}
 			defer func() {
 				if auditCloser != nil {

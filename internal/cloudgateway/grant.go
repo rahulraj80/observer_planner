@@ -24,7 +24,7 @@ var (
 	// is passed to the FEATURE lane. Bootstrap egress has its own named methods;
 	// routing it through the feature lane would ask for a grant that, by design,
 	// no one ever mints.
-	ErrBootstrapPurpose = errors.New("cloudgateway: account_device_operations is bootstrap egress, not a feature purpose — use the Bootstrap* methods")
+	ErrBootstrapPurpose = errors.New("cloudgateway: account_device_operations is bootstrap egress, not a feature purpose - use the Bootstrap* methods")
 	// ErrNoConsentSource is returned when the gateway was constructed without a
 	// GrantStore and a feature send is attempted. Fail closed: an unconfigured
 	// consent source is not an authorized one.
@@ -152,7 +152,7 @@ var purposeRules = map[cloudcontract.Purpose]purposeRule{
 	cloudcontract.PurposeAccountDeviceOps: {
 		lane: LaneBootstrap,
 		notYetReason: "account and device operations are authorized by your own sign-in action, " +
-			"not by a stored grant — there is nothing to grant here",
+			"not by a stored grant - there is nothing to grant here",
 		noUploadReason: "account and device operations send no session-derived data at all; they are the " +
 			"Bootstrap* methods, not a feature upload",
 	},
@@ -187,7 +187,7 @@ var purposeRules = map[cloudcontract.Purpose]purposeRule{
 		// (Sol review F4).
 		evidenceUploadable: false,
 		noUploadReason: "cohort benchmarking authorizes only the derived per-window contribution upload " +
-			"(the community leg of `observer cloud sync`), not a session-evidence upload — there is no " +
+			"(the community leg of `observer cloud sync`), not a session-evidence upload - there is no " +
 			"session body this purpose can send",
 	},
 	cloudcontract.PurposePublicProfile: {
@@ -354,7 +354,7 @@ func (g *Gateway) resolve(ctx context.Context, f grantFilter) ([]Grant, error) {
 		})
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("%w: nothing grants %s — %s", ErrNoLiveGrant, f.describe(), f.remedy())
+		return nil, fmt.Errorf("%w: nothing grants %s - %s", ErrNoLiveGrant, f.describe(), f.remedy())
 	}
 	return out, nil
 }

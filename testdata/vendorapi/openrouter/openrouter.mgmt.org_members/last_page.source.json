@@ -1,0 +1,32 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].email": "VerifiedOfficial",
+    "data[].first_name": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].last_name": "VerifiedOfficial",
+    "data[].role": "VerifiedOfficial",
+    "total_count": "VerifiedOfficial"
+  },
+  "fixture_sha256": "c216141e19b2153d31437cd6e8cbb47a7275c98a99a39ce74a468ab84f059e00",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/organization/members",
+    "query": {
+      "limit": "100",
+      "offset": "2"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized terminal page: offset 2 plus one member reaches total_count 3.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "OpenRouter API 1.0.0 (openapi.yaml as rendered on the reference page), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "65a87caddba8001863ef270e094c9f2d76ae3905ca73737d0aea573b7cba8b47",
+  "source_url": "https://openrouter.ai/docs/api/api-reference/organization/list-organization-members.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openrouter.mgmt.org_members"
+}

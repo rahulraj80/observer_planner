@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import type { TextareaHTMLAttributes } from "react";
 import { FieldShell, fieldClasses, type FieldChromeProps } from "./Input";
+import { callerSetsWidth } from "../lib/fieldWidth";
 
 export type TextareaProps = Omit<
   TextareaHTMLAttributes<HTMLTextAreaElement>,
@@ -21,7 +22,7 @@ export function Textarea({
       <textarea
         {...rest}
         className={clsx(
-          fieldClasses({ mono, invalid: Boolean(error) }),
+          fieldClasses({ mono, invalid: Boolean(error), ownWidth: callerSetsWidth(className) }),
           "resize-y",
           className,
         )}

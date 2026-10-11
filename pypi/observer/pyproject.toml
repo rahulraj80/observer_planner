@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "superbased-observer"
 dynamic = ["version"]
-description = "Claude Code cost tracking, Cursor token usage, Codex spend — AI coding agent observability across 26 adapters, proxy-accurate token counts and cost."
+description = "Local-first AI coding agent observability: Claude Code token usage, Codex cost and Cursor spend across 40 adapters, provider-exact via a local proxy. No account, no telemetry."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -14,19 +14,25 @@ requires-python = ">=3.8"
 keywords = [
   "ai",
   "observability",
-  "anthropic",
-  "openai",
-  "claude-code",
-  "codex",
-  "cursor",
-  "mcp",
-  "tokens",
-  "cost",
-  "cost-tracking",
-  "token-usage",
   "ai-coding-agent",
   "llm-observability",
+  "claude-code",
+  "claude-code-usage",
+  "codex",
+  "cursor",
+  "copilot",
+  "gemini-cli",
+  "anthropic",
+  "openai",
+  "mcp",
+  "tokens",
+  "token-usage",
+  "cost",
+  "cost-tracking",
+  "prompt-caching",
   "spend",
+  "local-first",
+  "no-telemetry",
 ]
 classifiers = [
   "Development Status :: 5 - Production/Stable",

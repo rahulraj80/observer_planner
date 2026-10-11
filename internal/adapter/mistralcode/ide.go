@@ -68,6 +68,9 @@ const (
 	// layoutIDE is the Continue-fork IDE store
 	// (<root>/<sessionId>.json + the sibling sessions.json index).
 	layoutIDE
+	// layoutUnified is the vibe >= 2.25 unified-harness store
+	// (<root>/unified/<session-uuid>/CURRENT; see unified.go).
+	layoutUnified
 )
 
 const (
@@ -96,6 +99,8 @@ func classifyLayout(path string) layout {
 	switch {
 	case matchesShape(path):
 		return layoutVibe
+	case matchesUnifiedShape(path):
+		return layoutUnified
 	case matchesIDEShape(path):
 		return layoutIDE
 	default:

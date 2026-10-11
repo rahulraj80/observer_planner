@@ -1,0 +1,7373 @@
+{
+ "group": "jetbrains",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/jetbrains-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "jetbrains.account.account_delete",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "DELETE /account {email}",
+   "read_write_doc": "W",
+   "class_doc": "Identity (control)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/jetbrains-account-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "revokes all licenses; verified domain only",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.invite_link",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /account/link-invitation {email}",
+   "read_write_doc": "W",
+   "class_doc": "Identity (control)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "existing JBA account joins org; verified domain",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.invite_signup",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /account/signup-invitation {email}",
+   "read_write_doc": "W",
+   "class_doc": "Identity (control)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "creates account; verified domain",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.license_assign",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /customer/licenses/assign {licenseId or license{productCode, team}, contact{email, firstName, lastName}, sendEmail, includeOfflineActivationCode}",
+   "read_write_doc": "W",
+   "class_doc": "Seats (control)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.license_change_team",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /customer/changeLicensesTeam",
+   "read_write_doc": "W",
+   "class_doc": "Seats, Projects (control)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "non-transferable stay",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.license_get",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /customer/licenses/{licenseId}",
+   "read_write_doc": "R",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.license_revoke",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /customer/licenses/revoke ?licenseId or ?email[&productCode]",
+   "read_write_doc": "W",
+   "class_doc": "Seats (control)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "only licenses assigned for a minimum period (truncated in spec)",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.licenses_list",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "page/perPage; count, pages"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /customer/licenses (?productCode, assigned, assigneeEmail, page, perPage)",
+   "read_write_doc": "R",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "licenseId, product, assignee (email, name, type), team, lastSeen{lastSeenDate, lastAssignmentDate, isOfflineCodeGenerated}, subscription{validUntilDate, isAutomaticallyRenewed}, isSuspended, isTrial, perpetual, domain",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.plugins",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /plugins",
+   "read_write_doc": "R",
+   "class_doc": "(dictionary)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "plugin product codes",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "jetbrains.account.products",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /products",
+   "read_write_doc": "R",
+   "class_doc": "(dictionary)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "product codes",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "jetbrains.account.team_licenses",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "page/perPage"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /customer/teams/{teamId}/licenses",
+   "read_write_doc": "R",
+   "class_doc": "Seats, Projects (team container)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "team = license container",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.token_info",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /token",
+   "read_write_doc": "R",
+   "class_doc": "Credentials, Roles",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "managed org/team + owner role",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.account.token_rotate",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.account",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /token/rotate",
+   "read_write_doc": "W",
+   "class_doc": "Credentials (control)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://account.jetbrains.com/openapi/specs/public.swagger.jba-api.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "own token only",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.acp.registry",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.acp",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "public ACP agent registry (agentclientprotocol/registry, FORMAT.md, agent.schema.json) feeding Central Agents page",
+   "read_write_doc": "",
+   "class_doc": "Policy (agent catalog)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "D (public JSON, read only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-agents.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.air.automation_credits",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.air",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "personal or project credits; UI",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "per run",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/air/create-automation.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.air.automation_webhook_in",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.air",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "per-automation token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST https://api.jetbrains.cloud/air-automations-gateway/api/v1/events/automations/<automation-id>, `Authorization: ApiKey <token>` (permanent, no rotation documented), optional JSON payload into task context",
+   "read_write_doc": "",
+   "class_doc": "(control: trigger run)",
+   "grain_doc": "n/a",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/air/automation-triggers.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "triggers also schedule, interval, GitHub PR/issue/workflow events, Jira events; results: create PR / push branch / none",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "jetbrains.air.automation_webhook_out",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.air",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "NONE (no HMAC, no secret documented); retries implied, policy n.d."
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "PushWebhook (unsigned): POST to admin URL on `automation.execution.succeeded` / `failed`; headers X-Air-Webhook-Id (`evt_<uuid>`, idempotency key), X-Air-Webhook-Event, X-Air-Webhook-Format (json/slack-workflow); body id, type, apiVersion, createdAt, automationId, automationName, automationRunId, statusUrl, output.result (markdown) or error{message, code}",
+   "read_write_doc": "",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "Event (per automation run)",
+   "build": "buildable",
+   "build_doc": "D (Air automations only, not IDE / CLI Junie)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/air/automation-notifications.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "https://www.jetbrains.com/help/air/automation-notifications.html",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.access_credit_view",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "View AI access"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "View AI access"
+   },
+   "freshness_doc": "live-ish",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "Access page: credits spent this month, Usage %, sum of credits / limits, 80% approaching-limit card (on page only, no email)",
+   "read_write_doc": "",
+   "class_doc": "Cost, Limits",
+   "grain_doc": "Snapshot (month to date)",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/monitor-ai-credit-usage.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.admin_security",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage organization"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage organization"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "Administration: org details, 2FA, verified domains, JetBrains Account API enable/disable",
+   "read_write_doc": "",
+   "class_doc": "Identity, Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialCreationPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/org-administration.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.agents",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "View/Manage AI settings; Business+"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "View/Manage AI settings; Business+"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI: registry agents (auto from ACP registry, cannot delete) + custom ACP agent JSON",
+   "read_write_doc": "",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-agents.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.ai_access",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "View/Manage AI access; seats Business+"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "View/Manage AI access; seats Business+"
+   },
+   "freshness_doc": "up to 1 h to apply when enabling AI",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI grant/revoke to users/groups/SA; everyone-mode; seats auto-assigned",
+   "read_write_doc": "",
+   "class_doc": "Seats, Identity",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-access.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.ai_policies",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage AI settings; Business+"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage AI settings; Business+"
+   },
+   "freshness_doc": "\"a few minutes\"",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI default + custom policies: General (cloud tasks, AI provider, credit limit), MCP, Agents (All available agents), Tools (BYOK, custom ACP agents, Air third-party MCP connectors); merge rules",
+   "read_write_doc": "",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-policies-configure.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.ai_providers",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage AI settings; Business+"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage AI settings; Business+"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI: JetBrains AI, OpenAI, Vertex, Anthropic, Bedrock; BYOK model list add/remove; provider set in default policy",
+   "read_write_doc": "",
+   "class_doc": "Policy (models)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-providers-manage-models.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_csv",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "View AI analytics"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "View AI analytics"
+   },
+   "freshness_doc": "batched",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "per-chart CSV export",
+   "read_write_doc": "",
+   "class_doc": "Adoption, Usage, Cost, LOC",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-analytics.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.adoption_users",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/adoption/users-adoption/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "Adoption",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.code_provenance_date",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/code-provenance/group-by/date-feature",
+   "read_write_doc": "",
+   "class_doc": "LOC",
+   "grain_doc": "Period x origin",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.credits_tool",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/credits-usage/group-by/tool",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "range x tool",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.credits_user_tool",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "page/limit"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "per user",
+   "mechanism_doc": "GET /api/v1/credits-usage/group-by/user-tool.paged",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "range x user x tool",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.effectiveness_date",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/effectiveness/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "LOC",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.effectiveness_date_feature",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/effectiveness/group-by/date-feature",
+   "read_write_doc": "",
+   "class_doc": "LOC",
+   "grain_doc": "Period x feature",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.effectiveness_totals",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/effectiveness/totals",
+   "read_write_doc": "",
+   "class_doc": "LOC",
+   "grain_doc": "range",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.limit_hits_date",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/adoption/limit-hits/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "Limits (hits)",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.limit_hits_user",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "per user {id, name, email}",
+   "mechanism_doc": "GET /api/v1/adoption/limit-hits/group-by/date-user.cursor",
+   "read_write_doc": "",
+   "class_doc": "Limits (hits)",
+   "grain_doc": "UserDay",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v1.quota_consumption",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "GET /api/v1/adoption/quota-consumption/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v1.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.adoption_users",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg (filter by principal/group, principalType, ides)",
+   "mechanism_doc": "POST /api/v2/adoption/users-adoption/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "Adoption",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "enabled vs active, totals",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.code_provenance",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg (principal filter)",
+   "mechanism_doc": "POST /api/v2/code-provenance/group-by/date-feature",
+   "read_write_doc": "",
+   "class_doc": "LOC",
+   "grain_doc": "Period x origin",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "origin human, junie, aia, claude_agent, codex_agent, gemini_agent, copilot, code_completion, nes, other, uncategorized; `timeSavedS`",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.credits_by_principal_tool",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "per principal",
+   "mechanism_doc": "POST /api/v2/credits-usage/group-by/date-principal-tool.cursor",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "range x principal x tool",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "no per-date field returned despite path; window by fromDate/toDate",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.credits_by_tool",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/credits-usage/group-by/tool",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "range x tool",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "`tariff` + `topup` credits (1 credit = 1 USD provider spend; BYOK = 0)",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.effectiveness_date",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/effectiveness/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "LOC",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "observable tool enum aia, junie, claude_agent, codex_agent, gemini_agent, pi, copilot, code_completion, nes",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.effectiveness_date_feature",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/effectiveness/group-by/date-feature",
+   "read_write_doc": "",
+   "class_doc": "LOC",
+   "grain_doc": "Period x feature",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "array named `tools`, entries keyed `feature`",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.effectiveness_totals",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/effectiveness/totals",
+   "read_write_doc": "",
+   "class_doc": "LOC, Adoption",
+   "grain_doc": "range total",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "suggested, accepted LOC, invocations (chat messages for agents)",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.groups_by_ids",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "POST /api/v2/groups/by-ids",
+   "read_write_doc": "",
+   "class_doc": "Groups",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "same shape",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.groups_by_user",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "per user",
+   "mechanism_doc": "POST /api/v2/groups/by-user",
+   "read_write_doc": "",
+   "class_doc": "Groups (membership)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "userIds, `transitive` flag",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.groups_list",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor, ascending"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "POST /api/v2/groups/list",
+   "read_write_doc": "",
+   "class_doc": "Groups",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "id, parentId, membersCount{direct, transitive}, parentGroups, hasChildren",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.limit_hits_date",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/adoption/limit-hits/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "Limits (hits, not state)",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "count, maximumDaily, totalHits",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.limit_hits_principal",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor (`limit`, `nextCursor`)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "per principal (id, name, type, email)",
+   "mechanism_doc": "POST /api/v2/adoption/limit-hits/group-by/date-principal.cursor",
+   "read_write_doc": "",
+   "class_doc": "Limits (hits)",
+   "grain_doc": "UserDay",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "sortKey date/name",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.principals_search",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "per principal",
+   "mechanism_doc": "POST /api/v2/principals/search",
+   "read_write_doc": "",
+   "class_doc": "Identity, ServiceAccounts",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "user{id, orgId, deleted, type member/jetbrains_user, name, email, jbaAccountId, jbaLogin}; serviceAccount; nameOrEmailContains",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.quota_consumption_date",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/adoption/quota-consumption/group-by/date",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "Period",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "credits `limit` (built-in quota) + `topup`",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.quota_consumption_date_tool",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/adoption/quota-consumption/group-by/date-tool",
+   "read_write_doc": "",
+   "class_doc": "Cost",
+   "grain_doc": "Period x tool",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "billed tool enum junie, aia, claude_agent, codex_agent, gemini_agent, opencode_agent, pi, copilot, other",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.sessions_list",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor (ties broken by session id)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "per owner",
+   "mechanism_doc": "POST /api/v2/sessions/list.cursor",
+   "read_write_doc": "",
+   "class_doc": "Sessions, Usage, Cost",
+   "grain_doc": "PerSession",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_session",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/session-explorer.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "sessionId, owner, timestamp, lastActivity, durationSeconds, creditsSpent, totalTokens, agent, ide, models[], provider; included when lastActivity in range (UI says start OR end in range: doc inconsistency); excludes AI Assistant Chat mode, quick actions, commit messages, completion; no MCP tools, no repos",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.tokens_by_model",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/token-usage/group-by/model.cursor",
+   "read_write_doc": "",
+   "class_doc": "Usage",
+   "grain_doc": "range x model",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "model + provider + tokens",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.analytics_v2.tokens_date_provider",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "agg",
+   "mechanism_doc": "POST /api/v2/token-usage/group-by/date-provider",
+   "read_write_doc": "",
+   "class_doc": "Usage",
+   "grain_doc": "Period x provider",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/analytics-api-v2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "provider `{type: jetbrains}` or byok id; single token total (no in/out/cache split); trend",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.audit_ui",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Manage organization; tier not stated (Enterprise \"AI audit logs\" still coming soon)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage organization; tier not stated (Enterprise \"AI audit logs\" still coming soon)"
+   },
+   "freshness_doc": "UI 90 d; CSV beyond 90 d, max 50,000 events per export; events: users/groups/SA CRUD, membership, role assign, AI access, credit limits; no read events, no AI usage",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI table + CSV download (timestamp, principal, action `domain.entity.verb`, target, result Success/Failure/Denied/Pending/Blocked; metadata old/new in UI only, not in CSV)",
+   "read_write_doc": "",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/audit.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.credit_limits",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage AI access; policy limits Business+"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage AI access; policy limits Business+"
+   },
+   "freshness_doc": "recalculated after save",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI: individual (user/SA), policy, org default; 0..1,000,000 credits; monthly reset",
+   "read_write_doc": "",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitGroup",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitOrg",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-credit-limits.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.credit_pool",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "View/Manage AI settings + Manage purchases"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "View/Manage AI settings + Manage purchases"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "AI settings: balance, buy credits, auto-purchase, migration-details CSV (incl. expiry)",
+   "read_write_doc": "",
+   "class_doc": "Cost, BillingExport",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-settings.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.data_collection",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage AI settings"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage AI settings"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "AI settings: detailed code-related data collection off by default / \"Let users decide\"",
+   "read_write_doc": "",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/ai-settings.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.groups",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage organization"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage organization"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI create (nested), members add/remove, delete; no IdP sync documented",
+   "read_write_doc": "",
+   "class_doc": "Groups",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/groups.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.hosted_vcs",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "Manage organization"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage organization"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI: GitHub Enterprise Server, GitLab Self-Managed connections",
+   "read_write_doc": "",
+   "class_doc": "Projects (integration)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/integrations.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.mcp_servers",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "View/Manage AI settings; Business+"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "View/Manage AI settings; Business+"
+   },
+   "freshness_doc": "minutes",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI: command (stdio) or remote (HTTP) servers, per policy; user-added local MCP NOT restricted",
+   "read_write_doc": "",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/mcp-servers.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.oauth_token",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "POST https://oauth.account.jetbrains.com/api/rest/oauth2/token",
+   "read_write_doc": "",
+   "class_doc": "Credentials (exchange)",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/exchange-client-id-and-secret-for-an-access-token.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "client_credentials, scope jcp-public, 3600 s",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.plans_seats",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage purchases"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage purchases"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "AI settings plan + seat count (billed on purchased seats)",
+   "read_write_doc": "",
+   "class_doc": "Seats",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/plans-and-pricing.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.roles",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage organization"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage organization"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI: 8 built-in roles, custom roles, 11 permissions, scope Organization or Groups (fixed at creation; group scope limited to Manage/View AI access + View AI analytics)",
+   "read_write_doc": "",
+   "class_doc": "Roles",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/roles.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.service_accounts",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage organization"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage organization"
+   },
+   "freshness_doc": "old tokens valid to expiry after rotate",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI create (client id + secret shown once), rotate secret, delete; system-created SAs read-only",
+   "read_write_doc": "",
+   "class_doc": "ServiceAccounts, Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/service-accounts.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.session_explorer_csv",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "View AI analytics / (self) / Manage organization"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "View AI analytics / (self) / Manage organization"
+   },
+   "freshness_doc": "batched",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI + CSV of all matching sessions (adds Provider in detail view)",
+   "read_write_doc": "",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/session-explorer.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.central.users",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.central",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Manage organization"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Manage organization"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "UI add (name+email), remove, edit",
+   "read_write_doc": "",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/jetbrains-console/users.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.hub.scim2",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.hub",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "a Hub permanent token (the identity provider's Secret Token) as Authorization: Bearer <token>"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM 2.0 startIndex (1-based) and count, totalResults"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "SCIM 2.0 per Hub auth module, tenant URL `<hub-base-url>/api/rest/scim2`; GET /api/rest/scim2/Users (RFC 7644 3.4.2 ListResponse); per-module SCIM tokens; excludes scheduled sync; Okta OIDC apps unsupported",
+   "read_write_doc": "",
+   "class_doc": "Identity, Groups (provisioning inbound)",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/hub/user-import-and-synchronization.html",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://www.jetbrains.com/help/ide-services-cloud/azure-ad-auth-module.html",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://www.rfc-editor.org/rfc/rfc7644",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "IDE Services Cloud / License Vault Cloud identity, not Central. Built (lane ENTAPI-L16E, T-717) for Identity: a customer_host surface (Hub runs on the customer's domain; the connection declares the tuple, ledger VCONN-HOST-1; a Hub under a path prefix such as /hub is not reachable because the tuple carries no path). Driver internal/vendorapi/jetbrains HubSCIM: GET /api/rest/scim2/Users, startIndex (1-based) and count 100, no filter; the SCIM ListResponse pages by the offset family with a 1-based index (an echoed startIndex other than the one asked, a short total or a repeated last user is drift). Landed as User/jetbrains.hub_user/v1 keyed jetbrains.hub_user = SCIM id: primary e-mail (folded), active, created and last modified times; the display name (else formatted name, else userName) is the display name; groups, roles, entitlements and extensions are never decoded (closed DTO). A complete page set is authoritative for the module's users. Hub documents only the endpoint and the token, so that Hub answers the RFC 7643 ListResponse is Inferred: assumption_tested. The token is the IdP's provisioning credential and can write users; Observer only reads (ledger VCONN-HOST-5). Groups stays buildable. Synthetic only, no vendor response observed.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16E: driver internal/vendorapi/jetbrains HubSCIM, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Hub Entra auth module Secret Token = Hub permanent token; RFC 7644 section 2 bearer"
+   },
+   "status": "synthetic, awaiting live validation",
+   "customer_host": true
+  },
+  {
+   "id": "jetbrains.ideservices.access_records",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n.d."
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/usage-analytics/users/analytics?from=&to=",
+   "read_write_doc": "R",
+   "class_doc": "Adoption",
+   "grain_doc": "Event/UserDay",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "user access records",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.ai_adoption",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/analytics/ai/users-adoption (groupBy DAY/WEEK/MONTH/YEAR, profileId)",
+   "read_write_doc": "R",
+   "class_doc": "Adoption",
+   "grain_doc": "Period",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/ai-analytics-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "enabled, active",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.ai_config_private",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET/POST/PUT /api/constituents/ai ; GET /api/constituents/ai/config (`defaultProviders`, availableProviders)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (providers, models)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services-cloud/2025-2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "PRIVATE API (2025.2 breaking-change notes)",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.ai_effectiveness",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/analytics/ai/effectiveness/metrics",
+   "read_write_doc": "R",
+   "class_doc": "LOC",
+   "grain_doc": "Period",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/ai-analytics-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "tool junie, aia, claude_code, code_completion, nes (note `claude_code` here vs `claude_agent` in Central)",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.ai_effectiveness_feature",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/analytics/ai/effectiveness/metrics-by-feature",
+   "read_write_doc": "R",
+   "class_doc": "LOC",
+   "grain_doc": "Period x tool",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/ai-analytics-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.ai_effectiveness_totals",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/analytics/ai/effectiveness/metrics/totals",
+   "read_write_doc": "R",
+   "class_doc": "LOC",
+   "grain_doc": "range",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "unspecified",
+     "unit": "lines",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/ai-analytics-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.ai_effectiveness_users",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor, limit 1..1000"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/analytics/ai/effectiveness/metrics/users.paged",
+   "read_write_doc": "R",
+   "class_doc": "LOC, Adoption",
+   "grain_doc": "UserDay x tool",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "user_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/ai-analytics-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "name + email; Junie Code mode only; NO tokens, credits, models, sessions",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.ai_request_log",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "bucket credentials (customer)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "customer bucket (PullBucket, customer-owned): `ai.platform.logging.enabled: true`; same object storage with `path-prefix` (`$pathPrefix/yyyy-MM-dd/$correlationId-response.json`) or separate S3 / Azure Blob; Logbook format json, http or splunk",
+   "read_write_doc": "",
+   "class_doc": "Content, Telemetry",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/logging-of-ai-requests.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "full request/response bodies between AI Enterprise and providers (correlation id, method, path, attributes incl. userId, masked headers, body); retention = customer's",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.aie_settings",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "Web UI admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "Web UI: enable AIE, user-count cap (pay as you go), providers, code completion provider, MCP (Allow users to add MCP in their IDE: real deny), Agent Registry (Allow all agents), detailed data collection",
+   "read_write_doc": "",
+   "class_doc": "Policy, Limits, Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitOrg",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/manage-aie.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "no per-user spend quota",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.automation_tokens_private",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "PATCH /api/automation-tokens/{id} (UI create with expiry)",
+   "read_write_doc": "W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services-cloud/2025-2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "PRIVATE",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.change_history_log",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "bucket / DB"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "object storage JSON (plugins, profiles, users, groups, automation tokens changes + author); self-hosted also PostgreSQL `TBE_AUDIT_LOG`",
+   "read_write_doc": "",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C (no file schema published)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/object-storage.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.data_collection",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Web UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "`Allow detailed data collection` org + per profile, off by default, retention \"not exceeding one year\"",
+   "read_write_doc": "",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/data-collection.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.group_profiles_private",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n.d."
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/groups/{groupId}/profiles ; PUT/DELETE /api/groups/{groupId}/profiles/{profileId} ; GET /api/profiles/{profileId}/groups",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/whats-new.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "preview notes",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.plugin_audit_private",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n.d."
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/plugins-audit-logs (replaces /api/ij-plugins-extras/audit-logs)",
+   "read_write_doc": "R",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/whats-new.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.plugin_download_log",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "bucket"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "object storage JSON (pluginId, pluginName, pluginVersion, timestamp, userAgent)",
+   "read_write_doc": "",
+   "class_doc": "Adoption",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/object-storage.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.plugins_upload",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /api/plugins",
+   "read_write_doc": "W",
+   "class_doc": "(plugin repo)",
+   "grain_doc": "n/a",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "not AI-relevant",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "jetbrains.ideservices.profile_audit_private",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n.d."
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/profiles/{profileId}/audit-logs ; /audit-logs/{eventId}",
+   "read_write_doc": "R",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/whats-new.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "from preview notes; public/private n.d.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.profile_settings_push",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Web UI admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "profile IDE settings / VM options / Marketplace, forced (re-applied every 7 min) or default; fetched at IDE start then hourly; via IDE Services plugin",
+   "read_write_doc": "",
+   "class_doc": "Policy (ManagedSettings)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C (UI only, no API documented)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/configure-settings-via-profiles.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.profiles_list",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "`items`"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/v1/profiles",
+   "read_write_doc": "R",
+   "class_doc": "Projects (profile container), Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/rest-api.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.user_audit_private",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n.d."
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/users/{userId}/audit-logs",
+   "read_write_doc": "R",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services-cloud/2025-2.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "PRIVATE",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.user_profiles",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n.d."
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/v1/users/{userId}/profiles",
+   "read_write_doc": "R",
+   "class_doc": "Groups (membership)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.user_profiles_assign",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "PUT /api/v1/users/{userId}/profiles ; PUT /api/v1/profiles/{profileId}/users ; DELETE /api/v1/users/{userId}/profiles/{profileId}",
+   "read_write_doc": "W",
+   "class_doc": "Groups (control)",
+   "grain_doc": "n/a",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.users_bulk_import",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /api/import/users {users[{sub, email, username, active, permissions[ROLE], groups[profile ids]}]}",
+   "read_write_doc": "W (full replace; absent users deactivated)",
+   "class_doc": "Identity, Roles, Groups (control)",
+   "grain_doc": "n/a",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/import-users-and-their-permissions-via-rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "raw payload kept in object storage for audit",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.users_create",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "POST /api/v1/users {email, username, role, isActive}",
+   "read_write_doc": "W",
+   "class_doc": "Identity, Roles (control)",
+   "grain_doc": "n/a",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.users_delete",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "DELETE /api/v1/users/{id}",
+   "read_write_doc": "W",
+   "class_doc": "Identity (control)",
+   "grain_doc": "n/a",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.ideservices.users_list",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservices",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "IDE Services automation token (Configuration > Automation Tokens, with an expiry) as Authorization: Automation <token>; an OAuth 2.0 token from the customer's own provider is the other documented option and is not supported"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "full list, not paged"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "GET /api/v1/users",
+   "read_write_doc": "R",
+   "class_doc": "Identity, Roles",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/rest-api.html",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): the first customer_host surface. IDE Services runs on the customer's own domain, so the row declares no host: each connection declares its own https tuple (validated like a catalog tuple, never an IP literal or a single label; audited on the connection routes; ledger VCONN-HOST-1), and a private address is dialed only for a tuple the server operator lists in [vendor_connections].customer_host_private_tuples. Driver internal/vendorapi/jetbrains Users (GET /api/v1/users, automation token as Authorization: Automation <token>), conformance against the vendormock mock (prefixed scheme), landed as User/jetbrains.ideservices_user/v1 resources keyed jetbrains.ideservices_user = user id: email, role, is_active, created_at; the username is the display name; createdBy is not landed; a complete list is authoritative. The Roles supply (the role is landed as an attribute) stays buildable. The reference shows no list response: that it is an array of the documented user object is Inferred, so assumption_tested only. Synthetic only, no vendor response observed. Secret class reviewed: user metadata only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/jetbrains Users, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: IDE Services rest-api.html Automation Tokens: Authorization: Automation <token>"
+   },
+   "status": "synthetic, awaiting live validation",
+   "customer_host": true
+  },
+  {
+   "id": "jetbrains.ideservicescloud.audit_support",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.ideservicescloud",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "support ticket"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "append-only external storage; obtained by contacting IDE Services support",
+   "read_write_doc": "",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/ide-services-cloud/troubleshooting-guide.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.node.central_cli",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "Central CLI rewrites ~/.claude/settings.json, ~/.codex/config.toml, ~/.gemini/.env + settings.json, ~/.junie/config.json, Pi extension; proxy `http://127.0.0.1:{port}/wire/{secret}/{agent}/{route}/...`; governance refresh removes agents not on org allow-list; tokens `~/.jetbrains-central/tokens.enc`; `central log` local request log",
+   "read_write_doc": "",
+   "class_doc": "Policy, Credentials",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.jetbrains.com/help/central-cli/cli-in-depth.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.node.junie_cli_config",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "`~/.junie/config.json`, trusted project `.junie/config.json`, `--config-location` / `JUNIE_CONFIG_LOCATION` (repeatable, loads in untrusted projects), `JUNIE_CONFIG_DEFAULT_LOCATIONS`; keys model, effort, provider, byok, proxies, hooks, *-locations, auto-update; trust markers `~/.junie/trust`; `~/.junie/allowlist.json`, `~/.junie/sandbox.json` (global only); no system / managed path documented",
+   "read_write_doc": "",
+   "class_doc": "Policy (ManagedSettings rail B)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "C (file contract, no vendor push)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://junie.jetbrains.com/docs/junie-cli-configuration.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "jetbrains.node.junie_cli_session",
+   "vendor_group": "jetbrains",
+   "vendor": "jetbrains",
+   "plane": "jetbrains.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "`events.jsonl` + `transcript.md` per session, `subagents/`; `/usage` shows session tokens + models + balance",
+   "read_write_doc": "",
+   "class_doc": "Sessions, Usage, Content",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "D (node adapter `junie`)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "unspecified",
+     "unit": "text",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://junie.jetbrains.com/docs/junie-cli.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

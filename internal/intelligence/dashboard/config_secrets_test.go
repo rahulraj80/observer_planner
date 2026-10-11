@@ -107,7 +107,7 @@ func TestHandleConfig_RedactsEveryT2Credential(t *testing.T) {
 
 	for _, tc := range allT2Values {
 		if bytes.Contains(raw, []byte(tc.value)) {
-			t.Errorf("SECRET LEAK: %s value %q appears in GET /api/config — the %s redaction row is missing or broken",
+			t.Errorf("SECRET LEAK: %s value %q appears in GET /api/config - the %s redaction row is missing or broken",
 				tc.key, tc.value, tc.key)
 		}
 	}
@@ -264,11 +264,16 @@ func TestConfigSectionRoundTrip_PreservesCredentials(t *testing.T) {
 
 	routingSection["Enabled"] = true
 	routingSection["Mode"] = "advise"
+	if len(routingPolicyTemplateNames()) == 0 {
+		// A build without proxy.routing accepts only the "custom" policy
+		// (routingpolicy_omit.go); the credential round trip is the point.
+		routingSection["Policy"] = "custom"
+	}
 	body, err := json.Marshal(routingSection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPut, "/api/config/section/routing", bytes.NewReader(body))
+	req := confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/routing", bytes.NewReader(body)))
 	req.Header.Set("Content-Type", "application/json")
 	pr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(pr, req)
@@ -315,7 +320,7 @@ func TestConfigSectionProcess_IgnoresEchoedETWToken(t *testing.T) {
 	server, cfgPath := newSecretTestServer(t, secretCorpus)
 
 	body := `{"Enabled":true,"ETW":{"Enabled":true,"Token":"` + secretSentinel + `","ListenAddr":"127.0.0.1:8899"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/config/section/process", strings.NewReader(body))
+	req := confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/process", strings.NewReader(body)))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr, req)

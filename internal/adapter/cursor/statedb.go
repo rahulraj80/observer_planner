@@ -53,7 +53,10 @@ import (
 //     1=user / 2=assistant, text, createdAt). This table also holds
 //     thousands of unrelated keys (checkpoints, MRU, other
 //     extensions' state) which is why every query below filters by
-//     key prefix rather than scanning the whole table.
+//     key prefix rather than scanning the whole table. Since Cursor
+//     3.23 (grounded 3.23.12, 2026-10-05) a Cloud Agent lives under
+//     `bcCachedDetails:<bc-id>` instead, a protobuf value this reader
+//     reads the KEY of only (cloudAgentSessionEvents).
 //
 // `agentKv:*` keys exist in some Cursor builds but their shape is not
 // documented anywhere and was not confirmed against a live capture —
@@ -131,16 +134,31 @@ func cursorUserDataDir(h crossmount.HomeRoot) string {
 // means unrelated ItemTable-style churn elsewhere in the same shared
 // file (settings, MRU lists, other extensions' state) never advances
 // the watermark and never triggers a scan.
+//
+// The key families are NAMED, never pattern-guessed: composerData,
+// bubbleId and bcCachedDetails (a Cursor Cloud Agent, see cloudagent.go).
+// Nothing else in cursorDiskKV is read, and in particular no key family
+// that holds auth, tokens, session secrets or credentials.
 const stateDBWatermarkSQL = `
 	SELECT COALESCE(MAX(rowid), 0) FROM cursorDiskKV
-	WHERE key LIKE 'composerData:%' OR key LIKE 'bubbleId:%'`
+	WHERE key LIKE 'composerData:%' OR key LIKE 'bubbleId:%' OR key LIKE 'bcCachedDetails:%'`
 
-// stateDBDeltaSQL selects every composerData/bubbleId row whose rowid
-// advanced past the last-seen watermark, oldest first.
+// stateDBDeltaSQL selects every row of the three named families whose
+// rowid advanced past the last-seen watermark, oldest first. A
+// bcCachedDetails value is a protobuf blob this reader never decodes, so
+// the query never even returns it: the row is KEY-ONLY (value NULL).
 const stateDBDeltaSQL = `
-	SELECT rowid, key, value FROM cursorDiskKV
-	WHERE rowid > ? AND (key LIKE 'composerData:%' OR key LIKE 'bubbleId:%')
+	SELECT rowid, key,
+	       CASE WHEN key LIKE 'bcCachedDetails:%' THEN NULL ELSE value END
+	FROM cursorDiskKV
+	WHERE rowid > ? AND (key LIKE 'composerData:%' OR key LIKE 'bubbleId:%' OR key LIKE 'bcCachedDetails:%')
 	ORDER BY rowid ASC`
+
+// cloudAgentKeyPrefix is the state.vscdb key family Cursor keeps a Cloud
+// Agent under: `bcCachedDetails:<bc-id>` (grounded on Cursor 3.23.12,
+// 2026-10-05: three rows, one colon each, values protobuf starting
+// `12 02 0a 00 1a`).
+const cloudAgentKeyPrefix = "bcCachedDetails:"
 
 // parseStateDBFile handles Cursor's global state.vscdb. Unlike
 // parseStoreDBFile (byte-offset-via-file-size), the cursor here is a
@@ -233,8 +251,17 @@ func (a *Adapter) parseStateDBFile(ctx context.Context, path string, fromOffset 
 		value                []byte
 	}
 	var bubbles []bubbleKey
+	// cloudAgents keeps the Cloud Agent ids in rowid order (the delta's
+	// own order) so the emitted rows are deterministic.
+	var cloudAgents []string
+	seenCloud := map[string]bool{}
 	for _, e := range delta {
 		switch {
+		case strings.HasPrefix(e.key, cloudAgentKeyPrefix):
+			if cid := cloudAgentKeyID(e.key); cid != "" && !seenCloud[cid] {
+				seenCloud[cid] = true
+				cloudAgents = append(cloudAgents, cid)
+			}
 		case strings.HasPrefix(e.key, "composerData:"):
 			if cid := strings.TrimPrefix(e.key, "composerData:"); cid != "" {
 				sessions[cid] = e.value
@@ -274,6 +301,8 @@ func (a *Adapter) parseStateDBFile(ctx context.Context, path string, fromOffset 
 	}
 	res.ToolEvents = append(res.ToolEvents,
 		a.composerSessionEvents(sessions, roots, hasBubble, coveredElsewhere, rootFor, path, ts)...)
+	res.ToolEvents = append(res.ToolEvents,
+		cloudAgentSessionEvents(cloudAgents, sessions, coveredElsewhere, rootFor, path, ts)...)
 	for _, b := range bubbles {
 		if coveredElsewhere(b.composerID) {
 			continue
@@ -463,7 +492,7 @@ func (a *Adapter) composerSessionEvents(sessions map[string][]byte, roots map[st
 // one bubble (fullConversationHeadersOnly, current builds), or one with
 // a bubble in the same delta (builds without the header list).
 func composerWorthBootstrapping(composerID string, raw []byte, bubbleInDelta bool) bool {
-	if bubbleInDelta || strings.HasPrefix(composerID, "bc-") {
+	if bubbleInDelta || classifyConversation(composerID, false).BootstrapsRootless {
 		return true
 	}
 	var doc struct {
@@ -473,6 +502,59 @@ func composerWorthBootstrapping(composerID string, raw []byte, bubbleInDelta boo
 		return false
 	}
 	return len(doc.Headers) > 0
+}
+
+// cloudAgentKeyID returns the conversation id of a
+// `bcCachedDetails:<bc-id>` key, "" when the key is malformed or the id is
+// not a Cloud Agent id. Only the KEY is read; the value is never fetched.
+func cloudAgentKeyID(key string) string {
+	id := strings.TrimPrefix(key, cloudAgentKeyPrefix)
+	if i := strings.IndexByte(id, ':'); i >= 0 {
+		id = id[:i]
+	}
+	id = strings.TrimSpace(id)
+	if id == "" || !classifyConversation(id, false).RemoteTurns {
+		return ""
+	}
+	return id
+}
+
+// cloudAgentSessionEvents emits one KEY-ONLY session_start per Cloud
+// Agent id seen under bcCachedDetails: id, placeholder (or known) root
+// and the file's mtime, nothing from the protobuf value, no content, no
+// model, no tokens. A conversation is skipped when the same delta already
+// has its composerData row (composerSessionEvents registers it with more
+// detail) or when the live hook / a sibling transcript already captured
+// it (coveredElsewhere, the same by-session-id gate every state.vscdb row
+// passes). The SourceEventID is stable per conversation, so the
+// bcCachedDetails row being rewritten (its rowid climbs on every REPLACE)
+// re-emits an identical row the store's UNIQUE upsert ignores.
+func cloudAgentSessionEvents(ids []string, composers map[string][]byte, coveredElsewhere func(string) bool,
+	rootFor func(string) string, path string, ts time.Time,
+) []models.ToolEvent {
+	var out []models.ToolEvent
+	for _, cid := range ids {
+		if _, ok := composers[cid]; ok {
+			continue
+		}
+		if coveredElsewhere(cid) {
+			continue
+		}
+		out = append(out, models.ToolEvent{
+			SourceFile:    path,
+			SourceEventID: "cursor-statedb-cloud-agent:" + cid,
+			SessionID:     cid,
+			MessageID:     "session:" + cid,
+			ProjectRoot:   rootFor(cid),
+			Timestamp:     ts,
+			Tool:          models.ToolCursor,
+			ActionType:    models.ActionSessionStart,
+			Target:        "startup",
+			Success:       true,
+			RawToolName:   "state.vscdb:bcCachedDetails",
+		})
+	}
+	return out
 }
 
 type composerDataDoc struct {

@@ -1,0 +1,1946 @@
+{
+ "group": "open-interpreter",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/open-interpreter-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "oi.byok.provider_planes",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.byok",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "header_key",
+    "doc": "provider admin keys"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "provider"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "provider"
+   },
+   "tier": {
+    "doc": "provider tier"
+   },
+   "freshness_doc": "provider",
+   "lookback_doc": "provider",
+   "per_user_doc": "per key / project",
+   "mechanism_doc": "the chosen provider's admin APIs (~100 providers: anthropic, openrouter, groq, github-copilot, deepseek, moonshot/kimi, zai, bedrock, ...)",
+   "read_write_doc": "per provider",
+   "class_doc": "Usage, Cost, Limits",
+   "grain_doc": "provider-defined",
+   "build": "catalog_only",
+   "build_doc": "not OI-segmentable: NA here, catalogued under each provider",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter/blob/main/docs/providers.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.cloud.codex_requirements_bundle",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.cloud",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "ChatGPT sign-in"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "ChatGPT Business/Enterprise (upstream)"
+   },
+   "freshness_doc": "next start",
+   "lookback_doc": "signed cache",
+   "per_user_doc": "per workspace",
+   "mechanism_doc": "cloud config bundle layers `enterprise_managed_config` / `enterprise_managed_requirements` (upstream: ChatGPT workspace Admin Console \"Agent Security\", fetched at login for ChatGPT sign-in on supported plans)",
+   "read_write_doc": "Write in ChatGPT admin console",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C, UNVERIFIED for OI (code path present; whether the fork's ChatGPT sign-in fetches the OpenAI bundle not tested; excluded by R-A-15 until proven)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/config/src/loader/mod.rs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://learn.chatgpt.com/docs/enterprise/managed-configuration",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.desktop.account_billing",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.desktop",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "OI account"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Pro/Business"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "while active",
+   "per_user_doc": "per user only",
+   "mechanism_doc": "individual account (name, email), third-party payment processor; `billingApiBaseUrl` oi-new-server.fly.dev in the public client profile",
+   "read_write_doc": "none documented",
+   "class_doc": "Identity, Seats, Cost",
+   "grain_doc": "per account",
+   "build": "catalog_only",
+   "build_doc": "Nothing driverable (client endpoint exists, no contract, no team admin)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/interpreter-workstation/main/distribution/product.official.json",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.openinterpreter.com/legal/privacy",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.desktop.distribution_overlay",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.desktop",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "build pipeline"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free (source)"
+   },
+   "freshness_doc": "per release",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org build",
+   "mechanism_doc": "Workstation JSON overlay `distribution.{id, hostedApiBaseUrl, auth.{provider,url,anonKey,storageKey}, telemetry.{sentryDsn,eventsUrl,eventsAnonKey}, updates.*}` via `scripts/with-distribution-config.mjs`; an org can point telemetry and hosted API at its own services",
+   "read_write_doc": "Write",
+   "class_doc": "Policy, Telemetry",
+   "grain_doc": "build time",
+   "build": "buildable",
+   "build_doc": "D for the overlay schema (VERIFIED-DOC distributions.md); telemetry event schema undocumented",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/interpreter-workstation/blob/main/docs/distributions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: client config, env or policy file the vendor documents",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.desktop.enterprise_controls",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.desktop",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "UI / unspecified"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "\"per-agent filesystem scopes bounded by global policy\", approvals for consequential actions, configurable providers via app-server contract, telemetry off by default; enterprise doc lists an unfinished hardening checklist (managed policy, identity/device enrollment, audit export, extension allowlists, minimum version)",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C (no file names, keys or MDM format documented; doc says not to claim a control until tested end to end)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/interpreter-workstation/blob/main/docs/enterprise-deployment.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.desktop.hosted_models",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.desktop",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "OI account"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Pro $20, Business $60"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "30 days",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Pro/Business hosted models via OI servers (`hostedApiBaseUrl` oi-new-api.fly.dev); OI logs full prompts, responses, attachments + metadata, kept up to 30 days; usage multipliers (4x / 3x) unquantified",
+   "read_write_doc": "none for customers (data request to help@openinterpreter.com)",
+   "class_doc": "Usage, Content, Retention",
+   "grain_doc": "PerCall (vendor-side)",
+   "build": "catalog_only",
+   "build_doc": "C (exists, no customer API, no export UI documented)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.openinterpreter.com/legal/privacy",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.openinterpreter.com/desktop",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.desktop.settings_ui",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.desktop",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "local UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Free/Pro/Business"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Settings > Models (provider, model id, key, base URL), Profiles, Workspaces, Approvals and safety, MCP servers, Integrations",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C (UI only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.openinterpreter.com/docs/desktop/models",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.inherit.openai_codex_planes",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.inherit",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "header_key",
+    "doc": "OpenAI keys"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "per OpenAI surface"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per OpenAI surface"
+   },
+   "tier": {
+    "doc": "ChatGPT Business/Enterprise"
+   },
+   "freshness_doc": "per OpenAI surface",
+   "lookback_doc": "per OpenAI surface",
+   "per_user_doc": "per user",
+   "mechanism_doc": "IF signed in with a ChatGPT Business/Enterprise workspace and IF the fork talks to the OpenAI Codex backend: Codex Analytics, Compliance Logs (`CODEX_LOG`, `CONVERSATION_MESSAGE`), cloud requirements",
+   "read_write_doc": "Read",
+   "class_doc": "Usage, Cost, Content, Audit, Sessions",
+   "grain_doc": "as openai.chatgpt.*",
+   "build": "catalog_only",
+   "build_doc": "NA for open-interpreter (R-A-15): UNVERIFIED whether OI traffic appears there or is distinguishable from codex; catalogued under openai",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "unspecified",
+     "unit": "text",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter/blob/main/docs/authentication.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/product-info/src/lib.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.analytics_feedback",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "vendor-bound"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`analytics` (\"When false, disables analytics across Codex product surfaces in this machine. Defaults to true\"), `feedback` (default true)",
+   "read_write_doc": "Write (off switch only)",
+   "class_doc": "Adoption",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "Nothing for customers; destination in the fork UNVERIFIED (contradiction: Desktop page says \"Runs offline with no telemetry\")",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/core/config.schema.json",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.openinterpreter.com/desktop",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.app_server",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "bearer token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "protocol"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "single tenant",
+   "mechanism_doc": "app-server WebSocket (`interpreter --remote ws://...`, bearer token via `--remote-auth-token-env`), shared daemon over Unix socket; Codex exec protocol (`codexPathOverride: \"interpreter\"`), ACP (`interpreter acp`)",
+   "read_write_doc": "Read + Write (drive agent)",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D (protocol inherited from Codex app-server/exec; ACP spec)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter/blob/main/docs/remote.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.codex_managed_config",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "admin file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "next launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "legacy `/etc/codex/managed_config.toml` (defaults; approval_policy/approvals_reviewer/sandbox_mode reinterpreted as requirements)",
+   "read_write_doc": "Read + Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (VERIFIED-SOURCE path in doc comment; UPSTREAM-DOC semantics)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/config/src/loader/mod.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.codex_mdm",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "next launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "macOS managed preferences domain `com.openai.codex`, keys `config_toml_base64`, `requirements_toml_base64` (forced values only; highest precedence)",
+   "read_write_doc": "Write (MDM)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (VERIFIED-SOURCE `codex-rs/config/src/loader/macos.rs`: hardcoded, no product switch)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/config/src/loader/macos.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.codex_requirements_toml",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "root/admin file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "next launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`/etc/codex/requirements.toml`, Windows `%ProgramData%\\OpenAI\\Codex\\requirements.toml` (shared with codex). Upstream keys: `allowed_approval_policies`, `allowed_sandbox_modes`, `allowed_permission_profiles`, `[mcp_servers.<n>].identity`, `[features]`, `allow_managed_hooks_only`, `[rules].prefix_rules`, `[experimental_network]`, `allowed_web_search_modes`, `allowed_login_methods`, `allowed_chatgpt_workspaces`, `[marketplaces]`",
+   "read_write_doc": "Read + Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (UPSTREAM-DOC format; VERIFIED-SOURCE that the fork loader reads the path, `codex-rs/config/src/loader/mod.rs`); per-key support at compat 0.156.1 UNVERIFIED (e.g. `allowed_permission_profiles` needs upstream 0.138.0+)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/config/src/loader/mod.rs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://learn.chatgpt.com/docs/enterprise/managed-configuration",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.codex_system_config",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "admin file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "next launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`/etc/codex/config.toml`, `%ProgramData%\\OpenAI\\Codex\\config.toml` (system defaults layer, shared with codex)",
+   "read_write_doc": "Read + Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (VERIFIED-SOURCE)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/config/src/loader/mod.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.hooks",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "synchronous",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`~/.openinterpreter/hooks.json` / config.toml `[[hooks.<Event>]]`, project equivalents, plugin hooks; stdin JSON `session_id`, `cwd`, `hook_event_name`, `model` + event-specific fields; PreToolUse deny via `hookSpecificOutput.permissionDecision=\"deny\"`; non-managed hooks need trust review (`/hooks`), managed hooks implied (upstream `allow_managed_hooks_only`, `[hooks].managed_dir`)",
+   "read_write_doc": "Read + Write (deny)",
+   "class_doc": "Sessions, Audit, Content, Policy",
+   "grain_doc": "Event: SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, PreCompact, PostCompact, SubagentStart, SubagentStop, Stop",
+   "build": "buildable",
+   "build_doc": "D for event list + common fields; event-specific field names not documented (C)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter/blob/main/docs/hooks.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.login_restriction",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "next launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`forced_login_method` (chatgpt / api), `forced_chatgpt_workspace_id`, `chatgpt_base_url`, `cli_auth_credentials_store` (auto/keyring/file) in config schema",
+   "read_write_doc": "Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C (VERIFIED-SOURCE schema descriptions; not in OI docs)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialCreationPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/core/config.schema.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.otel",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "collector side"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "collector's",
+   "per_user_doc": "per machine (upstream Codex OTel carries no directory identity)",
+   "mechanism_doc": "`[otel]` table (`exporter`, `trace_exporter`, `metrics_exporter`, `log_user_prompt`, `environment`) present in fork schema as \"OTEL configuration.\"",
+   "read_write_doc": "Read (receive)",
+   "class_doc": "Telemetry",
+   "grain_doc": "upstream Codex OTel shape",
+   "build": "catalog_only",
+   "build_doc": "C (VERIFIED-SOURCE schema only; not in OI docs; exporter behaviour and endpoint in fork UNVERIFIED)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://raw.githubusercontent.com/openinterpreter/openinterpreter/main/codex-rs/core/config.schema.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.project_config",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per repo",
+   "mechanism_doc": "`.openinterpreter/config.toml` + `.openinterpreter/hooks.json`, trusted projects only",
+   "read_write_doc": "Read + Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter/blob/main/docs/config.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.rollout_sessions",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "until deleted (`[history].persistence=\"none\"` disables transcripts)",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Codex-format rollout JSONL under `~/.openinterpreter/sessions` (CLI) and, for the older Desktop, `%APPDATA%\\interpreter\\codex-home\\sessions`; Workstation docs say app and terminal share one INTERPRETER_HOME",
+   "read_write_doc": "Read",
+   "class_doc": "Sessions, Usage, Content",
+   "grain_doc": "PerCall, PerSession",
+   "build": "buildable",
+   "build_doc": "D (Observer's existing adapter, node capture; not an admin surface)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/interpreter-workstation",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.node.user_config",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`~/.openinterpreter/config.toml` (INTERPRETER_HOME): `model`, `model_provider`, `approval_policy` (untrusted/on-request/never), `sandbox_mode`, `default_permissions`, `[permissions.<p>].filesystem/.network.domains`, `[sandbox_workspace_write].network_access`, `features.*` (apps, plugins, hooks, memories, multi_agent, shell_tool, network_proxy, ...), `[mcp_servers.<n>]` (`enabled_tools`, `disabled_tools`, `default_tools_approval_mode`), `[agents]` (max_threads, max_depth, job_max_runtime_seconds), `[history].persistence`, `log_dir`, `check_for_update_on_startup`",
+   "read_write_doc": "Read + Write (MDM / config mgmt)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (VERIFIED-DOC config-reference.md; full schema `codex-rs/core/config.schema.json`)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "NetworkPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter/blob/main/docs/config-reference.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/openinterpreter/openinterpreter/blob/main/docs/config.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "oi.vendor.app_telemetry",
+   "vendor_group": "open-interpreter",
+   "vendor": "oi",
+   "plane": "oi.vendor",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "vendor-internal"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "\"as needed\"",
+   "per_user_doc": "pseudonymous",
+   "mechanism_doc": "opt-in \"Help improve Interpreter\" (feature usage, OS, version, pseudonymous ids, diagnostics) to Sentry + Supabase events; fails closed without consent",
+   "read_write_doc": "none for customers",
+   "class_doc": "Adoption",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "Nothing (vendor-internal)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.openinterpreter.com/legal/privacy",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/openinterpreter/interpreter-workstation/blob/main/docs/distributions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

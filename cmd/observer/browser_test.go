@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -57,6 +59,7 @@ func chatGPTBody(t *testing.T, gran string) []byte {
 // a "full" turn stores no content when [browser].granularity_ceiling caps at
 // usage_only — the daemon is the final authority on what is STORED.
 func TestIngestBrowserTurnGranularityCeiling(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, database := openTestStore(t)
 	bc := config.BrowserConfig{Enabled: true, GranularityCeiling: "usage_only"}
 	if err := ingestBrowserTurn(context.Background(), st, chatGPTBody(t, "full"), bc, ""); err != nil {
@@ -95,6 +98,7 @@ func TestIngestBrowserTurnSiteToggle(t *testing.T) {
 // asserts the row lands. This is the loopback-graft verification: transport
 // (HTTP) is a deployment detail; the normalize→ingest owner is shared.
 func TestBrowserLoopbackListenerLandsRow(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, database := openTestStore(t)
 	bc := config.BrowserConfig{Enabled: true, GranularityCeiling: "full"}
 	recv, err := browseringest.New(browseringest.Options{
@@ -145,6 +149,7 @@ func TestBrowserLoopbackListenerLandsRow(t *testing.T) {
 // command) is an operator-attended step and is NOT exercised here; this test
 // drives everything downstream of the native host.
 func TestBrowserHookEndToEnd(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "observer.db")
 	configPath := filepath.Join(tmp, "config.toml")
@@ -406,7 +411,7 @@ func TestHandleBrowserHookOverLimitBoundedByContendedHealthLock(t *testing.T) {
 	_, _ = ack.ReadFrom(stdoutR)
 
 	if elapsed > 8*time.Second {
-		t.Errorf("handleBrowserHook took %s to return with a contended health lock — the flock wait should be bounded well under browserHealthLockTimeout (%s)", elapsed, browserHealthLockTimeout)
+		t.Errorf("handleBrowserHook took %s to return with a contended health lock - the flock wait should be bounded well under browserHealthLockTimeout (%s)", elapsed, browserHealthLockTimeout)
 	}
 	// No drop was recorded — the lock was never acquired — but the process
 	// must still have completed its own work (the ack) rather than hanging.
@@ -536,6 +541,7 @@ func idlessBody(t *testing.T) []byte {
 // per-site ingested counter in the health file (C1) — the durable signal that
 // capture is working, independent of the extension's self-reported beacon.
 func TestIngestBrowserTurnRecordsIngestTelemetry(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, _ := openTestStore(t)
 	dir := t.TempDir()
 	healthPath := filepath.Join(dir, browserHealthFileName)
@@ -563,6 +569,7 @@ func TestIngestBrowserTurnRecordsIngestTelemetry(t *testing.T) {
 // (id-less) ingest is counted AND flagged synthetic so the operator can see
 // id-less turns are landing.
 func TestIngestBrowserTurnRecordsSyntheticTelemetry(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, database := openTestStore(t)
 	dir := t.TempDir()
 	healthPath := filepath.Join(dir, browserHealthFileName)
@@ -742,6 +749,7 @@ func TestConcurrentCaptureWritersConverge(t *testing.T) {
 // a turn grouped by a real message id (conversation id absent) is NOT counted
 // synthetic — only a turn carrying neither id is.
 func TestSyntheticCountsOnlyTrueSynthetic(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, _ := openTestStore(t)
 	dir := t.TempDir()
 	healthPath := filepath.Join(dir, browserHealthFileName)
@@ -779,6 +787,7 @@ func TestSyntheticCountsOnlyTrueSynthetic(t *testing.T) {
 // turn silently merged into the first. capture_id is opaque and per-turn, so
 // it survives the strip.
 func TestIdlessSameMsDistinctCaptureIDTwoSessions(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, database := openTestStore(t)
 	bc := config.BrowserConfig{Enabled: true, GranularityCeiling: "full"}
 
@@ -823,6 +832,7 @@ func TestIdlessSameMsDistinctCaptureIDTwoSessions(t *testing.T) {
 // conversation_id, no message_id) that carries a capture_id ingests under the
 // "<site>:cap:<capture_id>" fallback session key (MED-1 / MED-3 — content-free).
 func TestIngestBrowserTurnCaptureIDFallbackKey(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, database := openTestStore(t)
 	bc := config.BrowserConfig{Enabled: true, GranularityCeiling: "full"}
 	body, _ := json.Marshal(map[string]any{
@@ -852,6 +862,7 @@ func TestIngestBrowserTurnCaptureIDFallbackKey(t *testing.T) {
 // bridge (no conversation_id, no message_id, NO capture_id) still ingests
 // under the content-free captured_at last-resort key — never dropped.
 func TestIngestBrowserTurnOldExtensionLastResortIngests(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, database := openTestStore(t)
 	bc := config.BrowserConfig{Enabled: true, GranularityCeiling: "full"}
 	body, _ := json.Marshal(map[string]any{
@@ -1005,7 +1016,7 @@ func TestHandleBrowserHookConfigEvent(t *testing.T) {
 	}
 	// The config event must NOT open/create the DB.
 	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
-		t.Errorf("config event created the DB at %s (err=%v) — it must not open the DB", dbPath, err)
+		t.Errorf("config event created the DB at %s (err=%v) - it must not open the DB", dbPath, err)
 	}
 }
 
@@ -1293,7 +1304,7 @@ func TestIdleBeaconRollingRefreshEventuallyStompsLegacyEntry(t *testing.T) {
 		t.Error("legacy entry was never protected within the freshness window (should hold ~10 min after promotion)")
 	}
 	if !sawStomped {
-		t.Error("legacy entry stayed idle-protected FOREVER across 24 min of idle beacons — MED-4 rolling-refresh bug not fixed")
+		t.Error("legacy entry stayed idle-protected FOREVER across 24 min of idle beacons - MED-4 rolling-refresh bug not fixed")
 	}
 }
 
@@ -1432,7 +1443,7 @@ func TestFailingCapturesAgeOutOfProtection(t *testing.T) {
 		t.Error("site was never protected in the window after its last successful capture")
 	}
 	if !sawStomped {
-		t.Error("failing captures kept the site idle-protected FOREVER — a failed capture must not refresh normal-status freshness (MED-4 residual)")
+		t.Error("failing captures kept the site idle-protected FOREVER - a failed capture must not refresh normal-status freshness (MED-4 residual)")
 	}
 }
 
@@ -1477,7 +1488,7 @@ func TestLegacyEntryThenOnlyDropsAgesOut(t *testing.T) {
 		}
 	}
 	if !sawStomped {
-		t.Error("legacy entry receiving only FAILED captures stayed idle-protected forever — capture-path promotion/gating not applied (MED-4 residual)")
+		t.Error("legacy entry receiving only FAILED captures stayed idle-protected forever - capture-path promotion/gating not applied (MED-4 residual)")
 	}
 }
 
@@ -1560,6 +1571,7 @@ func idSourceBody(idSource string) []byte {
 // id_source=="none" bumps the id_source_none counter, while a turn with real
 // provenance does not.
 func TestIngestBrowserTurnRecordsIDSourceNone(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, _ := openTestStore(t)
 	dir := t.TempDir()
 	healthPath := filepath.Join(dir, browserHealthFileName)
@@ -1583,6 +1595,7 @@ func TestIngestBrowserTurnRecordsIDSourceNone(t *testing.T) {
 // TestPeekBrowserTurnParsesIDSource proves the wire field is parsed (not
 // dropped) into the peek used by the telemetry path.
 func TestPeekBrowserTurnParsesIDSource(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	site, _, none := peekBrowserTurn(idSourceBody("none"))
 	if site != "chatgpt-web" || !none {
 		t.Errorf("peek(id_source=none) = (%q, none=%v), want (chatgpt-web, true)", site, none)
@@ -1600,6 +1613,7 @@ func TestPeekBrowserTurnParsesIDSource(t *testing.T) {
 // garbage/omitted id_source the adapter stores as "none" also counts as
 // "none" in health telemetry, rather than silently incrementing nothing.
 func TestPeekBrowserTurnNormalizesUnknownIDSource(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	cases := []struct {
 		name     string
 		idSource string
@@ -1633,6 +1647,7 @@ func TestPeekBrowserTurnNormalizesUnknownIDSource(t *testing.T) {
 // garbage/unrecognized value (not the literal "none") still bumps the
 // id_source_none counter, matching the "none" the adapter actually persists.
 func TestIngestBrowserTurnRecordsIDSourceNoneForGarbageValue(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
 	st, _ := openTestStore(t)
 	dir := t.TempDir()
 	healthPath := filepath.Join(dir, browserHealthFileName)
@@ -1705,7 +1720,7 @@ func TestUpdateBrowserHealthSkipsWhenDeadlineAlreadyExpired(t *testing.T) {
 		t.Fatal("want an error when ctx's deadline has already expired, got nil")
 	}
 	if called {
-		t.Error("mutate ran despite the already-expired deadline — best-effort telemetry must be skipped, not attempted")
+		t.Error("mutate ran despite the already-expired deadline - best-effort telemetry must be skipped, not attempted")
 	}
 	if _, statErr := os.Stat(healthPath); !os.IsNotExist(statErr) {
 		t.Errorf("health file was written despite the expired deadline (stat err = %v)", statErr)
@@ -1752,7 +1767,7 @@ func TestWithBrowserHealthLockBoundedByContendedLock(t *testing.T) {
 	// budget, never hang until the holder releases (it never does in this
 	// test, until the deferred unlock at the very end).
 	if elapsed > 2*time.Second {
-		t.Errorf("withBrowserHealthLock (via updateBrowserHealth) blocked %s against a %s ctx deadline — the flock wait is not bounded (MED re-review finding)", elapsed, budget)
+		t.Errorf("withBrowserHealthLock (via updateBrowserHealth) blocked %s against a %s ctx deadline - the flock wait is not bounded (MED re-review finding)", elapsed, budget)
 	}
 	if _, statErr := os.Stat(healthPath); !os.IsNotExist(statErr) {
 		t.Errorf("health file was written despite never acquiring the contended lock (stat err = %v)", statErr)
@@ -1792,7 +1807,7 @@ func TestWithBrowserHealthLockFallsBackToShortTimeoutWithoutCtxDeadline(t *testi
 		t.Fatal("want a timeout error when the lock is contended and ctx carries no deadline, got nil")
 	}
 	if elapsed < browserHealthLockTimeout-500*time.Millisecond || elapsed > browserHealthLockTimeout+2*time.Second {
-		t.Errorf("elapsed = %s, want close to browserHealthLockTimeout (%s) — a background.Context() caller must fall back to the short bounded timeout, not block forever", elapsed, browserHealthLockTimeout)
+		t.Errorf("elapsed = %s, want close to browserHealthLockTimeout (%s) - a background.Context() caller must fall back to the short bounded timeout, not block forever", elapsed, browserHealthLockTimeout)
 	}
 }
 
@@ -1851,11 +1866,11 @@ func TestWithBrowserHealthLockNoGoroutineLeakOnTimeout(t *testing.T) {
 		}
 		// Each call must return promptly (bounded by the budget), never hang.
 		if elapsed > budget+2*time.Second {
-			t.Fatalf("iteration %d: withBrowserHealthLock blocked %s against a %s budget — acquisition is not bounded", i, elapsed, budget)
+			t.Fatalf("iteration %d: withBrowserHealthLock blocked %s against a %s budget - acquisition is not bounded", i, elapsed, budget)
 		}
 	}
 	if got := atomic.LoadInt32(&mutateRan); got != 0 {
-		t.Fatalf("mutate ran %d times despite the lock being held for the whole loop — only-run-fn-when-acquired violated", got)
+		t.Fatalf("mutate ran %d times despite the lock being held for the whole loop - only-run-fn-when-acquired violated", got)
 	}
 
 	// The leak assertion: after all 20 timeouts, the goroutine count must not
@@ -1865,7 +1880,7 @@ func TestWithBrowserHealthLockNoGoroutineLeakOnTimeout(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	after := runtime.NumGoroutine()
 	if delta := after - before; delta > 5 {
-		t.Errorf("goroutine count grew by %d over %d timed-out acquisitions (before=%d after=%d) — a blocked flock goroutine is leaking per timeout", delta, iterations, before, after)
+		t.Errorf("goroutine count grew by %d over %d timed-out acquisitions (before=%d after=%d) - a blocked flock goroutine is leaking per timeout", delta, iterations, before, after)
 	}
 
 	// No abandoned acquisition may still be pending: release the holder, wait,
@@ -1874,10 +1889,10 @@ func TestWithBrowserHealthLockNoGoroutineLeakOnTimeout(t *testing.T) {
 	holderReleased = true
 	time.Sleep(200 * time.Millisecond)
 	if got := atomic.LoadInt32(&mutateRan); got != 0 {
-		t.Fatalf("a lingering abandoned acquisition ran the mutate %d times after the holder released — the timed-out call did not truly give up", got)
+		t.Fatalf("a lingering abandoned acquisition ran the mutate %d times after the holder released - the timed-out call did not truly give up", got)
 	}
 	if _, statErr := os.Stat(healthPath); !os.IsNotExist(statErr) {
-		t.Errorf("health file exists after release despite every acquisition timing out (stat err = %v) — a leaked acquisition wrote it", statErr)
+		t.Errorf("health file exists after release despite every acquisition timing out (stat err = %v) - a leaked acquisition wrote it", statErr)
 	}
 }
 
@@ -1910,10 +1925,10 @@ func TestWithBrowserHealthLockAlreadyCanceledSkipsFnEvenWhenLockIsFree(t *testin
 		t.Errorf("err = %v, want it to wrap context.Canceled", err)
 	}
 	if atomic.LoadInt32(&ran) != 0 {
-		t.Error("fn ran despite ctx being canceled before the first lock attempt — cancellation boundary violated with an uncontended lock")
+		t.Error("fn ran despite ctx being canceled before the first lock attempt - cancellation boundary violated with an uncontended lock")
 	}
 	if elapsed > 500*time.Millisecond {
-		t.Errorf("withBrowserHealthLock took %s to return on an already-canceled ctx with a FREE lock — should return promptly, not poll", elapsed)
+		t.Errorf("withBrowserHealthLock took %s to return on an already-canceled ctx with a FREE lock - should return promptly, not poll", elapsed)
 	}
 	if _, statErr := os.Stat(healthPath); !os.IsNotExist(statErr) {
 		t.Errorf("health file was created despite fn never running (stat err = %v)", statErr)
@@ -1967,14 +1982,83 @@ func TestWithBrowserHealthLockDoesNotRunFnPastAbsoluteExpiryOnBackgroundCtx(t *t
 		t.Fatal("want a timeout error when the lock is freed only after the fallback budget, got nil")
 	}
 	if atomic.LoadInt32(&ran) != 0 {
-		t.Error("fn ran after the lock was freed past the absolute expiry — the timer-vs-ticker select race let a late acquisition through")
+		t.Error("fn ran after the lock was freed past the absolute expiry - the timer-vs-ticker select race let a late acquisition through")
 	}
 	// Must return close to the fallback budget, not linger until (or past)
 	// the moment the holder actually releases.
 	if elapsed < browserHealthLockTimeout-500*time.Millisecond || elapsed > browserHealthLockTimeout+2*time.Second {
-		t.Errorf("elapsed = %s, want close to browserHealthLockTimeout (%s) — should give up at the absolute expiry, not wait for/past the holder's release", elapsed, browserHealthLockTimeout)
+		t.Errorf("elapsed = %s, want close to browserHealthLockTimeout (%s) - should give up at the absolute expiry, not wait for/past the holder's release", elapsed, browserHealthLockTimeout)
 	}
 	if _, statErr := os.Stat(healthPath); !os.IsNotExist(statErr) {
 		t.Errorf("health file was written despite the acquisition attempt expiring before the lock was freed (stat err = %v)", statErr)
+	}
+}
+
+// browserFakePAT is an obviously fake fine-grained PAT shape, assembled
+// so no token-shaped literal sits in the source.
+var browserFakePAT = "github_pat_11" + strings.Repeat("A", 22) + "_" + strings.Repeat("x", 59)
+
+// TestBrowserIngestRunsPromptCaptureLane pins P3: both browser ingest
+// transports (the native-messaging hook's own store and the daemon's
+// loopback-listener store) carry the guard, so a secret-bearing browser
+// prompt lands an R-172 capture-lane row AT INGEST, not only on a later
+// `observer guard rescan`.
+func TestBrowserIngestRunsPromptCaptureLane(t *testing.T) {
+	requireAdapter(t, "chatgpt-web")
+	cases := []struct {
+		name string
+		wire func(cfg config.Config, st *store.Store)
+	}{
+		{"native-messaging hook store", func(cfg config.Config, st *store.Store) {
+			guardBrowserHookStore(cfg, st, io.Discard)
+		}},
+		{"loopback listener store", func(cfg config.Config, st *store.Store) {
+			wireGuard(context.Background(), cfg, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "observer.db")
+			database, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
+			if err != nil {
+				t.Fatalf("open db: %v", err)
+			}
+			t.Cleanup(func() { _ = database.Close() })
+			st := store.New(database)
+			cfg := config.Default()
+			cfg.Observer.DBPath = dbPath
+			cfg.Guard.Enabled = true
+			cfg.Guard.Prompt.Enabled = true
+			tc.wire(cfg, st)
+
+			b, _ := json.Marshal(map[string]any{
+				"schema_version":  1,
+				"site":            "chatgpt-web",
+				"conversation_id": "conv-pat",
+				"message_id":      "msg-pat",
+				"model":           "gpt-4o",
+				"prompt_text":     "push the branch using " + browserFakePAT + " please",
+				"response_text":   "ok",
+				"captured_at":     "2026-10-02T09:30:00Z",
+				"granularity":     "redacted",
+			})
+			bc := config.BrowserConfig{Enabled: true, GranularityCeiling: "redacted"}
+			if err := ingestBrowserTurn(context.Background(), st, b, bc, ""); err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+			var rule, kind, tool, reason string
+			var actionID sql.NullInt64
+			if err := database.QueryRowContext(context.Background(),
+				`SELECT rule_id, event_kind, tool, reason, action_id FROM guard_events WHERE event_kind = 'user_prompt'`).
+				Scan(&rule, &kind, &tool, &reason, &actionID); err != nil {
+				t.Fatalf("guard_events: %v", err)
+			}
+			if rule != "R-172" || tool != "chatgpt-web" || !actionID.Valid {
+				t.Errorf("row = (%s, %s, action %v), want an action-anchored R-172 chatgpt-web row", rule, tool, actionID)
+			}
+			if strings.Contains(reason, "xxxxxxxx") {
+				t.Fatal("token leaked into the guard_events reason")
+			}
+		})
 	}
 }

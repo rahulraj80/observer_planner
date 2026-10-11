@@ -1,34 +1,13 @@
-import { useState } from "react";
-import clsx from "clsx";
-import { ChevronDown, GitFork } from "lucide-react";
-import { Icon, Pill, Tooltip } from "@/components/primitives";
+import { LineageBanner as SharedLineageBanner } from "@shared/components/sessiondetail";
+import type { LineageChild } from "@shared/lib/sessionLineage";
 import type { SessionDetail } from "@/lib/types";
 import { fmtCompact, fmtUSD } from "@/lib/format";
 
-// LineageBanner — codex fork / subagent lineage. Extracted VERBATIM from
-// SessionDetailPanel.tsx during the tab split. It renders ABOVE the tab strip
-// (with the KPI band), not inside a tab: lineage is a fact about the session's
-// identity, so hiding it behind a tab would make "this is a fork" discoverable
-// only by accident.
-
-
-// shortSid is the panel's short-session-id convention (mirrors the
-// header's `id.slice(0, 8)`), used for the lineage badge labels.
-function shortSid(id: string): string {
-  id = id.split(":agent:").at(-1) ?? id;
-  return id.length > 8 ? id.slice(0, 8) : id;
-}
-
-// lineagePillCls matches the Pill primitive's visual tokens so the
-// clickable lineage badges read as chips consistent with the rest of the
-// panel (border + soft bg + 10px semibold), while remaining <button>s.
-const lineagePillCls =
-  "inline-flex items-center gap-1 rounded-pill border px-[7px] py-[1px] text-[10px] font-semibold leading-[1.4] tracking-[0.02em] transition-colors";
-
-// LineageBanner surfaces a codex session's fork/subagent lineage: an
-// upward "parent" badge (subagent-of / forked-from) and a downward list
-// of the sessions spawned from this one. Renders nothing for a normal
-// (non-lineage) session. Reuses onOpenSession to navigate.
+// LineageBanner: codex fork / subagent lineage above the node drawer's tab
+// strip. The banner itself lives in shared/ (shared/components/sessiondetail/
+// LineageBanner.tsx, promoted for the org drawer, T-449); this file only
+// resolves the node's session row into the shared LineageInput, so its
+// importers are unchanged.
 export function LineageBanner({
   d,
   onOpenSession,
@@ -36,135 +15,27 @@ export function LineageBanner({
   d: SessionDetail;
   onOpenSession?: (id: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const isSubagent = d.thread_source === "subagent";
   const parentId = d.forked_from_id || d.parent_thread_id || "";
-  const hasParent = parentId !== "";
-  const children = d.children ?? [];
-  // Inline sub-agent activity (claude-code same-session sidechain model):
-  // no separate child session rows exist, so the banner notes the volume
-  // and points at the System tab's per-sub-agent breakdown.
-  const sidechainCount = d.sidechain_action_count ?? 0;
-  if (!hasParent && children.length === 0 && sidechainCount === 0) return null;
-
-  const canOpenParent = hasParent && d.parent_in_db && !!onOpenSession;
-  const parentLabel = isSubagent
-    ? `Subagent of ${shortSid(parentId)}`
-    : `Forked from ${shortSid(parentId)}`;
-
+  const children: LineageChild[] = (d.children ?? []).map((c) => {
+    const toks = (c.input_tokens ?? 0) + (c.output_tokens ?? 0);
+    const meta =
+      toks > 0
+        ? `${fmtCompact(toks)} tok${(c.cost_usd ?? 0) > 0 ? ` · ${fmtUSD(c.cost_usd)}` : ""}`
+        : (c.action_count ?? 0) > 0
+          ? `${c.action_count} action${(c.action_count ?? 0) === 1 ? "" : "s"}`
+          : undefined;
+    return { id: c.id, kind: c.thread_source === "subagent" ? "subagent" : "fork", meta };
+  });
   return (
-    <div className="mb-3 flex flex-col gap-2">
-      {sidechainCount > 0 && !hasParent && children.length === 0 && (
-        <div className="rounded-2 border border-accent/30 bg-accent-soft px-3 py-2 text-caption text-fg-2">
-          Contains{" "}
-          <span className="font-semibold text-fg-1">{sidechainCount}</span>{" "}
-          sidechain action{sidechainCount === 1 ? "" : "s"} from inline
-          sub-agents - see the System tab for the per-sub-agent breakdown.
-        </div>
-      )}
-      {hasParent && (
-        <div>
-          {/* Enabled: a themed Tooltip. Disabled: the reason stays a native
-              title (a disabled button fires no hover for the Tooltip). */}
-          <Tooltip content={canOpenParent ? `Open parent session ${parentId}` : undefined}>
-          <button
-            type="button"
-            disabled={!canOpenParent}
-            onClick={
-              canOpenParent ? () => onOpenSession!(parentId) : undefined
-            }
-            title={
-              canOpenParent
-                ? undefined
-                : !d.parent_in_db
-                  ? "Parent session not in this database"
-                  : "Session navigation unavailable here"
-            }
-            className={clsx(
-              lineagePillCls,
-              isSubagent
-                ? "border-accent/30 bg-accent-soft text-accent"
-                : "border-info/30 bg-info-soft text-info",
-              canOpenParent
-                ? "cursor-pointer hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]"
-                : "cursor-not-allowed opacity-55",
-            )}
-          >
-            {!isSubagent && <Icon icon={GitFork} size={10} className="shrink-0" />}
-            {parentLabel}
-          </button>
-          </Tooltip>
-        </div>
-      )}
-      {children.length > 0 && (
-        <div className="rounded-2 border border-line-2 bg-bg-2 px-3 py-2">
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-            className="flex w-full items-center justify-between text-left text-caption font-medium text-fg-2 hover:text-fg-1 focus:outline-none"
-          >
-            <span>
-              Spawned {children.length}{" "}
-              {children.every((c) => c.thread_source === "subagent")
-                ? "subagent"
-                : children.some((c) => c.thread_source === "subagent")
-                  ? "subagent/fork"
-                  : "fork"}{" "}
-              {children.length === 1 ? "session" : "sessions"}
-            </span>
-            <Icon
-              icon={ChevronDown}
-              size="xs"
-              className={clsx("shrink-0 text-fg-3 transition-transform", expanded && "rotate-180")}
-            />
-          </button>
-          {expanded && (
-            <ul className="mt-2 flex flex-col gap-1">
-              {children.map((c) => {
-                const openable = !!onOpenSession;
-                return (
-                  <li key={c.id}>
-                    <Tooltip content={openable ? `Open session ${c.id}` : undefined}>
-                    <button
-                      type="button"
-                      disabled={!openable}
-                      onClick={
-                        openable ? () => onOpenSession!(c.id) : undefined
-                      }
-                      title={openable ? undefined : "Session navigation unavailable here"}
-                      className={clsx(
-                        "flex w-full items-center gap-2 rounded-1 px-2 py-1 text-left text-caption transition-colors",
-                        openable
-                          ? "cursor-pointer hover:bg-bg-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]"
-                          : "cursor-default",
-                      )}
-                    >
-                      <Pill variant={c.thread_source === "subagent" ? "accent" : "info"}>
-                        {c.thread_source === "subagent" ? "subagent" : "fork"}
-                      </Pill>
-                      <span className="font-mono text-fg-2">
-                        {shortSid(c.id)}…
-                      </span>
-                      {(c.input_tokens ?? 0) > 0 || (c.output_tokens ?? 0) > 0 ? (
-                        <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-3">
-                          {fmtCompact((c.input_tokens ?? 0) + (c.output_tokens ?? 0))} tok
-                          {(c.cost_usd ?? 0) > 0 ? ` · ${fmtUSD(c.cost_usd)}` : ""}
-                        </span>
-                      ) : (c.action_count ?? 0) > 0 ? (
-                        <span className="ml-auto shrink-0 font-mono text-[10px] text-fg-3">
-                          {c.action_count} action{(c.action_count ?? 0) === 1 ? "" : "s"}
-                        </span>
-                      ) : null}
-                    </button>
-                    </Tooltip>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
+    <SharedLineageBanner
+      parentId={parentId}
+      parentKind={isSubagent ? "subagent" : "fork"}
+      parentOpenable={Boolean(d.parent_in_db)}
+      parentClosedReason={!d.parent_in_db ? "Parent session not in this database" : undefined}
+      children={children}
+      sidechainCount={d.sidechain_action_count ?? 0}
+      onOpenSession={onOpenSession}
+    />
   );
 }

@@ -30,7 +30,7 @@ export function integrityNotice(
     return {
       tone: "danger",
       label: "Database integrity",
-      text: `Database integrity check failed on ${checkedAt}${detail}. Run \`observer doctor db\`.`,
+      text: `Database integrity check failed on ${checkedAt}${detail}. Settings > Health has the doctor report, and its Re-run runs the full check.`,
     };
   }
   if (integrity.status === "error") {
@@ -72,7 +72,7 @@ export function integrityHealthRow(
   if (integrity.status === "corrupt") {
     return {
       status: "fail",
-      message: `quick_check failed at startup on ${checkedAt}${detail}. Run \`observer doctor db\`.`,
+      message: `quick_check failed at startup on ${checkedAt}${detail}. Re-run this report to run the full check.`,
     };
   }
   // "error": the probe could not COMPLETE - a timeout or locked file. Says

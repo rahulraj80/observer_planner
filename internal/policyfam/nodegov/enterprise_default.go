@@ -166,7 +166,8 @@ func EnterpriseDefaultBody(in EnterpriseDefaultInput) (Body, []byte, error) {
 		share[s.Key] = true
 	}
 
-	body := Body{Schema: MaxSchema, Pinned: pinned, Share: share}
+	body := Body{Pinned: pinned, Share: share}
+	body.Schema = SchemaFor(body)
 	raw, err := CanonicalJSON(body)
 	if err != nil {
 		return Body{}, nil, fmt.Errorf("policyfam/nodegov.EnterpriseDefaultBody: %w", err)

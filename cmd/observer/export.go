@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/marmutapp/superbased-observer/internal/costtext"
+	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // newExportCmd wires `observer export` — dump actions / sessions / api_turns /
@@ -30,7 +33,7 @@ func newExportCmd() *cobra.Command {
 		Short: "Dump tables as JSON or CSV for external analysis",
 		Long: "Streams rows from actions / sessions / api_turns / failures to stdout\n" +
 			"or to --out. No aggregation, no scrubbing beyond what ingestion already\n" +
-			"did — the raw row shape is what external analysts typically want.",
+			"did - the raw row shape is what external analysts typically want.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
 			if err != nil {
@@ -48,8 +51,12 @@ func newExportCmd() *cobra.Command {
 				w = f
 			}
 
+			// The export follows the developer cost display (T-204): under token
+			// usage the dollar columns are left out of the rows, for stdout and
+			// for an --out file alike, and the token columns stay.
 			return runExport(cmd.Context(), database, w, exportOptions{
 				Format: format, Table: table, ProjectRoot: projectRoot, Days: days,
+				Mode: newCostDisplayResolver(store.New(database)).Mode(),
 			})
 		},
 	}
@@ -67,6 +74,8 @@ type exportOptions struct {
 	Table       string
 	ProjectRoot string
 	Days        int
+	// Mode is the developer cost display; "" is dollars.
+	Mode string
 }
 
 func runExport(ctx context.Context, db *sql.DB, w io.Writer, opts exportOptions) error {
@@ -99,11 +108,12 @@ func runExport(ctx context.Context, db *sql.DB, w io.Writer, opts exportOptions)
 	}
 	defer rows.Close()
 
+	visible := costtext.KeepColumns(opts.Mode, headers)
 	switch strings.ToLower(opts.Format) {
 	case "json":
-		return writeJSONLines(w, rows, headers)
+		return writeJSONLines(w, rows, headers, visible)
 	case "csv":
-		return writeCSV(w, rows, headers)
+		return writeCSV(w, rows, headers, visible)
 	default:
 		return fmt.Errorf("--format %q not in {json, csv}", opts.Format)
 	}
@@ -208,24 +218,28 @@ func failuresQuery(projectRoot string, since time.Time) (string, []string) {
 
 // writeJSONLines writes NDJSON — one JSON object per row, newline-delimited.
 // Easier to stream than a single-array JSON.
-func writeJSONLines(w io.Writer, rows *sql.Rows, headers []string) error {
+func writeJSONLines(w io.Writer, rows *sql.Rows, headers, visible []string) error {
 	enc := json.NewEncoder(w)
 	for rows.Next() {
 		m, err := scanToMap(rows, headers)
 		if err != nil {
 			return err
 		}
-		if err := enc.Encode(m); err != nil {
+		out := make(map[string]any, len(visible))
+		for _, h := range visible {
+			out[h] = m[h]
+		}
+		if err := enc.Encode(out); err != nil {
 			return fmt.Errorf("export: write json: %w", err)
 		}
 	}
 	return rows.Err()
 }
 
-func writeCSV(w io.Writer, rows *sql.Rows, headers []string) error {
+func writeCSV(w io.Writer, rows *sql.Rows, headers, visible []string) error {
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
-	if err := cw.Write(headers); err != nil {
+	if err := cw.Write(visible); err != nil {
 		return fmt.Errorf("export: write csv header: %w", err)
 	}
 	for rows.Next() {
@@ -233,8 +247,8 @@ func writeCSV(w io.Writer, rows *sql.Rows, headers []string) error {
 		if err != nil {
 			return err
 		}
-		record := make([]string, len(headers))
-		for i, h := range headers {
+		record := make([]string, len(visible))
+		for i, h := range visible {
 			record[i] = toString(m[h])
 		}
 		if err := cw.Write(record); err != nil {

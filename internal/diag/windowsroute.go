@@ -16,6 +16,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/proxyroute"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // Cross-OS proxy-route doctor check (Phase 7).
@@ -81,6 +82,7 @@ func windowsProxyRoutesCheck(ctx context.Context, cfg config.Config, isWSL bool,
 
 	status := StatusOK
 	var details []string
+	var rems []remedy.Remediation
 	anyWritten := false
 	for _, d := range detected {
 		if d.written {
@@ -88,7 +90,9 @@ func windowsProxyRoutesCheck(ctx context.Context, cfg config.Config, isWSL bool,
 			details = append(details, fmt.Sprintf("%s: routed in %s → %s", d.label, d.config, d.baseURL))
 		} else {
 			status = StatusWarn
-			details = append(details, fmt.Sprintf("%s: %s present but NOT routed — run `observer init` to point it at the WSL proxy", d.label, d.config))
+			r := remedy.Of(remedy.InitWindowsRoute, d.label)
+			rems = append(rems, r)
+			details = append(details, fmt.Sprintf("%s: %s present but NOT routed - run %s to point it at the WSL proxy", d.label, d.config, remedy.Quote(r)))
 		}
 	}
 
@@ -102,7 +106,8 @@ func windowsProxyRoutesCheck(ctx context.Context, cfg config.Config, isWSL bool,
 	// missing from init. Covers .cursor (hooks-only) too. Never StatusFail.
 	for _, w := range ownershipWarns {
 		status = StatusWarn
-		details = append(details, w)
+		details = append(details, w.line)
+		rems = append(rems, w.fix)
 	}
 
 	// Best-effort reachability: does the Windows side actually reach the WSL
@@ -118,7 +123,7 @@ func windowsProxyRoutesCheck(ctx context.Context, cfg config.Config, isWSL bool,
 			// curl.exe missing, timed out, or connection refused — we cannot
 			// distinguish "proxy down" from "curl.exe absent" from inside WSL,
 			// so stay honest and don't fail.
-			details = append(details, "reachability unverifiable from WSL — if Windows tools can't connect, check .wslconfig (mirrored networking / localhostForwarding=false)")
+			details = append(details, "reachability unverifiable from WSL - if Windows tools can't connect, check .wslconfig (mirrored networking / localhostForwarding=false)")
 		}
 	}
 
@@ -129,74 +134,117 @@ func windowsProxyRoutesCheck(ctx context.Context, cfg config.Config, isWSL bool,
 	case !anyWritten:
 		msg = fmt.Sprintf("%d Windows-side tool(s) detected, none routed yet", len(detected))
 	}
-	return Check{Name: windowsRouteCheckName, Status: status, Message: msg, Details: details}, true
+	return Check{Name: windowsRouteCheckName, Status: status, Message: msg, Details: details, Remediations: rems}, true
 }
 
 // crossOSHomeSpec pairs a cross-OS tool label with its Windows-side config
-// subdir and the exact `observer init` recovery flag that disambiguates it.
-// cursor is hooks-only (no proxy-route writer) but still needs the ownership
-// recovery hint, so it rides the same table (CLAUDE.md #5 — a data table, not a
-// switch ladder).
+// subdir. The recovery command that disambiguates it is remedy's
+// InitWindowsHome for the label (the CLI flag and the dashboard Windows-home
+// control are both spelled there). cursor is hooks-only (no proxy-route
+// writer) but still needs the ownership recovery hint, so it rides the same
+// table (CLAUDE.md #5: a data table, not a switch ladder).
 type crossOSHomeSpec struct {
 	label  string
 	subdir string
-	flag   string
 }
 
 var crossOSHomeSpecs = []crossOSHomeSpec{
-	{"claude-code-windows", ".claude", "observer init --windows-claude-home <path>"},
-	{"codex-windows", ".codex", "observer init --windows-codex-home <path>"},
-	{"cursor-windows", ".cursor", "observer init --windows-cursor-home <path>"},
+	{"claude-code-windows", ".claude"},
+	{"codex-windows", ".codex"},
+	{"cursor-windows", ".cursor"},
 }
 
-// windowsHomeOwnershipWarnings walks the Windows-side homes for each cross-OS
-// tool's config subdir and returns a WARN line for every tool whose homes can't
-// be resolved to a single OWNED home — i.e. several candidates, or a single
-// candidate whose ownership the injected `owned` predicate can't verify. The
-// resolution rule mirrors proxyroute.resolveWindowsHome / hook.detectWindowsHome
-// (exactly one owned home resolves; anything else is refused). owned is injected
-// (the crossmount ownership seam) so tests are deterministic without a cmd.exe
-// interop shell.
-func windowsHomeOwnershipWarnings(homes []crossmount.HomeRoot, owned func(string) bool) []string {
+// ownershipWarning is one ambiguous / unverified cross-OS home: the detail
+// line and its structured fix.
+type ownershipWarning struct {
+	line string
+	fix  remedy.Remediation
+}
+
+// WindowsHomeCandidate is one Windows USER home that carries a cross-OS
+// tool's config dir, and whether it belongs to the current Windows user.
+type WindowsHomeCandidate struct {
+	Home  string `json:"home"`
+	Owned bool   `json:"owned"`
+}
+
+// WindowsHomeTarget is one cross-OS target's detected Windows homes (T-421
+// item 4). Resolved is the home `observer init` auto-picks (exactly one
+// owned candidate), "" when it refuses to pick.
+type WindowsHomeTarget struct {
+	Target     string                 `json:"target"`
+	Subdir     string                 `json:"subdir"`
+	Candidates []WindowsHomeCandidate `json:"candidates"`
+	Resolved   string                 `json:"resolved,omitempty"`
+}
+
+// WindowsHomeTargets lists, per cross-OS target, the Windows USER homes that
+// carry its config dir: the ONE detection the doctor's ownership warning and
+// the dashboard's Windows-home control share. The resolution rule mirrors
+// proxyroute.resolveWindowsHome / hook.detectWindowsHome (exactly one owned
+// home resolves; anything else is refused). owned is the crossmount
+// ownership seam (nil: nothing is verified as owned). Targets with no
+// candidate are omitted.
+func WindowsHomeTargets(homes []crossmount.HomeRoot, owned func(string) bool) []WindowsHomeTarget {
+	var out []WindowsHomeTarget
+	for _, spec := range crossOSHomeSpecs {
+		t := WindowsHomeTarget{Target: spec.label, Subdir: spec.subdir}
+		ownedCount, ownedHome := 0, ""
+		for _, h := range homes {
+			if h.OS != crossmount.OSWindows || !dirExists(filepath.Join(h.Path, spec.subdir)) {
+				continue
+			}
+			c := WindowsHomeCandidate{Home: h.Path, Owned: owned != nil && owned(h.Path)}
+			if c.Owned {
+				ownedCount++
+				ownedHome = h.Path
+			}
+			t.Candidates = append(t.Candidates, c)
+		}
+		if len(t.Candidates) == 0 {
+			continue
+		}
+		if ownedCount == 1 {
+			t.Resolved = ownedHome
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// windowsHomeOwnershipWarnings returns a WARN line for every cross-OS tool
+// whose homes can't be resolved to a single OWNED home: several candidates,
+// or a single candidate whose ownership the injected `owned` predicate can't
+// verify (WindowsHomeTargets decides). owned is injected (the crossmount
+// ownership seam) so tests are deterministic without a cmd.exe interop shell.
+func windowsHomeOwnershipWarnings(homes []crossmount.HomeRoot, owned func(string) bool) []ownershipWarning {
 	if owned == nil {
 		return nil
 	}
-	var out []string
-	for _, spec := range crossOSHomeSpecs {
-		var candidates []string
-		ownedCount := 0
-		for _, h := range homes {
-			if h.OS != crossmount.OSWindows {
-				continue
-			}
-			dir := filepath.Join(h.Path, spec.subdir)
-			if !dirExists(dir) {
-				continue
-			}
-			candidates = append(candidates, dir)
-			if owned(h.Path) {
-				ownedCount++
-			}
-		}
-		switch {
-		case len(candidates) == 0:
-			continue // nothing detected for this tool
-		case ownedCount == 1:
+	var out []ownershipWarning
+	for _, t := range WindowsHomeTargets(homes, owned) {
+		if t.Resolved != "" {
 			// Resolves cleanly regardless of how many homes were detected:
 			// resolveWindowsHome / the hook registrar auto-pick the single
 			// OWNED candidate, so a healthy multi-user machine must not WARN.
 			continue
-		case len(candidates) == 1:
-			out = append(out, fmt.Sprintf(
-				"%s: found %s but could not verify it belongs to the current Windows user (%%USERNAME%% mismatch or interop unavailable) — `observer init` will NOT auto-pick it; run `%s` to confirm",
-				spec.label, candidates[0], spec.flag,
-			))
-		default:
-			out = append(out, fmt.Sprintf(
-				"%s: multiple Windows-side homes carry the config (%s) — `observer init` will NOT auto-pick; run `%s` (the Windows user home, e.g. /mnt/c/Users/<you>) to choose",
-				spec.label, strings.Join(candidates, ", "), spec.flag,
-			))
 		}
+		dirs := make([]string, 0, len(t.Candidates))
+		for _, c := range t.Candidates {
+			dirs = append(dirs, filepath.Join(c.Home, t.Subdir))
+		}
+		fix := remedy.Of(remedy.InitWindowsHome, t.Target)
+		if len(dirs) == 1 {
+			out = append(out, ownershipWarning{fix: fix, line: fmt.Sprintf(
+				"%s: found %s but could not verify it belongs to the current Windows user (%%USERNAME%% mismatch or interop unavailable) - `observer init` will NOT auto-pick it; run %s to confirm",
+				t.Target, dirs[0], remedy.Quote(fix),
+			)})
+			continue
+		}
+		out = append(out, ownershipWarning{fix: fix, line: fmt.Sprintf(
+			"%s: multiple Windows-side homes carry the config (%s) - `observer init` will NOT auto-pick; run %s (the Windows user home, e.g. /mnt/c/Users/<you>) to choose",
+			t.Target, strings.Join(dirs, ", "), remedy.Quote(fix),
+		)})
 	}
 	return out
 }

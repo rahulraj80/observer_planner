@@ -1,13 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { SlideOver, SurfaceBadge, TabStrip, ToolBadge, Tooltip, TruncatedPath, type TabDef } from "@/components/primitives";
+import { SlideOver, SurfaceBadge, TabPanel, TabStrip, ToolBadge, Tooltip, TruncatedPath, type TabDef } from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
 import { sessionTabIcon } from "@shared/components/sessiondetail";
 import { CopyOnClick } from "@/components/CopyOnClick";
 import { SessionActionHeader } from "@/components/SessionActionHeader";
 import { fetchJSON } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { fmtShortId } from "@/lib/format";
+import {
+  DRAWER_TAB_PARAM,
+  clearDrawerTab,
+  drawerTabFromParams,
+  legacyDrawerTab,
+  migrateLegacyDrawerTab,
+  writeDrawerTab,
+} from "@/lib/drawerTab";
+import { costLabel, fmtShortId } from "@/lib/format";
 import type {
   SessionDetail,
   SessionMessages,
@@ -79,16 +87,12 @@ const TAB_IDS: TabId[] = [
   "system",
 ];
 
-// TAB_PARAM is the deep-link key. Convention copied from Settings
-// (`/settings?section=<id>`): the URL is the source of truth, the default is
-// omitted from the URL, and writes use { replace: true } so tab switching
-// doesn't fill the back-button history. The proposal asked for
-// `?session=…&tab=messages`; this is that.
-const TAB_PARAM = "tab";
-
-function isTabId(v: string | null): v is TabId {
-  return v != null && (TAB_IDS as string[]).includes(v);
-}
+// The deep-link key is `?dtab=` (lib/drawerTab.ts owns the rules): the URL
+// is the source of truth, the default is omitted from the URL, and writes use
+// { replace: true } so tab switching doesn't fill the back-button history.
+// Until 2026-10-02 it was `?tab=`, which is a PAGE tab's param since the
+// platform tabs plan (§1.3: page tabs `?tab=`, drawer tabs `?dtab=`); an old
+// `/sessions?session=…&tab=messages` link is still read and rewritten once.
 
 export function SessionDetailPanel({
   sessionId,
@@ -112,15 +116,15 @@ export function SessionDetailPanel({
   // for exactly that case, the list pages do not. See LiveHeroBand.tsx.
   liveHero?: boolean;
   // urlTabState = this panel is the one the ROUTE addresses, so the active tab
-  // lives in `?tab=` (deep-linkable, back/forward-safe). True for every list
+  // lives in `?dtab=` (deep-linkable, back/forward-safe). True for every list
   // page, which opens exactly one panel through its own `?session=`.
   //
-  // FALSE for a host that is not route state. `?tab=` is a single slot per
+  // FALSE for a host that is not route state. `?dtab=` is a single slot per
   // route, and a list page keeps its own panel mounted at all times (closed,
-  // `open={selected != null}`) with a cleanup effect that DELETES `?tab=`
+  // `open={selected != null}`) with a cleanup effect that DELETES `?dtab=`
   // whenever the panel is closed. So a second panel floating over that route —
   // the terminal workspace's session modal, which is opened by terminal token
-  // from wherever the operator happens to be — would write `?tab=messages`,
+  // from wherever the operator happens to be — would write `?dtab=messages`,
   // have the page's closed panel delete it on the very next commit, and snap
   // straight back to Overview. That was the 2026-08-28 "tabs flip back" defect.
   // Such a panel keeps its tab in local state and never touches the URL.
@@ -174,11 +178,11 @@ export function SessionDetailPanel({
 
   // ----- Tab state ------------------------------------------------
   //
-  // The URL owns the active tab (see TAB_PARAM) for the ONE panel a route
-  // addresses through its own `?session=`. The default is derived, not stored:
-  // opening in watch mode means the operator came to read the live stream, so
-  // Messages is the honest landing tab there; everything else lands on
-  // Overview. An explicit ?tab= always wins over both.
+  // The URL owns the active tab (`?dtab=`, lib/drawerTab.ts) for the ONE panel
+  // a route addresses through its own `?session=`. The default is derived, not
+  // stored: opening in watch mode means the operator came to read the live
+  // stream, so Messages is the honest landing tab there; everything else lands
+  // on Overview. An explicit ?dtab= (or an old link's ?tab=) wins over both.
   //
   // A panel that is NOT route-addressable keeps its tab in local state instead
   // (urlTabState={false}) — see the prop doc. Both code paths must run their
@@ -186,45 +190,33 @@ export function SessionDetailPanel({
   // declared; `urlTabState` only decides which one is read and written.
   const [searchParams, setSearchParams] = useSearchParams();
   const [localTab, setLocalTab] = useState<TabId | null>(null);
-  const urlTab = searchParams.get(TAB_PARAM);
+  const urlTab = drawerTabFromParams(searchParams, TAB_IDS);
   const defaultTab: TabId = watch ? "messages" : "overview";
-  const activeTab: TabId = urlTabState
-    ? isTabId(urlTab)
-      ? urlTab
-      : defaultTab
-    : (localTab ?? defaultTab);
+  const activeTab: TabId = urlTabState ? (urlTab ?? defaultTab) : (localTab ?? defaultTab);
   const setTab = useCallback(
     (id: TabId) => {
       if (!urlTabState) {
         setLocalTab(id);
         return;
       }
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          // Writing the default would make "no preference" and "chose the
-          // default" indistinguishable, and would leave a param behind on
-          // every panel open. Same rule Settings uses for ?section=.
-          if (id === (watch ? "messages" : "overview")) {
-            next.delete(TAB_PARAM);
-          } else {
-            next.set(TAB_PARAM, id);
-          }
-          return next;
-        },
-        { replace: true },
-      );
+      // Writing the default would make "no preference" and "chose the
+      // default" indistinguishable, and would leave a param behind on every
+      // panel open. Same rule Settings uses for ?section=. A page's own
+      // `?tab=` is never touched (writeDrawerTab).
+      setSearchParams((prev) => writeDrawerTab(prev, id, watch ? "messages" : "overview"), {
+        replace: true,
+      });
     },
     [urlTabState, setSearchParams, watch],
   );
-  // Drop ?tab= when the panel closes. Without this, closing while on the Cache
-  // tab leaves a dangling `?tab=cache` on a page with no open panel, and the
+  // Drop ?dtab= when the panel closes. Without this, closing while on the Cache
+  // tab leaves a dangling `?dtab=cache` on a page with no open panel, and the
   // NEXT session opened would silently land on Cache. Runs as an effect (i.e.
   // in a later commit than the host page's own `?session=` removal) so the two
   // URL writes can't clobber each other.
   //
   // GATED ON urlTabState, which is what makes the cleanup safe now that this
-  // panel has more than one host. `?tab=` is route state, and this effect is a
+  // panel has more than one host. `?dtab=` is route state, and this effect is a
   // blind delete of it — so only the instance that OWNS the route's tab param
   // may run it. A non-owning instance running this would delete a param written
   // by a different, still-open panel (see the prop doc).
@@ -235,18 +227,21 @@ export function SessionDetailPanel({
   // unconditional call here would re-navigate on every mount of every page
   // that renders this panel closed, and could self-retrigger. Once the param
   // is gone hasTabParam is false and the effect is inert.
-  const hasTabParam = searchParams.has(TAB_PARAM);
+  const hasTabParam = searchParams.has(DRAWER_TAB_PARAM);
   useEffect(() => {
     if (!urlTabState || open || !hasTabParam) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete(TAB_PARAM);
-        return next;
-      },
-      { replace: true },
-    );
+    setSearchParams((prev) => clearDrawerTab(prev) ?? prev, { replace: true });
   }, [urlTabState, open, hasTabParam, setSearchParams]);
+  // An old `/sessions?session=…&tab=messages` link: read above, rewritten to
+  // `?dtab=` once the panel is open, so the URL a reader copies is the new
+  // shape. Guarded on there being something to migrate (no self-retrigger).
+  const hasLegacyTab = urlTabState && open && legacyDrawerTab(searchParams, TAB_IDS) != null;
+  useEffect(() => {
+    if (!hasLegacyTab) return;
+    setSearchParams((prev) => migrateLegacyDrawerTab(prev, TAB_IDS, watch ? "messages" : "overview") ?? prev, {
+      replace: true,
+    });
+  }, [hasLegacyTab, setSearchParams, watch]);
 
   // ----- Mount policy: lazy-mount, then keep mounted ---------------
   //
@@ -527,7 +522,7 @@ export function SessionDetailPanel({
             label: "Messages",
             count: messages.data ? messages.data.total : null,
           },
-          { id: "cost", label: "Cost & limits" },
+          { id: "cost", label: costLabel("Cost & limits", "Usage & limits") },
           { id: "cache", label: "Cache" },
           { id: "tasks", label: "Tasks" },
           { id: "mcp", label: "MCP calls" },
@@ -662,19 +657,19 @@ export function SessionDetailPanel({
             with `hidden` (display:none). See the mount-policy note above —
             unmounting would abort in-flight fetches and restart polling on
             every tab flick. */}
-        <TabPanel id="overview" active={activeTab}>
+        <TabPanel id="overview" active={activeTab} idPrefix="sessdetail" className="mt-5">
           {d && <OverviewTab d={d} />}
         </TabPanel>
-        <TabPanel id="cost" active={activeTab}>
+        <TabPanel id="cost" active={activeTab} idPrefix="sessdetail" className="mt-5">
           {d && <CostTab d={d} />}
         </TabPanel>
-        <TabPanel id="cache" active={activeTab}>
+        <TabPanel id="cache" active={activeTab} idPrefix="sessdetail" className="mt-5">
           {d && <CacheTab d={d} />}
         </TabPanel>
-        <TabPanel id="tasks" active={activeTab}>
+        <TabPanel id="tasks" active={activeTab} idPrefix="sessdetail" className="mt-5">
           {d && <TasksTab d={d} />}
         </TabPanel>
-        <TabPanel id="messages" active={activeTab}>
+        <TabPanel id="messages" active={activeTab} idPrefix="sessdetail" className="mt-5">
           <MessagesTab
             tool={d?.tool}
             messages={messages}
@@ -708,10 +703,10 @@ export function SessionDetailPanel({
             }}
           />
         </TabPanel>
-        <TabPanel id="mcp" active={activeTab}>
+        <TabPanel id="mcp" active={activeTab} idPrefix="sessdetail" className="mt-5">
           <MCPCallsTab sessionId={sessionId} onFocusMessage={onFocusMessage} />
         </TabPanel>
-        <TabPanel id="system" active={activeTab}>
+        <TabPanel id="system" active={activeTab} idPrefix="sessdetail" className="mt-5">
           <SystemTab sessionId={sessionId} onFocusMessage={onFocusMessage} />
         </TabPanel>
       </div>
@@ -719,44 +714,13 @@ export function SessionDetailPanel({
   );
 }
 
-// TabPanel renders nothing until its tab has been visited once, then keeps its
-// subtree mounted forever (hidden when inactive). `hidden` is a Tailwind
-// display:none — React keeps the DOM and all component state, so useApi data,
-// in-flight requests, expanded rows and scroll positions all survive a tab
-// switch. Effects still run while hidden; the only measurable consequence is
-// that a scrollIntoView against a display:none node no-ops, which is why
-// cross-tab focus (Processes → Messages) switches the tab BEFORE setting
+// Panels are the shared keep-alive TabPanel (@shared/primitives/Tabs.tsx):
+// nothing renders until a tab is first visited, then its subtree stays mounted
+// (display:none when inactive), so useApi data, in-flight requests, expanded
+// rows and scroll positions survive a tab switch. Effects still run while
+// hidden; a scrollIntoView against a display:none node no-ops, which is why
+// cross-tab focus (Processes -> Messages) switches the tab BEFORE setting
 // focusMid rather than after.
-function TabPanel({
-  id,
-  active,
-  children,
-}: {
-  id: TabId;
-  active: TabId;
-  children: React.ReactNode;
-}) {
-  const isActive = id === active;
-  // Monotonic mount latch: flips true the first time this tab is selected and
-  // never flips back for the life of the panel.
-  const mountedRef = useRef(false);
-  if (isActive) mountedRef.current = true;
-  if (!mountedRef.current) return null;
-  return (
-    <div
-      id={`sessdetail-panel-${id}`}
-      role="tabpanel"
-      aria-labelledby={`sessdetail-tab-${id}`}
-      // Both the attribute and the utility class: the attribute keeps the
-      // panel out of the accessibility tree, the class guarantees display:none
-      // regardless of any base-layer rule that might set `display` on a div.
-      hidden={!isActive}
-      className={isActive ? "mt-5" : "hidden"}
-    >
-      {children}
-    </div>
-  );
-}
 
 // Re-export `ToolCallRow` so its type is preserved if consumers need it.
 export type { ToolCallRow };

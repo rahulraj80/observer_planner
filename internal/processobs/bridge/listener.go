@@ -288,7 +288,7 @@ func (l *Listener) Start(ctx context.Context) (<-chan processobs.RawEvent, error
 	// connected yet — which is a REASON, not a failure, and is exactly what an
 	// operator whose elevated task never started needs to read.
 	l.opts.NetworkAccounting.Set(processobs.NetworkAccountingUnavailable,
-		"waiting for an elevated cross-OS process capturer to connect to "+l.Addr()+" — none has connected yet")
+		"waiting for an elevated cross-OS process capturer to connect to "+l.Addr()+" - none has connected yet")
 	l.started.Store(true)
 	go l.acceptLoop(ctx)
 	return l.out, nil
@@ -322,7 +322,7 @@ func (l *Listener) acceptLoop(ctx context.Context) {
 	// Whatever ends this loop, no capturer is streaming afterwards, so a
 	// positive network-accounting claim must not outlive it.
 	defer l.claim.invalidate(l.opts.NetworkAccounting,
-		"the cross-OS process capturer listener stopped — per-process network bytes are no longer being measured")
+		"the cross-OS process capturer listener stopped - per-process network bytes are no longer being measured")
 
 	// Unblock Accept (and drop any live connection) when ctx is cancelled.
 	// Close covers the l.stop path itself; this goroutine covers ctx, which
@@ -349,7 +349,7 @@ func (l *Listener) acceptLoop(ctx context.Context) {
 			// end capture: pause briefly and keep waiting. There is no
 			// failure cap here BY DESIGN.
 			l.setLastErr(err.Error())
-			l.warn("process bridge listener: accept failed — still listening", "err", err)
+			l.warn("process bridge listener: accept failed - still listening", "err", err)
 			if !sleepCtx(ctx, l.stop, 100*time.Millisecond) {
 				break
 			}
@@ -393,7 +393,7 @@ func (l *Listener) handleConn(ctx context.Context, conn net.Conn) {
 	// now stale, and stale is a lie — withdraw it, exactly as spawn mode does
 	// between respawns. The listener itself keeps waiting.
 	l.claim.invalidate(l.opts.NetworkAccounting,
-		"the cross-OS process capturer disconnected — per-process network bytes are not being measured until it reconnects")
+		"the cross-OS process capturer disconnected - per-process network bytes are not being measured until it reconnects")
 	l.markDisconnected()
 }
 
@@ -529,7 +529,7 @@ func (l *Listener) onCapturerStats(s CapturerStats) {
 	if !reported || decode != prev {
 		switch {
 		case decode.Any():
-			l.warn("process bridge listener: the capturer's network-telemetry decoder is REFUSING events — "+
+			l.warn("process bridge listener: the capturer's network-telemetry decoder is REFUSING events - "+
 				"per-process byte totals from this host may be wrong, not merely missing",
 				"dropped", decode.NetworkDropped,
 				"unsupported_version", decode.NetworkUnsupportedVersion)
@@ -538,7 +538,7 @@ func (l *Listener) onCapturerStats(s CapturerStats) {
 			// stays silent — and the byte totals are zero anyway. Logged
 			// because a decoder that accepts nothing is not a decoder, and
 			// the refusal counters cannot say so.
-			l.warn("process bridge listener: the capturer's network-telemetry decoder has classified NO data events — "+
+			l.warn("process bridge listener: the capturer's network-telemetry decoder has classified NO data events - "+
 				"it refused nothing, but it accepted nothing either, so it is measuring no bytes at all; "+
 				"if this host was moving TCP traffic, the provider's event ids no longer match this build's layout table",
 				"ignored", decode.NetworkIgnored,

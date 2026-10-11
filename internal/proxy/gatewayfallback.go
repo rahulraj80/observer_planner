@@ -231,7 +231,7 @@ func (p *Proxy) applyTerminalPolicy(r *http.Request, outReq *http.Request, reqBo
 						EndpointsTried: tried, Generation: lc.generation,
 						LastStatus: lastStatus, Provider: provider,
 					})
-					p.logger.Warn("proxy: gateway ladder exhausted; custody-acked DIRECT fallback active — the developer credential now reaches the provider directly", "provider", provider, "generation", lc.generation)
+					p.logger.Warn("proxy: gateway ladder exhausted; custody-acked DIRECT fallback active - the developer credential now reaches the provider directly", "provider", provider, "generation", lc.generation)
 					// Served model is unchanged (same body, direct destination),
 					// so shape is left as-is.
 					return p.doWithRetry(dReq, reqBody)

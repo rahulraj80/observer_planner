@@ -60,6 +60,14 @@ func TestBuildRemoteControllerWiresSessionAudit(t *testing.T) {
 	defer database.Close()
 
 	ctrl := buildRemoteController(cfg, database)
+	if compiledOut("remote") {
+		// The remote component is not in this build: no controller is ever
+		// built, so the dashboard stays loopback-only (remote_omit.go).
+		if ctrl != nil {
+			t.Fatal("buildRemoteController returned a controller in a build without remote")
+		}
+		return
+	}
 	if ctrl == nil {
 		t.Fatal("buildRemoteController returned nil with remote enabled and a secret present")
 	}
@@ -91,7 +99,7 @@ func TestBuildRemoteControllerWiresSessionAudit(t *testing.T) {
 		t.Fatalf("count auth_failed: %v", err)
 	}
 	if n == 0 {
-		t.Fatal("a rejected pairing wrote no auth_failed row — RemoteOptions.Audit is unwired, " +
+		t.Fatal("a rejected pairing wrote no auth_failed row - RemoteOptions.Audit is unwired, " +
 			"so every session_paired / session_revoked / auth_failed event is silently discarded")
 	}
 
@@ -101,7 +109,7 @@ func TestBuildRemoteControllerWiresSessionAudit(t *testing.T) {
 		t.Fatalf("read auth_failed detail: %v", err)
 	}
 	if detail != "bad_secret" {
-		t.Errorf("auth_failed detail = %q, want %q — the reason must survive to the row, "+
+		t.Errorf("auth_failed detail = %q, want %q - the reason must survive to the row, "+
 			"since discriminating the reasons is the whole point of the sink", detail, "bad_secret")
 	}
 }

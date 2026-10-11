@@ -337,7 +337,7 @@ func (t *Table) ValidateDatedAt(now time.Time) []string {
 		for i := 1; i < len(entries); i++ {
 			if entries[i].EffectiveFrom.Equal(entries[i-1].EffectiveFrom) {
 				out = append(out, fmt.Sprintf(
-					"pricing: model %q has two dated entries with the same effective_from %s — the later one in file order wins, which is almost certainly not what you meant",
+					"pricing: model %q has two dated entries with the same effective_from %s - the later one in file order wins, which is almost certainly not what you meant",
 					k, entries[i].EffectiveFrom.Format(time.RFC3339),
 				))
 			}
@@ -352,7 +352,7 @@ func (t *Table) ValidateDatedAt(now time.Time) []string {
 		}
 		if flat != entries[cur].Pricing {
 			out = append(out, fmt.Sprintf(
-				"pricing: model %q dated entry in force (effective_from %s) does not match the current flat rate — the flat table must always hold CURRENT rates, so historical costs will be right but today's will not",
+				"pricing: model %q dated entry in force (effective_from %s) does not match the current flat rate - the flat table must always hold CURRENT rates, so historical costs will be right but today's will not",
 				k, entries[cur].EffectiveFrom.Format(time.RFC3339),
 			))
 		}

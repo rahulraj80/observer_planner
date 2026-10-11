@@ -305,7 +305,7 @@ func TestProbeFromResultReportsPluginWiring(t *testing.T) {
 	if reason == "" {
 		t.Fatal("fixture setup: Detection.Reason() returned empty for an Active detection")
 	}
-	wantWiredDetail := "wired via the Claude Code plugin — " + reason
+	wantWiredDetail := "wired via the Claude Code plugin - " + reason
 
 	t.Run("hooks", func(t *testing.T) {
 		cases := []struct {
@@ -316,7 +316,7 @@ func TestProbeFromResultReportsPluginWiring(t *testing.T) {
 			wantDetail     string
 		}{
 			{
-				name:           "skipped — wired via the plugin",
+				name:           "skipped - wired via the plugin",
 				res:            hook.RegistrationResult{Skipped: true, SkipReason: reason},
 				wantRegistered: true,
 				wantViaPlugin:  true,
@@ -368,7 +368,7 @@ func TestProbeFromResultReportsPluginWiring(t *testing.T) {
 			wantDetail     string
 		}{
 			{
-				name:           "skipped — wired via the plugin",
+				name:           "skipped - wired via the plugin",
 				res:            mcp.RegistrationResult{Skipped: true, SkipReason: reason},
 				wantRegistered: true,
 				wantViaPlugin:  true,

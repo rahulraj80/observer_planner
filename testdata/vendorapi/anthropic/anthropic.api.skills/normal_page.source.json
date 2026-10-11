@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].display_name": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].latest_version_id": "VerifiedOfficial",
+    "data[].source": "VerifiedOfficial",
+    "data[].source.type": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "data[].updated_at": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "367747e07b9e4ecf8b4c5ee0fc50ae2086189e21e9555f8bd3a71ebec5c18d69",
+  "http": {
+    "method": "GET",
+    "path": "/v1/skills",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/skills.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated Skills API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "f5d3b5b260be426b51a560e2348d25f27081fafe93c6330e5893351ca5fe3b3f",
+  "source_url": "https://platform.claude.com/docs/en/api/skills.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.api.skills"
+}

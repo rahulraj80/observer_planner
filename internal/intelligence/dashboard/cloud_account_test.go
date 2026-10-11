@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 )
 
@@ -205,7 +206,7 @@ func TestCloudLoginStateMachine(t *testing.T) {
 		t.Fatalf("first POST = %d %+v", code, st)
 	}
 	// The authorize URL is captured from the child's output.
-	cloudWaitFor(t, "auth_url capture", func() bool { return srv.opts.CloudAccount.state().AuthURL != "" })
+	cloudWaitFor(t, "auth_url capture", func() bool { return srv.opts.CloudAccount.State().AuthURL != "" })
 	_, st = cloudDoJSON[CloudLoginState](t, srv.handleCloudLoginState, http.MethodGet, "/api/cloud/login/state")
 	if st.AuthURL != "https://auth.example.com/authorize?client_id=abc&state=xyz" || !st.Running {
 		t.Fatalf("running state = %+v", st)
@@ -228,7 +229,7 @@ func TestCloudLoginStateMachine(t *testing.T) {
 	// Child finishes cleanly and the credential appears.
 	probe.set(CloudSignInState{ClientIDConfigured: true, APITokenPresent: true, WorkOSSignInPresent: true})
 	runner.release <- nil
-	cloudWaitFor(t, "login finish", func() bool { return srv.opts.CloudAccount.state().Finished })
+	cloudWaitFor(t, "login finish", func() bool { return srv.opts.CloudAccount.State().Finished })
 	_, st = cloudDoJSON[CloudLoginState](t, srv.handleCloudLoginState, http.MethodGet, "/api/cloud/login/state")
 	if st.Running || !st.Finished || !st.OK || !strings.Contains(st.Message, "Signed in") || st.FinishedAt == "" {
 		t.Fatalf("finished state = %+v", st)
@@ -246,14 +247,14 @@ func TestCloudLoginStateMachine(t *testing.T) {
 func TestCloudLoginFailureModes(t *testing.T) {
 	t.Run("child error", func(t *testing.T) {
 		probe := &fakeCloudProbe{st: CloudSignInState{ClientIDConfigured: true}}
-		runner := &fakeCloudRunner{release: make(chan error, 1), output: "Opening your browser...\nError: state mismatch (possible CSRF) — sign-in aborted\n"}
+		runner := &fakeCloudRunner{release: make(chan error, 1), output: "Opening your browser...\nError: state mismatch (possible CSRF) - sign-in aborted\n"}
 		srv := newCloudAccountTestServer(t, probe, runner)
 		if code, _ := cloudDoJSON[CloudLoginState](t, srv.handleCloudLogin, http.MethodPost, "/api/cloud/login"); code != http.StatusOK {
 			t.Fatalf("POST = %d", code)
 		}
 		runner.release <- errors.New("exit status 1")
-		cloudWaitFor(t, "finish", func() bool { return srv.opts.CloudAccount.state().Finished })
-		st := srv.opts.CloudAccount.state()
+		cloudWaitFor(t, "finish", func() bool { return srv.opts.CloudAccount.State().Finished })
+		st := srv.opts.CloudAccount.State()
 		if st.OK || !strings.Contains(st.Message, "exit status 1") || !strings.Contains(st.Message, "state mismatch") {
 			t.Fatalf("state = %+v", st)
 		}
@@ -266,8 +267,8 @@ func TestCloudLoginFailureModes(t *testing.T) {
 			t.Fatalf("POST = %d", code)
 		}
 		runner.release <- nil
-		cloudWaitFor(t, "finish", func() bool { return srv.opts.CloudAccount.state().Finished })
-		st := srv.opts.CloudAccount.state()
+		cloudWaitFor(t, "finish", func() bool { return srv.opts.CloudAccount.State().Finished })
+		st := srv.opts.CloudAccount.State()
 		if st.OK || !strings.Contains(st.Message, "did not complete") {
 			t.Fatalf("state = %+v", st)
 		}
@@ -278,7 +279,7 @@ func TestCloudLoginFailureModes(t *testing.T) {
 		srv := newCloudAccountTestServer(t, probe, runner)
 		cloudDoJSON[CloudLoginState](t, srv.handleCloudLogin, http.MethodPost, "/api/cloud/login")
 		runner.release <- errors.New("boom")
-		cloudWaitFor(t, "finish", func() bool { return srv.opts.CloudAccount.state().Finished })
+		cloudWaitFor(t, "finish", func() bool { return srv.opts.CloudAccount.State().Finished })
 		code, st := cloudDoJSON[CloudLoginState](t, srv.handleCloudLogin, http.MethodPost, "/api/cloud/login")
 		if code != http.StatusOK || !st.Running || st.Finished {
 			t.Fatalf("retry POST = %d %+v", code, st)
@@ -394,7 +395,7 @@ func TestCloudLoginOrgEnrolledRefusal(t *testing.T) {
 // synchronously and reports its output; refused (409) while a login runs.
 func TestCloudLogout(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
-		runner := &fakeCloudRunner{output: "Logged out — credentials cleared. Local enrichment results are kept.\n"}
+		runner := &fakeCloudRunner{output: "Logged out - credentials cleared. Local enrichment results are kept.\n"}
 		srv := newCloudAccountTestServer(t, &fakeCloudProbe{}, runner)
 		code, resp := cloudDoJSON[CloudLogoutResponse](t, srv.handleCloudLogout, http.MethodPost, "/api/cloud/logout")
 		if code != http.StatusOK || !resp.OK || !strings.Contains(resp.Message, "Logged out") {
@@ -557,10 +558,10 @@ func TestCloudLoginTimeout(t *testing.T) {
 	probe := &fakeCloudProbe{st: CloudSignInState{ClientIDConfigured: true}}
 	runner := &fakeCloudRunner{release: make(chan error)} // never released
 	srv := newCloudAccountTestServer(t, probe, runner)
-	srv.opts.CloudAccount.loginTimeout = 30 * time.Millisecond
+	srv.opts.CloudAccount.LoginTimeout = 30 * time.Millisecond
 	cloudDoJSON[CloudLoginState](t, srv.handleCloudLogin, http.MethodPost, "/api/cloud/login")
-	cloudWaitFor(t, "timeout finish", func() bool { return srv.opts.CloudAccount.state().Finished })
-	st := srv.opts.CloudAccount.state()
+	cloudWaitFor(t, "timeout finish", func() bool { return srv.opts.CloudAccount.State().Finished })
+	st := srv.opts.CloudAccount.State()
 	if st.OK || !strings.Contains(st.Message, "deadline") {
 		t.Fatalf("timeout state = %+v", st)
 	}
@@ -578,7 +579,7 @@ func TestCloudLooksLikeAuthURL(t *testing.T) {
 		{"visit https://x.example now", false},
 		{"", false},
 	} {
-		if got := cloudLooksLikeAuthURL(tc.line); got != tc.want {
+		if got := dashapi.CloudLooksLikeAuthURL(tc.line); got != tc.want {
 			t.Errorf("%q → %v, want %v", tc.line, got, tc.want)
 		}
 	}

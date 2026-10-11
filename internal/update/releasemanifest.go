@@ -159,7 +159,7 @@ func VerifyReleaseManifest(in ReleaseManifestInput) (Manifest, error) {
 func verifyReleaseSignature(env Envelope, body []byte, in ReleaseManifestInput) error {
 	if len(in.Keys) == 0 {
 		if !in.AllowUnpinnedKey {
-			return fmt.Errorf("update.VerifyReleaseManifest: %w — pass the accepted key set, "+
+			return fmt.Errorf("update.VerifyReleaseManifest: %w - pass the accepted key set, "+
 				"or opt out explicitly if this tree compiles none in", ErrNoVendorKey)
 		}
 		return nil

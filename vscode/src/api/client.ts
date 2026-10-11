@@ -4,6 +4,7 @@
 // directly. Uses the global `fetch` (Node >= 18 — VS Code 1.90+ ships
 // Node 20).
 
+import type { ComponentsStateLite } from '../components-internals';
 import type {
   CacheStatusResponse,
   CostResponse,
@@ -122,6 +123,11 @@ export class Client {
   async cacheStatus(sessionId?: string): Promise<CacheStatusResponse> {
     const q = sessionId ? `?session=${encodeURIComponent(sessionId)}` : '';
     return this.get<CacheStatusResponse>(`/api/cache/status${q}`);
+  }
+
+  /** GET /api/components/state: which catalog components are active here (T-670). */
+  async componentsState(): Promise<ComponentsStateLite> {
+    return this.get<ComponentsStateLite>(`/api/components/state`);
   }
 
   async fileState(absolutePath: string): Promise<FileStateResponse> {

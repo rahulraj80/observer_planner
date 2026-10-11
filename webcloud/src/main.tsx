@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
+import { ThemeProvider } from "@shared/lib/useTheme";
 import { initTheme } from "./theme";
 import "./styles.css";
 
@@ -15,9 +16,11 @@ function render() {
   }
   createRoot(container).render(
     <React.StrictMode>
-      <BrowserRouter basename="/portal">
-        <App />
-      </BrowserRouter>
+      <ThemeProvider app="webcloud">
+        <BrowserRouter basename="/portal">
+          <App />
+        </BrowserRouter>
+      </ThemeProvider>
     </React.StrictMode>,
   );
 }

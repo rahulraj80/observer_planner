@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/scrub"
+
 	"github.com/marmutapp/superbased-observer/internal/commitlog"
 )
 
@@ -167,7 +169,7 @@ func TestUpsertCommitsScrubsSubject(t *testing.T) {
 	if subject := rows[0].Subject; strings.Contains(subject, secret) {
 		t.Errorf("subject %q still carries the raw secret — scrub did not run", subject)
 	}
-	if !strings.Contains(rows[0].Subject, "[REDACTED]") {
+	if !scrub.HasRedaction(rows[0].Subject) {
 		t.Errorf("subject %q does not carry the redaction marker", rows[0].Subject)
 	}
 }

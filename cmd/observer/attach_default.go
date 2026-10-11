@@ -20,12 +20,7 @@
 package main
 
 import (
-	"fmt"
-	"io"
-	"path/filepath"
 	"strings"
-
-	"github.com/marmutapp/superbased-observer/internal/attachsock"
 )
 
 // attachDaemonUnreachableNotice is the stderr line printed when default-on
@@ -42,7 +37,7 @@ import (
 // the launcher can't override). "launching without attach" then read as a
 // promise the fail-closed immediately broke; "attach disabled for this run"
 // composes cleanly with BOTH a subsequent bare launch AND a subsequent refusal.
-const attachDaemonUnreachableNotice = "observer: daemon unreachable — attach disabled for this run"
+const attachDaemonUnreachableNotice = "observer: daemon unreachable - attach disabled for this run"
 
 // attachDaemonChildNotice is printed when the OBSERVER_DAEMON_CHILD env marker is
 // present but there is NO live OOB channel — a user manually running
@@ -52,14 +47,14 @@ const attachDaemonUnreachableNotice = "observer: daemon unreachable — attach d
 // otherwise-silent decline to an operator who expected attach. It is NOT printed
 // on the daemon's own healthy inner launcher (daemonSpawned) — see decideAttach
 // row 0 for why that high-frequency path stays silent.
-const attachDaemonChildNotice = "observer: attach skipped — already inside a daemon-owned terminal"
+const attachDaemonChildNotice = "observer: attach skipped - already inside a daemon-owned terminal"
 
 // attachConfigDisabledNotice is printed on the config-contradiction row:
 // [terminal.attach].default_on is true (the operator opted into attach-by-
 // default) but [terminal.attach].enabled is false (the master switch is off), on
 // an otherwise attach-eligible interactive launch. Naming the exact key lets the
 // operator resolve the contradiction instead of silently getting bare launches.
-const attachConfigDisabledNotice = "observer: attach skipped — [terminal.attach].enabled is false while default_on is set; set [terminal.attach].enabled = true to auto-attach"
+const attachConfigDisabledNotice = "observer: attach skipped - [terminal.attach].enabled is false while default_on is set; set [terminal.attach].enabled = true to auto-attach"
 
 // attachVerdict is the outcome of decideAttach. attach/forcedAttach both route
 // to the attach path; bare/forcedBare both route to the bare-launch path. The
@@ -242,53 +237,6 @@ func decideAttach(in attachDecisionInputs) attachDecision {
 	default:
 		return attachDecision{verdict: verdictBare}
 	}
-}
-
-// acquireBareResumeClaim takes the DURABLE cross-process resume flock for a bare
-// `observer <tool> --resume <id>` launch (review finding H3), so that a bare
-// native resume run during daemon downtime cannot collide with the daemon's own
-// attach-resume of the same session (which would duplicate the transcript). It
-// is a NO-OP when:
-//   - sessionID or dbPath is empty (nothing to guard), or
-//   - this process is a daemon-owned child (runningAsDaemonChild): the daemon
-//     already holds the claim for the run it spawned, so the inner launcher must
-//     not try to re-acquire it (a different process → it would self-conflict).
-//
-// On a filesystem error it FAILS OPEN (proceeds without the durable claim) — the
-// guard must never block a legitimate resume; the daemon-side guard still
-// applies when the daemon is up. On a genuine conflict it prints exactly one
-// honest line and returns ok=false; the caller exits nonzero. On success it
-// returns a releaser the caller DEFERS for the child's lifetime (the flock is
-// held until the bare child exits, and the OS releases it if the process dies).
-func acquireBareResumeClaim(stderr io.Writer, dbPath, tool, sessionID string) (release func(), ok bool) {
-	if sessionID == "" || dbPath == "" || runningAsDaemonChild() {
-		return func() {}, true
-	}
-	dir := filepath.Dir(attachSocketPath(dbPath))
-	claim, acquired, err := attachsock.AcquireResumeClaim(dir, sessionID)
-	if err != nil {
-		return func() {}, true // fail open — never block a legit resume on a guard error
-	}
-	if !acquired {
-		fmt.Fprintf(stderr, "observer %s: resume already in progress for session %s\n", tool, sessionID)
-		return func() {}, false
-	}
-	return claim.Release, true
-}
-
-// attachSocketReachable dials the daemon's attach socket for the given observer
-// DB path and reports whether the connection succeeded — the cheap reachability
-// probe the default-on decision consults. It reuses the SAME attachsock.Dial the
-// interactive attach client uses (so the two never disagree about "is the daemon
-// there"), immediately closing the probe connection. A missing socket file fails
-// fast (ENOENT), so opted-out/scripted paths that never call this pay nothing.
-func attachSocketReachable(dbPath string) bool {
-	conn, err := attachsock.Dial(attachSocketPath(dbPath))
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
 }
 
 // argsContainClaudePrint reports whether claude's headless print mode (`-p` /

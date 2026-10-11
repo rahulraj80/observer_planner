@@ -10,6 +10,11 @@ interactive version of this guide; this document is the long-form
 read for users who prefer prose, or who want to dig into per-AI-tool
 integration details.
 
+Its "Choose components" step (after "Verify your install", command
+`SuperBased: Choose Components`) opens the dashboard's Settings >
+Components page in the dashboard panel, where you pick what Observer
+runs on this machine; see [`docs/component-state.md`](./component-state.md).
+
 ---
 
 ## Contents

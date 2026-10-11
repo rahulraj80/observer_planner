@@ -1,0 +1,37 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].end_time": "VerifiedOfficial",
+    "data[].object": "VerifiedOfficial",
+    "data[].results": "VerifiedOfficial",
+    "data[].results[]": "VerifiedOfficial",
+    "data[].results[].object": "VerifiedOfficial",
+    "data[].results[].project_id": "VerifiedOfficial",
+    "data[].results[].usage_bytes": "VerifiedOfficial",
+    "data[].start_time": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial",
+    "object": "VerifiedOfficial"
+  },
+  "fixture_sha256": "163b517eb261fa16fedf7f132c7fc8905bb5ff883ea0e2fd6cebcf2208905472",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/usage/vector_stores",
+    "query": {
+      "page": "cursor-from-the-first-page",
+      "start_time": "1730419200"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId usage-vector-stores. Verbatim example: the documented terminal page.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.usage_vector_stores"
+}

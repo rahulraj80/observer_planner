@@ -35,7 +35,7 @@ func newDBStatsCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "stats",
-		Short: "Per-table size breakdown (reads every page — a moment on large DBs)",
+		Short: "Per-table size breakdown (reads every page - a moment on large DBs)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
 			if err != nil {
@@ -51,7 +51,7 @@ func newDBStatsCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), string(body))
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s — %s total, ~%s reclaimable by vacuum\n\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s - %s total, ~%s reclaimable by vacuum\n\n",
 				cfg.Observer.DBPath, fmtBytesIEC(rep.TotalBytes), fmtBytesIEC(rep.ReclaimableBytes))
 			fmt.Fprintf(cmd.OutOrStdout(), "%-28s %12s %12s\n", "TABLE", "SIZE", "ROWS")
 			for _, t := range rep.Tables {
@@ -80,7 +80,7 @@ func newDBVacuumCmd() *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			fmt.Fprintln(cmd.OutOrStdout(), "vacuum: rebuilding — this can take a while on large databases…")
+			fmt.Fprintln(cmd.OutOrStdout(), "vacuum: rebuilding - this can take a while on large databases…")
 			freed, err := db.Vacuum(cmd.Context(), database)
 			if err != nil {
 				return err
@@ -159,7 +159,7 @@ func newDBImportCmd() *cobra.Command {
 				return fmt.Errorf("source database: %w", err)
 			}
 			if st.IsDir() || st.Size() == 0 {
-				return fmt.Errorf("source database %s is %s — refusing (db.Open would silently create an empty one)",
+				return fmt.Errorf("source database %s is %s - refusing (db.Open would silently create an empty one)",
 					foreign, map[bool]string{true: "a directory", false: "empty"}[st.IsDir()])
 			}
 
@@ -170,7 +170,7 @@ func newDBImportCmd() *cobra.Command {
 			defer cleanup()
 			liveAbs, _ := filepath.Abs(cfg.Observer.DBPath)
 			if liveAbs == foreign {
-				return fmt.Errorf("source %s IS the live database — nothing to import", foreign)
+				return fmt.Errorf("source %s IS the live database - nothing to import", foreign)
 			}
 
 			// Migrate the foreign file to the current schema so the
@@ -202,7 +202,7 @@ func newDBImportCmd() *cobra.Command {
 			}
 			verb := "imported"
 			if dryRun {
-				verb = "would import (dry-run — nothing written)"
+				verb = "would import (dry-run - nothing written)"
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s from %s:\n", verb, foreign)
 			for _, row := range []struct {

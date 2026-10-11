@@ -1,7 +1,16 @@
+//go:build !sbo_omit_org_update
+
 package orgclient
+
+// update.go is the org.update component's half of the org client (lane
+// MP-GOV4, T-711): the manifest rail and the artifact download. A build
+// with -tags sbo_omit_org_update links update_omitted.go instead, so
+// internal/update leaves the binary; the 426 version-floor memory and
+// ShareOptions stay core (agenttooold.go).
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -25,83 +34,17 @@ import (
 // in order to act on a disagreement.
 const updateRail = "update"
 
-// agentTooOldMessage renders a 426 refusal for the node's own operator.
-//
-// The server sends orgcontract.AgentTooOldBody, a SUPERSET of the standard
-// {error, message} shape, so this reads the typed fields when they are there
-// and falls back to serverError's generic rendering when they are not — a
-// server that answers 426 for some other reason still produces a usable line
-// rather than an empty one.
-//
-// The message names BOTH versions on purpose: the developer reading it in
-// `observer status` or on the dashboard banner is not the admin who set the
-// floor, and "426" tells them nothing they can act on.
-// AgentTooOldRefusal is the last 426 this client received, if any.
-//
-// IN-MEMORY on purpose, the updateCache posture: it describes a live condition
-// (the org's floor versus the running binary), and a restart re-learns it on
-// the very next push cycle. Persisting it would risk showing a stale "you are
-// too old" banner on a node that has since been updated.
-type AgentTooOldRefusal struct {
-	// Message is the operator-facing line, naming both versions.
-	Message string
-	// MinVersion is what the org requires; YourVersion is what this node
-	// reported. Both are echoed so a surface can render them separately.
-	MinVersion  string
-	YourVersion string
-	At          time.Time
-}
-
-// noteAgentTooOld records a 426 refusal.
-func (c *Client) noteAgentTooOld(body []byte, status int) string {
-	msg := agentTooOldMessage(body, status)
-	var b orgcontract.AgentTooOldBody
-	_ = json.Unmarshal(body, &b)
-	c.updates.mu.Lock()
-	c.updates.refusal = &AgentTooOldRefusal{
-		Message:     msg,
-		MinVersion:  strings.TrimSpace(b.MinVersion),
-		YourVersion: strings.TrimSpace(b.YourVersion),
-		At:          time.Now().UTC(),
-	}
-	c.updates.mu.Unlock()
-	return msg
-}
-
-// clearAgentTooOld forgets a refusal. Called on every ACCEPTED push, so the
-// banner disappears the moment the node is updated rather than needing a
-// restart or a dismissal.
-func (c *Client) clearAgentTooOld() {
-	c.updates.mu.Lock()
-	c.updates.refusal = nil
-	c.updates.mu.Unlock()
-}
-
-// AgentTooOld reports the last min-version refusal, or nil.
-func (c *Client) AgentTooOld() *AgentTooOldRefusal {
-	if c == nil {
-		return nil
-	}
+// resetUpdateCache drops the rail's memory on an enrolment identity change
+// (identitycaches.go): the previous org's accepted ordinals, pinned key,
+// pending nudges and verified manifest.
+func (c *Client) resetUpdateCache() {
 	c.updates.mu.Lock()
 	defer c.updates.mu.Unlock()
-	return c.updates.refusal
-}
-
-func agentTooOldMessage(body []byte, status int) string {
-	var b orgcontract.AgentTooOldBody
-	if err := json.Unmarshal(body, &b); err == nil && b.Reason == update.RefusalReasonAgentTooOld {
-		your := strings.TrimSpace(b.YourVersion)
-		if your == "" {
-			your = "unknown"
-		}
-		msg := fmt.Sprintf("your org requires observer %s or newer; this node reports %s",
-			strings.TrimSpace(b.MinVersion), your)
-		if m := strings.TrimSpace(b.Message); m != "" {
-			return msg + " (" + m + ")"
-		}
-		return msg
-	}
-	return serverError(body, status)
+	c.updates.lastAccepted = nil
+	c.updates.pending = nil
+	c.updates.keyID = ""
+	c.updates.manifest, c.updates.artifact = update.Manifest{}, update.Artifact{}
+	c.updates.state, c.updates.reason = update.StateIdle, ""
 }
 
 // markUpdateChannelPendingAfterRefusal arms a manifest fetch after a 426.
@@ -152,10 +95,6 @@ type updateCache struct {
 	// and the fetch on opposite sides of this field is what keeps PushOnce
 	// free of an outbound call of its own.
 	pending map[update.Channel]struct{}
-	// refusal is the last 426 the push rail received (W5 skew enforcement),
-	// or nil. Cleared on every accepted push, so the node dashboard's banner
-	// disappears the moment an update fixes the condition.
-	refusal *AgentTooOldRefusal
 	// manifest is the most recently verified manifest, for `observer update
 	// status` and the dashboard card to read.
 	manifest update.Manifest
@@ -167,6 +106,56 @@ type updateCache struct {
 	// keyID is the org distribution key this rail has seen, so a CHANGED key
 	// is refused rather than TOFU-accepted on a later fetch.
 	keyID string
+	// result is the last verification's distro facts (selected distro,
+	// transition, epoch), for the apply path.
+	result update.VerifyResult
+	// distro, when set, makes this node DISTRO-AWARE (modular packaging
+	// plan 5.6.1): the fetch negotiates the v2 route first and every
+	// verification runs the distro rules against the context it returns.
+	// Nil is the pre-modular behaviour exactly (v1 only, no distro rule),
+	// which is what an old node does and what the four-cell tests model.
+	distro func(ctx context.Context, channel update.Channel) update.DistroContext
+	// vendorKeys verifies the v2 release index; nil uses the keys compiled
+	// into this binary (update.VendorPublicKeys). Tests set throwaway keys.
+	vendorKeys []ed25519.PublicKey
+}
+
+// SetUpdateDistroSource makes this client distro-aware: fn returns the
+// node's distro context (running distro, policy target, ceiling verdict,
+// persisted epoch) for a channel at fetch time. The daemon wires it at start
+// (cmd/observer/update_distro.go); it is read on every fetch, so a policy or
+// ceiling change takes effect on the next nudge without a restart.
+func (c *Client) SetUpdateDistroSource(fn func(ctx context.Context, channel update.Channel) update.DistroContext) {
+	if c == nil {
+		return
+	}
+	c.updates.mu.Lock()
+	c.updates.distro = fn
+	c.updates.mu.Unlock()
+}
+
+// setUpdateVendorKeys overrides the release-index verification keys (tests).
+func (c *Client) setUpdateVendorKeys(keys []ed25519.PublicKey) {
+	c.updates.mu.Lock()
+	c.updates.vendorKeys = keys
+	c.updates.mu.Unlock()
+}
+
+// updateDistroContext returns the distro context for a fetch and whether
+// this node is distro-aware at all.
+func (c *Client) updateDistroContext(ctx context.Context, channel update.Channel) (update.DistroContext, []ed25519.PublicKey, bool) {
+	c.updates.mu.Lock()
+	fn, keys := c.updates.distro, c.updates.vendorKeys
+	c.updates.mu.Unlock()
+	if fn == nil {
+		return update.DistroContext{}, nil, false
+	}
+	dc := fn(ctx, channel)
+	dc.Aware = true
+	if keys == nil {
+		keys = update.VendorPublicKeys()
+	}
+	return dc, keys, true
 }
 
 // FetchOrgUpdateManifest pulls the org's signed update manifest over the
@@ -212,6 +201,22 @@ func (c *Client) FetchOrgUpdateManifest(ctx context.Context, channel update.Chan
 	if err != nil {
 		return false, fmt.Errorf("orgclient.FetchOrgUpdateManifest: bearer: %w", err)
 	}
+	// The four-cell negotiation (plan 5.6.1, third-pass M2):
+	//   new node + new server -> v2 (this branch);
+	//   new node + old server -> v2 is not supported (404 / the SPA page), so
+	//     fall through to v1, where verify rule 12 accepts the full build only
+	//     for a node that runs full and whose ceiling permits full, and
+	//     otherwise records blocked{server_lacks_distro_updates};
+	//   old node + new server -> an old node never calls v2: it fetches the v1
+	//     route, which still serves only the full build, unchanged;
+	//   old node + old server -> today's behaviour.
+	dc, vendorKeys, aware := c.updateDistroContext(ctx, channel)
+	if aware {
+		changed, handled, verr := c.fetchOrgUpdateManifestV2(ctx, enr.OrgServerURL, bearer, channel, dc, vendorKeys)
+		if handled {
+			return changed, verr
+		}
+	}
 	url := strings.TrimRight(enr.OrgServerURL, "/") + "/api/agent/update/manifest?channel=" + string(channel)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -224,11 +229,11 @@ func (c *Client) FetchOrgUpdateManifest(ctx context.Context, channel update.Chan
 		return false, fmt.Errorf("orgclient.FetchOrgUpdateManifest: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		// Nothing published — and also what a PRE-FEATURE server answers,
-		// which is exactly the compat shape acceptance 4 requires: a new agent
-		// against an old server stays idle and behaves byte-identically to
-		// today.
+	if c.classifyRail(updateRail, resp) == railReplyNotSupported {
+		// Nothing published — and also what a PRE-FEATURE server answers
+		// (a 404, or its SPA page; railreply.go), which is exactly the compat
+		// shape acceptance 4 requires: a new agent against an old server
+		// stays idle and behaves byte-identically to today.
 		return false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -261,11 +266,69 @@ func (c *Client) FetchOrgUpdateManifest(ctx context.Context, channel update.Chan
 		AllowDowngrade:              false,
 		Now:                         time.Now().UTC(),
 		GOOS:                        goos, GOARCH: goarch,
+		// Zero unless this node is distro-aware; then rule 12 applies the
+		// new-node / old-server rule to this v1 document.
+		Distro: dc,
 	})
 	if verr != nil {
 		return c.recordUpdateOutcome(ctx, channel, env, res, verr)
 	}
 	return c.recordUpdateOutcome(ctx, channel, env, res, nil)
+}
+
+// fetchOrgUpdateManifestV2 is the distro-aware fetch: the v2 document and the
+// vendor-signed release index in one response, verified by the same nine
+// rules plus the three distro rules. handled is false when the server does
+// not serve v2 for this node (a pre-v2 server, or a publication without a v2
+// object), so the caller falls back to v1 under rule 12.
+func (c *Client) fetchOrgUpdateManifestV2(ctx context.Context, serverURL, bearer string, channel update.Channel,
+	dc update.DistroContext, vendorKeys []ed25519.PublicKey,
+) (changed, handled bool, err error) {
+	url := strings.TrimRight(serverURL, "/") + "/api/agent/update/manifest/v2?channel=" + string(channel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, true, err
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	resp, err := c.httpClient.Do(req)
+	c.noteRenewalFromResponse(RenewalPathOther, resp, err)
+	if err != nil {
+		return false, true, fmt.Errorf("orgclient.FetchOrgUpdateManifest: v2: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if c.classifyRail(updateRail, resp) == railReplyNotSupported {
+		return false, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, true, fmt.Errorf("orgclient.FetchOrgUpdateManifest: v2: server returned %d", resp.StatusCode)
+	}
+	var env update.EnvelopeV2
+	if err := orgcontract.DecodeCapped(resp.Body, maxOrgDocBytes, &env); err != nil {
+		return false, true, fmt.Errorf("orgclient.FetchOrgUpdateManifest: v2 decode: %w", err)
+	}
+	if err := c.checkOrgKeyIdentity(ctx, updateRail, env.KeyID); err != nil {
+		return false, true, fmt.Errorf("orgclient.FetchOrgUpdateManifest: %w", err)
+	}
+	pinned, lastAccepted, err := c.updatePins(ctx, channel, env.KeyID)
+	if err != nil {
+		return false, true, err
+	}
+	goos, goarch := update.CurrentPlatform()
+	res, verr := update.Verify(update.VerifyInput{
+		Envelope:                    env.Envelope,
+		PinnedKeyID:                 pinned,
+		PinnedPublicKey:             env.KeyID,
+		InstalledVersion:            c.agentVersion,
+		LastAcceptedManifestVersion: lastAccepted,
+		Now:                         time.Now().UTC(),
+		GOOS:                        goos, GOARCH: goarch,
+		Schema:          update.SchemaV2,
+		ReleaseIndexB64: env.ReleaseIndexB64, ReleaseIndexSig: env.ReleaseIndexSig,
+		VendorKeys: vendorKeys,
+		Distro:     dc,
+	})
+	changed, err = c.recordUpdateOutcome(ctx, channel, env.Envelope, res, verr)
+	return changed, true, err
 }
 
 // updatePins returns the key this rail should verify against and the highest
@@ -279,7 +342,7 @@ func (c *Client) updatePins(ctx context.Context, channel update.Channel, offered
 	c.updates.mu.Lock()
 	defer c.updates.mu.Unlock()
 	if c.updates.keyID != "" && c.updates.keyID != offered {
-		return "", 0, fmt.Errorf("server update-manifest key CHANGED (pinned %s…, got %s…) — refusing; re-enrol to rotate trust",
+		return "", 0, fmt.Errorf("server update-manifest key CHANGED (pinned %s…, got %s…) - refusing; re-enrol to rotate trust",
 			prefix8(c.updates.keyID), prefix8(offered))
 	}
 	if c.updates.lastAccepted == nil {
@@ -363,6 +426,7 @@ func (c *Client) recordUpdateOutcome(ctx context.Context, channel update.Channel
 	c.updates.lastAccepted[string(channel)] = res.Manifest.ManifestVersion
 	c.updates.manifest, c.updates.artifact = res.Manifest, res.Artifact
 	c.updates.state, c.updates.reason = res.State, res.Reason
+	c.updates.result = res
 	c.updates.mu.Unlock()
 	c.logger.Info("org update manifest accepted",
 		"channel", channel, "manifest_version", res.Manifest.ManifestVersion,
@@ -427,6 +491,14 @@ type UpdateStatus struct {
 	NotesURL        string
 	EOSAt           string
 	Artifact        update.Artifact
+	// Schema is the accepted manifest's schema (v1 or v2). Distro is the
+	// distro of the selected artifact (full for v1); DistroTransition and
+	// DistroEpoch say whether applying it moves this node to another
+	// distro, and the epoch the apply then records (plan 5.6.1).
+	Schema           string
+	Distro           string
+	DistroTransition bool
+	DistroEpoch      int64
 }
 
 // UpdateStatus returns the cached manifest posture. It reads memory only and
@@ -445,6 +517,11 @@ func (c *Client) UpdateStatus() UpdateStatus {
 		NotesURL:        c.updates.manifest.NotesURL,
 		EOSAt:           c.updates.manifest.EOSAt,
 		Artifact:        c.updates.artifact,
+		Schema:          c.updates.manifest.Schema,
+		Distro:          update.NormalizeDistro(c.updates.artifact.Distro),
+		// The transition facts belong to the ACCEPTED manifest only.
+		DistroTransition: c.updates.result.DistroTransition && c.updates.result.Manifest.ManifestVersion == c.updates.manifest.ManifestVersion,
+		DistroEpoch:      c.updates.manifest.DistroEpoch,
 	}
 	if st.State == "" {
 		st.State = update.StateIdle
@@ -583,14 +660,3 @@ func (c *Client) DownloadUpdateArtifact(ctx context.Context, version, filename s
 	}
 	return nil
 }
-
-// ShareOptions exposes the node's resolved push-share posture.
-//
-// It exists for ONE caller: the update wiring, which needs to know whether
-// this node is admin-managed or enterprise-granted in order to resolve
-// [update].auto_apply's DEFAULT (§3.9). Those two facts are not both in the
-// TOML — EnterpriseGranted arrives on the runtime enrolment grant — so a
-// caller that read the config alone would silently answer "BYO" for half the
-// managed fleet. Resolving it through the SAME accessor the push seam uses is
-// what keeps the two from disagreeing.
-func (c *Client) ShareOptions() store.ShareOptions { return c.shareOptions() }

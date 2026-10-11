@@ -277,7 +277,7 @@ func TestPortalUsageCarriesPlanJobsAndResets(t *testing.T) {
 	decode(t, resp, &u)
 
 	// The pre-existing fields keep their names and meanings (additive change).
-	if u.Feature == "" || u.DailyCap != 20 || u.MonthlyCap != 100 {
+	if u.Feature == "" || u.DailyCap != 100 || u.MonthlyCap != 3000 {
 		t.Fatalf("the existing allowance fields changed shape: %+v", u)
 	}
 	if u.Plan != "free" || u.PlanLabel == "" || u.PlanVersion < 1 || u.BudgetPool != "free" {

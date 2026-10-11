@@ -335,3 +335,66 @@ func TestLoadUnknownLedger(t *testing.T) {
 		t.Errorf("unknown .zzzunk count = %d, want 2", led.Extensions[".zzzunk"])
 	}
 }
+
+// TestLoadVerbosityAggregateScoped pins the global-filter scope (session
+// grain): tool narrows by sessions.tool, project by root, model to the
+// sessions that USED the model (a proxy turn), never the sessions.model label.
+func TestLoadVerbosityAggregateScoped(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	p1, _ := s.UpsertProject(ctx, "/tmp/v1", "")
+	p2, _ := s.UpsertProject(ctx, "/tmp/v2", "")
+	for _, sess := range []models.Session{
+		{ID: "c1", ProjectID: p1, Tool: models.ToolClaudeCode, Model: "opus", StartedAt: time.Now().UTC()},
+		{ID: "x1", ProjectID: p2, Tool: models.ToolCodex, Model: "opus", StartedAt: time.Now().UTC()},
+	} {
+		if err := s.UpsertSession(ctx, sess); err != nil {
+			t.Fatal(err)
+		}
+	}
+	act := func(sid, eid string, pid int64, tool string) models.Action {
+		return models.Action{
+			SessionID: sid, ProjectID: pid, Timestamp: time.Now().UTC(),
+			ActionType: models.ActionWriteFile, Target: eid + ".go", Success: true, Tool: tool,
+			ContentBytes: 100, SourceFile: "f.jsonl", SourceEventID: eid,
+		}
+	}
+	if _, err := s.InsertActions(ctx, []models.Action{
+		act("c1", "e1", p1, models.ToolClaudeCode), act("x1", "e2", p2, models.ToolCodex),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Only x1 ran a turn on "opus"; c1 carries the label alone.
+	if _, err := s.InsertAPITurn(ctx, models.APITurn{SessionID: "x1", Provider: models.ProviderAnthropic, Model: "opus", InputTokens: 1, OutputTokens: 1, Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		scope VerbosityScope
+		want  int64
+	}{
+		{"none", VerbosityScope{}, 200},
+		{"tool", VerbosityScope{Tool: models.ToolCodex}, 100},
+		{"project", VerbosityScope{ProjectRoot: "/tmp/v1"}, 100},
+		{"model used", VerbosityScope{Model: "opus"}, 100},
+		{"model never used", VerbosityScope{Model: "haiku"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groups, err := s.LoadVerbosityAggregateScoped(ctx, "day", 0, tc.scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got int64
+			for _, g := range groups {
+				got += g.Breakdown.Written["go"]
+			}
+			if got != tc.want {
+				t.Fatalf("go bytes = %d, want %d", got, tc.want)
+			}
+			if _, err := s.LoadVerbosityGroupTokensScoped(ctx, "day", 0, tc.scope); err != nil {
+				t.Fatalf("tokens: %v", err)
+			}
+		})
+	}
+}

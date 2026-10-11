@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -178,8 +179,8 @@ func TestProbeDirEnvRootIsWindowsOnly(t *testing.T) {
 func TestRegistryTotals(t *testing.T) {
 	const (
 		wantTotal      = 45 // len(integration.Tools()); 42 -> 43 on 2026-09-03 (kiro-crew), 43 -> 44 on 2026-09-05 (poolside), 44 -> 45 on 2026-09-06 (zed)
-		wantLaunchable = 27 // Handoff.Launchable() == true
-		wantBinary     = 28 // Binary != nil (27 launchable + aider, Binary-only)
+		wantLaunchable = 31 // Handoff.Launchable() == true; 27 -> 31 on 2026-10-03 (aider, crush, junie, poolside)
+		wantBinary     = 31 // Binary != nil (every launchable row; aider was Binary-only before 2026-10-03)
 	)
 	caps := integration.Capabilities()
 	if got := len(caps); got != wantTotal {
@@ -199,5 +200,95 @@ func TestRegistryTotals(t *testing.T) {
 	}
 	if binary != wantBinary {
 		t.Errorf("Binary != nil rows = %d, want %d (bump docs/plans/adapter-coverage-parity-plan-2026-06-26.md §15 and docs/README.md alongside this constant if the change is intentional)", binary, wantBinary)
+	}
+}
+
+// TestGooseInstallHintsMatchVendorDocs pins goose's guided install to the
+// commands https://goose-docs.ai/docs/getting-started/installation documents
+// (re-grounded 2026-10-02 after a failed guided install on a Linux node): the
+// stable-channel download_cli.sh from the aaif-goose/goose repo on Unix, the
+// `block-goose-cli` brew formula, and the branch-tip download_cli.ps1 on
+// Windows. The repo moved from block/goose in Dec 2025; no hint may point at
+// the old location.
+func TestGooseInstallHintsMatchVendorDocs(t *testing.T) {
+	c, ok := integration.For("goose")
+	if !ok || c.Binary == nil {
+		t.Fatal("goose has no Binary row")
+	}
+	// CONFIGURE=false: the documented non-interactive form (the script
+	// otherwise ends in `goose configure`, which kept the guided-install PTY
+	// open; TestScriptInstallsAreNonInteractive).
+	const unixScript = "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash"
+	seen := map[string]bool{}
+	for i, h := range c.Binary.Installs {
+		cmd := strings.Join(h.Argv, " ")
+		if strings.Contains(cmd, "block/goose") || strings.Contains(h.Display, "block/goose") {
+			t.Errorf("Installs[%d] still points at the moved block/goose repo: %q", i, cmd)
+		}
+		switch {
+		case h.Channel == "script" && (h.OS == "linux" || h.OS == "darwin"):
+			if got := h.Argv[len(h.Argv)-1]; got != unixScript || h.Display != unixScript {
+				t.Errorf("Installs[%d] (%s script) = %q / display %q, want the documented %q", i, h.OS, got, h.Display, unixScript)
+			}
+		case h.Channel == "brew":
+			if strings.Join(h.Argv, " ") != "brew install block-goose-cli" {
+				t.Errorf("Installs[%d] brew = %q, want brew install block-goose-cli", i, cmd)
+			}
+		case h.Channel == "script" && h.OS == "windows":
+			if !strings.Contains(cmd, "https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1") {
+				t.Errorf("Installs[%d] windows script = %q, want the documented download_cli.ps1 URL", i, cmd)
+			}
+		}
+		seen[h.OS+"/"+h.Channel] = true
+	}
+	for _, want := range []string{"linux/script", "darwin/script", "windows/script"} {
+		if !seen[want] {
+			t.Errorf("goose has no %s install hint", want)
+		}
+	}
+}
+
+// TestInstallHintRequiresGrounded pins InstallHint.Requires (the host programs
+// a guided install checks BEFORE running a vendor script, 2026-10-03): every
+// Unix curl|sh hint names curl, every entry is a bare program name (or "a|b"
+// alternatives), and the two prerequisites that failed live on demo node 1
+// are declared - kiro-cli's Linux script hard-requires unzip, goose's Linux
+// script extracts a .tar.bz2 with tar + bzip2.
+func TestInstallHintRequiresGrounded(t *testing.T) {
+	prog := regexp.MustCompile(`^[a-z0-9][a-z0-9_.+-]*(\|[a-z0-9][a-z0-9_.+-]*)*$`)
+	has := func(h integration.InstallHint, want string) bool {
+		for _, r := range h.Requires {
+			if r == want {
+				return true
+			}
+		}
+		return false
+	}
+	pinned := map[string][]string{
+		"kiro-cli/linux": {"curl", "unzip"},
+		"goose/linux":    {"curl", "tar", "bzip2"},
+	}
+	for _, c := range integration.Capabilities() {
+		if c.Binary == nil {
+			continue
+		}
+		for i, h := range c.Binary.Installs {
+			for _, r := range h.Requires {
+				if !prog.MatchString(r) {
+					t.Errorf("%s Installs[%d].Requires entry %q is not a bare program name (or a|b alternatives)", c.Tool, i, r)
+				}
+			}
+			cmd := strings.Join(h.Argv, " ")
+			if h.OS != "windows" && h.Channel == "script" && strings.Contains(cmd, "curl ") && !has(h, "curl") {
+				t.Errorf("%s Installs[%d] (%s) pipes from curl but does not require it: %q", c.Tool, i, h.OS, cmd)
+			}
+			if h.Channel == "script" {
+				for _, want := range pinned[c.Tool+"/"+h.OS] {
+					if !has(h, want) {
+						t.Errorf("%s Installs[%d] (%s script) must require %q (grounded from the vendor script)", c.Tool, i, h.OS, want)
+					}
+				}
+			}
+		}
 	}
 }

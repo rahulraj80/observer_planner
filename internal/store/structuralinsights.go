@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/aggregate"
 	"github.com/marmutapp/superbased-observer/internal/dataauthority"
+	"github.com/marmutapp/superbased-observer/internal/modelfamily"
 )
 
 // structuralinsights.go is the store seam for the STRUCTURAL-INSIGHTS rail
@@ -74,7 +74,7 @@ type StructuralDayFacts struct {
 	// ToolMix is sessions-per-tool. Unsorted; the builder sorts.
 	ToolMix []StructuralMixCount
 	// ModelFamilyMix is sessions-per-coarse-model-family, folded through
-	// internal/aggregate.Family so a raw model string never leaves this seam.
+	// internal/modelfamily.Family so a raw model string never leaves this seam.
 	ModelFamilyMix []StructuralMixCount
 	// TokensIn / TokensOut / CacheReadTokens are the summed token_usage columns.
 	TokensIn        int
@@ -222,7 +222,7 @@ func (s *Store) LoadStructuralDayFacts(ctx context.Context, dayStartRFC3339, day
 	}
 	byFamily := map[string]int{}
 	for _, m := range rawModelMix {
-		byFamily[aggregate.Family(m.Key)] += m.Count
+		byFamily[modelfamily.Family(m.Key)] += m.Count
 	}
 	for fam, n := range byFamily {
 		facts.ModelFamilyMix = append(facts.ModelFamilyMix, StructuralMixCount{Key: fam, Count: n})

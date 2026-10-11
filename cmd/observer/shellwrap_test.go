@@ -1,3 +1,5 @@
+//go:build !sbo_omit_integration_shell_wrap
+
 package main
 
 import (
@@ -48,6 +50,7 @@ func TestShellWrapShimsTargetRealVerbs(t *testing.T) {
 // TestShellWrapCLIRoundTrip drives preview -> enable -> status -> disable
 // against a throwaway HOME. The real home and shell files are never touched.
 func TestShellWrapCLIRoundTrip(t *testing.T) {
+	requireComponents(t, "integration.shell-wrap")
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX layout")
 	}
@@ -111,6 +114,7 @@ func TestShellWrapCLIRoundTrip(t *testing.T) {
 // wrapping is off, and when on, a shim baked with an old observer path is
 // re-pointed at the running binary.
 func TestShellWrapStartRefreshRepointsMovedShims(t *testing.T) {
+	requireComponents(t, "integration.shell-wrap")
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX layout")
 	}

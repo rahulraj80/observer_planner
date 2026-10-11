@@ -1,0 +1,53 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "total_seats_consumed": "VerifiedOfficial",
+    "total_seats_purchased": "VerifiedOfficial",
+    "users": "VerifiedOfficial",
+    "users[]": "VerifiedOfficial",
+    "users[].enterprise_server_emails": "VerifiedOfficial",
+    "users[].enterprise_server_emails[]": "VerifiedOfficial",
+    "users[].enterprise_server_user": "VerifiedOfficial",
+    "users[].enterprise_server_user_ids": "VerifiedOfficial",
+    "users[].enterprise_server_user_ids[]": "VerifiedOfficial",
+    "users[].github_com_enterprise_role": "VerifiedOfficial",
+    "users[].github_com_enterprise_roles": "VerifiedOfficial",
+    "users[].github_com_enterprise_roles[]": "VerifiedOfficial",
+    "users[].github_com_login": "VerifiedOfficial",
+    "users[].github_com_member_roles": "VerifiedOfficial",
+    "users[].github_com_member_roles[]": "VerifiedOfficial",
+    "users[].github_com_name": "VerifiedOfficial",
+    "users[].github_com_orgs_with_pending_invites": "VerifiedOfficial",
+    "users[].github_com_orgs_with_pending_invites[]": "VerifiedOfficial",
+    "users[].github_com_profile": "VerifiedOfficial",
+    "users[].github_com_saml_name_id": "VerifiedOfficial",
+    "users[].github_com_two_factor_auth": "VerifiedOfficial",
+    "users[].github_com_user": "VerifiedOfficial",
+    "users[].github_com_verified_domain_emails": "VerifiedOfficial",
+    "users[].github_com_verified_domain_emails[]": "VerifiedOfficial",
+    "users[].license_type": "VerifiedOfficial",
+    "users[].total_user_accounts": "VerifiedOfficial",
+    "users[].visual_studio_license_status": "VerifiedOfficial",
+    "users[].visual_studio_subscription_email": "VerifiedOfficial",
+    "users[].visual_studio_subscription_user": "VerifiedOfficial"
+  },
+  "fixture_sha256": "aa07b1ebd4d73623d499fe6aadabae291abdfe73c686f2a24e6b6b0a842e84ab",
+  "http": {
+    "headers": {
+      "link": "<https://api.github.com/enterprises/{enterprise}/consumed-licenses?page=2>; rel=\"next\"",
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/consumed-licenses",
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/consumed-licenses (operationId enterprise-admin/get-consumed-licenses). Paging is the Link header (the header value is a synthesized example of the documented mechanism).",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.enterprise.consumed_licenses"
+}

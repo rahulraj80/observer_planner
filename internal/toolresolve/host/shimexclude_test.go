@@ -33,3 +33,20 @@ func TestNewEnvExcludesCommandWrappingShims(t *testing.T) {
 		t.Fatalf("ExcludeDirs %v lacks %s", env.ExcludeDirs, want)
 	}
 }
+
+// TestShimExcludeDirsCoverTheWindowsBridgeTarget: on a WSL daemon the Windows
+// homes' shim dirs (the WSL bridge target, T-419) are skipped too, so a
+// resolution over the drive mount never takes a bridge shim for the vendor
+// binary.
+func TestShimExcludeDirsCoverTheWindowsBridgeTarget(t *testing.T) {
+	got := shimExcludeDirs("linux", "/home/u", []string{"/mnt/c/Users/u"})
+	want := []string{"/home/u/.observer/shims", "/mnt/c/Users/u/.observer/shims"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if filepath.Clean(got[i]) != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}

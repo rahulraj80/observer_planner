@@ -92,7 +92,7 @@ export function isTerminalCapabilityError(e: unknown): boolean {
 // exact missing dependency and where to fix it, mirroring the honest-disabled
 // convention used for the remote-terminal gate above.
 export const PROJECT_ROOT_DENIED_MSG =
-  "That project root isn't allow-listed. Add it to [terminal.launch].allowed_project_roots (Terminals page → launch policy, on the owner's local dashboard), then restart SuperBased - or launch in the agent's default directory.";
+  "That project root isn't allow-listed. Add it in Terminals > Settings > Folder Selection on the owner's local dashboard (it applies to the next launch, no restart) - or launch in the agent's default directory.";
 
 // isProjectRootDeniedError reports whether an error thrown by the launch POST is
 // the [terminal.launch].allowed_project_roots gate ("project root not

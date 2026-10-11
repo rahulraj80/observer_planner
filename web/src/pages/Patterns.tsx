@@ -14,6 +14,7 @@ import {
 } from "@/components/primitives";
 import { Pagination } from "@/components/DataTable";
 import { Summary } from "@/components/Summary";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import { ChartState } from "@/components/ChartState";
 import { useApi } from "@/lib/useApi";
 import { useFilters, useGranularity, windowLabel, windowParams } from "@/lib/filters";
@@ -61,17 +62,18 @@ function patternRow(t: string): { color: string; label: string } | undefined {
 }
 
 export function PatternsPage() {
-  const { project, tool } = useFilters();
+  const { project, tool, model } = useFilters();
   const projectRoot = project === "all" ? "" : project;
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<Filter>("all");
 
   const patterns = useApi<PatternsResponse>(
     "/api/patterns",
-    { page, limit: PAGE_LIMIT, project: projectParam, tool: toolParam },
-    [page, project, tool],
+    { page, limit: PAGE_LIMIT, project: projectParam, tool: toolParam, model: modelParam },
+    [page, project, tool, model],
   );
 
   const filtered = useMemo(() => {
@@ -92,14 +94,26 @@ export function PatternsPage() {
       <PageHeader
         icon={navIcon("patterns")}
         title="Patterns"
-        sub={`Repeatable behaviours the observer noticed across your sessions - for example, "after running \`go test\`, you almost always run \`go vet\`." These get fed into observer-suggest which writes them into CLAUDE.md / AGENTS.md / .cursorrules, so new sessions inherit the habit without you re-typing instructions.`}
+        sub={`Repeatable behaviors the observer noticed across your sessions, for example "after running \`go test\`, you almost always run \`go vet\`." The instruction-file generator below writes them into CLAUDE.md / AGENTS.md / .cursorrules, so new sessions inherit the habit without you re-typing instructions.`}
         helpId="tab.patterns"
+        right={
+          <CommandJobButton
+            job="patterns"
+            confirmLabel="Derive patterns now?"
+            armedNote="Re-derives hot files, co-change pairs and command sequences from your sessions. Local only."
+            runningLabel="Deriving…"
+            doneText="Patterns updated."
+            onDone={() => patterns.reload()}
+          >
+            Derive patterns now
+          </CommandJobButton>
+        }
       />
       <ChartShell
         title="Learned patterns"
         sub={
           patterns.data
-            ? `${fmtInt(patterns.data.total)} total · derived by \`observer patterns\` via decay-weighted analysis. \`observer suggest\` composes these into CLAUDE.md / AGENTS.md / .cursorrules.`
+            ? `${fmtInt(patterns.data.total)} total · derived from session activity with decay-weighted analysis (Derive patterns now, above, refreshes them). Generate suggestions composes these into CLAUDE.md / AGENTS.md / .cursorrules.`
             : <InlineLoading label="Loading patterns" />
         }
         right={
@@ -161,7 +175,7 @@ export function PatternsPage() {
           empty={!patterns.loading && !filtered.length}
           emptyHint={
             filter === "all"
-              ? "No patterns mined yet. Run `observer patterns` to derive hot files, co-change pairs, and command sequences from session activity."
+              ? "No patterns mined yet. Use Derive patterns now (top of the page) to derive hot files, co-change pairs, and command sequences from session activity."
               : `No "${patternRow(filter)?.label ?? filter}" patterns in this page. Try another filter or pagination.`
           }
           height={220}
@@ -212,14 +226,15 @@ function PatternDistributionChart({
   rows: PatternRow[];
   loading: boolean;
 }) {
-  const { project, tool, win, customRange } = useFilters();
+  const { project, tool, model, win, customRange } = useFilters();
   const gran = useGranularity();
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const ts = useApi<PatternsTimeseries>(
     "/api/patterns/timeseries",
-    { ...windowParams(win, customRange), ...gran.params, project: projectParam, tool: toolParam },
-    [project, tool, win, customRange, gran.params],
+    { ...windowParams(win, customRange), ...gran.params, project: projectParam, tool: toolParam, model: modelParam },
+    [project, tool, model, win, customRange, gran.params],
   );
   const days = ts.data?.points ?? [];
   const g = asGranularity(ts.data?.bucket ?? gran.expected);
@@ -248,7 +263,7 @@ function PatternDistributionChart({
         denied={ts.denied}
         deniedPermission={ts.deniedPermission}
         empty={!hasNonZero(days, ["total"])}
-        emptyHint="No pattern reinforcements in window. Run `observer patterns` to mine more, or widen the window when more endpoints accept ?days."
+        emptyHint="No pattern reinforcements in this window. Use Derive patterns now (top of the page) to mine more, or widen the window."
         height={220}
       >
         <div className="flex flex-col gap-2">

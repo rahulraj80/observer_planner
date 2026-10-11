@@ -1373,7 +1373,7 @@ var knownActionKinds = map[string]bool{
 	"config_change": true, "worktree_create": true, "worktree_remove": true,
 	"rate_limit": true, "subagent_wait": true, "agent_message": true,
 	"agent_control": true, "skill_invoke": true, "schedule": true, "tool_search": true,
-	"stdin_write": true, "harness_call": true, "unknown": true,
+	"stdin_write": true, "harness_call": true, "task_event": true, "unknown": true,
 	// The CLI's own fallback for a row whose action_type is empty
 	// (cmd/observer/cloud.go::cloudRawActions).
 	"action": true,

@@ -61,6 +61,12 @@ func (c *Client) FetchOrgAnnouncement(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("orgclient.FetchOrgAnnouncement: bearer: %w", err)
 	}
+	// "Nothing published" is a steady state: re-asked on a doubling interval
+	// rather than every cycle (railbackoff.go). Skipping changes nothing — a
+	// 404 never clears the cached banner either.
+	if c.announcementNotFound.Skip(time.Now()) {
+		return false, nil
+	}
 	url := strings.TrimRight(enr.OrgServerURL, "/") + "/api/agent/announcement"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -73,8 +79,10 @@ func (c *Client) FetchOrgAnnouncement(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("orgclient.FetchOrgAnnouncement: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return false, nil // nothing published — fine (also: older server)
+	notServed := c.classifyRail(announcementRail, resp) == railReplyNotSupported
+	c.announcementNotFound.Observe(notServed, time.Now(), c.pushInterval())
+	if notServed {
+		return false, nil // nothing published — fine (also: older server, railreply.go)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("orgclient.FetchOrgAnnouncement: server returned %d", resp.StatusCode)
@@ -105,9 +113,6 @@ func (c *Client) FetchOrgAnnouncement(ctx context.Context) (bool, error) {
 		if !repinned {
 			pinned = cached.ServerPubkey
 		}
-		if cached.Version >= doc.Version && !(repinned && doc.Version >= cached.Version) {
-			return false, nil // already current
-		}
 	}
 	// ONE org distribution identity across rails (see orgpin.go): a
 	// first announcement must present the key the routing rail already
@@ -119,6 +124,12 @@ func (c *Client) FetchOrgAnnouncement(ctx context.Context) (bool, error) {
 	}
 	if err := orgcontract.VerifyAnnouncement(doc, pinned); err != nil {
 		return false, fmt.Errorf("orgclient.FetchOrgAnnouncement: %w", err)
+	}
+	// T-655 (the T-390 shape): the version compare runs only on a VERIFIED
+	// document, so a tampered or unsigned one at or below the cached version
+	// is refused instead of being read as "already current".
+	if hasCached && cached.Version >= doc.Version && !(repinned && doc.Version >= cached.Version) {
+		return false, nil // already current
 	}
 	if err := c.store.UpsertOrgAnnouncement(ctx, store.OrgAnnouncementRow{
 		Version: doc.Version, Body: doc.Body, BodyHash: doc.BodyHash,

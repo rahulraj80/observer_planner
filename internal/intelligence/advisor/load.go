@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/sessionmsg"
 )
 
@@ -31,6 +32,13 @@ const minSessionRows = 5
 func LoadFacts(ctx context.Context, db *sql.DB, opts Options) (*Facts, error) {
 	now := opts.now()
 	since := now.AddDate(0, 0, -opts.WindowDays).UTC().Format(time.RFC3339)
+	if !opts.Since.IsZero() {
+		since = opts.Since.UTC().Format(time.RFC3339)
+	}
+	until := openUntil
+	if !opts.Until.IsZero() {
+		until = opts.Until.UTC().Format(time.RFC3339)
+	}
 
 	sessions := map[string]*SessionFacts{}
 	pending := map[string]*pendingSession{}
@@ -63,8 +71,8 @@ func LoadFacts(ctx context.Context, db *sql.DB, opts Options) (*Facts, error) {
 		FROM api_turns at
 		JOIN sessions s ON s.id = at.session_id
 		LEFT JOIN projects p ON p.id = s.project_id
-		WHERE at.timestamp >= ?` + scopeFilter(opts)
-	if err := loadRows(ctx, db, proxyQ, since, opts, func(r loadedRow) {
+		WHERE at.timestamp >= ? AND at.timestamp < ?` + scopeFilter(opts)
+	if err := loadRows(ctx, db, proxyQ, since, until, opts, func(r loadedRow) {
 		s := ensureSession(sessions, r.sid, r.tool, r.smodel, r.root)
 		t, ok := parseTS(r.ts)
 		if !ok {
@@ -101,8 +109,8 @@ func LoadFacts(ctx context.Context, db *sql.DB, opts Options) (*Facts, error) {
 		FROM token_usage tu
 		JOIN sessions s ON s.id = tu.session_id
 		LEFT JOIN projects p ON p.id = s.project_id
-		WHERE tu.timestamp >= ?` + scopeFilter(opts)
-	if err := loadRows(ctx, db, jsonlQ, since, opts, func(r loadedRow) {
+		WHERE tu.timestamp >= ? AND tu.timestamp < ?` + scopeFilter(opts)
+	if err := loadRows(ctx, db, jsonlQ, since, until, opts, func(r loadedRow) {
 		t, ok := parseTS(r.ts)
 		if !ok {
 			return
@@ -153,7 +161,7 @@ func LoadFacts(ctx context.Context, db *sql.DB, opts Options) (*Facts, error) {
 		f.Sessions = append(f.Sessions, *s)
 	}
 	sort.Slice(f.Sessions, func(i, j int) bool { return f.Sessions[i].ID < f.Sessions[j].ID })
-	if err := loadPhase2(ctx, db, since, f); err != nil {
+	if err := loadPhase2(ctx, db, since, until, f); err != nil {
 		return nil, err
 	}
 	return f, nil
@@ -195,6 +203,9 @@ func scopeFilter(opts Options) string {
 	if opts.Tool != "" {
 		sb.WriteString(" AND s.tool = ?")
 	}
+	if frag, _ := modelfilter.AndSessionsUsing("s.id", opts.Model); frag != "" {
+		sb.WriteString(frag)
+	}
 	return sb.String()
 }
 
@@ -206,7 +217,8 @@ func scopeArgs(opts Options) []any {
 	if opts.Tool != "" {
 		args = append(args, opts.Tool)
 	}
-	return args
+	_, margs := modelfilter.AndSessionsUsing("s.id", opts.Model)
+	return append(args, margs...)
 }
 
 // loadedRow is one scanned row of either union arm (fields a given arm
@@ -223,8 +235,8 @@ type loadedRow struct {
 
 // loadRows runs one of the two union-arm queries, binding the optional
 // project filter, and feeds each row to fn.
-func loadRows(ctx context.Context, db *sql.DB, q, since string, opts Options, fn func(loadedRow)) error {
-	args := append([]any{since}, scopeArgs(opts)...)
+func loadRows(ctx context.Context, db *sql.DB, q, since, until string, opts Options, fn func(loadedRow)) error {
+	args := append([]any{since, until}, scopeArgs(opts)...)
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return err
@@ -241,6 +253,10 @@ func loadRows(ctx context.Context, db *sql.DB, q, since string, opts Options, fn
 	}
 	return rows.Err()
 }
+
+// openUntil is the upper bound of an open-ended window: later than any
+// RFC3339 timestamp, so "< openUntil" admits every row.
+const openUntil = "9999-12-31T23:59:59Z"
 
 func ensureSession(m map[string]*SessionFacts, sid, tool, smodel, root string) *SessionFacts {
 	s, ok := m[sid]

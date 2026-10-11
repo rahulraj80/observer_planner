@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,6 +207,7 @@ func TestPrimeAgentSeededLaunchInjectsProviderExactlyOnce(t *testing.T) {
 		t.Fatalf("mkdir home: %v", err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv(observerProviderAPIKeyEnv, "test-not-a-secret") // a key is available, so the provider IS written
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(cfgPath, []byte("[observer]\ndb_path = \""+filepath.Join(dir, "observer.db")+"\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -229,11 +231,20 @@ func TestPrimeAgentSeededLaunchInjectsProviderExactlyOnce(t *testing.T) {
 		t.Fatalf("an ordinary flag argv must NOT trip the management-verb guard: %v", err)
 	}
 
-	// The provider file is written BEFORE the handoff render (see
-	// newPrimeAgentCmd's RunE ordering), so it must exist and contain the
-	// observer provider with a valid, non-secret apiKey — even though the
-	// overall command errored on the unresolvable session.
-	assertPrimeAgentProviderFile(t, filepath.Join(home, ".prime", "agent", "models.json"), "http://127.0.0.1:8820/v1")
+	// The provider is session-scoped (Sol A5-08): it is written before the
+	// handoff render and REMOVED again when the launch ends, including this
+	// failed one, so no models.json residue survives.
+	if _, statErr := os.Stat(filepath.Join(home, ".prime", "agent", "models.json")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("a failed launch left the session provider behind (stat err %v)", statErr)
+	}
+}
+
+// ensurePrimeAgentObserverProvider is the pre-A5-08 helper shape the
+// provider-file tests below drive: write the session provider with a
+// credential available, keeping the file (no restore).
+func ensurePrimeAgentObserverProvider(baseURL string) error {
+	_, err := preparePrimeAgentObserverProvider(baseURL, true)
+	return err
 }
 
 // TestPrimeAgentManagementVerbsAreRejectedForSeeding is the FINDING-1-class

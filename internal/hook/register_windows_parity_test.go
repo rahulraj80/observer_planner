@@ -1200,8 +1200,8 @@ func newVendorWindowsRegistry(t *testing.T, binary, subdir string, setWindowsHom
 // readGenericSettingsHookCommands decodes a settings.json's "hooks"
 // block into event → []command — the settings.json counterpart of
 // readCodexHookCommands, for the four genericSettingsHookTarget-shaped
-// vendors (gemini-cli, qwen-code, qoder — droid uses hooks.json, read
-// via readCodexHookCommands like codex/factory-droid already do).
+// vendors (gemini-cli, qwen-code, qoder — droid uses hooks.json with
+// its events at the root, read via droidRootCommands).
 func readGenericSettingsHookCommands(t *testing.T, path string) map[string][]string {
 	t.Helper()
 	raw, err := readSettingsFile(path)
@@ -1238,7 +1238,7 @@ type jsonHooksWindowsVendor struct {
 	tool         string // e.g. "gemini-cli-windows"
 	subdir       string // e.g. ".gemini"
 	configFile   string // "settings.json" or "hooks.json"
-	event        string
+	event        string // the prompt-submit event (its command shape is pinned); the writer registers eventsOr(dispatchTool, event)
 	dispatchTool string // the base-tool token embedded in the command, e.g. "gemini-cli"
 	setHome      func(*Options, string)
 }
@@ -1272,7 +1272,7 @@ func jsonHooksWindowsVendors() []jsonHooksWindowsVendor {
 func (v jsonHooksWindowsVendor) readHooksCommands(t *testing.T, path string) map[string][]string {
 	t.Helper()
 	if v.configFile == "hooks.json" {
-		return readCodexHookCommands(t, path)
+		return droidRootCommands(t, path)
 	}
 	return readGenericSettingsHookCommands(t, path)
 }
@@ -1298,8 +1298,8 @@ func TestRegisterJSONHooksWindowsVendors_FreshInstall(t *testing.T) {
 			if res.ConfigPath != wantPath {
 				t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, wantPath)
 			}
-			if len(res.HooksAdded) != 1 || res.HooksAdded[0] != v.event {
-				t.Errorf("HooksAdded = %v, want [%s]", res.HooksAdded, v.event)
+			if want := eventsOr(v.dispatchTool, v.event); strings.Join(res.HooksAdded, ",") != strings.Join(want, ",") {
+				t.Errorf("HooksAdded = %v, want %v", res.HooksAdded, want)
 			}
 			cmds := v.readHooksCommands(t, res.ConfigPath)[v.event]
 			if len(cmds) != 1 {
@@ -1331,8 +1331,8 @@ func TestRegisterJSONHooksWindowsVendors_Idempotent(t *testing.T) {
 			if len(res.HooksAdded) != 0 {
 				t.Errorf("HooksAdded = %v, want none on the idempotent re-run", res.HooksAdded)
 			}
-			if len(res.AlreadySet) != 1 || res.AlreadySet[0] != v.event {
-				t.Errorf("AlreadySet = %v, want [%s]", res.AlreadySet, v.event)
+			if want := eventsOr(v.dispatchTool, v.event); strings.Join(res.AlreadySet, ",") != strings.Join(want, ",") {
+				t.Errorf("AlreadySet = %v, want %v", res.AlreadySet, want)
 			}
 		})
 	}
@@ -1386,13 +1386,14 @@ func TestUnregisterJSONHooksWindowsVendors_RemovesOnlyObserverEntries(t *testing
 			if res.Tool != v.tool {
 				t.Errorf("Tool = %q, want %q", res.Tool, v.tool)
 			}
-			if len(res.HooksRemoved) != 1 {
-				t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+			if want := eventsOr(v.dispatchTool, v.event); len(res.HooksRemoved) != len(want) {
+				t.Errorf("HooksRemoved = %v, want %v", res.HooksRemoved, want)
 			}
-			cmds := v.readHooksCommands(t, path)[v.event]
-			for _, cmd := range cmds {
-				if strings.Contains(cmd, " hook "+v.dispatchTool+" ") {
-					t.Errorf("event %s still carries an observer entry: %q", v.event, cmd)
+			for _, event := range eventsOr(v.dispatchTool, v.event) {
+				for _, cmd := range v.readHooksCommands(t, path)[event] {
+					if strings.Contains(cmd, " hook "+v.dispatchTool+" ") {
+						t.Errorf("event %s still carries an observer entry: %q", event, cmd)
+					}
 				}
 			}
 		})
@@ -1502,8 +1503,8 @@ func TestRegisterPoolsideWindows_FreshInstall(t *testing.T) {
 	if res.ConfigPath != wantPath {
 		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, wantPath)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "UserPromptSubmit" {
-		t.Errorf("HooksAdded = %v, want [UserPromptSubmit]", res.HooksAdded)
+	if len(res.HooksAdded) != len(poolsideEvents) || res.HooksAdded[0] != "UserPromptSubmit" {
+		t.Errorf("HooksAdded = %v, want [UserPromptSubmit PreToolUse]", res.HooksAdded)
 	}
 	body, err := os.ReadFile(res.ConfigPath)
 	if err != nil {
@@ -1527,8 +1528,8 @@ func TestUnregisterPoolsideWindows_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Unregister(poolside-windows): %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != len(poolsideEvents) {
+		t.Errorf("HooksRemoved = %v, want one per registered event", res.HooksRemoved)
 	}
 	body, _ := os.ReadFile(filepath.Join(dir, "settings.yaml"))
 	if strings.Contains(string(body), "hook poolside") {
@@ -1574,21 +1575,21 @@ func TestRegisterCommandCodeWindows_FreshInstall(t *testing.T) {
 	if res.ConfigPath != wantPath {
 		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, wantPath)
 	}
-	if len(res.HooksAdded) != 1 || res.HooksAdded[0] != "transformInput" {
-		t.Errorf("HooksAdded = %v, want [transformInput]", res.HooksAdded)
+	if strings.Join(res.HooksAdded, ",") != "beforeToolCall,transformInput" {
+		t.Errorf("HooksAdded = %v, want [beforeToolCall transformInput] (the plugin shim)", res.HooksAdded)
 	}
 	body, err := os.ReadFile(res.ConfigPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := string(body)
-	if !strings.Contains(ts, `const OBSERVER_WSL_BIN = "/home/u/superbased-observer/bin/observer";`) {
+	if !strings.Contains(ts, `"wsl_bin":"/home/u/superbased-observer/bin/observer"`) {
 		t.Errorf("observer-guard.ts missing baked-in OBSERVER_WSL_BIN: %s", ts)
 	}
-	if !strings.Contains(ts, `const WSL_DISTRO = "Ubuntu-20.04";`) {
+	if !strings.Contains(ts, `"wsl_distro":"Ubuntu-20.04"`) {
 		t.Errorf("observer-guard.ts missing baked-in WSL_DISTRO: %s", ts)
 	}
-	if strings.Contains(ts, "{{OBSERVER_WSL_BIN}}") || strings.Contains(ts, "{{WSL_DISTRO}}") {
+	if strings.Contains(ts, "{{OBSERVER_SHIM_PROFILE}}") {
 		t.Errorf("placeholder leaked into rendered file: %s", ts)
 	}
 }
@@ -1609,8 +1610,8 @@ func TestRegisterCommandCodeWindows_Idempotent(t *testing.T) {
 	if len(res.HooksAdded) != 0 {
 		t.Errorf("second register added %v, want none", res.HooksAdded)
 	}
-	if len(res.AlreadySet) != 1 {
-		t.Errorf("AlreadySet = %v, want one entry", res.AlreadySet)
+	if len(res.AlreadySet) != 2 {
+		t.Errorf("AlreadySet = %v, want both shim events", res.AlreadySet)
 	}
 }
 
@@ -1626,8 +1627,8 @@ func TestUnregisterCommandCodeWindows_RoundTrip(t *testing.T) {
 	if res.Error != nil {
 		t.Fatalf("Unregister(command-code-windows): %v", res.Error)
 	}
-	if len(res.HooksRemoved) != 1 {
-		t.Errorf("HooksRemoved = %v, want one entry", res.HooksRemoved)
+	if len(res.HooksRemoved) != 2 {
+		t.Errorf("HooksRemoved = %v, want both shim events", res.HooksRemoved)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "mods", "observer-guard.ts")); !os.IsNotExist(err) {
 		t.Errorf("observer-guard.ts still present after unregister (err=%v)", err)

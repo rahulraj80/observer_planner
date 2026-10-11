@@ -128,11 +128,11 @@ func TestAPIToolsBreakdownObservedExceedsDeclared(t *testing.T) {
 		t.Fatalf("expressible_categories = %d; want %d", got, len(declared))
 	}
 	if got := breakdownNum(cov, "observed_categories"); got != len(declared)+1 {
-		t.Fatalf("observed_categories = %d; want %d — a real observation must not be truncated away",
+		t.Fatalf("observed_categories = %d; want %d - a real observation must not be truncated away",
 			got, len(declared)+1)
 	}
 	if got := breakdownNum(cov, "observed_beyond_declared"); got != 1 {
-		t.Fatalf("observed_beyond_declared = %d; want 1 — without it, observed>expressible looks impossible",
+		t.Fatalf("observed_beyond_declared = %d; want 1 - without it, observed>expressible looks impossible",
 			got)
 	}
 	if !cov["vocabulary_declared"].(bool) {
@@ -181,14 +181,14 @@ func TestAPIToolsBreakdownNativeGroupCap(t *testing.T) {
 
 	row := breakdownRow(t, breakdownFixture(t, events), models.ToolClaudeCode)
 	if got := breakdownNum(row, "total"); got != 15 {
-		t.Fatalf("total = %d; want 15 — the cap must never truncate the totals pass", got)
+		t.Fatalf("total = %d; want 15 - the cap must never truncate the totals pass", got)
 	}
 	byType, _ := row["by_type"].(map[string]any)
 	if got := sumBuckets(byType); got != 15 {
 		t.Errorf("by_type %v sums to %d; want the exact 15", byType, got)
 	}
 	if got := breakdownNum(byType, models.ActionMCPCall); got != 1 {
-		t.Errorf("by_type[mcp_call] = %d; want 1 — the least frequent group is still counted exactly", got)
+		t.Errorf("by_type[mcp_call] = %d; want 1 - the least frequent group is still counted exactly", got)
 	}
 	byCategory, _ := row["by_category"].(map[string]any)
 	if got := sumBuckets(byCategory); got != 15 {

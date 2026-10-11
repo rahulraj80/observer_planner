@@ -55,7 +55,7 @@ func newMetricsCmd() *cobra.Command {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"metrics listening on http://%s/metrics — ctrl-c to stop\n", listen)
+				"metrics listening on http://%s/metrics - ctrl-c to stop\n", listen)
 			if err := server.ListenAndServe(ctx, listen); err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}

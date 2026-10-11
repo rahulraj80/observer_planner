@@ -110,7 +110,7 @@ func printPromptConfigSummary(out io.Writer, guardEnabled bool, guardMode string
 	fmt.Fprintf(out, "guard.prompt.enabled     = %v\n", p.Enabled)
 	fmt.Fprintf(out, "guard.prompt.mode        = %s\n", p.Mode)
 	fmt.Fprintf(out, "guard.prompt.hook_lane   = %v\n", p.HookLane)
-	fmt.Fprintf(out, "guard.prompt.proxy_lane  = %v (wired via internal/guard/proxyguard.go's scanPrompt; a config change here only reaches it after a daemon restart — the hook lane picks it up on the very next hook invocation)\n", p.ProxyLane)
+	fmt.Fprintf(out, "guard.prompt.proxy_lane  = %v (wired via internal/guard/proxyguard.go's scanPrompt; a config change here only reaches it after a daemon restart - the hook lane picks it up on the very next hook invocation)\n", p.ProxyLane)
 	fmt.Fprintf(out, "guard.prompt.enforce_independent = %v", p.EnforceIndependent)
 	if p.EnforceIndependent {
 		fmt.Fprintf(out, " (acts on its own mode regardless of guard.mode)\n")
@@ -122,7 +122,7 @@ func printPromptConfigSummary(out io.Writer, guardEnabled bool, guardMode string
 		(p.EnforceIndependent || guardMode == "enforce") {
 		effective = "ACTIVE (the hook lane evaluates and can " + p.Mode + ")"
 	} else if guardEnabled && guardMode != "off" && p.Enabled && p.HookLane {
-		effective = "OBSERVE-ONLY (evaluates and records, never blocks — set guard.mode=enforce or guard.prompt.enforce_independent=true)"
+		effective = "OBSERVE-ONLY (evaluates and records, never blocks - set guard.mode=enforce or guard.prompt.enforce_independent=true)"
 	}
 	fmt.Fprintf(out, "effective hook-lane state = %s\n", effective)
 }
@@ -231,7 +231,7 @@ func printPromptApprovals(ctx context.Context, out io.Writer, database *sql.DB) 
 		}
 		warn := ""
 		if a.Scope == "global" && a.ExpiresAt.IsZero() {
-			warn = "  *** GLOBAL, NEVER EXPIRES — exempts every detector in this rule class, everywhere on this node ***"
+			warn = "  *** GLOBAL, NEVER EXPIRES - exempts every detector in this rule class, everywhere on this node ***"
 		}
 		fmt.Fprintf(out, "  id=%d rule=%s scope=%s granted_by=%s (%s)%s\n",
 			a.ID, a.RuleID, a.Scope, a.GrantedBy, expiry, warn)
@@ -253,9 +253,9 @@ func newGuardPromptAllowCmd() *cobra.Command {
 			"scoped to one of --session <id> (this conversation only, matching\n" +
 			"the reply's own suggestion), --project (this repo's root), or\n" +
 			"--global (everywhere on this node). Delegates to the SAME\n" +
-			"guard_approvals mechanism `observer guard approve` uses — there is\n" +
+			"guard_approvals mechanism `observer guard approve` uses - there is\n" +
 			"no separate per-detector table. IMPORTANT: the grant is by RULE,\n" +
-			"not by exact detector — every secret-class detector (github_pat,\n" +
+			"not by exact detector - every secret-class detector (github_pat,\n" +
 			"api keys, entropy, ...) shares R-172, and every PII-class detector\n" +
 			"(credit_card, us_ssn, email, ...) shares R-190. Allowing one\n" +
 			"detector allows every OTHER detector of the same class in that\n" +
@@ -332,9 +332,9 @@ func newGuardPromptClearCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clear [fingerprint]",
 		Short: "Remove a reconsider-once grant (force a fresh ask-once interrupt)",
-		Long: "Removes ONE guard_prompt_reconsider row by its fingerprint —\n" +
+		Long: "Removes ONE guard_prompt_reconsider row by its fingerprint -\n" +
 			"the opaque sha256 hex `observer guard prompt events` prints as\n" +
-			"target_excerpt (never the matched value or raw prompt text) —\n" +
+			"target_excerpt (never the matched value or raw prompt text) -\n" +
 			"so the next identical resend interrupts again instead of\n" +
 			"silently confirming. Pass --all to clear every pending grant.",
 		Args: cobra.MaximumNArgs(1),

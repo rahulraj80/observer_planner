@@ -145,6 +145,7 @@ func writeToolInputRollout(t *testing.T, body string) string {
 // patch_apply_end still holds its `changes` map is re-derived from it,
 // joined on call_id, and the dry run writes nothing.
 func TestBackfillToolInputHappyPath(t *testing.T) {
+	requireAdapter(t, "codex")
 	ctx := context.Background()
 	const callID = "exec-11111111-1111-4111-8111-111111111111"
 	const diff = "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
@@ -196,7 +197,7 @@ func TestBackfillToolInputHappyPath(t *testing.T) {
 func TestBackfillToolInputNeverOverwrites(t *testing.T) {
 	ctx := context.Background()
 	const callID = "exec-22222222-2222-4222-8222-222222222222"
-	const existing = `{"already":"here — the operator's own value"}`
+	const existing = `{"already":"here - the operator's own value"}`
 	path := writeToolInputRollout(t, rolloutLines(
 		patchApplyEndRecord(callID, "/tmp/ti-fixture/other.py", "@@ -1 +1 @@\n-old\n+new\n"),
 	))
@@ -210,10 +211,10 @@ func TestBackfillToolInputNeverOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Updated != 0 {
-		t.Fatalf("updated=%d, want 0 — a populated row was rewritten", res.Updated)
+		t.Fatalf("updated=%d, want 0 - a populated row was rewritten", res.Updated)
 	}
 	if res.Examined != 0 {
-		t.Fatalf("examined=%d, want 0 — a populated row was selected as a candidate", res.Examined)
+		t.Fatalf("examined=%d, want 0 - a populated row was selected as a candidate", res.Examined)
 	}
 	if res.AlreadyPopulated != 1 {
 		t.Fatalf("already_populated=%d, want 1", res.AlreadyPopulated)
@@ -235,6 +236,7 @@ func TestBackfillToolInputNeverOverwrites(t *testing.T) {
 //
 // MUTATION PROOF (b). Kills the no-input / fail-closed branches.
 func TestBackfillToolInputNeverInvents(t *testing.T) {
+	requireAdapter(t, "codex")
 	ctx := context.Background()
 	const realCall = "exec-33333333-3333-4333-8333-333333333333"
 	path := writeToolInputRollout(t, rolloutLines(
@@ -327,7 +329,7 @@ func TestBackfillToolInputNeverInvents(t *testing.T) {
 		// written. A mutant that silences every branch above by
 		// refusing to write at all still has to satisfy this row.
 		{
-			name: "decoy — a genuinely recoverable edit_file IS written",
+			name: "decoy - a genuinely recoverable edit_file IS written",
 			row: toolInputFixtureRow{
 				id: 18, tool: models.ToolCodex, actionType: models.ActionEditFile,
 				rawName: "patch_apply_end", sourceFile: path, eventID: realCall,
@@ -353,7 +355,7 @@ func TestBackfillToolInputNeverInvents(t *testing.T) {
 			stored := inputOf(t, ctx, database, tc.row.id)
 			if tc.bucketName == "updated" {
 				if stored == "" {
-					t.Fatal("the recoverable row was not written — the pass writes nothing at all")
+					t.Fatal("the recoverable row was not written - the pass writes nothing at all")
 				}
 				return
 			}
@@ -395,7 +397,7 @@ func TestToolInputUpdateSQLRefusesPopulatedRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n != 0 {
-		t.Fatalf("rows affected = %d, want 0 — the statement rewrote a populated row", n)
+		t.Fatalf("rows affected = %d, want 0 - the statement rewrote a populated row", n)
 	}
 	if v := inputOf(t, ctx, database, 1); v != existing {
 		t.Fatalf("populated row changed:\n got %q\nwant %q", v, existing)
@@ -408,7 +410,7 @@ func TestToolInputUpdateSQLRefusesPopulatedRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n, _ = got.RowsAffected(); n != 1 {
-		t.Fatalf("rows affected = %d, want 1 — the statement no longer writes empty rows", n)
+		t.Fatalf("rows affected = %d, want 1 - the statement no longer writes empty rows", n)
 	}
 	if v := inputOf(t, ctx, database, 2); v != "WRITTEN" {
 		t.Fatalf("empty row not written: %q", v)
@@ -418,6 +420,7 @@ func TestToolInputUpdateSQLRefusesPopulatedRow(t *testing.T) {
 // TestBackfillToolInputIdempotent: a second --apply over an
 // already-converged DB selects nothing and changes nothing.
 func TestBackfillToolInputIdempotent(t *testing.T) {
+	requireAdapter(t, "codex")
 	ctx := context.Background()
 	const callID = "exec-44444444-4444-4444-8444-444444444444"
 	path := writeToolInputRollout(t, rolloutLines(
@@ -455,6 +458,7 @@ func TestBackfillToolInputIdempotent(t *testing.T) {
 //
 // MUTATION PROOF (b), value layer.
 func TestScrubbedChangesNeverInvents(t *testing.T) {
+	requireAdapter(t, "codex")
 	sc := scrub.New()
 	tests := []struct {
 		name string
@@ -484,6 +488,7 @@ func TestScrubbedChangesNeverInvents(t *testing.T) {
 // shapes through the full DB path, so the guard is proven where it
 // matters and not only in the helper.
 func TestBackfillToolInputEmptyChangesStaysUnresolved(t *testing.T) {
+	requireAdapter(t, "codex")
 	ctx := context.Background()
 	for _, changes := range []string{"null", "{}"} {
 		t.Run("changes="+changes, func(t *testing.T) {

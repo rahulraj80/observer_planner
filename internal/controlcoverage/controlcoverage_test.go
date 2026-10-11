@@ -1,6 +1,7 @@
 package controlcoverage
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/guard"
@@ -45,49 +46,49 @@ var wantRow = map[string]struct {
 	BudgetChannel   integration.BudgetAdmissionChannel
 	RouteProof      RouteProofState
 }{
-	"aider":            {integration.EnforceOrgDisallow, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"aider":            {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
 	"antigravity":      {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"antigravity-cli":  {integration.EnforceSandbox, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"antigravity-cli":  {integration.EnforceHookBlock, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"chatgpt-web":      {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"claude-code":      {integration.EnforceHookBlock, PromptSubmitBlockAsk, integration.BudgetAdmissionObserverProxy, RouteProofStateProven},
 	"claude-web":       {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"cline":            {integration.EnforceRecordedAcceptance, PromptSubmitProbeRequired, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"cline-cli":        {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
-	"codex":            {integration.EnforceSandbox, PromptSubmitBlockAsk, integration.BudgetAdmissionObserverProxy, RouteProofStateProven},
+	"cline-cli":        {integration.EnforceHookBlock, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateProven}, // T-208: providers.json read-back is launch evidence
+	"codex":            {integration.EnforceHookBlock, PromptSubmitBlockAsk, integration.BudgetAdmissionObserverProxy, RouteProofStateProven},
 	"command-code":     {integration.EnforceSandbox, PromptSubmitBlockOnly, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"copilot":          {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"copilot-cli":      {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateProven},
+	"copilot-cli":      {integration.EnforceHookBlock, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateProven},
 	"copilot-web":      {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"cowork":           {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"crush":            {integration.EnforceOrgDisallow, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"crush":            {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
 	"cursor":           {integration.EnforceHookBlock, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"deepseek":         {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"devin":            {integration.EnforceSandbox, PromptSubmitBlockOnly, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"droid":            {integration.EnforceSandbox, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"devin":            {integration.EnforceHookBlock, PromptSubmitBlockOnly, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"droid":            {integration.EnforceHookBlock, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"freebuff":         {integration.EnforceSandbox, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"gemini-cli":       {integration.EnforceSandbox, PromptSubmitBlockAsk, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"gemini-cli":       {integration.EnforceHookBlock, PromptSubmitBlockAsk, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
 	"gemini-web":       {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"goose":            {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
-	"grok":             {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"goose":            {integration.EnforceHookBlock, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"grok":             {integration.EnforceHookBlock, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
 	"grokbot":          {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"hermes":           {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
-	"junie":            {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"junie":            {integration.EnforceSandbox, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"kilo-code":        {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"kilo-code-cli":    {integration.EnforceSandbox, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"kimi-code":        {integration.EnforceSandbox, PromptSubmitProbeRequired, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"kilo-code-cli":    {integration.EnforceHookBlock, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"kimi-code":        {integration.EnforceHookBlock, PromptSubmitBlockOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
 	"kiro-cli":         {integration.EnforceSandbox, PromptSubmitProbeRequired, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"kiro-crew":        {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"mistral-code":     {integration.EnforceSandbox, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"muse":             {integration.EnforceSandbox, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"muse":             {integration.EnforceHookBlock, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"open-interpreter": {integration.EnforceSandbox, PromptSubmitProbeRequired, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"openclaw":         {integration.EnforceSandbox, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"opencode":         {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateProven},
+	"opencode":         {integration.EnforceHookBlock, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateProven},
 	"perplexity-web":   {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"pi":               {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
-	"poolside":         {integration.EnforceRecordedAcceptance, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"pi":               {integration.EnforceHookBlock, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"poolside":         {integration.EnforceSandbox, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"prime-agent":      {integration.EnforceSandbox, PromptSubmitProxyOnly, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
-	"qoder":            {integration.EnforceSandbox, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
-	"qwen-code":        {integration.EnforceSandbox, PromptSubmitBlockAsk, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
+	"qoder":            {integration.EnforceHookBlock, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
+	"qwen-code":        {integration.EnforceHookBlock, PromptSubmitBlockAsk, integration.BudgetAdmissionObserverProxy, RouteProofStateUnproven},
 	"zcode":            {integration.EnforceSandbox, PromptSubmitBlockAsk, integration.BudgetAdmissionNone, RouteProofStateNone},
 	"zed":              {integration.EnforceRecordedAcceptance, PromptSubmitNone, integration.BudgetAdmissionNone, RouteProofStateNone},
 }
@@ -216,11 +217,114 @@ func TestForMatchesRows(t *testing.T) {
 			t.Errorf("%s: For() returned ok=false for a Rows() member", r.Tool)
 			continue
 		}
-		if got != r {
+		if !reflect.DeepEqual(got, r) {
 			t.Errorf("%s: For() = %+v, want %+v", r.Tool, got, r)
 		}
 	}
 	if _, ok := For("not-a-real-tool"); ok {
 		t.Error(`For("not-a-real-tool") = ok, want ok=false`)
+	}
+}
+
+// wantPostHocOnlyPromptTools is the GOLDEN PIN of PostHocOnlyPromptTools
+// (prompt-guard coverage audit 2026-10-02,
+// docs/audits/prompt-guard-coverage-audit-2026-10-02.md): the tools on which
+// a prompt rule (R-172 / R-190) has NO pre-send seam at all — no verified
+// prompt-submit hook and no proxy route — and so can only flag a prompt
+// after it was sent. A registry edit that moves a tool in or out of this
+// set must be a deliberate one: update this list and the audit's table.
+var wantPostHocOnlyPromptTools = []string{
+	"antigravity", "antigravity-cli", "chatgpt-web", "claude-web", "cline",
+	"copilot", "copilot-web", "cowork", "deepseek", "freebuff", "gemini-web",
+	"grokbot", "junie", "kilo-code", "kilo-code-cli", "kiro-cli", "kiro-crew",
+	"mistral-code", "muse", "open-interpreter", "openclaw", "perplexity-web",
+	"zed",
+}
+
+func TestPostHocOnlyPromptTools(t *testing.T) {
+	got := PostHocOnlyPromptTools()
+	if len(got) != len(wantPostHocOnlyPromptTools) {
+		t.Fatalf("PostHocOnlyPromptTools() = %v (%d), want %v (%d)", got, len(got), wantPostHocOnlyPromptTools, len(wantPostHocOnlyPromptTools))
+	}
+	for i := range got {
+		if got[i] != wantPostHocOnlyPromptTools[i] {
+			t.Fatalf("PostHocOnlyPromptTools()[%d] = %q, want %q (full: %v)", i, got[i], wantPostHocOnlyPromptTools[i], got)
+		}
+	}
+}
+
+// TestHasPreSendPromptSeam is the table for the seam predicate itself: one
+// row per PromptSubmit bucket, with and without a proxy route.
+func TestHasPreSendPromptSeam(t *testing.T) {
+	cases := []struct {
+		prompt PromptSubmitChannel
+		route  RouteProofState
+		want   bool
+	}{
+		{PromptSubmitBlockAsk, RouteProofStateNone, true},
+		{PromptSubmitBlockOnly, RouteProofStateNone, true},
+		{PromptSubmitProxyOnly, RouteProofStateProven, true},
+		{PromptSubmitProbeRequired, RouteProofStateNone, false},
+		{PromptSubmitProbeRequired, RouteProofStateUnproven, true},
+		{PromptSubmitNone, RouteProofStateNone, false},
+		{PromptSubmitNone, RouteProofStateProven, true},
+	}
+	for _, tc := range cases {
+		r := Row{PromptSubmit: tc.prompt, RouteProof: tc.route}
+		if got := r.HasPreSendPromptSeam(); got != tc.want {
+			t.Errorf("prompt=%s route=%s: got %v want %v", tc.prompt, tc.route, got, tc.want)
+		}
+	}
+}
+
+// TestCapsCoverEveryCapabilityAndReadBindings: every row carries a coverage
+// entry for every capability of the closed vocabulary, every state and seam
+// comes from its closed set, and the states agree with the bindings: a
+// wired gate the guard matrix lists is "wired", a probe_required prompt
+// lane reports probe_required, and a hook-less row reports none throughout.
+func TestCapsCoverEveryCapabilityAndReadBindings(t *testing.T) {
+	states := map[CoverageState]bool{
+		CoverageWired: true, CoverageRegistered: true,
+		CoverageProbeRequired: true, CoverageVendorOnly: true, CoverageNone: true,
+	}
+	seams := map[string]bool{
+		AltSeamNone: true, AltSeamProxy: true, AltSeamNativeCompile: true,
+		AltSeamSandbox: true, AltSeamWatcher: true, AltSeamCaptureLane: true,
+	}
+	for _, r := range Rows() {
+		if len(r.Caps) != len(integration.HookCaps()) {
+			t.Errorf("%s: %d capability entries, want %d", r.Tool, len(r.Caps), len(integration.HookCaps()))
+		}
+		for cp, cov := range r.Caps {
+			if !states[cov.State] || !seams[cov.AltSeam] {
+				t.Errorf("%s/%s: out-of-vocabulary %+v", r.Tool, cp, cov)
+			}
+		}
+	}
+	cases := []struct {
+		tool  string
+		cap   integration.HookCap
+		state CoverageState
+		seam  string
+	}{
+		{"claude-code", integration.HookCapToolGate, CoverageWired, AltSeamNativeCompile},
+		{"codex", integration.HookCapToolGate, CoverageWired, AltSeamSandbox},
+		{"gemini-cli", integration.HookCapToolGate, CoverageWired, AltSeamSandbox},
+		{"kimi-code", integration.HookCapToolGate, CoverageWired, AltSeamSandbox},
+		{"kimi-code", integration.HookCapPromptGate, CoverageWired, AltSeamProxy},
+		{"opencode", integration.HookCapToolGate, CoverageWired, AltSeamNativeCompile},
+		{"openclaw", integration.HookCapToolGate, CoverageVendorOnly, AltSeamSandbox},
+		{"zed", integration.HookCapToolGate, CoverageNone, AltSeamWatcher},
+		{"chatgpt-web", integration.HookCapPromptGate, CoverageNone, AltSeamCaptureLane},
+	}
+	for _, tc := range cases {
+		r, ok := For(tc.tool)
+		if !ok {
+			t.Fatalf("%s: no row", tc.tool)
+		}
+		got := r.Caps[tc.cap]
+		if got.State != tc.state || got.AltSeam != tc.seam {
+			t.Errorf("%s/%s = %+v, want state %s seam %q", tc.tool, tc.cap, got, tc.state, tc.seam)
+		}
 	}
 }

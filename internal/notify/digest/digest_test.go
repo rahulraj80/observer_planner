@@ -8,7 +8,7 @@ import (
 func baseData() Data {
 	return Data{
 		Title:         "Weekly cost digest",
-		PeriodLabel:   "Jun 29 – Jul 5, 2026",
+		PeriodLabel:   "Jun 29 - Jul 5, 2026",
 		TotalUSD:      123.45,
 		PriorTotalUSD: 100.00,
 		HasPrior:      true,
@@ -37,7 +37,7 @@ func TestComposeContainsKeyLines(t *testing.T) {
 		t.Errorf("subject missing title/period: %q", m.Subject)
 	}
 	wantText := []string{
-		"Observed spend for Jun 29 – Jul 5, 2026: $123.45",
+		"Observed spend for Jun 29 - Jul 5, 2026: $123.45",
 		"Observed spend: $123.45",
 		"Prior period: $100.00",
 		"Change: +$23.45 (+23%)",
@@ -142,5 +142,38 @@ func TestSignedDelta(t *testing.T) {
 		if got := signedDelta(tt.cur, tt.prior); got != tt.want {
 			t.Errorf("signedDelta(%v,%v) = %q, want %q", tt.cur, tt.prior, got, tt.want)
 		}
+	}
+}
+
+// TestComposeTokenDisplay pins T-204: the node digest under the token-usage
+// developer cost display renders every figure as the token usage behind it,
+// leaves out the dollar-only movers section and carries no dollar sign; the
+// zero value (the org digest, an admin surface) stays dollars.
+func TestComposeTokenDisplay(t *testing.T) {
+	d := baseData()
+	d.Title = "Weekly usage digest"
+	d.CostDisplay = "tokens"
+	d.TotalTokens, d.PriorTotalTokens = 1_260_000, 1_000_000
+	d.Breakdowns[0].Items[0].Tokens = 800_000
+	d.Breakdowns[0].Items[1].Tokens = 450_000
+	d.Breakdowns[1].Items[0].Tokens = 1_260_000
+	m := Compose(d)
+	for _, w := range []string{
+		"Observed usage for Jun 29 - Jul 5, 2026: 1.3M tok",
+		"Prior period: 1M tok",
+		"Change: +260K tok (+26%)",
+		"claude-opus-4-8: 800K tok",
+	} {
+		if !strings.Contains(m.Text, w) {
+			t.Errorf("token digest missing %q\n---\n%s", w, m.Text)
+		}
+	}
+	for _, body := range []string{m.Subject, m.Text, m.HTML} {
+		if strings.Contains(body, "$") || strings.Contains(body, "Top movers") {
+			t.Errorf("token digest carries a dollar figure or the movers section:\n%s", body)
+		}
+	}
+	if !strings.Contains(Compose(baseData()).Text, "$123.45") {
+		t.Error("the zero-value display is no longer dollars")
 	}
 }

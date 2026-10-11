@@ -1,6 +1,7 @@
 import { CircleHelp, type LucideIcon } from "lucide-react";
 import CloudEvidenceSettingsEditor, { DEFAULT_EVIDENCE_SETTINGS, effectiveEvidenceSettings, evidenceSettingsError } from "./CloudEvidenceSettingsEditor";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Button,
   ChartShell,
@@ -21,6 +22,7 @@ import { CloudEnrichmentSummary } from "@/components/CloudEnrichmentSummary";
 import { pushToast } from "@/components/Toast";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON, apiReason } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { fmtDateTime, fmtInt, fmtRelative } from "@/lib/format";
 import {
   cloudDisable,
@@ -45,6 +47,8 @@ import type {
   EnrolmentStatus,
 } from "@/lib/types";
 import { MetricIcon } from "@/components/MetricIcon";
+import { orgDisplayLabel } from "@/lib/orgName";
+import { cloudPreviewAvailable, cloudWriteState } from "@/lib/cloudGovernance";
 
 // CloudIntelligenceSection is the Settings → Cloud Intelligence page.
 //
@@ -90,8 +94,12 @@ import { MetricIcon } from "@/components/MetricIcon";
 // Nothing on this page talks to the hosted service directly: sign-in presence
 // is a local keychain read the daemon performs through an injected seam, and
 // every outbound action is the `observer cloud` CLI running as a child.
-// `icon` is the section glyph from the Settings SECTIONS table.
-export function CloudIntelligenceSection({ icon }: { icon?: LucideIcon }) {
+// `icon` is the section glyph from the Settings SECTIONS table. `readOnly` is
+// the governance state of the `cloud` Settings section (an org-managed node
+// pins it read-only by default): every write control then renders disabled
+// with the managed explanation, while reads and the network-free evidence
+// preview stay available (G11; the daemon guard exempts the preview).
+export function CloudIntelligenceSection({ icon, readOnly = false }: { icon?: LucideIcon; readOnly?: boolean }) {
   const status = useApi<CloudStatusWithDigestPlan>("/api/cloud/status", undefined, [], {
     refreshMs: 15000,
   });
@@ -99,6 +107,7 @@ export function CloudIntelligenceSection({ icon }: { icon?: LucideIcon }) {
   const settings = useCloudConfigForm();
   const actionsAvailable = !!data?.sign_in?.actions_available;
   const signedIn = !!data?.sign_in?.signed_in;
+  const write = cloudWriteState(actionsAvailable, readOnly);
 
   // Enterprise-first gate: an org-enrolled node's sessions are excluded from
   // personal cloud enrichment (see CloudAccountCard's header comment). Lifted
@@ -108,7 +117,7 @@ export function CloudIntelligenceSection({ icon }: { icon?: LucideIcon }) {
     refreshMs: 30000,
   });
   const orgEnrolled = !!enrolment.data?.enrolled;
-  const orgLabel = enrolment.data?.org_name || enrolment.data?.org_id || "your organization";
+  const orgLabel = orgDisplayLabel(enrolment.data?.org_display);
 
   return (
     <div className="space-y-5">
@@ -120,6 +129,7 @@ export function CloudIntelligenceSection({ icon }: { icon?: LucideIcon }) {
         settings={settings}
         orgEnrolled={orgEnrolled}
         orgLabel={orgLabel}
+        lockedTitle={write.lockedTitle}
       />
 
       {data && !orgEnrolled && <CloudEnrichmentSummary data={data} />}
@@ -127,29 +137,30 @@ export function CloudIntelligenceSection({ icon }: { icon?: LucideIcon }) {
       <CloudEnableCard
         data={data}
         signedIn={signedIn}
-        actionsAvailable={actionsAvailable}
+        actionsAvailable={write.writable}
+        lockedTitle={write.lockedTitle}
         orgEnrolled={orgEnrolled}
         orgLabel={orgLabel}
         onChanged={status.reload}
       />
 
-      <CloudLedgerCard actionsAvailable={actionsAvailable} />
+      <CloudLedgerCard actionsAvailable={cloudPreviewAvailable(actionsAvailable, readOnly)} />
 
       <details className="rounded-3 border border-line-2 bg-bg-2">
         <Summary className="px-4 py-2.5 text-small font-medium text-fg-2 hover:text-fg-1">
           Advanced
         </Summary>
         <div className="space-y-5 border-t border-line-2 px-4 py-3">
-          <CloudConsentGrantsCard actionsAvailable={actionsAvailable} />
-          <CloudDeleteAccountCard actionsAvailable={actionsAvailable} onDeleted={status.reload} />
-          <CloudAdvancedSettings settings={settings} />
+          <CloudConsentGrantsCard actionsAvailable={actionsAvailable} lockedTitle={write.lockedTitle} />
+          <CloudDeleteAccountCard actionsAvailable={actionsAvailable} lockedTitle={write.lockedTitle} onDeleted={status.reload} />
+          <CloudAdvancedSettings settings={settings} lockedTitle={write.lockedTitle} />
         </div>
       </details>
 
       <ChartShell
         title="Cloud activity"
         icon={icon}
-        sub="Optional signed-in personal enrichment (Signed-in Free). Every local Observer feature works fully without this. Node-local state only: consent receipts, the send outbox by state, and synced enrichment results. Uploads and result pulls run through `observer cloud sync` (manually, or on the schedule below when auto-sync is on)."
+        sub="Optional signed-in personal enrichment (Signed-in Free). Every local Observer feature works fully without this. Node-local state only: consent receipts, the send outbox by state, and synced enrichment results. Uploads and result pulls run when you press Sync now on the Cloud account card, or on the schedule below when auto-sync is on."
       >
         <ChartState
           loading={status.loading && !data}
@@ -195,6 +206,7 @@ function CloudAccountCard({
   settings,
   orgEnrolled,
   orgLabel,
+  lockedTitle,
 }: {
   signIn: CloudSignInView | null;
   loading: boolean;
@@ -203,6 +215,8 @@ function CloudAccountCard({
   settings: CloudConfigForm;
   orgEnrolled: boolean;
   orgLabel: string;
+  /** Set when the organization pinned this section read-only (G11). */
+  lockedTitle?: string;
 }) {
   const [login, setLogin] = useState<CloudLoginState | null>(null);
   const [busy, setBusy] = useState<"login" | "logout" | null>(null);
@@ -351,12 +365,14 @@ function CloudAccountCard({
   const meta = PHASE_META[phase];
   const actionsAvailable = !!signIn?.actions_available;
   const clientIDMissing = !!signIn?.known && !signIn.client_id_configured;
-  const canSignIn = actionsAvailable && phase !== "signing_in" && !clientIDMissing && busy === null && !orgEnrolled;
-  const pillLabel = orgEnrolled ? "Managed" : meta.label;
-  const pillVariant = orgEnrolled ? "info" : meta.variant;
+  const locked = !!lockedTitle;
+  const canSignIn =
+    actionsAvailable && phase !== "signing_in" && !clientIDMissing && busy === null && !orgEnrolled && !locked;
+  const pillLabel = orgEnrolled || locked ? "Managed" : meta.label;
+  const pillVariant = orgEnrolled || locked ? "info" : meta.variant;
   const signInDisabledTitle = orgEnrolled
     ? `Personal cloud sign-in is managed by ${orgLabel} and is unavailable on this node.`
-    : undefined;
+    : lockedTitle;
 
   return (
     <div className="rounded-3 border border-accent/40 bg-bg-2 p-4">
@@ -418,13 +434,13 @@ function CloudAccountCard({
             {phase === "signed_in" && (
               <>
                 {/* The spans carry the tooltips so they also explain a disabled button. */}
-                <Tooltip content={orgEnrolled ? signInDisabledTitle : "Drain the outbox and pull enrichment results now (same as `observer cloud sync`)"}>
+                <Tooltip content={orgEnrolled || locked ? signInDisabledTitle : "Drain the outbox and pull enrichment results now (same as `observer cloud sync`)"}>
                   <span className="inline-flex">
                     <Button
                       size="sm"
                       variant="soft"
                       onClick={() => void startSync()}
-                      disabled={!actionsAvailable || syncRunning || syncBusy || orgEnrolled}
+                      disabled={!actionsAvailable || syncRunning || syncBusy || orgEnrolled || locked}
                     >
                       {syncRunning ? "Syncing…" : syncBusy ? "Starting…" : "Sync now"}
                     </Button>
@@ -445,7 +461,8 @@ function CloudAccountCard({
                 <Button
                   variant="secondary"
                   onClick={() => void logout()}
-                  disabled={!actionsAvailable || busy !== null || phase !== "signed_in"}
+                  disabled={!actionsAvailable || busy !== null || phase !== "signed_in" || locked}
+                  title={lockedTitle}
                 >
                   {busy === "logout" ? "Signing out…" : "Sign out"}
                 </Button>
@@ -474,6 +491,13 @@ function CloudAccountCard({
             This node is enrolled in {orgLabel}. Personal cloud enrichment is managed by your
             organization and is unavailable here - sessions captured on this node are org-owned.
             Signing in personally does nothing on an enrolled node.
+          </p>
+          <p className="mt-1 leading-relaxed">
+            Those sessions are enriched on the organization plane instead: see{" "}
+            <Link to="/settings?section=intel" className="font-medium text-accent hover:text-accent-strong">
+              Org enrichment
+            </Link>
+            , and each session's Org enrichment card.
           </p>
         </div>
       )}
@@ -576,7 +600,7 @@ function CloudAccountCard({
         </div>
       )}
 
-      <CloudPreferences settings={settings} orgEnrolled={orgEnrolled} />
+      <CloudPreferences settings={settings} orgEnrolled={orgEnrolled} lockedTitle={lockedTitle} />
     </div>
   );
 }
@@ -715,6 +739,7 @@ function CloudEnableCard({
   data,
   signedIn,
   actionsAvailable,
+  lockedTitle,
   orgEnrolled,
   orgLabel,
   onChanged,
@@ -722,6 +747,8 @@ function CloudEnableCard({
   data: CloudStatusWithDigestPlan | null;
   signedIn: boolean;
   actionsAvailable: boolean;
+  /** Set when the organization pinned this section read-only (G11). */
+  lockedTitle?: string;
   orgEnrolled: boolean;
   orgLabel: string;
   onChanged: () => void;
@@ -809,9 +836,11 @@ function CloudEnableCard({
   }
 
   const disclosure = data?.disclosure ?? "";
-  const disabledTitle = !actionsAvailable
-    ? "Available when the dashboard runs under `observer start`; otherwise run `observer cloud enable` / `observer cloud disable` in a terminal."
-    : undefined;
+  const disabledTitle =
+    lockedTitle ??
+    (!actionsAvailable
+      ? "Available when the dashboard runs under `observer start`; otherwise run `observer cloud enable` / `observer cloud disable` in a terminal."
+      : undefined);
 
   if (isOn) {
     const wantsExcerpts = draftExcerpts;
@@ -851,6 +880,7 @@ function CloudEnableCard({
           variant="primary"
           className="mt-3"
           disabled={busy || !actionsAvailable || evidenceInvalid}
+          title={disabledTitle}
           onClick={() => void doEnable(draftExcerpts, draftBackground)}
         >
           {busy ? "Saving…" : "Save enrichment settings"}
@@ -914,14 +944,14 @@ function CloudEnableCard({
         <EnableSwitchRow
           on={draftExcerpts}
           onChange={setDraftExcerpts}
-          disabled={busy}
+          disabled={busy || !!lockedTitle}
           label={CLOUD_ENABLE_SWITCH2_LABEL}
           description={CLOUD_ENABLE_SWITCH2_DESC}
         />
         <EnableSwitchRow
           on={draftBackground}
           onChange={setDraftBackground}
-          disabled={busy}
+          disabled={busy || !!lockedTitle}
           label={CLOUD_ENABLE_SWITCH3_LABEL}
           description={CLOUD_ENABLE_SWITCH3_DESC}
         />
@@ -959,7 +989,15 @@ function CloudEnableCard({
 // nothing when the action routes aren't wired (actionsAvailable false) — the
 // hooks below still run every render (React rules of hooks); only the
 // endpoint they hit changes to `null` (useApi no-ops on a null path).
-function CloudConsentGrantsCard({ actionsAvailable }: { actionsAvailable: boolean }) {
+function CloudConsentGrantsCard({
+  actionsAvailable,
+  lockedTitle,
+}: {
+  actionsAvailable: boolean;
+  /** Set when the organization pinned this section read-only (G11): the
+   *  receipts stay listed, the grant/revoke controls render disabled. */
+  lockedTitle?: string;
+}) {
   const grants = useApi<CloudGrantsResponse>(
     actionsAvailable ? "/api/cloud/consent/grants" : null,
     undefined,
@@ -1114,7 +1152,8 @@ function CloudConsentGrantsCard({ actionsAvailable }: { actionsAvailable: boolea
                         size="sm"
                         variant={armed ? "danger" : "secondary"}
                         onClick={() => onRevokeClick(g.purpose)}
-                        disabled={isBusy}
+                        disabled={isBusy || !!lockedTitle}
+                        title={lockedTitle}
                       >
                         {isBusy
                           ? "Working…"
@@ -1131,7 +1170,8 @@ function CloudConsentGrantsCard({ actionsAvailable }: { actionsAvailable: boolea
                       size="sm"
                       variant="soft"
                       onClick={() => void runAction(g.purpose, "grant")}
-                      disabled={isBusy}
+                      disabled={isBusy || !!lockedTitle}
+                      title={lockedTitle}
                     >
                       {isBusy ? "Working…" : `Grant ${label}`}
                     </Button>
@@ -1161,9 +1201,12 @@ function CloudConsentGrantsCard({ actionsAvailable }: { actionsAvailable: boolea
 // hosted account intact and only forgetting the local sign-in + node state.
 function CloudDeleteAccountCard({
   actionsAvailable,
+  lockedTitle,
   onDeleted,
 }: {
   actionsAvailable: boolean;
+  /** Set when the organization pinned this section read-only (G11). */
+  lockedTitle?: string;
   onDeleted: () => void;
 }) {
   const [localOnly, setLocalOnly] = useState(false);
@@ -1234,7 +1277,8 @@ function CloudDeleteAccountCard({
             setLocalOnly(ev.target.checked);
             setArmed(false);
           }}
-          className="h-3.5 w-3.5 rounded-1 border-line-2"
+          disabled={!!lockedTitle}
+          className="h-3.5 w-3.5 rounded-1 border-line-2 disabled:cursor-not-allowed"
         />
         Only clear this device (keep the hosted account)
       </label>
@@ -1244,7 +1288,8 @@ function CloudDeleteAccountCard({
         <Button
           variant="danger"
           onClick={() => void run()}
-          disabled={busy}
+          disabled={busy || !!lockedTitle}
+          title={lockedTitle}
         >
           {busy
             ? "Working…"
@@ -1340,21 +1385,13 @@ function useCloudConfigForm(): CloudConfigForm {
     setSaving(true);
     setSaveError(null);
     try {
-      const res = await fetchJSON<{ saved: boolean; restart_required: boolean }>(
-        "/api/config/section/cloud",
-        undefined,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            BaseURL: form.BaseURL,
-            AutoSync: form.AutoSync,
-            AutoSyncIntervalMinutes: Number(form.AutoSyncIntervalMinutes) || 0,
-            AutoEnrich: form.AutoEnrich,
-            WorkOSClientID: form.WorkOSClientID,
-          }),
-        },
-      );
+      const res = await saveConfigSection("cloud", {
+        BaseURL: form.BaseURL,
+        AutoSync: form.AutoSync,
+        AutoSyncIntervalMinutes: Number(form.AutoSyncIntervalMinutes) || 0,
+        AutoEnrich: form.AutoEnrich,
+        WorkOSClientID: form.WorkOSClientID,
+      });
       if (!res.saved) {
         setSaveError("Save was not confirmed by the server.");
         return;
@@ -1398,18 +1435,28 @@ function useCloudConfigForm(): CloudConfigForm {
 function CloudPreferences({
   settings,
   orgEnrolled,
+  lockedTitle,
 }: {
   settings: CloudConfigForm;
   orgEnrolled?: boolean;
+  /** Set when the organization pinned this section read-only (G11). */
+  lockedTitle?: string;
 }) {
   const { form, update, save, dirty, saving, saveError } = settings;
+  const locked = !!lockedTitle;
   return (
     <div className="mt-4 border-t border-line-2 pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-fg-3">
           Cloud preferences
         </div>
-        <Button size="sm" variant="secondary" onClick={() => void save()} disabled={!dirty || saving}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => void save()}
+          disabled={!dirty || saving || locked}
+          title={lockedTitle}
+        >
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
@@ -1425,6 +1472,7 @@ function CloudPreferences({
           <Toggle
             on={form.AutoSync}
             onChange={(next) => update("AutoSync", next)}
+            disabled={locked}
             label={<span>Sync automatically</span>}
           />
           <div className="text-[10.5px] text-fg-4">
@@ -1439,9 +1487,10 @@ function CloudPreferences({
               step={1}
               value={form.AutoSyncIntervalMinutes}
               onChange={(ev) => update("AutoSyncIntervalMinutes", Number(ev.target.value))}
+              disabled={locked}
               mono
               label="Interval (minutes)"
-              help="0 = built-in default (60); otherwise at least 5."
+              help="0 = built-in default (15); otherwise at least 5."
             />
           )}
         </div>
@@ -1467,7 +1516,8 @@ function CloudPreferences({
 // preferences — compiled-in defaults in a shipped build; exposed only for
 // staging/self-host (schema prominence = expert). Editing here dirties the
 // same [cloud] form the preferences footer saves.
-function CloudAdvancedSettings({ settings }: { settings: CloudConfigForm }) {
+function CloudAdvancedSettings({ settings, lockedTitle }: { settings: CloudConfigForm; lockedTitle?: string }) {
+  const locked = !!lockedTitle;
   const { form, update, save, dirty, saving, saveError, loading, error, denied, deniedPermission } =
     settings;
   return (
@@ -1500,6 +1550,7 @@ function CloudAdvancedSettings({ settings }: { settings: CloudConfigForm }) {
               type="text"
               value={form.WorkOSClientID}
               onChange={(ev) => update("WorkOSClientID", ev.target.value)}
+              disabled={locked}
               placeholder="client_01…"
               spellCheck={false}
               mono
@@ -1516,6 +1567,7 @@ function CloudAdvancedSettings({ settings }: { settings: CloudConfigForm }) {
               type="url"
               value={form.BaseURL}
               onChange={(ev) => update("BaseURL", ev.target.value)}
+              disabled={locked}
               placeholder="https://cloud.superbased.app"
               spellCheck={false}
               mono
@@ -1534,7 +1586,13 @@ function CloudAdvancedSettings({ settings }: { settings: CloudConfigForm }) {
               <span className="font-mono text-fg-3">{form.LoginPort || 9797}</span> - file-only
               (edit config.toml directly); it must match the redirect URI registered in WorkOS.
             </div>
-            <Button size="sm" variant="secondary" onClick={() => void save()} disabled={!dirty || saving}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void save()}
+              disabled={!dirty || saving || locked}
+              title={lockedTitle}
+            >
               {saving ? "Saving…" : "Save"}
             </Button>
           </div>
@@ -1565,13 +1623,9 @@ function StatusBody({ data }: { data: CloudStatusWithDigestPlan }) {
         </p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-[11.5px] text-fg-3">
           <li>
-            Sign in above, then enrich a session from its detail panel or with the{" "}
-            <code className="rounded-1 border border-line-3 bg-bg-3 px-1 py-0.5 font-mono text-[11px] text-fg-1">
-              observer cloud
-            </code>{" "}
-            CLI: <span className="font-mono">preview</span>,{" "}
-            <span className="font-mono">consent</span>,{" "}
-            <span className="font-mono">sync</span>.
+            Sign in above, then enrich a session from its detail panel (it previews exactly
+            what would be sent and asks for consent). Standing consent lives under Advanced,
+            Consent grants; Sync now on the Cloud account card sends and pulls.
           </li>
           <li>{data.descriptor}</li>
         </ul>
@@ -1610,7 +1664,7 @@ function StatusBody({ data }: { data: CloudStatusWithDigestPlan }) {
           <div className="mt-0.5 text-[10.5px] text-fg-3">
             {data.has_synced
               ? "A result pull has advanced the cursor at least once."
-              : "No results pulled yet (run `observer cloud sync`)."}
+              : "No results pulled yet. Sync now on the Cloud account card above pulls them."}
           </div>
         </div>
 

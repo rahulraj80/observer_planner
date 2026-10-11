@@ -48,7 +48,8 @@
 #                 label on staging, PRODUCTION on prod — cosmetic; what makes
 #                 it actually production is the Modified Abuse Monitoring
 #                 approval + real ContentLogging attestation, gap 5.1) + a
-#                 `luna` Global Standard deployment placeholder
+#                 Luna (GPT-6 Luna, deployment `gpt-6-luna`) Global Standard
+#                 deployment placeholder
 #   2 identities  sbci-api, sbci-worker (user-assigned managed identities,
 #                 least-privilege role assignments per contract §2, incl. the
 #                 custom "Cloudintel Canary Reader" role — see
@@ -244,8 +245,15 @@ PG_ADMIN_JOB_NAME="${PG_ADMIN_JOB_NAME:-${SBCI_ENV}-sbci-pgsql}"
 PG_ADMIN_JOB_IMAGE="${PG_ADMIN_JOB_IMAGE:-docker.io/library/postgres:16-alpine}"
 PG_ADMIN_JOB_CONTAINER_NAME="${PG_ADMIN_JOB_CONTAINER_NAME:-pgsql}"
 
-# GPT-5.6 Luna identifiers — the operator sets the real values (README).
-LUNA_DEPLOYMENT_NAME="luna"
+# GPT-6 Luna identifiers (operator ruling D-299, 2026-10-05: GPT-6 Luna is the
+# enrichment model for every plan); the operator sets the real model
+# name/version (README); nothing real is invented here. The DEPLOYMENT name
+# defaults to `gpt-6-luna` because it must equal route_registry.deployment of
+# migration 0041's `session_enrichment.gpt-6-luna.v1` route (the binding call
+# does not set the deployment), and it follows the estates' own model-named
+# convention (`gpt-5.6-luna`, `gpt-5.6-sol`) instead of the old literal `luna`
+# that `status` could never find.
+LUNA_DEPLOYMENT_NAME="${LUNA_DEPLOYMENT_NAME:-gpt-6-luna}"
 LUNA_MODEL_NAME="${LUNA_MODEL_NAME:-REPLACE_WITH_REAL_LUNA_MODEL_NAME}"
 LUNA_MODEL_VERSION="${LUNA_MODEL_VERSION:-REPLACE_WITH_REAL_LUNA_MODEL_VERSION}"
 LUNA_MODEL_FORMAT="${LUNA_MODEL_FORMAT:-OpenAI}"

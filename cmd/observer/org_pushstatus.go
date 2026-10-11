@@ -10,18 +10,18 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
-// eligibleTotal sums the post-cursor (push-eligible) row counts across
-// the five pushable tables.
-func eligibleTotal(cur, maxIDs store.PushCursor) int64 {
-	return (maxIDs.Sessions - cur.Sessions) +
-		(maxIDs.Actions - cur.Actions) +
-		(maxIDs.APITurns - cur.APITurns) +
-		(maxIDs.TokenUsage - cur.TokenUsage) +
-		(maxIDs.GuardEvents - cur.GuardEvents)
+// eligibleTotal sums the per-table push-eligible row COUNTS
+// (store.PushEligibleCounts) across the five pushable tables. It used to
+// subtract the cursor from each table's max id, which went negative when
+// the sessions cursor sat above MAX(rowid) (T-373).
+func eligibleTotal(eligible store.PushCursor) int64 {
+	return eligible.Sessions + eligible.Actions + eligible.APITurns +
+		eligible.TokenUsage + eligible.GuardEvents
 }
 
 // historicalTotal sums all captured rows across the pushable tables.
@@ -41,12 +41,39 @@ func pushEligibilityReason(eligible, historical int64, lastPush *store.PushLogEn
 	}
 	switch {
 	case historical == 0:
-		return "no captured activity yet — run an agent session (through the proxy or any watched tool) to create rows."
+		return "no captured activity yet - run an agent session (through the proxy or any watched tool) to create rows."
 	case lastPush != nil:
-		return fmt.Sprintf("cursor is up to date — nothing new since the last push (%s). New activity ships on the next loop.", lastPush.PushedAt)
+		return fmt.Sprintf("cursor is up to date - nothing new since the last push (%s). New activity ships on the next loop.", pushStampLocal(lastPush.PushedAt, time.Local))
 	default:
-		return fmt.Sprintf("all %d historical row(s) predate enrolment — the cursor is seeded at the high-water mark at enrol time so only POST-enrolment activity ships. Start a fresh agent session, or run `observer org backfill --all --confirm` to share the history.", historical)
+		return fmt.Sprintf("all %d historical row(s) predate enrolment - the cursor is seeded at the high-water mark at enrol time so only POST-enrolment activity ships. Start a fresh agent session, or run `observer org backfill --all --confirm` to share the history.", historical)
 	}
+}
+
+// pushStampLocal renders an org_push_log timestamp (SQLite datetime('now'):
+// UTC with no zone) in loc with the zone named, so neither the CLI nor the
+// dashboard (a Local-only route, so the same machine and timezone) shows a
+// UTC wall-clock time that reads as local. Anything it cannot parse passes
+// through unchanged.
+func pushStampLocal(s string, loc *time.Location) string {
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.UTC)
+	if err != nil || loc == nil {
+		return s
+	}
+	return t.In(loc).Format("2006-01-02 15:04 MST")
+}
+
+// configuredPushInterval is the push ceiling this machine's config asks for,
+// in seconds: [org_client].push_interval_seconds, or the release default the
+// push loop itself falls back to (config.DefaultPushIntervalSeconds) when it
+// is unset or not positive. `observer org push-status` and Settings >
+// Enrolment both show it (T-642); before that the CLI fell back to a stale
+// 900 s the loop never used. A managed organization can lower the live
+// ceiling further through signed node governance.
+func configuredPushInterval(c config.OrgClientConfig) int {
+	if c.PushIntervalSeconds > 0 {
+		return c.PushIntervalSeconds
+	}
+	return config.DefaultPushIntervalSeconds
 }
 
 // newOrgPushStatusCmd implements `observer org push-status` — a single
@@ -71,7 +98,7 @@ func newOrgPushStatusCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if !st.Enrolled {
-				fmt.Fprintln(out, "Not enrolled — push is inactive. Run `observer enroll <url> <token>`.")
+				fmt.Fprintln(out, "Not enrolled - push is inactive. Run `observer enroll <url> <token>`.")
 				return nil
 			}
 
@@ -92,10 +119,7 @@ func newOrgPushStatusCmd() *cobra.Command {
 				fmt.Fprintf(out, "Auto-push loop:    running (%d daemon(s))\n", len(locks))
 			}
 
-			interval := b.cfg.OrgClient.PushIntervalSeconds
-			if interval <= 0 {
-				interval = 900
-			}
+			interval := configuredPushInterval(b.cfg.OrgClient)
 			fmt.Fprintf(out, "Push interval:     %ds\n", interval)
 
 			cur, err := b.store.LoadPushCursor(cmd.Context())
@@ -106,14 +130,18 @@ func newOrgPushStatusCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("current max ids: %w", err)
 			}
-			eligible := eligibleTotal(cur, maxIDs)
+			counts, err := b.store.PushEligibleCounts(cmd.Context(), cur)
+			if err != nil {
+				return fmt.Errorf("eligible counts: %w", err)
+			}
+			eligible := eligibleTotal(counts)
 			fmt.Fprintf(out, "Eligible rows:     %d\n", eligible)
 
 			if st.LastPush == nil {
 				fmt.Fprintln(out, "Last attempt:      (none yet)")
 			} else {
 				lp := st.LastPush
-				fmt.Fprintf(out, "Last attempt:      %s — %s, %d rows%s\n",
+				fmt.Fprintf(out, "Last attempt:      %s - %s, %d rows%s\n",
 					lp.PushedAt, lp.Status, lp.RowCount, errSuffix(lp.Error))
 			}
 			fmt.Fprintf(out, "Next attempt:      %s\n", nextAttempt(running, st.LastPush, interval))
@@ -124,7 +152,7 @@ func newOrgPushStatusCmd() *cobra.Command {
 			// it from a 'failed' row in the history.
 			if p := st.PushPaused; p != nil {
 				fmt.Fprintln(out)
-				fmt.Fprintln(out, "PUSHES PAUSED — the composed rollup is larger than the accepted push limit,")
+				fmt.Fprintln(out, "PUSHES PAUSED - the composed rollup is larger than the accepted push limit,")
 				fmt.Fprintln(out, "so no telemetry is reaching the org server right now.")
 				fmt.Fprintf(out, "  Resumes:  %s\n", p.Until.Local().Format(time.RFC3339))
 				if p.Reason != "" {
@@ -153,7 +181,7 @@ func newOrgPushStatusCmd() *cobra.Command {
 // "within Ns of daemon start" hint when no push has happened yet.
 func nextAttempt(running bool, lastPush *store.PushLogEntry, intervalSec int) string {
 	if !running {
-		return "n/a — auto-push loop not running"
+		return "n/a - auto-push loop not running"
 	}
 	if lastPush == nil {
 		return fmt.Sprintf("within %ds of daemon start (no push yet)", intervalSec)

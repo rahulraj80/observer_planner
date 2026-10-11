@@ -42,7 +42,7 @@ func newCommandCodeCmd() *cobra.Command {
 		Aliases: []string{"commandcode"},
 		Short:   "Launch Command Code; with --continue-from, seed a handover as its initial message",
 		Long: "Wraps Command Code (`commandcode`, npm package `command-code`).\n" +
-			"This launcher is NON-PROXIED — Command Code's API-URL knob points at\n" +
+			"This launcher is NON-PROXIED - Command Code's API-URL knob points at\n" +
 			"its own closed gateway, so there is no Anthropic/OpenAI-shaped lane\n" +
 			"to redirect. Token capture happens via observer's local command-code\n" +
 			"adapter (per-message usage envelope in the session JSONL).\n\n" +
@@ -111,7 +111,7 @@ func newCommandCodeCmd() *cobra.Command {
 				// the continued work. Fail fast, before the handoff render
 				// (the goose --no-session precedent).
 				if forwardedFlagConflict(args, "--no-session") {
-					err := fmt.Errorf("--continue-from opens a session-persisted seeded run, but you forwarded --no-session — drop it (observer's command-code adapter captures from the on-disk session JSONL)")
+					err := fmt.Errorf("--continue-from opens a session-persisted seeded run, but you forwarded --no-session - drop it (observer's command-code adapter captures from the on-disk session JSONL)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer command-code: %v\n", err)
 					return err
 				}
@@ -121,7 +121,7 @@ func newCommandCodeCmd() *cobra.Command {
 				// positional injection kinds, so this flag case is the
 				// launcher's own guard (the goose --no-session shape).
 				if argsContainHeadlessFlag(args, "-p", "--print") {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the headless -p/--print one-shot — drop it (or run the handover through `commandcode -p` yourself)")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the headless -p/--print one-shot - drop it (or run the handover through `commandcode -p` yourself)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer command-code: %v\n", err)
 					return err
 				}
@@ -137,7 +137,7 @@ func newCommandCodeCmd() *cobra.Command {
 				// that owns the case — the droid `exec` precedent. Fail fast,
 				// before the (comparatively expensive) handoff render.
 				if verb, bad := commandCodeHeadlessScan.leadingVerb(args); bad {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the management subcommand %q, which prints and exits — drop it, or run `commandcode %s` yourself", verb, verb)
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE Command Code session, but you forwarded the management subcommand %q, which prints and exits - drop it, or run `commandcode %s` yourself", verb, verb)
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer command-code: %v\n", err)
 					return err
 				}

@@ -225,7 +225,7 @@ func registerResumeFlag(cmd *cobra.Command, tool string) *string {
 	resume := new(string)
 	if capab, _ := integration.For(tool); capab.Resume.Kind == integration.ResumeNative {
 		cmd.Flags().StringVar(resume, "resume", "",
-			"Resume a CLOSED session by its id: reattaches the tool's REAL prior conversation via its native resume mechanism — NOT a distilled fork. Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
+			"Resume a CLOSED session by its id: reattaches the tool's REAL prior conversation via its native resume mechanism - NOT a distilled fork. Mutually exclusive with --continue-from/--carry/--from-message/--from-time. Combine with --attach to resume into a daemon-owned session the dashboard can join. See docs/plans/session-attach-design-2026-07-19.md.")
 	}
 	return resume
 }
@@ -251,7 +251,7 @@ func resumeAttachPassthrough(resume string) []string {
 func rejectIncompatibleResumeFlags(label, continueFrom, carry string, fromMessage int, fromTime string) error {
 	switch {
 	case continueFrom != "":
-		return fmt.Errorf("observer %s: --resume (native, reattaches the REAL session) is mutually exclusive with --continue-from (distilled fork into a NEW session) — pick one", label)
+		return fmt.Errorf("observer %s: --resume (native, reattaches the REAL session) is mutually exclusive with --continue-from (distilled fork into a NEW session) - pick one", label)
 	case carry != "":
 		return fmt.Errorf("observer %s: --carry only applies to --continue-from and cannot be combined with --resume", label)
 	case fromMessage != 0:
@@ -316,7 +316,7 @@ func applyLauncherResume(s launcherResumeSpec) (args []string, release func(), o
 	announceOOBSession(s.id)
 	out := injectNativeResume(s.verb, s.id, s.args)
 	fmt.Fprintf(s.stderr,
-		"observer %s: native resume — reattaching session %s (real transcript, not a fork)\n",
+		"observer %s: native resume - reattaching session %s (real transcript, not a fork)\n",
 		s.label, s.id)
 	return out, rel, true, nil
 }

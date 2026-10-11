@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import clsx from "clsx";
 import {
   useFilters,
   windowLabel,
@@ -9,19 +8,21 @@ import {
   type Window,
 } from "@/lib/filters";
 import { useApi } from "@/lib/useApi";
-import type { ToolsResponse, ProjectsResponse } from "@/lib/types";
+import type { CostSummary, ToolsResponse, ProjectsResponse } from "@/lib/types";
 import { toolMeta } from "@/lib/tools";
-import { filterScopeFor, ignoredFilters } from "@/lib/filterScope";
+import { barNoteFilters, filterScopeFor, ignoredFiltersNote } from "@/lib/filterScope";
 import {
   ComboChip,
   type ComboOption,
   DateRangePopover,
   Icon,
+  ModelFilterChip,
   ToolDot,
   Tooltip,
 } from "./primitives";
+import { SearchChip } from "@shared/primitives";
 import { HelpInd } from "./HelpInd";
-import { Box, Clock, Folder, Search } from "lucide-react";
+import { Box, Clock, Folder } from "lucide-react";
 
 const WINDOW_OPTIONS: ComboOption[] = [
   { value: "1h", label: "1 hr", searchable: "1 hr hour sub-day" },
@@ -41,13 +42,16 @@ export function FilterBar({
 }: {
   onOpenPalette: () => void;
 }) {
-  const { win, customRange, tool, setTool, project, setProject, query } =
+  const { win, customRange, tool, setTool, project, setProject, model, setModel, query } =
     useFilters();
-  // Route-aware: only the filters the current page actually reads are shown
-  // (lib/filterScope.ts). Search opens the global palette, so it stays.
-  const { pathname } = useLocation();
-  const scope = filterScopeFor(pathname);
-  const ignored = ignoredFilters(scope, { tool, project });
+  // Route-aware: the window / tool / project chips show only where the page
+  // reads them (lib/filterScope.ts, tab-aware). The Model chip is the one
+  // overarching filter (D-323): always in the bar, disabled where the page
+  // cannot filter by model, and the note says so. Search opens the global
+  // palette, so it stays.
+  const { pathname, search } = useLocation();
+  const scope = filterScopeFor(pathname, search);
+  const ignored = barNoteFilters(scope, { tool, project, model });
 
   // /api/tools is the source of truth for which tools have data in
   // the active window (mirrors the legacy dashboard's behaviour). Neither
@@ -58,6 +62,18 @@ export function FilterBar({
     [win, customRange],
   );
   const projects = useApi<ProjectsResponse>(scope.project ? "/api/projects" : null);
+  // The models seen under the current selection (the per-model cost rollup
+  // for the window AND the chosen tool / project, never the model filter
+  // itself): the Model picker lists only what the rest of the bar leaves in
+  // view. A chosen model that falls outside a new tool / project selection
+  // stays chosen and is marked "no data in this selection" (ModelSelect).
+  const toolArg = scope.tool && tool !== "all" ? tool : undefined;
+  const projectArg = scope.project && project !== "all" ? project : undefined;
+  const models = useApi<CostSummary>(
+    scope.model ? "/api/models" : null,
+    { ...windowParams(win, customRange), tool: toolArg, project: projectArg },
+    [win, customRange, toolArg, projectArg],
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2 gap-y-2 border-b border-line-1 bg-bg-1 px-3 py-2 lg:h-[var(--filterbar-h)] lg:flex-nowrap lg:gap-3 lg:px-5 lg:py-0">
@@ -79,15 +95,21 @@ export function FilterBar({
         />
       )}
 
-      <SearchTrigger query={query} onOpen={onOpenPalette} />
+      <ModelSelect
+        value={model}
+        onChange={setModel}
+        rows={models.data?.rows ?? []}
+        loaded={scope.model && models.data != null && !models.loading}
+        disabled={!scope.model}
+      />
 
-      {/* A tool / project filter that is set but not read here is still
-          applied on the pages that read it; say so rather than hide it. */}
+      <SearchChip query={query} onOpen={onOpenPalette} />
+
+      {/* A tool / project / model filter that is set but not read here is
+          still applied on the pages that read it; say so rather than hide it.
+          The always-present Model chip is named here whenever it is disabled. */}
       {ignored.length > 0 && (
-        <span className="text-[11px] text-fg-3">
-          {ignored.length === 2 ? "Tool and project filters" : ignored[0] === "tool" ? "The tool filter" : "The project filter"}{" "}
-          {ignored.length === 2 ? "do" : "does"} not apply to this page
-        </span>
+        <span className="text-[11px] text-fg-3">{ignoredFiltersNote(ignored)}</span>
       )}
 
       {/* Spacer pushes the loading note to the right on desktop; on
@@ -95,57 +117,9 @@ export function FilterBar({
           below lg (the wrapped controls flow left-to-right instead). */}
       <div className="hidden flex-1 lg:block" />
       <span className="text-[11px] text-fg-3">
-        {tools.loading || projects.loading ? "loading filters…" : null}
+        {tools.loading || projects.loading || models.loading ? "loading filters…" : null}
       </span>
     </div>
-  );
-}
-
-// SearchTrigger — button-chip that opens the ⌘K palette. Mirrors
-// design/shell.jsx:168-172. When a global query is set, the chip
-// shows it (truncated) so the user has visible feedback that a
-// search is in effect. The ⌘K shortcut is wired in App.tsx so it
-// works from anywhere, not just FilterBar mount.
-function SearchTrigger({
-  query,
-  onOpen,
-}: {
-  query: string;
-  onOpen: () => void;
-}) {
-  const trimmed = query.trim();
-  return (
-    <Tooltip
-      content={
-        <>
-          Open command palette <kbd>⌘K</kbd> - search pages, sessions, actions
-        </>
-      }
-      maxWidth={320}
-    >
-    <button
-      type="button"
-      onClick={onOpen}
-      className={clsx(
-        "flex h-7 items-center gap-1.5 rounded-2 border bg-bg-2 px-2 text-[11px] transition-colors",
-        trimmed
-          ? "border-accent/50 text-fg-1"
-          : "border-line-2 text-fg-3 hover:bg-bg-3 hover:text-fg-1",
-      )}
-    >
-      <Icon icon={Search} size={11} />
-      {trimmed ? (
-        <span className="max-w-[180px] truncate font-mono text-[11px] text-fg-0">
-          {trimmed}
-        </span>
-      ) : (
-        <span>Search anything…</span>
-      )}
-      <kbd className="ml-0.5 rounded-1 border border-line-3 bg-bg-3 px-1 py-px font-mono text-[9.5px] text-fg-3">
-        ⌘K
-      </kbd>
-    </button>
-    </Tooltip>
   );
 }
 
@@ -320,6 +294,29 @@ function ProjectSelect({
         );
       }}
     />
+  );
+}
+
+// ModelSelect is the Model chip: the shared ModelFilterChip (one control for
+// the node and org dashboards) plus this bar's help indicator.
+function ModelSelect({
+  value,
+  onChange,
+  rows,
+  loaded,
+  disabled,
+}: {
+  value: string;
+  onChange: (s: string) => void;
+  rows: { key: string; turn_count: number }[];
+  loaded: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1" data-tour="model-filter">
+      <ModelFilterChip value={value} onChange={onChange} rows={rows} loaded={loaded} disabled={disabled} />
+      <HelpInd id="filter.model" />
+    </div>
   );
 }
 

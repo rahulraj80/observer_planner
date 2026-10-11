@@ -86,7 +86,7 @@ var leaseRulesCommon = []leaseRule{
 // The local controller is therefore never evicted by a remote in this table.
 var leaseRules = append(
 	append([]leaseRule{}, leaseRulesCommon...),
-	leaseRule{RequesterRemote, HolderLocal, Outcome{ActionRefuse, false, "held locally — remote takeover disabled"}},
+	leaseRule{RequesterRemote, HolderLocal, Outcome{ActionRefuse, false, "held locally - remote takeover disabled"}},
 	leaseRule{RequesterRemote, HolderRemote, Outcome{ActionRefuse, false, "already held by another remote writer"}},
 )
 

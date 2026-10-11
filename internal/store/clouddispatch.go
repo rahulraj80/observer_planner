@@ -46,7 +46,7 @@ import (
 // a receipt that is no longer live at the exact terms the caller named. The
 // caller must not dispatch; the receipt was revoked, superseded, expired, or
 // its generation moved between prepare and attempt.
-var ErrCloudDispatchRefused = errors.New("store: dispatch refused — the consent receipt no longer authorizes this send at these terms")
+var ErrCloudDispatchRefused = errors.New("store: dispatch refused - the consent receipt no longer authorizes this send at these terms")
 
 // CloudDispatchLeaseRequest names the exact terms a lease is requested at.
 type CloudDispatchLeaseRequest struct {

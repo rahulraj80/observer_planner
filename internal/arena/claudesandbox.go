@@ -49,12 +49,12 @@ func prepareClaudeSandbox(runDir, slot, workspaceRoot string) (string, error) {
 		if ferr != nil {
 			return "", fmt.Errorf("arena.prepareClaudeSandbox: %w", ferr)
 		}
-		if werr := os.WriteFile(filepath.Join(cfgDir, "settings.json"), filtered, 0o600); werr != nil {
+		if werr := os.WriteFile(filepath.Join(cfgDir, "settings.json"), filtered, 0o600); werr != nil { //nolint:gosec // G703: copies the operator's own settings into the arena's private config dir
 			return "", fmt.Errorf("arena.prepareClaudeSandbox: %w", werr)
 		}
 	}
 	if creds, err := os.ReadFile(filepath.Join(home, ".claude", credentialsFileName)); err == nil {
-		if werr := os.WriteFile(filepath.Join(cfgDir, credentialsFileName), creds, 0o600); werr != nil {
+		if werr := os.WriteFile(filepath.Join(cfgDir, credentialsFileName), creds, 0o600); werr != nil { //nolint:gosec // G703: copies the operator's own settings into the arena's private config dir
 			return "", fmt.Errorf("arena.prepareClaudeSandbox: %w", werr)
 		}
 	}

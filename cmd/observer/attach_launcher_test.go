@@ -108,7 +108,9 @@ func TestLauncherAttachFallsThroughWhenNotTTY(t *testing.T) {
 // TestRegisterAttachFlagsGroundedOnly pins that --attach/--no-attach are
 // registered ONLY for a tool whose registry row grounds an Attach capability
 // (capability dispatch, never a tool-name branch): present for a grounded tool
-// (opencode, one of the fan-out rows), absent for an ungrounded one (aider).
+// (opencode, one of the fan-out rows), absent for an ungrounded one
+// (deepseek, a web-UI tool with no launcher; aider was the example until it
+// gained a launcher on 2026-10-03).
 func TestRegisterAttachFlagsGroundedOnly(t *testing.T) {
 	grounded := &cobra.Command{Use: "opencode"}
 	registerAttachFlags(grounded, "opencode")
@@ -116,8 +118,8 @@ func TestRegisterAttachFlagsGroundedOnly(t *testing.T) {
 		t.Error("a grounded tool must register --attach and --no-attach")
 	}
 
-	ungrounded := &cobra.Command{Use: "aider"}
-	registerAttachFlags(ungrounded, "aider")
+	ungrounded := &cobra.Command{Use: "deepseek"}
+	registerAttachFlags(ungrounded, "deepseek")
 	if ungrounded.Flags().Lookup("attach") != nil || ungrounded.Flags().Lookup("no-attach") != nil {
 		t.Error("an ungrounded tool must NOT register --attach/--no-attach")
 	}

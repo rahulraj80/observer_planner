@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.message": "VerifiedOfficial",
+    "error.type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "7d2d4af40a6e666a6436617157c11dbeac1d7d86426c49237594b3aab0cb1c26",
+  "http": {
+    "method": "GET",
+    "path": "/v1/credits",
+    "status": 401
+  },
+  "notes": "The documented error object with the 401 authentication_error row; the message is synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "Charm Hyper API Credits (docs/api/credits.html), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "583502b6030b0d97a25b1815f3bcfd274c606a286c01d32763492d847007cfb1",
+  "source_url": "https://hyper.charm.land/docs/api/credits.html",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "charm.hyper.credits_api"
+}

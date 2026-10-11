@@ -234,7 +234,7 @@ func TestHandleProjectsSpendMatchesCostEngine(t *testing.T) {
 		t.Fatalf("project %d absent from /api/projects rows: %+v", projectID, resp.Rows)
 	}
 	if listUSD != detail.Spend.TotalUSD {
-		t.Errorf("list spend_usd_30d = %v, detail Spend.TotalUSD = %v — list and detail must agree", listUSD, detail.Spend.TotalUSD)
+		t.Errorf("list spend_usd_30d = %v, detail Spend.TotalUSD = %v - list and detail must agree", listUSD, detail.Spend.TotalUSD)
 	}
 }
 

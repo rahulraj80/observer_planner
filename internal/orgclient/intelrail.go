@@ -114,6 +114,9 @@ type IntelFetchOutcome struct {
 	// simply NOT cached (fail-open: the node renders no enrichment for that
 	// session); it is never partially stored and never silently truncated.
 	DeadLettered int
+	// Cleared is the number of cached rows a verified purge-tombstone set
+	// removed this cycle.
+	Cleared int
 	// NextCursor is the server's continuation cursor after this cycle (the
 	// node's new `since`); empty when nothing new was returned.
 	NextCursor string
@@ -142,9 +145,10 @@ const (
 	IntelFetchChannelOff = "channel_off"
 	// IntelFetchMalformed — a 200 body arrived but did not decode.
 	IntelFetchMalformed = "malformed"
-	// IntelFetchIdentityChanged — the enrolment's org id changed while the
-	// request was in flight, so the page belongs to an enrolment that is no
-	// longer current. The page is DISCARDED (never cached, cursor not advanced)
+	// IntelFetchIdentityChanged — the enrolment (org, subject, enrolment time
+	// or bearer) changed, or the rail closed, while the request was in flight,
+	// so the page belongs to an enrolment that is no longer current. The
+	// page is DISCARDED (never cached, cursor not advanced)
 	// — a response from an obsolete enrolment is refused (finding 6).
 	IntelFetchIdentityChanged = "identity_changed"
 )
@@ -170,10 +174,15 @@ func (c *Client) intelRailEnabled() bool {
 // needs. It is resolved in ONE place (resolveIntelRailIdentity) so the fetch
 // path carries the rail's logic rather than six credential branches.
 type intelRailIdentity struct {
-	OrgID     string
-	ServerURL string
-	Bearer    string
-	SignKey   ed25519.PrivateKey
+	OrgID string
+	// UserID is the enrolment subject (the tombstone floor is kept per subject).
+	UserID string
+	// EnrolledAt marks the enrolment instance: a leave and a re-enrolment with
+	// the SAME org write a new one (review M3-09).
+	EnrolledAt string
+	ServerURL  string
+	Bearer     string
+	SignKey    ed25519.PrivateKey
 }
 
 // resolveIntelRailIdentity loads the live enrolment and both credentials.
@@ -202,11 +211,19 @@ func (c *Client) resolveIntelRailIdentity(ctx context.Context) (intelRailIdentit
 	if err != nil {
 		return intelRailIdentity{}, fmt.Errorf("orgclient.FetchIntelResults: signing key: %w", err)
 	}
+	// A store that hands back an empty bearer or a malformed key (a partly
+	// cleared keychain) is "not enrolled" for the rail: ed25519.Sign panics on
+	// a key of the wrong length, and the consent report runs this on demand.
+	if bearer == "" || len(signKey) != ed25519.PrivateKeySize {
+		return intelRailIdentity{}, ErrNotEnrolled
+	}
 	return intelRailIdentity{
-		OrgID:     enr.OrgID,
-		ServerURL: enr.OrgServerURL,
-		Bearer:    bearer,
-		SignKey:   signKey,
+		OrgID:      enr.OrgID,
+		UserID:     enr.UserID,
+		EnrolledAt: enr.EnrolledAt,
+		ServerURL:  enr.OrgServerURL,
+		Bearer:     bearer,
+		SignKey:    signKey,
 	}, nil
 }
 
@@ -245,7 +262,7 @@ func (c *Client) intelNonOKOutcome(state string, code int) (IntelFetchOutcome, e
 		// Pre-feature server, or the feature is off for this org. NEVER clears
 		// the cache; logged at most once per daemon lifetime.
 		if !c.intelNotSupportedLogged {
-			c.logger.Info("org intelligence rail not supported by the org server (404) — keeping any cached results")
+			c.logger.Info("org intelligence rail not supported by the org server (404) - keeping any cached results")
 			c.intelNotSupportedLogged = true
 		}
 		return IntelFetchOutcome{State: state}, nil
@@ -270,6 +287,12 @@ func (c *Client) FetchIntelResults(ctx context.Context) (IntelFetchOutcome, erro
 	if err != nil {
 		return IntelFetchOutcome{State: IntelFetchNotEnrolled}, err
 	}
+	// A server that answers 404 (rail not offered) is re-asked on a doubling
+	// interval rather than every cycle (railbackoff.go). The skipped cycle
+	// reports the same not_supported state the 404 produced; nothing clears.
+	if c.intelNotFound.Skip(time.Now()) {
+		return IntelFetchOutcome{State: IntelFetchNotSupported}, nil
+	}
 	bearer, signKey := ident.Bearer, ident.SignKey
 
 	// Bind the cursor and cache to THIS enrolment's org id. If the live
@@ -284,6 +307,7 @@ func (c *Client) FetchIntelResults(ctx context.Context) (IntelFetchOutcome, erro
 		// against: session ids are client-chosen, so a strike from org A must
 		// never count against a same-id row from org B.
 		c.intelRejects = nil
+		c.intelTombstoneApplied = ""
 		if derr := c.store.DeleteForeignOrgIntelResults(ctx, boundOrgID); derr != nil {
 			c.logger.Warn("org intelligence cache: dropping foreign-org rows failed", "err", derr)
 		}
@@ -311,6 +335,14 @@ func (c *Client) FetchIntelResults(ctx context.Context) (IntelFetchOutcome, erro
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set(orgcontract.HeaderTimestamp, strconv.FormatInt(ts, 10))
 	req.Header.Set(orgcontract.HeaderAgentSignature, base64.RawURLEncoding.EncodeToString(sig))
+	// The tombstone cursor this node last applied (review C156-28): the server
+	// pages the purge backlog from it. Unsigned on purpose; the set that comes
+	// back is signed and checked against the same floor.
+	if floor, ferr := c.store.OrgIntelTombstoneFloor(ctx, boundOrgID, ident.UserID); ferr != nil {
+		c.logger.Debug("org intelligence: reading the tombstone floor failed", "err", ferr)
+	} else if floor != "" {
+		req.Header.Set(orgcontract.HeaderIntelTombstonesAfter, floor)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	c.noteRenewalFromResponse(RenewalPathOther, resp, err)
@@ -318,9 +350,11 @@ func (c *Client) FetchIntelResults(ctx context.Context) (IntelFetchOutcome, erro
 		return IntelFetchOutcome{State: IntelFetchUnreachable}, fmt.Errorf("orgclient.FetchIntelResults: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	status := c.railStatus(intelResultsRail, resp) // an older server's page answers as 404 (railreply.go)
+	c.intelNotFound.Observe(status == http.StatusNotFound, time.Now(), c.pushInterval())
 
-	if state := classifyIntelStatus(resp.StatusCode); state != IntelFetchOK {
-		return c.intelNonOKOutcome(state, resp.StatusCode)
+	if state := classifyIntelStatus(status); state != IntelFetchOK {
+		return c.intelNonOKOutcome(state, status)
 	}
 
 	var page orgcontract.IntelResultsResponse
@@ -329,16 +363,33 @@ func (c *Client) FetchIntelResults(ctx context.Context) (IntelFetchOutcome, erro
 	}
 
 	// Refuse a response from an obsolete enrolment (finding 6): if the live
-	// enrolment changed org while the request was in flight, this page belongs
-	// to an enrolment that is no longer current. Discard it without caching or
-	// advancing the cursor.
+	// enrolment changed while the request was in flight (any part of its
+	// identity, not only the org: review M3-09), or the rail closed, this page
+	// belongs to an enrolment that is no longer current. Discard it without
+	// caching or advancing the cursor.
 	cur, cerr := c.store.LoadEnrolment(ctx)
 	if cerr != nil {
 		return IntelFetchOutcome{State: IntelFetchUnreachable}, fmt.Errorf("orgclient.FetchIntelResults: re-check enrolment: %w", cerr)
 	}
-	if cur == nil || cur.OrgID != boundOrgID {
+	if !c.intelRailStillBound(cur, ident) {
 		c.logger.Warn("org intelligence results discarded: enrolment identity changed in flight")
 		return IntelFetchOutcome{State: IntelFetchIdentityChanged}, nil
+	}
+
+	// Purges first (parity follow-up ruling 1): a VERIFIED tombstone set clears
+	// the cached results of the sessions the org purged, before this page's
+	// rows land (a purged session's rows are never on a page; a later
+	// Re-enrich's rows carry higher job ids and survive the clear). A set that
+	// does not verify clears nothing.
+	cleared := 0
+	if page.Tombstones != nil {
+		n, terr := c.applyIntelTombstones(ctx, boundOrgID, cur.UserID, page.Tombstones)
+		if terr != nil {
+			c.logger.Warn("org intelligence purge tombstones not applied; keeping the cache", "err", terr)
+		} else if n > 0 {
+			c.logger.Info("org intelligence cache cleared for purged sessions", "rows", n)
+		}
+		cleared = n
 	}
 
 	applied := 0
@@ -391,7 +442,7 @@ func (c *Client) FetchIntelResults(ctx context.Context) (IntelFetchOutcome, erro
 			if v.DeadLetter {
 				delete(c.intelRejects, key)
 				deadLettered++
-				c.logger.Warn("org intelligence result dead-lettered after repeated rejection — skipping it so the rail can advance",
+				c.logger.Warn("org intelligence result dead-lettered after repeated rejection - skipping it so the rail can advance",
 					"session_id", row.SessionID, "job_id", row.JobID, "attempts", v.Attempts, "err", uerr)
 				continue
 			}
@@ -429,5 +480,23 @@ func (c *Client) FetchIntelResults(ctx context.Context) (IntelFetchOutcome, erro
 	if advanced {
 		nextCursor = page.NextCursor
 	}
-	return IntelFetchOutcome{State: IntelFetchOK, Applied: applied, DeadLettered: deadLettered, NextCursor: nextCursor}, nil
+	return IntelFetchOutcome{State: IntelFetchOK, Applied: applied, DeadLettered: deadLettered, Cleared: cleared, NextCursor: nextCursor}, nil
+}
+
+// intelRailStillBound reports whether a page fetched under bound may still
+// land (review M3-09). Comparing the org id alone let a page in flight across
+// a leave and a SAME-org re-enrolment (another member, or a consent that was
+// withdrawn and re-given) be cached under the new enrolment. The page lands
+// only when the rail's gate (which carries the local opt-in and, on an
+// individual node, the active consent) is still open and the enrolment is the
+// same instance: org, subject, enrolment time and bearer all unchanged.
+func (c *Client) intelRailStillBound(cur *store.Enrolment, bound intelRailIdentity) bool {
+	if cur == nil || !c.intelRailEnabled() {
+		return false
+	}
+	if cur.OrgID != bound.OrgID || cur.UserID != bound.UserID || cur.EnrolledAt != bound.EnrolledAt {
+		return false
+	}
+	bearer, err := c.bearers.LoadBearer()
+	return err == nil && bearer == bound.Bearer
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/guardfallback"
 	"github.com/marmutapp/superbased-observer/internal/policy"
 )
 
@@ -64,6 +65,17 @@ type policyFile struct {
 	// for every other layer, enforced in parsePolicyFile); the caller
 	// unions it into the per-project engine's Config.Disabled.
 	disable []string
+	// fallbacks is the org layer's `[fallbacks]` table (internal/
+	// guardfallback, D-221): the organization's choice of what an invalid
+	// user policy and a missing sandbox degrade to. Only the ORG layer may
+	// carry it (every other layer refuses the key); the zero value is the
+	// all-defaults set.
+	fallbacks guardfallback.Fallbacks
+	// fallbackProblems are entries of that table this binary could not
+	// honour (an unknown key or value). The authoring gate (Lint) refuses
+	// them; the consumer gate notes them and keeps the default for the
+	// key, because a newer server may know a value this agent does not.
+	fallbackProblems []string
 }
 
 // rawOverride is a parsed [[override]] entry, kept pre-merge so the
@@ -81,7 +93,17 @@ type rawOverride struct {
 	// elsewhere with a load issue, and `observer guard lint` reports
 	// the same issue against a user/project file.
 	Overridable bool
-	Layer       string
+	// EnforceOff is set when the row writes `enforce = false`
+	// EXPLICITLY (an absent key leaves it false). It caps the rule at
+	// FLAG on every seam, tool and prompt (D-030; the operator ruling of
+	// 2026-10-02 made the policy form's "Enforce (block/hold, not just
+	// flag)" checkbox, when OFF, mean exactly this; Sol A2-06 carried it
+	// past the org prompt lanes). merge.go decides per layer: the org and
+	// the user / trusted-project layers may write it (not on an
+	// org-floored or integrity rule below the org); the agent-writable
+	// in-repo project layer may not, because it relaxes.
+	EnforceOff bool
+	Layer      string
 }
 
 // tomlPolicyFile is the on-disk shape.
@@ -94,6 +116,10 @@ type tomlPolicyFile struct {
 	// trusted_project (the "disable is a config posture" split for the
 	// user + in-repo-project layers is preserved as an unknown-key error).
 	Disable []string `toml:"disable"`
+	// Fallbacks is the org-only `[fallbacks]` table (guardfallback.Table).
+	// Decoded as a loose map so a key from a newer server is a fallback
+	// problem (noted on the org layer) rather than a decoder error.
+	Fallbacks map[string]any `toml:"fallbacks"`
 }
 
 // tomlRule is one [[rule]] entry (§4.4).
@@ -111,7 +137,9 @@ type tomlRule struct {
 type tomlOverride struct {
 	Rule     string `toml:"rule"`
 	Decision string `toml:"decision"`
-	Enforce  bool   `toml:"enforce"`
+	// Enforce is a pointer so an explicit `enforce = false` is told
+	// apart from an absent key (rawOverride.EnforceOff).
+	Enforce *bool `toml:"enforce"`
 	// Overridable is org-layer-only (see rawOverride.Overridable).
 	Overridable bool `toml:"overridable"`
 }
@@ -197,6 +225,9 @@ func Lint(raw []byte, layer string) []string {
 	// keeps the publish gate byte-identical to the pre-tolerance
 	// behaviour: the same wording, the same single-problem result, and
 	// "fix the typo first" before any downstream problem it caused.
+	if len(pf.fallbackProblems) > 0 {
+		return append([]string(nil), pf.fallbackProblems...)
+	}
 	if len(pf.notes) > 0 {
 		return []string{unknownKeysProblem(pf.notes)}
 	}
@@ -375,6 +406,16 @@ func parsePolicyFile(raw []byte, layer string) (*policyFile, error) {
 	}
 
 	pf := &policyFile{layer: layer, notes: ignored, disable: f.Disable}
+	// `[fallbacks]` is the organization's setting (D-221): only a signed org
+	// bundle may carry it. On a user / project file it stays an unknown-key
+	// error, so a developer can never author the org's choice locally.
+	if meta.IsDefined(guardfallback.Table) {
+		if layer != layerOrg {
+			return nil, errors.New(unknownKeysProblem([]string{guardfallback.Table}))
+		}
+		pf.fallbacks, pf.fallbackProblems = guardfallback.Decode(f.Fallbacks)
+		pf.notes = append(pf.notes, pf.fallbackProblems...)
+	}
 	seen := map[string]bool{}
 	for i := range f.Rule {
 		r, err := compileRule(&f.Rule[i], layer)
@@ -391,7 +432,13 @@ func parsePolicyFile(raw []byte, layer string) (*policyFile, error) {
 		if ov.Rule == "" {
 			return nil, fmt.Errorf("override %d: missing rule id", i+1)
 		}
-		ro := rawOverride{RuleID: ov.Rule, Enforced: ov.Enforce, Overridable: ov.Overridable, Layer: layer}
+		ro := rawOverride{
+			RuleID:      ov.Rule,
+			Enforced:    ov.Enforce != nil && *ov.Enforce,
+			EnforceOff:  ov.Enforce != nil && !*ov.Enforce,
+			Overridable: ov.Overridable,
+			Layer:       layer,
+		}
 		if ov.Decision != "" {
 			d, err := policy.ParseDecision(ov.Decision)
 			if err != nil {
@@ -447,7 +494,7 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		return zero, fmt.Errorf("missing id")
 	}
 	if policy.IsBuiltinRuleID(tr.ID) {
-		return zero, fmt.Errorf("id collides with built-in rule %s — use [[override]] to tune built-ins", tr.ID)
+		return zero, fmt.Errorf("id collides with built-in rule %s - use [[override]] to tune built-ins", tr.ID)
 	}
 	if tr.Category == "" {
 		return zero, fmt.Errorf("missing category (destructive|boundary|secrets|exfil|posture|mcp|taint|budget|anomaly)")
@@ -470,10 +517,10 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		return zero, err
 	}
 	if cmdScoped == nil && evScoped == nil {
-		return zero, fmt.Errorf("no matchers — the rule would never fire")
+		return zero, fmt.Errorf("no matchers - the rule would never fire")
 	}
 	if cmdScoped != nil && evScoped != nil {
-		return zero, fmt.Errorf("cannot mix command-scoped (command_regex/command_base/arg_contains) and event-scoped matchers in one rule — split into two rules")
+		return zero, fmt.Errorf("cannot mix command-scoped (command_regex/command_base/arg_contains) and event-scoped matchers in one rule - split into two rules")
 	}
 
 	// applies_to: explicit list wins; otherwise the matchers imply it.
@@ -488,7 +535,7 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		}
 	}
 	if len(kinds) == 0 {
-		return zero, fmt.Errorf("cannot infer applies_to from the matchers — set applies_to explicitly")
+		return zero, fmt.Errorf("cannot infer applies_to from the matchers - set applies_to explicitly")
 	}
 
 	// Observe = min(decision, flag): observe mode records, never
@@ -509,6 +556,9 @@ func compileRule(tr *tomlRule, layer string) (policy.Rule, error) {
 		Doc:       layer + " rule " + tr.ID,
 		Source:    layer,
 		Enforced:  tr.Enforce,
+		// A spend matcher reads the guard's budget stamp, so the engine must
+		// keep the budget lookup on for this rule (T-418).
+		ReadsBudgetStamps: tr.Match.SessionCostUSDGt > 0,
 	}
 	r.Match = evScoped
 	r.MatchCmd = cmdScoped
@@ -680,7 +730,7 @@ func compileEvConds(m *tomlMatchers) (conds []evCond, kinds []policy.EventKind, 
 		limit := m.SessionCostUSDGt
 		conds = append(conds, func(ctx *policy.MatchContext) (bool, string) {
 			if ctx.Event.SessionCostUSD > limit {
-				return true, fmt.Sprintf("session spend $%.2f > $%.2f", ctx.Event.SessionCostUSD, limit)
+				return true, policy.SessionCostConditionReason(ctx.Event.SessionCostUSD, limit)
 			}
 			return false, ""
 		})

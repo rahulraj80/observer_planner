@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedSDK",
+    "data[]": "VerifiedSDK",
+    "first_id": "Inferred",
+    "has_more": "VerifiedSDK",
+    "last_id": "VerifiedSDK",
+    "object": "Inferred"
+  },
+  "fixture_sha256": "81a90e78d977134613596712eda02fe251daa86c02176e5a63344e1c78aec3c8",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/audit_logs",
+    "query": {
+      "after": "audit_log-SYNTH0003"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized empty last page.",
+  "scenario": "empty_page",
+  "sdk_or_spec_version_or_commit": "openai-python main, fetched 2026-10-07",
+  "source_kind": "sdk_type",
+  "source_sha256": "f882605ca289330eeba085f5384c0774cedd30158bba60629028d787c05bb0db",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/admin/organization/audit_log_list_response.py",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.audit_logs"
+}

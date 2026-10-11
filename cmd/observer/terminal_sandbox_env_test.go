@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals_sandbox && !sbo_omit_terminals
+
 package main
 
 import (
@@ -39,7 +41,7 @@ func TestLaunchChildEnvRefusesSpoofedSandboxMarker(t *testing.T) {
 	out := launchChildEnv(req, "auth-token")
 	for _, kv := range out {
 		if strings.HasPrefix(kv, sandbox.EnvMarker+"=") {
-			t.Fatalf("non-sandboxed child env leaked %q — spoofed marker not stripped", kv)
+			t.Fatalf("non-sandboxed child env leaked %q - spoofed marker not stripped", kv)
 		}
 	}
 }

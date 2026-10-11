@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   ChartShell,
   EmptyState,
-  HeroStat,
+  StatCard,
   InlineLoading,
   Icon,
   ModelId,
@@ -11,18 +11,33 @@ import {
   PageHeader,
   Pill,
   SegmentedControl,
-  Stagger,
+  StatStrip,
+  ComboChip,
+  TabPanel,
+  TabStrip,
   Table,
+  useTabVisited,
+  type TabDef,
 } from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { ROUTING_TABS, defaultTab, type RoutingTab } from "@/lib/nodePageTabs";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/DataTable";
 import { HelpInd, TitleWithHelp } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { markRestartPending } from "@/lib/restartPending";
 import { useFilters, windowDaysApprox, windowLabel } from "@/lib/filters";
-import { fmtClock, fmtDateTime, fmtInt, fmtUSD } from "@/lib/format";
+import { costLabel, dollarsShown, fmtClock, fmtDateTime, fmtInt, fmtUSD, maskDollarAmounts, withoutDollars } from "@/lib/format";
+
+// Routing's economics (realized / would-have savings, $ per decision, cache
+// forfeits, per-move estimates) are decision-time dollar estimates with no
+// token form: in the org's token-usage view (format.ts cost affordances) they
+// drop, and the decision counts, reroutes and quality evidence stay.
 import { Check, X } from "lucide-react";
 import { VocabPill } from "@shared/lib/vocabPill";
 import { POLICY_MODE } from "@/lib/vocabTones";
@@ -420,7 +435,15 @@ export function RoutingPage() {
   // Global window (TopBar) drives every windowed query; "all" maps to
   // the same far horizon as sibling pages. Reason/applied stay local —
   // they're feed filters, not data scopes.
-  const { win, customRange } = useFilters();
+  const { win, customRange, model, tool, project } = useFilters();
+  // The global Model, Tool and Project filters narrow the decision feed,
+  // savings, shadow grading and the health board (a decision is in a model
+  // when it asked for it OR ran on it; it is in a tool / project when its
+  // session ran there, T-521). The policy / tier map / simulate / apply views
+  // are configuration, not data, and stay whole.
+  const modelArg = model !== "all" ? model : undefined;
+  const toolArg = tool !== "all" ? tool : undefined;
+  const projectArg = project !== "all" ? project : undefined;
   // Routing surfaces are day-centric: the savings / shadow / apply
   // endpoints replay over a whole-day count and echo `window_days`,
   // so sub-day / custom windows round up to a day count here rather
@@ -449,25 +472,66 @@ export function RoutingPage() {
   };
   const [expanded, setExpanded] = useState<number | null>(null);
 
+  // Page tabs (platform tabs plan §2.2): Overview / Decisions / Policy /
+  // Shadow & apply, lazy per tab and kept mounted. Status + savings feed
+  // the strip (every tab); each tab's own reads run on its first open.
+  const pageTabs = usePageTabs("routing", ROUTING_TABS);
+  const [tab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const overviewVisited = useTabVisited<RoutingTab>("overview", tab);
+  const decisionsVisited = useTabVisited<RoutingTab>("decisions", tab);
+  const policyVisited = useTabVisited<RoutingTab>("policy", tab);
+  const shadowVisited = useTabVisited<RoutingTab>("shadow", tab);
+
   const status = useApi<RoutingStatus>("/api/routing/status");
-  const savings = useApi<SavingsResponse>("/api/routing/savings", { days }, [days]);
-  const decisions = useApi<DecisionsResponse>(
-    "/api/routing/decisions",
-    { days, limit: 50, reason: reason || undefined, applied: appliedFilter || undefined },
-    [days, reason, appliedFilter],
+  const savings = useApi<SavingsResponse>(
+    "/api/routing/savings",
+    { days, model: modelArg, tool: toolArg, project: projectArg },
+    [days, modelArg, toolArg, projectArg],
   );
-  const tiers = useApi<TiersResponse>("/api/routing/tiers");
-  const health = useApi<HealthResponse>("/api/routing/health");
-  const shadow = useApi<ShadowReport>("/api/routing/shadow", { days }, [days]);
+  const decisions = useApi<DecisionsResponse>(
+    decisionsVisited ? "/api/routing/decisions" : null,
+    {
+      days,
+      limit: 50,
+      reason: reason || undefined,
+      applied: appliedFilter || undefined,
+      model: modelArg,
+      tool: toolArg,
+      project: projectArg,
+    },
+    [days, reason, appliedFilter, modelArg, toolArg, projectArg],
+  );
+  const tiers = useApi<TiersResponse>(policyVisited ? "/api/routing/tiers" : null);
+  const health = useApi<HealthResponse>(
+    overviewVisited ? "/api/routing/health" : null,
+    { model: modelArg, tool: toolArg, project: projectArg },
+    [modelArg, toolArg, projectArg],
+  );
+  const shadow = useApi<ShadowReport>(
+    shadowVisited ? "/api/routing/shadow" : null,
+    { days, model: modelArg, tool: toolArg, project: projectArg },
+    [days, modelArg, toolArg, projectArg],
+  );
 
   const st = status.data;
   const sv = savings.data;
   const sh = shadow.data;
   const decisionRows = decisions.data?.decisions ?? [];
 
+  // Badges only from the page-level status read: Policy carries a dot when
+  // the active policy has lint errors (danger) or warnings / demoted rules.
+  const lintErrors = (st?.lint ?? []).some((l) => l.severity === "error");
+  const policyNotice = (st?.lint ?? []).length > 0 || Object.keys(st?.demoted_rules ?? {}).length > 0;
+  const tabDefs: TabDef<RoutingTab>[] = pageTabs.ids.map((id) => ({
+    id,
+    label: ROUTING_TABS.labels[id],
+    dot: id === "policy" ? (lintErrors ? "danger" : policyNotice ? "warn" : null) : null,
+  }));
+
   return (
-    <div className="space-y-6 p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
       <PageHeader
+        className="mb-6"
         icon={navIcon("routing")}
         title="Routing"
         helpId="tab.routing"
@@ -482,15 +546,13 @@ export function RoutingPage() {
               </span>
             </span>
           ) : (
-            "Model-routing decisions, savings, and policy transparency"
+            costLabel("Model-routing decisions, savings, and policy transparency", "Model-routing decisions and policy transparency")
           )
         }
       />
 
-      {st && !st.enabled && <RoutingPreviewCard />}
-
-      <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <HeroStat
+      <StatStrip cols={dollarsShown() ? 4 : 2} ariaLabel="Routing summary">
+        <StatCard
           label="Decisions - all time"
           helpId="tile.routing.decisions"
           icon={<MetricIcon metric="routingDecisions" />}
@@ -499,28 +561,32 @@ export function RoutingPage() {
           sub={
             st?.last_decision_at
               ? `last ${fmtDateTime(st.last_decision_at)}`
-              : "none yet - routing is opt-in (Settings → Routing, or the preview above)"
+              : "none yet - routing is opt-in (Settings → Routing, or the preview on Overview)"
           }
         />
-        <HeroStat
-          label={`Realized - ${winLabel}`}
-          icon={<MetricIcon metric="savings" />}
-          helpId="tile.routing.realized"
-          loading={savings.loading}
-          stale={savings.isStale}
-          value={sv ? fmtUSD(sv.realized_usd) : "-"}
-          sub="decision-time estimates on applied rewrites (enforce mode)"
-        />
-        <HeroStat
-          label={`Would-have - ${winLabel}`}
-          icon={<MetricIcon metric="counterfactualSavings" />}
-          helpId="tile.routing.would_have"
-          loading={savings.loading}
-          stale={savings.isStale}
-          value={sv ? fmtUSD(sv.would_have_usd) : "-"}
-          sub="the same estimates on unapplied advise decisions"
-        />
-        <HeroStat
+        {dollarsShown() && (
+          <>
+            <StatCard
+              label={`Realized - ${winLabel}`}
+              icon={<MetricIcon metric="savings" />}
+              helpId="tile.routing.realized"
+              loading={savings.loading}
+              stale={savings.isStale}
+              value={sv ? fmtUSD(sv.realized_usd) : "-"}
+              sub="decision-time estimates on applied rewrites (enforce mode)"
+            />
+            <StatCard
+              label={`Would-have - ${winLabel}`}
+              icon={<MetricIcon metric="counterfactualSavings" />}
+              helpId="tile.routing.would_have"
+              loading={savings.loading}
+              stale={savings.isStale}
+              value={sv ? fmtUSD(sv.would_have_usd) : "-"}
+              sub="the same estimates on unapplied advise decisions"
+            />
+          </>
+        )}
+        <StatCard
           label="Calibration cells"
           icon={<MetricIcon metric="calibrationCells" />}
           helpId="tile.routing.calibration"
@@ -529,15 +595,34 @@ export function RoutingPage() {
           value={st ? fmtInt(st.calibration_rows) : "-"}
           sub={
             <>
-              <code className="rounded-1 bg-bg-3 px-1 font-mono text-[10.5px]">
-                observer model-value --save-calibration
-              </code>{" "}
-              feeds the §R7.2 evidence gate
+              built from your own turns; feeds the §R7.2 evidence gate
+              <CommandJobButton
+                job="calibration"
+                className="mt-1.5"
+                outputLines={2}
+                confirmLabel="Save calibration?"
+                armedNote="Aggregates the last 30 days of your turns into calibration cells. Local only."
+                runningLabel="Saving…"
+                doneText="Calibration saved."
+                onDone={() => status.reload()}
+              >
+                Save calibration now
+              </CommandJobButton>
             </>
           }
         />
-      </Stagger>
+      </StatStrip>
 
+      <TabStrip
+        tabs={tabDefs}
+        value={tab}
+        onChange={setTab}
+        idPrefix="routing"
+        ariaLabel="Routing sections"
+        className="mb-4"
+      />
+
+      <TabPanel id="shadow" active={tab} idPrefix="routing" className="space-y-6">
       <ChartShell
         title={<TitleWithHelp text={`Advise shadow - ${winLabel}`} helpId="chart.routing_shadow" />}
         right={
@@ -550,20 +635,25 @@ export function RoutingPage() {
           ) : null
         }
       >
-        {shadow.loading ? (
+        {shadow.loading || (!shadow.data && !shadow.error) ? (
           <InlineLoading block />
         ) : st && !st.enabled ? (
           <p className="py-2 text-[12px] text-fg-3">
             Routing is off - the shadow accrues once advise mode runs (every advise decision is a recorded
-            counterfactual; requests stay untouched). Preview savings above answers "is it worth enabling?" without
-            turning anything on.
+            counterfactual; requests stay untouched). The savings preview on the Overview tab answers "is it worth
+            enabling?" without turning anything on.
           </p>
         ) : sh ? (
           <>
             <p className="text-[12px] leading-relaxed text-fg-2">
-              {fmtInt(sh.advise_decisions)} advise decisions; {fmtInt(sh.would_reroute)} would have rerouted, saving{" "}
-              <span className="font-semibold text-fg-1">{fmtUSD(sh.would_save_usd)}</span> (net of{" "}
-              {fmtUSD(sh.cache_forfeit_usd)} cache forfeits) with{" "}
+              {fmtInt(sh.advise_decisions)} advise decisions; {fmtInt(sh.would_reroute)} would have rerouted
+              {dollarsShown() && (
+                <>
+                  , saving <span className="font-semibold text-fg-1">{fmtUSD(sh.would_save_usd)}</span> (net of{" "}
+                  {fmtUSD(sh.cache_forfeit_usd)} cache forfeits)
+                </>
+              )}{" "}
+              with{" "}
               <span className="font-semibold text-fg-1">{fmtInt(sh.quality_flags)}</span> quality-flag events (
               {fmtInt(sh.evidence_backed_moves)} moves evidence-backed).
             </p>
@@ -585,7 +675,7 @@ export function RoutingPage() {
             {st?.enabled && st.mode === "advise" && <PromoteControl sh={sh} />}
             {st?.enabled && st.mode === "enforce" && (
               <p className="mt-2 text-[11.5px] text-fg-3">
-                Enforce is live - applied rewrites land in the decisions feed below; realized savings on the tile
+                Enforce is live - applied rewrites land in the Decisions tab's feed; realized savings on the tile
                 above.
               </p>
             )}
@@ -595,7 +685,9 @@ export function RoutingPage() {
       </ChartShell>
 
       <RoutingApplyCard days={days} />
+      </TabPanel>
 
+      <TabPanel id="policy" active={tab} idPrefix="routing" className="space-y-6">
       {st && Object.keys(st.demoted_rules ?? {}).length > 0 && (
         <ChartShell
           title={<TitleWithHelp text="Calibration demotions" helpId="chart.routing_demotions" />}
@@ -613,7 +705,7 @@ export function RoutingPage() {
           <p className="mt-2 text-[11px] leading-snug text-fg-3">
             Demotions are in-memory: a daemon restart clears them and the next calibration pass (hourly) re-detects
             anything still regressing. Affected decisions carry the{" "}
-            <code className="font-mono">calibration_demoted</code> reason code in the feed below.
+            <code className="font-mono">calibration_demoted</code> reason code in the Decisions feed.
           </p>
         </ChartShell>
       )}
@@ -652,182 +744,10 @@ export function RoutingPage() {
       </ChartShell>
 
       <ChartShell
-        title={<TitleWithHelp text="Decisions feed" helpId="chart.routing_decisions" />}
-        right={
-          <div className="flex flex-wrap items-center gap-2">
-            <select value={reason} onChange={(e) => setParam("reason", e.target.value)} className={SELECT_CLASS}>
-              <option value="">all reasons</option>
-              {(decisions.data?.reasons ?? []).map((rc) => (
-                <option key={rc} value={rc} title={REASON_DOCS[rc]}>
-                  {rc}
-                </option>
-              ))}
-            </select>
-            <SegmentedControl<AppliedFilter>
-              size="sm"
-              options={[
-                { value: "", label: "All" },
-                { value: "true", label: "Applied" },
-                { value: "false", label: "Advised" },
-              ]}
-              value={appliedFilter}
-              onChange={(v) => setParam("applied", v)}
-            />
-            <span className="text-[11px] text-fg-3">
-              {decisions.data ? `${fmtInt(decisions.data.total)} decisions ${winLabel}` : ""}
-            </span>
-          </div>
-        }
-      >
-        {decisions.loading ? (
-          <InlineLoading block />
-        ) : decisionRows.length === 0 ? (
-          <EmptyState
-            variant="inline"
-            illustration="inbox"
-            title="No routing decisions in this window"
-            body={
-              <>
-                Routing is opt-in and advise-first - preview the value first (the card above, while routing is
-                off), enable advise via Settings → Routing, route traffic through the proxy, then watch decisions
-                land here (<code className="rounded-1 bg-bg-3 px-1">observer routing advise</code> for the CLI
-                view).
-              </>
-            }
-          />
-        ) : (
-          <Table
-            size="md"
-            minWidth={680}
-            head={
-              <tr>
-                <th className="py-1.5 pr-3 font-medium">When</th>
-                <th className="py-1.5 pr-3 font-medium">Kind</th>
-                <th className="py-1.5 pr-3 font-medium">Route</th>
-                <th className="py-1.5 pr-3 font-medium">Mode</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Est. savings</th>
-                <th className="py-1.5 font-medium">Reasons</th>
-              </tr>
-            }
-          >
-                {decisionRows.map((d) => (
-                  <Fragment key={d.ID}>
-                    <tr
-                      onClick={() => setExpanded(expanded === d.ID ? null : d.ID)}
-                      className="cursor-pointer border-b border-line-1/60"
-                    >
-                      <td className="whitespace-nowrap py-1.5 pr-3 text-fg-3">
-                        {fmtClock(d.Timestamp)}
-                      </td>
-                      <td className="py-1.5 pr-3">
-                        <Pill variant="neutral">{d.TurnKind}</Pill>
-                      </td>
-                      <td className="py-1.5 pr-3 text-[11px] text-fg-2">
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          <ModelId model={d.OriginalModel} className="min-w-0" />
-                          {d.SelectedModel !== d.OriginalModel ? (
-                            <>
-                              <span className="text-fg-3">→</span>
-                              <ModelId model={d.SelectedModel} className="min-w-0" />
-                            </>
-                          ) : null}
-                        </span>
-                      </td>
-                      <td className="py-1.5 pr-3">
-                        {d.Applied ? <Pill variant="warn">applied</Pill> : <Pill variant="info">{d.Mode}</Pill>}
-                      </td>
-                      <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-fg-2">
-                        {fmtUSD(d.EstSavingsUSD)}
-                      </td>
-                      <td className="py-1.5 text-[11px] text-fg-3">{(d.ReasonCodes ?? []).join(", ")}</td>
-                    </tr>
-                    {expanded === d.ID && (
-                      <tr className="border-b border-line-1/60">
-                        <td colSpan={6} className="rounded-1 bg-bg-3 px-3 py-2 text-[11px] leading-relaxed text-fg-2">
-                          <div className="space-y-1.5">
-                            <div>
-                              decision <code className="font-mono">{d.ID}</code> · session{" "}
-                              {d.SessionID ? (
-                                <Link
-                                  to={`/sessions?session=${encodeURIComponent(d.SessionID)}`}
-                                  className="font-mono text-accent hover:underline"
-                                >
-                                  {d.SessionID}
-                                </Link>
-                              ) : (
-                                <code className="font-mono">(none)</code>
-                              )}
-                              {d.APITurnID != null ? (
-                                <>
-                                  {" "}
-                                  · api turn <code className="font-mono">{d.APITurnID}</code>
-                                </>
-                              ) : (
-                                " · turn never landed"
-                              )}
-                              {d.Tool ? ` · ${d.Tool}` : ""}
-                              {d.ProjectRoot ? (
-                                <>
-                                  {" "}
-                                  · <code className="font-mono">{d.ProjectRoot}</code>
-                                </>
-                              ) : null}
-                            </div>
-                            {(d.ReasonCodes ?? []).length > 0 && (
-                              <ul className="space-y-0.5">
-                                {(d.ReasonCodes ?? []).map((rc) => (
-                                  <li key={rc}>
-                                    <code className="font-mono text-fg-1">{rc}</code>
-                                    {REASON_DOCS[rc] ? <span className="text-fg-3"> - {REASON_DOCS[rc]}</span> : null}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            <div>
-                              policy <code className="font-mono">{d.PolicyName}</code> @{" "}
-                              <code className="font-mono">{d.PolicyHash}</code> · economics: est. savings{" "}
-                              <span className="font-semibold text-fg-1">{fmtUSD(d.EstSavingsUSD)}</span> net of cache
-                              forfeit {fmtUSD(d.CacheForfeitUSD)}{" "}
-                              <span className="text-fg-3">
-                                (what abandoning the warm prompt-cache prefix would cost - already deducted;{" "}
-                                {d.EstimateVersion})
-                              </span>
-                            </div>
-                            <div className="text-fg-3">
-                              CLI: <code className="font-mono">observer routing explain {d.ID}</code>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-          </Table>
-        )}
-      </ChartShell>
-
-      <ChartShell title={<TitleWithHelp text={`Savings by tier - ${winLabel}`} helpId="chart.routing_savings" />} sub={sv?.note}>
-        {savings.loading ? (
-          <InlineLoading block />
-        ) : (sv?.by_tier ?? []).length === 0 ? (
-          <div className="py-6 text-center text-[12px] text-fg-3">
-            No graded savings yet - rows appear once decisions land in this window.
-          </div>
-        ) : (
-          <DataTable<SavingsGroup>
-            data={sv?.by_tier ?? []}
-            columns={SAVINGS_COLUMNS}
-            rowKey={(g) => g.key}
-            minWidth={640}
-          />
-        )}
-      </ChartShell>
-
-      <ChartShell
         title={<TitleWithHelp text="Tier map" helpId="chart.routing_tiers" />}
         sub="Pills with counts carry observed calibration evidence (hover for per-kind error rates). Evidence is correlational - deltas act only past the §R7.2 thresholds."
       >
-        {tiers.loading ? (
+        {tiers.loading || (!tiers.data && !tiers.error) ? (
           <InlineLoading block />
         ) : (
           <div className="space-y-2">
@@ -869,12 +789,212 @@ export function RoutingPage() {
           </div>
         )}
       </ChartShell>
+      </TabPanel>
+
+      <TabPanel id="decisions" active={tab} idPrefix="routing" className="space-y-6">
+      <ChartShell
+        title={<TitleWithHelp text="Decisions feed" helpId="chart.routing_decisions" />}
+        right={
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Reason codes are short ids with a long meaning: the meaning
+                rides as the popover row's second line. */}
+            <ComboChip
+              label="Reason"
+              value={reason}
+              onChange={(v) => setParam("reason", v)}
+              placeholder="Filter reasons…"
+              popoverWidth={380}
+              options={[
+                { value: "", label: "all reasons", searchable: "all reasons" },
+                ...(decisions.data?.reasons ?? []).map((rc) => ({
+                  value: rc,
+                  label: <span className="font-mono">{rc}</span>,
+                  detail: REASON_DOCS[rc],
+                  searchable: `${rc} ${REASON_DOCS[rc] ?? ""}`.toLowerCase(),
+                })),
+              ]}
+            />
+            <SegmentedControl<AppliedFilter>
+              size="sm"
+              options={[
+                { value: "", label: "All" },
+                { value: "true", label: "Applied" },
+                { value: "false", label: "Advised" },
+              ]}
+              value={appliedFilter}
+              onChange={(v) => setParam("applied", v)}
+            />
+            <span className="text-[11px] text-fg-3">
+              {decisions.data ? `${fmtInt(decisions.data.total)} decisions ${winLabel}` : ""}
+            </span>
+          </div>
+        }
+      >
+        {decisions.loading || (!decisions.data && !decisions.error) ? (
+          <InlineLoading block />
+        ) : decisionRows.length === 0 ? (
+          <EmptyState
+            variant="inline"
+            illustration="inbox"
+            title="No routing decisions in this window"
+            body={
+              <>
+                Routing is opt-in and advise-first - preview the value first (the Overview tab, while routing is
+                off), enable advise via Settings → Routing, route traffic through the proxy, then watch decisions
+                land here (<code className="rounded-1 bg-bg-3 px-1">observer routing advise</code> for the CLI
+                view).
+              </>
+            }
+          />
+        ) : (
+          <Table
+            size="md"
+            minWidth={680}
+            head={
+              <tr>
+                <th className="py-1.5 pr-3 font-medium">When</th>
+                <th className="py-1.5 pr-3 font-medium">Kind</th>
+                <th className="py-1.5 pr-3 font-medium">Route</th>
+                <th className="py-1.5 pr-3 font-medium">Mode</th>
+                {dollarsShown() && <th className="py-1.5 pr-3 text-right font-medium">Est. savings</th>}
+                <th className="py-1.5 font-medium">Reasons</th>
+              </tr>
+            }
+          >
+                {decisionRows.map((d) => (
+                  <Fragment key={d.ID}>
+                    <tr
+                      onClick={() => setExpanded(expanded === d.ID ? null : d.ID)}
+                      className="cursor-pointer border-b border-line-1/60"
+                    >
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-fg-3">
+                        {fmtClock(d.Timestamp)}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <Pill variant="neutral">{d.TurnKind}</Pill>
+                      </td>
+                      <td className="py-1.5 pr-3 text-[11px] text-fg-2">
+                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                          <ModelId model={d.OriginalModel} className="min-w-0" />
+                          {d.SelectedModel !== d.OriginalModel ? (
+                            <>
+                              <span className="text-fg-3">→</span>
+                              <ModelId model={d.SelectedModel} className="min-w-0" />
+                            </>
+                          ) : null}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        {d.Applied ? <Pill variant="warn">applied</Pill> : <Pill variant="info">{d.Mode}</Pill>}
+                      </td>
+                      {dollarsShown() && (
+                        <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums text-fg-2">
+                          {fmtUSD(d.EstSavingsUSD)}
+                        </td>
+                      )}
+                      <td className="py-1.5 text-[11px] text-fg-3">{(d.ReasonCodes ?? []).join(", ")}</td>
+                    </tr>
+                    {expanded === d.ID && (
+                      <tr className="border-b border-line-1/60">
+                        <td colSpan={dollarsShown() ? 6 : 5} className="rounded-1 bg-bg-3 px-3 py-2 text-[11px] leading-relaxed text-fg-2">
+                          <div className="space-y-1.5">
+                            <div>
+                              decision <code className="font-mono">{d.ID}</code> · session{" "}
+                              {d.SessionID ? (
+                                <Link
+                                  to={`/sessions?session=${encodeURIComponent(d.SessionID)}`}
+                                  className="font-mono text-accent hover:underline"
+                                >
+                                  {d.SessionID}
+                                </Link>
+                              ) : (
+                                <code className="font-mono">(none)</code>
+                              )}
+                              {d.APITurnID != null ? (
+                                <>
+                                  {" "}
+                                  · api turn <code className="font-mono">{d.APITurnID}</code>
+                                </>
+                              ) : (
+                                " · turn never landed"
+                              )}
+                              {d.Tool ? ` · ${d.Tool}` : ""}
+                              {d.ProjectRoot ? (
+                                <>
+                                  {" "}
+                                  · <code className="font-mono">{d.ProjectRoot}</code>
+                                </>
+                              ) : null}
+                            </div>
+                            {(d.ReasonCodes ?? []).length > 0 && (
+                              <ul className="space-y-0.5">
+                                {(d.ReasonCodes ?? []).map((rc) => (
+                                  <li key={rc}>
+                                    <code className="font-mono text-fg-1">{rc}</code>
+                                    {REASON_DOCS[rc] ? <span className="text-fg-3"> - {REASON_DOCS[rc]}</span> : null}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            <div>
+                              policy <code className="font-mono">{d.PolicyName}</code> @{" "}
+                              <code className="font-mono">{d.PolicyHash}</code>
+                              {dollarsShown() && (
+                                <>
+                                  {" "}· economics: est. savings{" "}
+                                  <span className="font-semibold text-fg-1">{fmtUSD(d.EstSavingsUSD)}</span> net of cache
+                                  forfeit {fmtUSD(d.CacheForfeitUSD)}{" "}
+                                  <span className="text-fg-3">
+                                    (what abandoning the warm prompt-cache prefix would cost - already deducted;{" "}
+                                    {d.EstimateVersion})
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            <div className="text-fg-3">
+                              CLI: <code className="font-mono">observer routing explain {d.ID}</code>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+          </Table>
+        )}
+      </ChartShell>
+      </TabPanel>
+
+      <TabPanel id="overview" active={tab} idPrefix="routing" className="space-y-6">
+      {/* Routing off: the content-free preview answers "is it worth
+          enabling?" first. */}
+      {st && !st.enabled && <RoutingPreviewCard />}
+
+      <ChartShell
+        title={<TitleWithHelp text={`${costLabel("Savings by tier", "Decisions by tier")} - ${winLabel}`} helpId="chart.routing_savings" />}
+        sub={sv?.note ? maskDollarAmounts(sv.note) : undefined}
+      >
+        {savings.loading ? (
+          <InlineLoading block />
+        ) : (sv?.by_tier ?? []).length === 0 ? (
+          <div className="py-6 text-center text-[12px] text-fg-3">
+            No graded savings yet - rows appear once decisions land in this window.
+          </div>
+        ) : (
+          <DataTable<SavingsGroup>
+            data={sv?.by_tier ?? []}
+            columns={withoutDollars(SAVINGS_COLUMNS, (c) => c.id === "realized" || c.id === "would_have" || c.id === "per_decision")}
+            rowKey={(g) => g.key}
+            minWidth={640}
+          />
+        )}
+      </ChartShell>
 
       <ChartShell
         title={<TitleWithHelp text="Health board (observed)" helpId="chart.routing_health" />}
         sub="429/5xx rates from the node's own api_turns stream - the observations the §R12.3 circuit breakers act on."
       >
-        {health.loading ? (
+        {health.loading || (!health.data && !health.error) ? (
           <InlineLoading block />
         ) : (health.data?.models ?? []).length === 0 ? (
           <div className="py-6 text-center text-[12px] text-fg-3">no proxied turns observed yet</div>
@@ -887,6 +1007,7 @@ export function RoutingPage() {
           />
         )}
       </ChartShell>
+      </TabPanel>
     </div>
   );
 }
@@ -935,7 +1056,7 @@ function ReadinessLadder({ sh }: { sh: ShadowReport }) {
         sh.quality_flags === 0
           ? "Zero quality flags - every proposed move is evidence-backed"
           : `Quality flags - ${fmtInt(sh.quality_flags)} proposed moves lack parity evidence${flaggedKinds ? ` (${flaggedKinds})` : ""}`,
-      next: "investigate the flagged kinds and grow calibration evidence: observer model-value --save-calibration",
+      next: "investigate the flagged kinds and grow calibration evidence: Save calibration now (the Calibration cells tile)",
     },
   ];
   return (
@@ -975,11 +1096,7 @@ function PromoteControl({ sh }: { sh: ShadowReport }) {
     try {
       const cfg = await fetchJSON<{ config: { Routing: Record<string, unknown> } }>("/api/config");
       const sec = { ...cfg.config.Routing, Enabled: true, Mode: "enforce" };
-      await fetchJSON("/api/config/section/routing", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sec),
-      });
+      await saveConfigSection("routing", sec);
       markRestartPending("routing");
       setSaved(true);
       setConfirming(false);
@@ -1010,7 +1127,8 @@ function PromoteControl({ sh }: { sh: ShadowReport }) {
           <p className="text-fg-2">
             Enforce rewrites the model on proxied requests (same provider shape, fail-open on any internal error).
             The shadow says: {fmtInt(sh.would_reroute)} reroutes would have applied over {sh.window_days} days,
-            saving {fmtUSD(sh.would_save_usd)} net, {fmtInt(sh.quality_flags)} quality flags. You can demote back
+            {dollarsShown() ? `saving ${fmtUSD(sh.would_save_usd)} net, ` : "with "}
+            {fmtInt(sh.quality_flags)} quality flags. You can demote back
             to advise at any time in Settings → Routing.
           </p>
           <div className="mt-2 flex items-center gap-2">
@@ -1444,11 +1562,7 @@ function RoutingPreviewCard() {
       // other file-only shape survive server-side regardless.
       const cfg = await fetchJSON<{ config: { Routing: Record<string, unknown> } }>("/api/config");
       const sec = { ...cfg.config.Routing, Enabled: true, Mode: "advise", Policy: template };
-      await fetchJSON("/api/config/section/routing", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sec),
-      });
+      await saveConfigSection("routing", sec);
       markRestartPending("routing");
       setEnabled(true);
       setConfirming(false);
@@ -1493,9 +1607,15 @@ function RoutingPreviewCard() {
           <p className="text-[12px] leading-relaxed text-fg-2">
             Over the last {result!.window_days} days, the <span className="font-semibold text-fg-1">{rep.policy_name}</span>{" "}
             policy would have rerouted <span className="font-semibold text-fg-1">{fmtInt(rep.would_reroute)}</span> of{" "}
-            {fmtInt(rep.turns_evaluated)} turns, saving an estimated{" "}
-            <span className="font-semibold text-fg-1">{fmtUSD(rep.est_savings_usd)}</span> net (cache forfeits of{" "}
-            {fmtUSD(rep.cache_forfeit_usd)} already deducted), with{" "}
+            {fmtInt(rep.turns_evaluated)} turns
+            {dollarsShown() && (
+              <>
+                , saving an estimated{" "}
+                <span className="font-semibold text-fg-1">{fmtUSD(rep.est_savings_usd)}</span> net (cache forfeits of{" "}
+                {fmtUSD(rep.cache_forfeit_usd)} already deducted)
+              </>
+            )}
+            , with{" "}
             <span className="font-semibold text-fg-1">{fmtInt(rep.quality_risk_flags)}</span> quality-risk flags
             (reroutes lacking parity evidence).
           </p>
@@ -1508,7 +1628,7 @@ function RoutingPreviewCard() {
                   <th className="py-1 pr-4 font-medium">From</th>
                   <th className="py-1 pr-4 font-medium">To</th>
                   <th className="py-1 pr-4 text-right font-medium">Turns</th>
-                  <th className="py-1 text-right font-medium">Est. $</th>
+                  {dollarsShown() && <th className="py-1 text-right font-medium">Est. $</th>}
                 </tr>
               }
             >
@@ -1517,12 +1637,12 @@ function RoutingPreviewCard() {
                       <td className="py-1 pr-4 font-mono text-[11px] text-fg-2">{m.from}</td>
                       <td className="py-1 pr-4 font-mono text-[11px] text-fg-1">{m.to}</td>
                       <td className="py-1 pr-4 text-right tabular-nums text-fg-2">{fmtInt(m.count)}</td>
-                      <td className="py-1 text-right tabular-nums text-fg-2">{fmtUSD(m.est_savings_usd)}</td>
+                      {dollarsShown() && <td className="py-1 text-right tabular-nums text-fg-2">{fmtUSD(m.est_savings_usd)}</td>}
                     </tr>
                   ))}
             </Table>
           )}
-          <p className="text-[11px] leading-snug text-fg-3">{result!.note}</p>
+          <p className="text-[11px] leading-snug text-fg-3">{maskDollarAmounts(result!.note)}</p>
           {enabled ? (
             <Pill variant="warn">saved: advise mode ({template}) - restart the daemon to apply</Pill>
           ) : confirming ? (

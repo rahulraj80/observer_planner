@@ -103,6 +103,14 @@ func Render(in Input, tile DaemonTile, opts RenderOptions) string {
 			if text, ok := renderModelSegment(in); ok {
 				rendered = append(rendered, segment{text: text})
 			}
+		case SegmentBudget:
+			if text, ok := renderBudgetSegment(tile); ok {
+				rendered = append(rendered, segment{text: text})
+			}
+		case SegmentGrants:
+			if text, ok := renderGrantsSegment(tile); ok {
+				rendered = append(rendered, segment{text: text})
+			}
 		}
 	}
 

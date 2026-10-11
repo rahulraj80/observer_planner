@@ -1,0 +1,6036 @@
+{
+ "group": "google",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/google-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "google.apikeys.keys",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.apikeys",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "apikeys.keys.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`apikeys.googleapis.com/v2/projects/P/locations/global/keys` create/list/get/patch/delete/undelete; API + client restrictions",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials, CredentialLifecycle",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/api-keys/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.billing.bq_export_detailed",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.billing",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "BQ"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "same",
+   "lookback_doc": "same",
+   "per_user_doc": "no",
+   "mechanism_doc": "`gcp_billing_export_resource_v1_<ACCOUNT>` (+ resource.name / global_name)",
+   "read_write_doc": "R",
+   "class_doc": "Cost (resource)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/reports/gemini-enterprise-costs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: customer-owned cloud log or warehouse (BigQuery) export",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.billing.bq_export_pricing",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.billing",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "BQ"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`cloud_pricing_export`",
+   "read_write_doc": "R",
+   "class_doc": "Cost (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/reports/gemini-enterprise-costs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: customer-owned cloud log or warehouse (BigQuery) export",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.billing.bq_export_standard",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.billing",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "BigQuery read on dataset"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "BQ"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any billing account"
+   },
+   "freshness_doc": "intra-day, final ~1 d+",
+   "lookback_doc": "from enable (multi-region backfills previous month)",
+   "per_user_doc": "no",
+   "mechanism_doc": "BigQuery `gcp_billing_export_v1_<ACCOUNT>`: `billing_account_id, invoice{month,publisher_type}, cost_type, service{id,description}, sku{id,description}, usage_start_time, usage_end_time, project{id,number,name,ancestry_numbers,ancestors,labels}, labels, system_labels, location, cost, currency, currency_conversion_rate, usage{amount,unit,amount_in_pricing_units,pricing_unit}, credits[], adjustment_info, export_time, tags, cost_at_list, transaction_type, seller_name, price{...}, cost_at_effective_price_default, cost_at_list_consumption_model, consumption_model`. Gemini Enterprise subscription + overage under service \"Vertex AI Search\" (74B1-77CF-C302) / Vertex AI; \"Originating products\" (Antigravity) NOT in BQ schema",
+   "read_write_doc": "R",
+   "class_doc": "Cost, BillingExport (hourly rows)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "credits",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/standard-usage",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/reports/gemini-enterprise-costs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.billing.budgets",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "billing.budgets.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "alerts on ~1 d data",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "`billingbudgets.googleapis.com/v1/billingAccounts/B/budgets` CRUD; threshold rules; Pub/Sub programmatic notifications",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits, SpendAlert (Snapshot + push)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendAlert",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/budget-api-spend-cap",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.billing.reports_originating_product",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.billing",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "billing viewer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "~1 d",
+   "lookback_doc": "billing",
+   "per_user_doc": "no",
+   "mechanism_doc": "Billing Reports UI \"Originating products\" filter (Antigravity rows); not in BQ",
+   "read_write_doc": "UI",
+   "class_doc": "Cost (OrgDay)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/reports/gemini-enterprise-costs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.billing.spend_caps",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`billing.budgets.configureSpendCap` / `billing.resourcebudgets.configureSpendCap`"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "first-party accounts"
+   },
+   "freshness_doc": "not instant",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "same API, `spendCap.inputState` CONFIGURED / AWAITING_NEXT_PERIOD, `outputState` (ENFORCED ...); one project + one service (aiplatform, generativelanguage, run, cloudfunctions); monthly; gross estimated list cost; excludes Gemini Enterprise subscriptions",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits, SpendLimitProject (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Cloud Billing Budget API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.cloudidentity.groups",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.cloudidentity",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Groups Admin / groups scopes"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Cloud Identity / Workspace"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "`cloudidentity.googleapis.com/v1/groups` + `memberships`",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups, GroupMembership",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://cloud.google.com/identity/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.audit_logs",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "scopes": [
+     "https://www.googleapis.com/auth/logging.read"
+    ],
+    "doc": "Google service account JWT bearer token in the egress seam (RFC 7523, token host oauth2.googleapis.com, scope logging.read): client_email as the connection parameter, the PEM private key sealed; the service account needs roles/logging.viewer (and roles/logging.privateLogViewer for Data Access logs) on the project, and Data Access audit logs must be enabled"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "pageToken in the request body, nextPageToken in the response (vendormock next_token family, body spelling)"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "Cloud Logging API read quota (entries.list)"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "Admin Activity 400 d, Data Access 30 d default (generic)",
+   "per_user_doc": "yes (principalEmail, generic audit structure)",
+   "mechanism_doc": "POST /v2/entries:list on logging.googleapis.com with resourceNames [projects/<project_id>], a server-authored filter (the project's cloudaudit.googleapis.com activity and data_access logs, protoPayload.serviceName=\"cloudaicompanion.googleapis.com\", the window), orderBy timestamp asc, pageSize 1000, pageToken; Cloud Audit Logs methods: CodeGenerationService.CompleteCode/GenerateCode, TaskCompletionService.CompleteTask, TextGenerationService.GenerateText, EntitlementService.CheckStatus, CodeRepositoryIndexManagementService, Topic/Message services (22 methods). requestMetadata, request and response never decoded.",
+   "read_write_doc": "R",
+   "class_doc": "Audit, Usage (Event)",
+   "grain_doc": "",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/audit-logging",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://cloud.google.com/logging/docs/reference/v2/rest/v2/entries/list",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://logging.googleapis.com/$discovery/rest?version=v2",
+     "checked_on": "2026-10-08"
+    },
+    {
+     "url": "https://developers.google.com/identity/protocols/oauth2/service-account",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16D, T-713): driver internal/vendorapi/google CodeAssistAudit, the first row of the egress seam's Google token table (scope https://www.googleapis.com/auth/logging.read) and a reviewed POST row (body kind cloud_audit_log_query: the filter is composed in vendorapi from the project id and a closed service table, never by a caller). Conformance against the vendormock mock (the mock token host verifies the RS256 assertion, the API accepts only the minted token). Landed as vendor audit events in namespace google.cloud_audit: the method through a closed 22-row table as the action (another method lands as other with a canary), principalEmail as the actor (a gserviceaccount.com principal is an agent), the resource name as the target, log type, service, status code and monitored resource type as detail. Synthetic only, no vendor response observed. assumption_tested: LogEntry and AuditLog are documented schemas without a cloudaicompanion example. Reach is pull_api: the cloud log is read through the Logging API, not a sink. Secret class reviewed: may_return_secret (request and response payloads can carry prompts and code); closed DTO, never decoded.",
+   "derivation": {
+    "reach_rule": "http (entries.list is an API read)",
+    "build_rule": "lane ENTAPI-L16D: driver internal/vendorapi/google CodeAssistAudit, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Logging v2 discovery document oauth2 scopes"
+   },
+   "status": "synthetic, awaiting live validation",
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "logging.googleapis.com",
+     "port": 443
+    }
+   ],
+   "token_hosts": [
+    {
+     "scheme": "https",
+     "host": "oauth2.googleapis.com",
+     "port": 443
+    }
+   ]
+  },
+  {
+   "id": "google.codeassist.code_repository_indexes",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`.../codeRepositoryIndexes` CRUD; `.../repositoryGroups` CRUD + get/setIamPolicy (code customization, Enterprise)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, Roles (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/api/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.code_tools_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`.../codeToolsSettings` CRUD + bindings; `enabledTool[]{tool, handle, accountConnector, config[], uriOverride}`; consuming product not stated",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (semantics unverified)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/api/reference/rest/v1/projects.locations.codeToolsSettings",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.data_sharing_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`.../dataSharingWithGoogleSettings` CRUD + bindings (fields not fetched)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (fields unverified)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/api/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.gcp_enablement_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`.../geminiGcpEnablementSettings` CRUD + bindings; `disableWebGrounding`, `webGroundingType` (GROUNDING_WITH_GOOGLE_SEARCH / WEB_GROUNDING_FOR_ENTERPRISE), `enableCustomerDataSharing` (\"Not implemented\")",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/api/reference/rest/v1/projects.locations.geminiGcpEnablementSettings",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.individuals_access",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Workspace Service Settings privilege"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Workspace Admin console > Apps > Additional Google Services > Google Cloud Platform > \"Allow access to Code Assist for individuals\" (free tier incl. Gemini CLI and Antigravity)",
+   "read_write_doc": "UI",
+   "class_doc": "AgentCapability (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/codeassist/control-individuals-access",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.license_autoassign",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "console only: auto-assign toggle + inactivity T days (license back on day T+1); console shows last-used time",
+   "read_write_doc": "UI",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/codeassist/manage-licenses",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.license_pool",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "OAuth; `consumerprocurement.licensePools.enumerateLicensedUsers` / `.assign` / `.unassign` (Billing Account Admin or Consumer Procurement Order Admin grants)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "not documented"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Code Assist Standard/Enterprise"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "snapshot",
+   "per_user_doc": "yes (`username`, `assignTime`; NO last-used in API)",
+   "mechanism_doc": "GET/POST `https://cloudcommerceconsumerprocurement.googleapis.com/v1/billingAccounts/B/orders/O/licensePool:enumerateLicensedUsers` / `:assign` / `:unassign` body `{\"usernames\":[...]}`; header `X-Goog-User-Project`",
+   "read_write_doc": "R/W",
+   "class_doc": "Seats, Identity (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/codeassist/manage-licenses",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.log_metadata",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "same"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "bucket retention",
+   "per_user_doc": "yes",
+   "mechanism_doc": "log `%2Fmetadata`: `codeExposure`, `codeAcceptance` (`linesCount`, `commentLinesCount`, `originalRequestId`, `programmingLanguage`), `chatExposure`, `chatAcceptance` (`interactionType`, `linesCount`, `is_agentic`)",
+   "read_write_doc": "R",
+   "class_doc": "LOC, Adoption (Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "event",
+     "unit": "lines",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/log-gemini",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.log_request_response",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`roles/logging.viewer`; enabled via logging_settings"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "entries.list paging, Logging API quotas"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "log bucket retention (generic `_Default` 30 d, configurable)",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Cloud Logging `entries.list`; logs `projects/P/logs/cloudaicompanion.googleapis.com%2Frequest` and `%2Fresponse`; `labels.user_id` (email), `labels.request_id`, `labels.method`, `labels.product`, `jsonPayload.clientName` (`cloudcode_cli` = Gemini CLI agent, `CloudCodeVscode`), `clientVersion`; payload `taskCompletionRequest/Response`, `codeCompletionRequest`",
+   "read_write_doc": "R",
+   "class_doc": "Content (PerCall)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (scope text says IDE only; samples show CLI)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/log-gemini",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.log_sink",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`roles/logging.configWriter`, `roles/logging.bucketWriter`"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "streaming",
+   "lookback_doc": "per destination",
+   "per_user_doc": "as logs",
+   "mechanism_doc": "Log Router sink (Logging API `sinks`) filter `resource.type=\"cloudaicompanion.googleapis.com/Instance\"` to central bucket / Pub/Sub / BigQuery",
+   "read_write_doc": "R/W",
+   "class_doc": "Telemetry (stream)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/configure-logging",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.logging_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`roles/cloudaicompanion.settingsAdmin`"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "immediate (LRO)",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`cloudaicompanion.googleapis.com/v1/projects/P/locations/global/loggingSettings` CRUD + `.../settingBindings` (`target`, `product`); body `log_prompts_and_responses`, `log_metadata`",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, Retention (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/api/reference/rest",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/configure-logging",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.metrics",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`roles/monitoring.viewer`"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Monitoring API quotas"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "DELTA visible within 7200 s; GAUGE within 86400 s",
+   "lookback_doc": "Cloud Monitoring 6 weeks (generic)",
+   "per_user_doc": "NO (aggregate)",
+   "mechanism_doc": "Cloud Monitoring `timeSeries.list` on resource `cloudaicompanion.googleapis.com/Instance`; types `cloudaicompanion.googleapis.com/code_assist/{chat_responses_count, code_lines_accepted_count, code_suggestions_accepted_count, code_suggestions_count, daily_active_user_count, twenty_eight_day_active_user_count}`, `.../usage/{response_count, responses/daily_active_users, responses/seven_day_active_users, responses/twenty_eight_day_active_users}`; labels `client_name` (e.g. geminicli, VSCODE), `programming_language`, `initiation_method`, `method`, `product`",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Adoption, LOC (OrgDay; DELTA hourly, GAUGE daily)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "org_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/monitoring/api/metrics_gcp_c",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.network_domain_restriction",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "customer proxy"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "customer PITM proxy injects `X-GeminiCodeAssist-Allowed-Domains` on `https://cloudcode-pa.googleapis.com`; no console/API (Gemini CLI enterprise doc names `X-GoogApps-Allowed-Domains`)",
+   "read_write_doc": "customer-infra",
+   "class_doc": "Policy / sign-in control",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/codeassist/network-access",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.codeassist.release_channel_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.codeassist",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Ent"
+   },
+   "freshness_doc": "IDE restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`.../releaseChannelSettings` CRUD + settingBindings; `releaseChannel` STABLE / EXPERIMENTAL",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/api/reference/rest/v1/projects.locations.releaseChannelSettings",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.agent_governance",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "discoveryengine"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Gemini Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "v1alpha `engines.assistants.agents` create/deploy/requestAgentReview/rejectAgent/withdrawAgent; `authorizations`; Agent Registry/Gateway (2026-06-25)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Event/Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (NA to our adapters)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.analytics_export",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "discoveryengine.readwrite"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "LRO"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Gemini Enterprise app"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "unknown",
+   "per_user_doc": "unknown",
+   "mechanism_doc": "v1alpha `engines/E/analytics:exportMetrics` -> BigQuery (app analytics)",
+   "read_write_doc": "R",
+   "class_doc": "Usage (OrgDay)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (NA to our adapters)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/reference/rest/v1alpha/projects.locations.collections.engines.analytics/exportMetrics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.audit_logs",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "logging.viewer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Logging API"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "400 d admin / 30 d data",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Cloud Audit Logs serviceName discoveryengine: `LicenseConfigService.Create/Update/Get/Distribute/RetractLicenseConfig`, `UserLicenseService.BatchUpdateUserLicenses`, `ExportUserLicenses`, `AclConfigService.*` ...",
+   "read_write_doc": "R",
+   "class_doc": "Audit (Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/audit-logging",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Cloud Audit Logs",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.billing_license_configs",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "billing + discoveryengine"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "`v1/billingAccounts/B/billingAccountLicenseConfigs:distributeLicenseConfig` / `:retractLicenseConfig` (+ v1alpha get)",
+   "read_write_doc": "W",
+   "class_doc": "Seats (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: documented vendor API named in the mechanism cell",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.businessaicode_audit",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "logging.viewer; Data Access logs must be enabled (inferred)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Logging API"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "Data Access 30 d default",
+   "per_user_doc": "yes (authenticationInfo principal, generic audit structure; body fields not documented)",
+   "mechanism_doc": "Cloud Audit Logs `protoPayload.serviceName=\"businessaicode.googleapis.com\"`, all Data Access: `PredictionService.GenerateContent/StreamGenerateContent`, `FetchQuotaStatus`, `QueryConfig`, `SendTelemetry`, `TelemetryService.SendTelemetry`, `ManagementService.FetchConfig/SelfAssignLicense` (v1alpha/v1beta/v1main); read via Logging `entries.list`",
+   "read_write_doc": "R",
+   "class_doc": "Audit, Usage, Adoption (PerCall Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/docs/codeassist/business-audit-logging",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.devtools_logging",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "logging.viewer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "unknown",
+   "lookback_doc": "unknown",
+   "per_user_doc": "unknown",
+   "mechanism_doc": "prompt/response + metadata logs in the licensed project; log names, schema, retention NOT documented",
+   "read_write_doc": "R",
+   "class_doc": "Content, Telemetry (PerCall)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://antigravity.google/docs/enterprise/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.devtools_metrics",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "agentspaceAdmin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "5 to 15 min",
+   "lookback_doc": "Monitoring default",
+   "per_user_doc": "no",
+   "mechanism_doc": "console dashboard (Preview): active users h/d/w/28d, Total Tokens, Daily Token Usage, Daily API Calls by `error_type`, tool calls (no data); opens in Metrics Explorer but metric types are NOT in the published metric list",
+   "read_write_doc": "R (UI)",
+   "class_doc": "Usage, Adoption (hourly/daily)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/ai-developer-tools-metrics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.devtools_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`roles/discoveryengine.agentspaceAdmin`"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "client session",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "console Gemini Enterprise > Settings > AI developer tools: master toggle (per location), outside-of-file-access policy, terminal auto-execution, sandbox mode, browser access, Allowed URLs, browser JS auto-execution, MCP servers + `local_servers`/`remote_servers` JSON, prompts/responses logging, metadata logging, `/boost`, `/teamwork-preview`, authorized models (Google only). \"None [API] documented.\"",
+   "read_write_doc": "UI",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "NetworkPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/ai-developer-tools-settings",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.license_configs",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "OAuth `cloud-platform`; discoveryengine perms"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Gemini Enterprise Std/Plus/SEM/PAYG"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "snapshot",
+   "per_user_doc": "no",
+   "mechanism_doc": "`discoveryengine.googleapis.com/v1/projects/P/locations/L/licenseConfigs` create/get/list/patch; `licenseCount`, `subscriptionTier`, `state`, `autoRenew`, `startDate`, `endDate`, `subscriptionTerm`, `freeTrial`, `geminiBundle`, `earlyTerminated`, `lastUserUpdateTime`",
+   "read_write_doc": "R/W",
+   "class_doc": "Seats (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/reference/rest/v1/projects.locations.licenseConfigs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.license_usage_stats",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "snapshot",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET `.../userStores/S/licenseConfigsUsageStats` -> `{licenseConfig, usedLicenseCount}`",
+   "read_write_doc": "R",
+   "class_doc": "Seats (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.overage_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "agentspaceAdmin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Std/Plus/SEM, invoiced"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "console Feature usage > Overage toggle per edition; cap is a Cloud Billing spend cap on aiplatform",
+   "read_write_doc": "UI",
+   "class_doc": "Limits (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/configure-overages",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.quota_metrics",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "monitoring.viewer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Monitoring API"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "visible within 150 s",
+   "lookback_doc": "Monitoring default",
+   "per_user_doc": "no (ppu quotas are per-user limits, aggregate series)",
+   "mechanism_doc": "Cloud Monitoring on `discoveryengine.googleapis.com/Location`: `quota/ai_dev_tool_wtu_tier_{business,business_trial,developer_ultra,enterprise_plus,enterprise_standard}_regional/{usage,limit,exceeded}`, `quota/ai_dev_tool_overage_wtu_regional/*`, `quota/ratev2/agentic_wtu_*_ppu_weekly_regional/*` (per-project per-user windowed); label `regional_location`, `limit_name`",
+   "read_write_doc": "R",
+   "class_doc": "Limits, Usage (per project, 60 s samples)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (BETA)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/monitoring/api/metrics_gcp_d_h",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.usage_audit_logs",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "agentspaceAdmin + logging.viewer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Logging API"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Gemini Enterprise app"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "bucket",
+   "per_user_doc": "yes",
+   "mechanism_doc": "logs `discoveryengine.googleapis.com%2Fgemini_enterprise_user_activity`, `...%2Fgen_ai.*`; services Search/Assist/StreamAssist/AnswerQuery/Agent*/...; Antigravity NOT covered",
+   "read_write_doc": "R",
+   "class_doc": "Audit, Content (PerCall)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (NA to our adapters)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/set-up-usage-audit-logs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.usage_spending_page",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "~1 d",
+   "lookback_doc": "30 d",
+   "per_user_doc": "no",
+   "mechanism_doc": "console Usage & Spending billing tab, 30 d, split Gemini Enterprise app / Agent Platform / AI developer tools",
+   "read_write_doc": "UI",
+   "class_doc": "Cost (OrgDay)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/manage-costs-overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.user_licenses",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`discoveryengine.userStores.listUserLicenses`; regional hosts `{us,eu,global}-discoveryengine`"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "pageToken"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "snapshot",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET `v1/projects/P/locations/L/userStores/default_user_store/userLicenses` (pageSize default 100 max 1000, `filter` on `licenseAssignmentState` / `userPrincipal`, `orderBy`); POST `userStores/S:batchUpdateUserLicenses`; v1alpha POST `userLicenses:export` (inline base64 CSV). Fields `userPrincipal`, `userProfile`, `licenseAssignmentState` (ASSIGNED, NO_LICENSE, NO_LICENSE_ATTEMPTED_LOGIN, BLOCKED), `licenseConfig`, `createTime`, `updateTime`, `lastLoginTime`",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Seats, Adoption (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/reference/rest/v1/projects.locations.userStores.userLicenses/list",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.userstore",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`userStores` get/patch (auto-assign-on-first-login likely here; fields not fetched)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (fields unverified)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini/enterprise/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: documented vendor API named in the mechanism cell",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.ge.wif_sign_in",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.ge",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "IAM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "same"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Antigravity \"Advanced WIF Configuration\" string; backed by IAM workforce pools/providers (see google.iam.workforce_pools)",
+   "read_write_doc": "via IAM",
+   "class_doc": "Identity, Credentials",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://antigravity.google/docs/enterprise/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: IAM workforce pools API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.gemini_api.usage_console",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.gemini_api",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "console"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "API key"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "AI Studio usage / rate-limit tier pages for `generativelanguage.googleapis.com` keys (UI); spend caps via google.billing.spend_caps",
+   "read_write_doc": "UI",
+   "class_doc": "Usage, RateLimits",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (not re-fetched this pass)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.geminicli.admin_controls",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.geminicli",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "console"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "\"enterprise users\""
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "\"Management Console\" (goo.gle/manage-gemini-cli): Strict Mode, Extensions, MCP, MCP allowlist (`mcpServers`), Required MCP (`requiredMcpServers`), Unmanaged Capabilities; server-enforced; no API; page last updated 2026-04-10",
+   "read_write_doc": "UI",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://geminicli.com/docs/admin/enterprise-controls/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.geminicli.admin_policy_dir",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.geminicli",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local admin / MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "CLI restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "TOML in `/etc/gemini-cli/policies` etc. (root-owned / ProgramData-protected); fields `toolName`, `subagent`, `mcpName`, `toolAnnotations`, `argsPattern`, `commandPrefix`, `commandRegex`, `decision` allow/deny/ask_user, `priority`, `denyMessage`, `modes`, `interactive`, `allowRedirection`; Admin tier highest",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (file projection)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://geminicli.com/docs/reference/policy-engine/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.geminicli.otel",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.geminicli",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none (collector auth is customer's)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "collector",
+   "per_user_doc": "yes",
+   "mechanism_doc": "node OTLP push (`telemetry.otlpEndpoint`, grpc/http); events `gemini_cli.user_prompt`, `.tool_call`, `.api_request/response/error`, `.file_operation`, `.conversation_finished`, `.agent.start/finish`, `gen_ai.client.inference.operation.details`...; metrics `gemini_cli.token.usage`, `.lines.changed`, `.session.count`, `.agent.*`, `gen_ai.client.token.usage`; attrs `session.id`, `installation.id`, `user.email`, `active_approval_mode`; `logPrompts` DEFAULT TRUE",
+   "read_write_doc": "push",
+   "class_doc": "Telemetry, Usage, Sessions, LOC, Content (PerCall)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "per_call",
+     "unit": "lines",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://geminicli.com/docs/cli/telemetry/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.geminicli.otel_gcp_target",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.geminicli",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "node ADC with Trace Agent, Metric Writer, Logs Writer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Logging/Monitoring API"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "bucket retention",
+   "per_user_doc": "yes",
+   "mechanism_doc": "`telemetry.target=gcp`: direct to Cloud Trace / Monitoring / Logging of `OTLP_GOOGLE_CLOUD_PROJECT`; \"Gemini CLI Monitoring\" dashboard template; log names and metric prefixes NOT documented",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry (PerCall)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (read-back names undocumented)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://geminicli.com/docs/cli/telemetry/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.geminicli.system_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.geminicli",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local admin / MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "CLI restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "MDM file: `/etc/gemini-cli/{system-defaults.json,settings.json}`, `C:\\ProgramData\\gemini-cli\\...`, `/Library/Application Support/GeminiCli/...`; keys `admin.secureModeEnabled`, `admin.extensions.enabled`, `admin.mcp.enabled`, `admin.mcp.config`, `admin.mcp.requiredConfig`, `admin.skills.enabled`, `security.auth.enforcedType`, `tools.core`, `mcp.allowed/excluded`, `telemetry.*`. Env vars and CLI args outrank the file",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (file projection)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://geminicli.com/docs/reference/configuration/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.iam.policy_bindings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.iam",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "resourcemanager.projects.setIamPolicy"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "`projects:getIamPolicy/setIamPolicy` (v3)",
+   "read_write_doc": "R/W",
+   "class_doc": "Roles, RoleAssign",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/resource-manager/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.iam.roles",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.iam",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "iam.roles.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`iam.googleapis.com/v1/roles`, `projects.roles` (custom)",
+   "read_write_doc": "R/W",
+   "class_doc": "Roles",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/iam/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.iam.sa_keys",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.iam",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "iam.serviceAccountKeys.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`.../serviceAccounts/SA/keys` create/list/delete/disable",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials, CredentialLifecycle",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/iam/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: IAM API",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.iam.service_accounts",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.iam",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "iam.serviceAccounts.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`iam/v1/projects/P/serviceAccounts`",
+   "read_write_doc": "R/W",
+   "class_doc": "ServiceAccounts",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "ServiceAccounts",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/iam/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.iam.workforce_pools",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.iam",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "iam.workforcePools.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`iam/v1/locations/global/workforcePools` + providers (OIDC/SAML)",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Credentials",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic; not supported for Code Assist licenses)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/iam/docs/workforce-identity-federation",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.iam.workload_pools",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.iam",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "cloud_iam",
+    "doc": "iam.workloadIdentityPools.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`projects/P/locations/global/workloadIdentityPools`",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/iam/docs/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: IAM API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: cloud_iam"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.logging.bucket_retention",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.logging",
+   "reach": "pull_bucket",
+   "transport": "bucket",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "logging.buckets.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Logging API `projects/P/locations/L/buckets` `retentionDays`; CMEK on bucket",
+   "read_write_doc": "R/W",
+   "class_doc": "Retention, RetentionPolicy",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/logging/docs/reference/v2/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "bucket",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.resourcemanager.projects",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.resourcemanager",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "resourcemanager.*"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "`cloudresourcemanager.googleapis.com/v3` organizations/folders/projects",
+   "read_write_doc": "R/W",
+   "class_doc": "Projects (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/resource-manager/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.vertex.model_org_policy",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.vertex",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "orgpolicy admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "minutes",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Org Policy API constraint `vertexai.allowedModels` values `publishers/P/models/M:predict / deploy / tune`, max 500 values; also `vertexai.allowedPartnerModelFeatures`",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/control-model-access",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Org Policy API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.vertex.publisher_metrics",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.vertex",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "monitoring.viewer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Monitoring API"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "PAYG"
+   },
+   "freshness_doc": "minutes",
+   "lookback_doc": "Monitoring default",
+   "per_user_doc": "no",
+   "mechanism_doc": "Cloud Monitoring `aiplatform.googleapis.com/publisher/online_serving/{token_count, tokens, consumed_token_throughput, model_invocation_count, model_invocation_latencies, first_token_latencies, character_count, ...}` on `aiplatform.googleapis.com/PublisherModel`; token_count labels `type`, `max_token_size`, `request_type`, `shared_request_type`, `explicit_caching`, `accounting_resource`, `modality`, `source`",
+   "read_write_doc": "R",
+   "class_doc": "Usage (per model, DELTA)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (BETA)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/monitoring/api/metrics_gcp_a_b",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.vertex.quotas",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.vertex",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`cloudquotas.*`"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "list paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "minutes",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "Cloud Quotas API `cloudquotas.googleapis.com/v1 .../quotaInfos` (read), `quotaPreferences` (request change); usage via `serviceruntime.googleapis.com/quota/*` metrics",
+   "read_write_doc": "R/W(request)",
+   "class_doc": "RateLimits, Limits (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RateLimitProject",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/docs/quotas/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.vertex.request_labels",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.vertex",
+   "reach": "in_band",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "caller"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "PAYG"
+   },
+   "freshness_doc": "~1 d",
+   "lookback_doc": "billing",
+   "per_user_doc": "caller-defined",
+   "mechanism_doc": "`labels` field on generateContent (Google models, max 64) / `X-Vertex-AI-Labels` header (partner, max 32); PayGo only; flows to billing export `labels` (field name not stated on page); Gemini CLI does not set them",
+   "read_write_doc": "W (client)",
+   "class_doc": "Cost attribution",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (client side)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/add-labels-to-api-calls",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: observed on inference traffic through the Observer proxy (no admin credential)",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.vertex.request_response_logging",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.vertex",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`aiplatform.endpoints.setPublisherModelConfig`"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "PAYG project"
+   },
+   "freshness_doc": "near real time",
+   "lookback_doc": "BQ owned",
+   "per_user_doc": "no",
+   "mechanism_doc": "`POST .../v1beta1/projects/P/locations/L/publishers/google/models/M:setPublisherModelConfig` `loggingConfig{enabled, samplingRate, bigqueryDestination.outputUri, enableOtelLogging}`; BQ columns `endpoint, deployed_model_id, logging_time, request_id, request_payload, response_payload, model, model_version, api_method, full_request, full_response, metadata, otel_log`; no user id",
+   "read_write_doc": "R/W",
+   "class_doc": "Content (PerCall, sampled)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (Preview)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/request-response-logging",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.admin_audit",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "same"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "hours",
+   "lookback_doc": "180 d",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Reports API `applications/admin` (settings changes incl. Generative AI settings, generic)",
+   "read_write_doc": "R",
+   "class_doc": "Audit (Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/admin/reports/v1/appendix/activity/gemini-in-workspace-apps",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Admin SDK Reports API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.admin_roles",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "admin.directory.rolemanagement"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "pageToken"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Directory `roles`, `roleAssignments` (Gemini Settings administrator privilege)",
+   "read_write_doc": "R/W",
+   "class_doc": "Roles, RoleAssign",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/admin/directory/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Admin SDK Directory API",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.audit_bigquery_export",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_cloud_log",
+   "transport": "cloud_log",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "super admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "BQ"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Enterprise / Frontline / Education Std+Plus / Enterprise Essentials Plus"
+   },
+   "freshness_doc": "~hourly",
+   "lookback_doc": "customer BQ",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Workspace log export to BigQuery incl. Gemini audit logs",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry, Audit (Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (blog source)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://workspaceupdates.googleblog.com/2025/08/export-gemini-audit-logs-to-bigquery.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "cloud_log",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.data_regions",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "super admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "edition-gated"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "console data regions policy; Gemini App prompts/responses covered at rest + processing (Gemini app since 2026-06; Enterprise Plus / Frontline Plus processing, Education storage only)",
+   "read_write_doc": "UI",
+   "class_doc": "Retention (residency)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://knowledge.workspace.google.com/admin/compliance/data-covered-by-data-regions",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.directory_groups",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "admin.directory.group"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "pageToken"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Directory `groups`, `members`",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups, GroupMembership",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/admin/directory/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Admin SDK Directory API",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.directory_orgunits",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "admin.directory.orgunit"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Directory `orgunits`",
+   "read_write_doc": "R/W",
+   "class_doc": "Projects (OU container)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/admin/directory/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Admin SDK Directory API",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.directory_users",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "admin.directory.user scopes"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "pageToken"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Admin SDK Directory `admin.googleapis.com/admin/directory/v1/users`",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, MemberProvision",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (generic)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/admin/directory/reference/rest",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.gemini_app_history",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Gemini Settings admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "~1 d",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "console Generative AI > Gemini app conversation history (3/18/36 months, default 18; off = 72 h); Gemini in Workspace auto-deletion 90/540/1080 d / never, per OU/group",
+   "read_write_doc": "UI",
+   "class_doc": "Retention, RetentionPolicy",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://knowledge.workspace.google.com/admin/generative-ai/workspace-with-gemini/manage-gemini-in-workspace-conversation-history-settings",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.gemini_app_service_status",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "policy API scopes"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paging"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "minutes",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Cloud Identity Policy API `settings/gemini_app.service_status` (and `notebooklm`) per OU/group; read documented, mutate not stated for service_status",
+   "read_write_doc": "R",
+   "class_doc": "Policy, AgentCapability (Snapshot)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable (read)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://cloud.google.com/identity/docs/concepts/supported-policy-api-settings",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Cloud Identity Policy API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.gemini_app_settings",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "console: Gemini app access to Workspace services per app, other Generative AI toggles",
+   "read_write_doc": "UI",
+   "class_doc": "ToolPolicy, FeatureToggle",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://knowledge.workspace.google.com/admin/generative-ai/gemini-app/turn-google-apps-in-gemini-on-or-off",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.gemini_reports_console",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "console"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace with Gemini"
+   },
+   "freshness_doc": "2 to 3 d",
+   "lookback_doc": "7/28/90 d",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Admin console Generative AI > Gemini reports (org + user level, days at limit, per-app); spreadsheet download",
+   "read_write_doc": "UI",
+   "class_doc": "Usage, Adoption, Limits (UserDay, 28 d window)",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://knowledge.workspace.google.com/admin/generative-ai/review-gemini-usage-in-your-organization",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.licensing",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "apps.licensing scope"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "pageToken"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace"
+   },
+   "freshness_doc": "immediate",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Enterprise License Manager `licensing/v1/product/{productId}/sku/{skuId}/user`; Gemini products 101068 (sku 1010680001 Gemini Business / Gemini Enterprise Business Edition) and 101047 (Gemini Labs, Security, Meet, AI Expanded Access, AI Pro for Education, Gemini Education Premium); Gemini app itself is included in most editions",
+   "read_write_doc": "R/W",
+   "class_doc": "Seats, SeatAssign",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "unspecified",
+     "unit": "seats",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/admin/licensing/v1/how-tos/products",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.reports_gemini",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "`admin.reports.audit.readonly` (DWD SA)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "pageToken / maxResults"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "Workspace with Gemini"
+   },
+   "freshness_doc": "hours",
+   "lookback_doc": "180 d rolling, from 2025-06-20",
+   "per_user_doc": "yes (actor email)",
+   "mechanism_doc": "`GET admin.googleapis.com/admin/reports/v1/activity/users/all/applications/gemini_in_workspace_apps` event `ai_usage_event`/`feature_utilization`; params `action`, `app_name` (incl. `gemini_app`), `event_category`, `feature_source`; no conversation id, model, tokens",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Adoption, Audit (Event)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/admin/reports/v1/appendix/activity/gemini-in-workspace-apps",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.vault_gemini",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "Vault admin privileges"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "LRO"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "editions with Vault"
+   },
+   "freshness_doc": "export job",
+   "lookback_doc": "per retention",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Vault API `matters.holds` (`HeldGeminiQuery`), `matters.exports` (`GeminiExportOptions`, format XML \"Only available for Gemini\"), `Query.geminiOptions`",
+   "read_write_doc": "R/W",
+   "class_doc": "Content (PerConversation)",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "unspecified",
+     "unit": "text",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://developers.google.com/workspace/vault/reference/rest/v1/matters.exports",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Vault API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "google.workspace.vault_retention",
+   "vendor_group": "google",
+   "vendor": "google",
+   "plane": "google.workspace",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Vault admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": "editions with Vault"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Vault retention rules / holds for Gemini app messages (console; no retention-rule resource in Vault API)",
+   "read_write_doc": "UI",
+   "class_doc": "Retention, RetentionPolicy",
+   "grain_doc": "",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://knowledge.workspace.google.com/vault/retention/retain-gemini-app-messages-with-vault",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

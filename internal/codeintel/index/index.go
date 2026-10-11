@@ -141,7 +141,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, root string, force bool) (R
 		return rep, nil
 	}
 
-	candidates, err := ix.collectCandidates(absRoot)
+	candidates, err := ix.collectCandidates(ctx, absRoot)
 	if err != nil {
 		return rep, err
 	}
@@ -151,6 +151,9 @@ func (ix *Indexer) IndexProject(ctx context.Context, root string, force bool) (R
 		// Consent gate: register the files as needs_consent so
 		// `index status` shows the project, but index nothing.
 		for _, c := range candidates {
+			if ctx.Err() != nil {
+				return rep, ctx.Err()
+			}
 			_ = ix.opts.Store.CodeIntelRegisterFile(ctx, absRoot, c.path, string(c.lang))
 			_ = ix.opts.Store.CodeIntelSetFileStatus(ctx, absRoot, c.path, "needs_consent")
 		}
@@ -230,7 +233,7 @@ func (ix *Indexer) maybeBuildDerived(ctx context.Context, project string, rep *R
 			ix.logger.Warn("codeintel: derived-rows probe failed; rebuilding", "project", project, "err", err)
 		} else if has {
 			rep.DerivedSkipped = true
-			ix.logger.Debug("codeintel: no files changed and derived rows present — skipping search/semantic rebuild",
+			ix.logger.Debug("codeintel: no files changed and derived rows present - skipping search/semantic rebuild",
 				"project", project, "unchanged", rep.Unchanged)
 			return
 		}
@@ -383,9 +386,15 @@ type candidate struct {
 
 // collectCandidates walks the tree and returns every file with a
 // supported, allow-listed extension, skipping ignored dirs and symlinks.
-func (ix *Indexer) collectCandidates(absRoot string) ([]candidate, error) {
+// The walk stops on ctx (T-553): a large project root (or one on the slow
+// WSL DrvFs mount) used to be walked to the end after the daemon was told
+// to stop, because the per-file checks only start after the walk.
+func (ix *Indexer) collectCandidates(ctx context.Context, absRoot string) ([]candidate, error) {
 	var out []candidate
 	walkErr := filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			// Unreadable dir/file — skip it, don't abort the whole walk.
 			return nil //nolint:nilerr // best-effort indexing

@@ -52,6 +52,7 @@ var allowlistedBackfillModes = map[string][]string{
 	"cache-rescan":             {"backfill", "--cache-rescan"},
 	"zed-rescan":               {"backfill", "--zed-rescan"},
 	"crush-rescan":             {"backfill", "--crush-rescan"},
+	"qwen-code-rescan":         {"backfill", "--qwen-code-rescan"},
 	"openclaw-project-root":    {"backfill", "--openclaw-project-root"},
 	"openclaw-session-id":      {"backfill", "--openclaw-session-id"},
 	"codex-project-root":       {"backfill", "--codex-project-root"},
@@ -59,6 +60,10 @@ var allowlistedBackfillModes = map[string][]string{
 	"cursor-user-prompts":      {"backfill", "--cursor-user-prompts"},
 	"cursor-subagents":         {"backfill", "--cursor-subagents"},
 	"tasks":                    {"backfill", "--tasks"},
+	// Lines-of-code counts for historical edits (docs/loc-tracking.md); NOT
+	// part of --all, so it needs its own row (backlog item 6 sweep: three
+	// LOC surfaces told the user to run `observer backfill --loc`).
+	"loc": {"backfill", "--loc"},
 }
 
 // init derives one `scan-<tool>` mode per integration-registry adapter,
@@ -80,7 +85,7 @@ func init() {
 type backfillJob struct {
 	ID        string    `json:"id"`
 	Mode      string    `json:"mode"`
-	Status    string    `json:"status"` // running | done | failed
+	Status    string    `json:"status"` // running | done | failed | canceled
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at,omitempty"`
 	ExitCode  int       `json:"exit_code,omitempty"`
@@ -97,6 +102,13 @@ type backfillJob struct {
 	// TestBackfillJobsList ordering flake. Not serialized; creation
 	// order is an internal detail.
 	seq int64
+	// cancel stops the job's subprocess (its exec context); set by
+	// runBackfillJob once the run starts. canceled records an operator
+	// cancel (T-421 item 2), including one that arrives before the run
+	// starts, so the run never begins and the final status is "canceled"
+	// rather than "failed". Both are guarded by Server.backfillMu.
+	cancel   context.CancelFunc
+	canceled bool
 }
 
 // backfillExecFn spawns an observer subprocess. Args are the FULL
@@ -201,7 +213,7 @@ func (s *Server) handleBackfillRun(w http.ResponseWriter, r *http.Request) {
 	}
 	argv, ok := allowlistedBackfillModes[req.Mode]
 	if !ok {
-		http.Error(w, "unknown mode "+req.Mode+" — see /api/backfill/status for valid values",
+		http.Error(w, "unknown mode "+req.Mode+" - see /api/backfill/status for valid values",
 			http.StatusBadRequest)
 		return
 	}
@@ -306,7 +318,7 @@ func (s *Server) handleScanRun(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !known {
-			http.Error(w, "unknown adapter "+req.Adapter+" — see /api/tools/status for valid names",
+			http.Error(w, "unknown adapter "+req.Adapter+" - see /api/tools/status for valid names",
 				http.StatusBadRequest)
 			return
 		}
@@ -390,7 +402,24 @@ func (s *Server) runBackfillJob(id string, args []string) {
 		}
 	}
 
-	exit, err := s.execBackfill(ctx, args, onChunk)
+	// Publish the cancel func so an operator cancel (cancelCommandJob) can
+	// stop the subprocess; a cancel that already arrived means the run
+	// never starts.
+	s.backfillMu.Lock()
+	early := false
+	if job, ok := s.backfillJobs[id]; ok {
+		job.cancel = cancel
+		early = job.canceled
+	}
+	s.backfillMu.Unlock()
+
+	var (
+		exit int
+		err  error
+	)
+	if !early {
+		exit, err = s.execBackfill(ctx, args, onChunk)
+	}
 
 	s.backfillMu.Lock()
 	defer s.backfillMu.Unlock()
@@ -400,6 +429,12 @@ func (s *Server) runBackfillJob(id string, args []string) {
 	}
 	job.EndedAt = time.Now().UTC()
 	job.ExitCode = exit
+	job.cancel = nil
+	if job.canceled {
+		job.Status = "canceled"
+		job.Error = "canceled from the dashboard before it finished"
+		return
+	}
 	if err != nil {
 		job.Status = "failed"
 		job.Error = err.Error()

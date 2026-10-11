@@ -1,0 +1,30 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedSDK",
+    "data[]": "VerifiedSDK",
+    "data[].end_time": "VerifiedSDK",
+    "data[].object": "VerifiedSDK",
+    "data[].results": "VerifiedSDK",
+    "data[].results[]": "VerifiedSDK",
+    "data[].start_time": "VerifiedSDK",
+    "has_more": "VerifiedSDK",
+    "next_page": "VerifiedSDK",
+    "object": "VerifiedSDK"
+  },
+  "fixture_sha256": "d4d1f3b2a56d13d6cabc7889aad42bcc37180d95f62e6363393d2ce2d25277a8",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organization/costs",
+    "status": 200
+  },
+  "notes": "Synthesized: a day with no cost; last page.",
+  "scenario": "empty_page",
+  "sdk_or_spec_version_or_commit": "openai-python main, fetched 2026-10-07",
+  "source_kind": "sdk_type",
+  "source_sha256": "5e1be2b7f3fa9db827971109ed06fa2a6b2c0997303acae0096e95e63db168f9",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/admin/organization/usage_costs_response.py",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.costs"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "8f14e45f-ceea-4e6b-9c3a-1d2e3f4a5b6c",
+  "name": "Web app",
+  "owner": "team",
+  "repos": [
+    {
+      "url": "https://github.com/your-org/your-web-app"
+    },
+    {
+      "url": "https://github.com/your-org/your-api"
+    }
+  ],
+  "environmentJson": "{\"install\": \"pnpm install\", \"start\": \"sudo service docker start\"}",
+  "versionId": "c9f0f895-fb98-4b91-8f3e-2a1b0c9d8e7f",
+  "createdAt": "2026-09-01T16:20:00.000Z",
+  "updatedAt": "2026-09-29T21:05:00.000Z"
+}

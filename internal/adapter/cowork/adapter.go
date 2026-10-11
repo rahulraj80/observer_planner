@@ -606,7 +606,11 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	// Audit-record UUIDs in this set get IsSidechain=true on their
 	// emitted actions. Empty when the local-instance had no sub-agent
 	// activity (or no .claude/projects/ tree at all).
-	sidechain := collectSidechainUUIDs(filepath.Dir(path))
+	sidechain, err := collectSidechainUUIDs(ctx, filepath.Dir(path))
+	if err != nil {
+		adapter.ApplyProjectIdentity(&res, projectIdentity)
+		return res, err
+	}
 
 	// cacheAcc is the per-session Tier-2 cache-observation
 	// accumulator (see cachetrack.go). It receives every user +
@@ -1573,15 +1577,22 @@ func seedRateLimitTracker(f *os.File, until int64, sessionID string) ratelimitst
 // Implementation: filepath.WalkDir descends recursively, picking only
 // files whose basename matches `agent-*.jsonl` AND whose parent dir
 // is named `subagents`. Each line is JSON-decoded just for `uuid` +
-// `type`.
-func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
+// `type`. A cancelled ctx stops the walk and returns ctx's error with an
+// empty set (T-557).
+func collectSidechainUUIDs(ctx context.Context, instanceDir string) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	claudeProjects := filepath.Join(instanceDir, ".claude", "projects")
 	info, err := os.Stat(claudeProjects)
 	if err != nil || !info.IsDir() {
-		return out
+		return out, nil
 	}
-	_ = filepath.WalkDir(claudeProjects, func(p string, d os.DirEntry, walkErr error) error {
+	// T-557: this walk runs on every parse, so it honours cancellation
+	// between entries and between lines; a daemon stop never waits for the
+	// whole subagent tree to be decoded.
+	err = filepath.WalkDir(claudeProjects, func(p string, d os.DirEntry, walkErr error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if walkErr != nil {
 			// Skip unreadable subtrees; not fatal.
 			return nil
@@ -1596,7 +1607,7 @@ func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
 		if filepath.Base(filepath.Dir(p)) != "subagents" {
 			return nil
 		}
-		f, err := os.Open(p)
+		f, err := os.Open(p) //nolint:gosec // G122: walks the tool's own local session tree read only
 		if err != nil {
 			return nil
 		}
@@ -1604,6 +1615,9 @@ func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
 		for sc.Scan() {
+			if cerr := ctx.Err(); cerr != nil {
+				return cerr
+			}
 			var rec struct {
 				Type string `json:"type"`
 				UUID string `json:"uuid"`
@@ -1617,5 +1631,20 @@ func collectSidechainUUIDs(instanceDir string) map[string]struct{} {
 		}
 		return nil
 	})
-	return out
+	if err != nil {
+		// Only a cancellation stops the walk early (every other error is
+		// skipped above); a partial set must not reach the parse.
+		return map[string]struct{}{}, err
+	}
+	return out, nil
+}
+
+// IsNativeTool implements adapter.NativeToolClassifier (the package-level
+// IsNativeTool).
+func (*Adapter) IsNativeTool(name string) bool { return IsNativeTool(name) }
+
+// ProjectAttribution implements adapter.ProjectReattributor for the
+// --cowork-project-root backfill (the package-level ProjectAttribution).
+func (*Adapter) ProjectAttribution(path string) (sessionID, projectRoot, remote string, ok bool) {
+	return ProjectAttribution(path)
 }

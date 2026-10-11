@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -11,8 +13,8 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/termsvc"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve"
@@ -52,7 +54,7 @@ func TestCreateFreshTranslatesForeignProjectRoot(t *testing.T) {
 	// Native absolute path: translation is a no-op, so the canonical dir reaches
 	// termsvc.Spawn unchanged (the regression guard that the translate call did
 	// not break native launches).
-	if _, err := a.CreateFresh(dashboard.FreshLaunchSpec{
+	if _, err := a.CreateFresh(dashapi.FreshLaunchSpec{
 		Tool: "claude-code", Subcommand: "claude", ProjectRoot: dir,
 	}); err != nil {
 		t.Fatalf("CreateFresh native: %v", err)
@@ -75,9 +77,9 @@ func TestCreateFreshTranslatesForeignProjectRoot(t *testing.T) {
 	// allow-listed nor existent, so validation denies it — proving the raw
 	// backslash path was transformed + validated, never spawned verbatim.
 	lau.last = termsvc.LaunchRequest{}
-	if _, err := a.CreateFresh(dashboard.FreshLaunchSpec{
+	if _, err := a.CreateFresh(dashapi.FreshLaunchSpec{
 		Tool: "claude-code", Subcommand: "claude", ProjectRoot: winRoot,
-	}); !errors.Is(err, dashboard.ErrLaunchProjectRootDenied) {
+	}); !errors.Is(err, dashapi.ErrLaunchProjectRootDenied) {
 		t.Fatalf("CreateFresh windows root err = %v, want ErrLaunchProjectRootDenied", err)
 	}
 	if lau.last.Dir != "" {
@@ -306,7 +308,7 @@ func TestWindowsPlansForGroundedRowsAreNotNPM(t *testing.T) {
 			continue
 		}
 		if plan.Argv[0] == "npm" {
-			t.Errorf("%s: Windows plan falls back to npm (%q) — a grounded native channel should win",
+			t.Errorf("%s: Windows plan falls back to npm (%q) - a grounded native channel should win",
 				tool, plan.Display)
 		}
 	}
@@ -404,7 +406,7 @@ func TestTerminalLaunchPolicyAllowShell(t *testing.T) {
 // renders it as an honest 403 naming the missing config knob.
 func TestMapFreshErrShellDisabled(t *testing.T) {
 	got := mapFreshErr(termsvc.ErrShellLaunchDisabled)
-	if !errors.Is(got, dashboard.ErrLaunchShellDisabled) {
+	if !errors.Is(got, dashapi.ErrLaunchShellDisabled) {
 		t.Fatalf("mapFreshErr(ErrShellLaunchDisabled) = %v, want ErrLaunchShellDisabled", got)
 	}
 }
@@ -427,7 +429,7 @@ func TestCreateFreshShellRequest(t *testing.T) {
 	})
 	a := &launchManagerAdapter{svc: svc}
 
-	if _, err := a.CreateFresh(dashboard.FreshLaunchSpec{
+	if _, err := a.CreateFresh(dashapi.FreshLaunchSpec{
 		Tool:  termsvc.ShellTool,
 		Shell: true,
 	}); err != nil {
@@ -444,7 +446,7 @@ func TestCreateFreshShellRequest(t *testing.T) {
 	// tool allow-list entry.
 	svc2 := termsvc.New(termsvc.Options{Recorder: assembledRecorder{}, Launcher: lau})
 	a2 := &launchManagerAdapter{svc: svc2}
-	if _, err := a2.CreateFresh(dashboard.FreshLaunchSpec{Tool: termsvc.ShellTool, Shell: true}); !errors.Is(err, dashboard.ErrLaunchShellDisabled) {
+	if _, err := a2.CreateFresh(dashapi.FreshLaunchSpec{Tool: termsvc.ShellTool, Shell: true}); !errors.Is(err, dashapi.ErrLaunchShellDisabled) {
 		t.Fatalf("CreateFresh shell (disabled) err = %v, want ErrLaunchShellDisabled", err)
 	}
 }
@@ -469,9 +471,9 @@ func TestInstallNoteFor(t *testing.T) {
 		},
 		{
 			name: "install_note_set_wins",
-			spec: &integration.BinaryResolveSpec{InstallNote: "desktop installer only — no CLI channel exists"},
+			spec: &integration.BinaryResolveSpec{InstallNote: "desktop installer only - no CLI channel exists"},
 			goos: "linux",
-			want: "desktop installer only — no CLI channel exists",
+			want: "desktop installer only - no CLI channel exists",
 		},
 		{
 			name: "install_note_empty_falls_back_to_the_shared_sentence",
@@ -492,7 +494,7 @@ func TestInstallNoteFor(t *testing.T) {
 				InstallNote: "install it inside WSL",
 			},
 			goos: "windows",
-			want: "no Windows build exists (vendor: WSL only) — install it inside WSL",
+			want: "no Windows build exists (vendor: WSL only) - install it inside WSL",
 		},
 		{
 			name: "windows_note_is_not_shown_off_windows",
@@ -517,7 +519,7 @@ func TestInstallNoteFor(t *testing.T) {
 			name: "windows_note_alone_still_names_the_vendor_docs_floor",
 			spec: &integration.BinaryResolveSpec{WindowsNote: "no Windows build exists"},
 			goos: "windows",
-			want: "no Windows build exists — " + toolresolve.NoGroundedInstallMsg,
+			want: "no Windows build exists - " + toolresolve.NoGroundedInstallMsg,
 		},
 	}
 	for _, tc := range tests {
@@ -570,7 +572,7 @@ func TestToolPreflightSeamFillsInstallNoteWhenNoPlan(t *testing.T) {
 	}
 
 	if withoutPlan == "" {
-		t.Logf("every launchable row has a %s install plan — nothing to assert for the no-plan arm", runtime.GOOS)
+		t.Logf("every launchable row has a %s install plan - nothing to assert for the no-plan arm", runtime.GOOS)
 	} else {
 		pf, ok := seam(withoutPlan)
 		if !ok {
@@ -580,21 +582,21 @@ func TestToolPreflightSeamFillsInstallNoteWhenNoPlan(t *testing.T) {
 			t.Errorf("%s has no plan yet carries install_command %q", withoutPlan, pf.InstallCommand)
 		}
 		if pf.InstallNote == "" {
-			t.Errorf("%s has no install plan — install_note must state the reason", withoutPlan)
+			t.Errorf("%s has no install plan - install_note must state the reason", withoutPlan)
 		}
 	}
 
 	if withPlan == "" {
-		t.Skip("no launchable row has an install plan on this OS — nothing to assert for the plan arm")
+		t.Skip("no launchable row has an install plan on this OS - nothing to assert for the plan arm")
 	}
 	pf, ok := seam(withPlan)
 	if !ok {
 		t.Fatalf("seam(%q) reported not launchable", withPlan)
 	}
 	if pf.InstallCommand == "" {
-		t.Errorf("%s has an install plan — install_command must be set", withPlan)
+		t.Errorf("%s has an install plan - install_command must be set", withPlan)
 	}
 	if pf.InstallNote != "" {
-		t.Errorf("%s has an install plan — install_note must stay empty, got %q", withPlan, pf.InstallNote)
+		t.Errorf("%s has an install plan - install_note must stay empty, got %q", withPlan, pf.InstallNote)
 	}
 }

@@ -85,6 +85,44 @@ type actionDetail struct {
 	FileSizeBytes int64     `json:"file_size_bytes,omitempty"`
 }
 
+// actionDetailsQuery builds the get_action_details read for a code-built
+// placeholder list (?,?,...).
+//
+// The excerpt join goes through the FTS5 shadow table, never through the
+// virtual table's action_id column (T-415). action_id is UNINDEXED in
+// action_excerpts (001_initial.sql), so the old
+// `LEFT JOIN action_excerpts ae ON ae.action_id = a.id` planned as a FULL
+// scan of every stored excerpt once PER requested action: 25 ids took about
+// 10 s on a 529k-excerpt node. FTS5 keeps its stored columns in the ordinary
+// table action_excerpts_content (c0 is action_id), which migration 147
+// indexes, so the join resolves each action to its FTS rowids by index seek
+// and then reads the excerpt by rowid equality (about 1 ms for 25 ids).
+//
+// The `+a.id` is load-bearing: c0 has no affinity and actions.id is
+// INTEGER, so a bare `aec.c0 = a.id` makes SQLite apply numeric affinity to
+// c0, which disqualifies the c0 index and degrades to a scan of the whole
+// index per action. The unary plus drops a.id's affinity, so the comparison
+// is the same one the indexer's own delete makes (an int64 bound against c0;
+// every writer binds int64). Two LEFT JOINs keep the old row multiplicity:
+// one output row per excerpt row, and an action with no excerpt still
+// returns once with an empty excerpt. Pinned by
+// TestActionDetailsQueryUsesExcerptIndex.
+func actionDetailsQuery(placeholders string) string {
+	//nolint:gosec // G201: the only format arg is a code-built placeholder list (?,?,...); all values are bound via ? args.
+	return fmt.Sprintf(
+		`SELECT a.id, a.session_id, a.tool, a.action_type, COALESCE(a.target,''),
+		        a.timestamp, a.success, COALESCE(a.freshness,''), COALESCE(a.duration_ms,0),
+		        COALESCE(a.error_message,''), COALESCE(a.raw_tool_name,''), COALESCE(a.raw_tool_input,''),
+		        COALESCE(ae.excerpt,''), COALESCE(a.content_hash,''), COALESCE(a.file_size_bytes,0)
+		 FROM actions a
+		 LEFT JOIN action_excerpts_content aec ON aec.c0 = +a.id
+		 LEFT JOIN action_excerpts ae ON ae.rowid = aec.id
+		 WHERE a.id IN (%s)
+		 ORDER BY a.timestamp DESC`,
+		placeholders,
+	)
+}
+
 func (t *getActionDetailsTool) Invoke(ctx context.Context, raw json.RawMessage) (any, error) {
 	var args struct {
 		ActionIDs []int64 `json:"action_ids"`
@@ -104,18 +142,7 @@ func (t *getActionDetailsTool) Invoke(ctx context.Context, raw json.RawMessage) 
 		placeholders[i] = "?"
 		queryArgs[i] = id
 	}
-	//nolint:gosec // G201: the only format arg is a code-built placeholder list (?,?,…); all values are bound via ? args.
-	q := fmt.Sprintf(
-		`SELECT a.id, a.session_id, a.tool, a.action_type, COALESCE(a.target,''),
-		        a.timestamp, a.success, COALESCE(a.freshness,''), COALESCE(a.duration_ms,0),
-		        COALESCE(a.error_message,''), COALESCE(a.raw_tool_name,''), COALESCE(a.raw_tool_input,''),
-		        COALESCE(ae.excerpt,''), COALESCE(a.content_hash,''), COALESCE(a.file_size_bytes,0)
-		 FROM actions a LEFT JOIN action_excerpts ae ON ae.action_id = a.id
-		 WHERE a.id IN (%s)
-		 ORDER BY a.timestamp DESC`,
-		strings.Join(placeholders, ","),
-	)
-	rows, err := t.db.QueryContext(ctx, q, queryArgs...)
+	rows, err := t.db.QueryContext(ctx, actionDetailsQuery(strings.Join(placeholders, ",")), queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
@@ -169,7 +196,7 @@ func (*getFailureContextTool) InputSchema() map[string]any {
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type":        "string",
-				"description": "The exact command string to look up — hashed and normalized internally.",
+				"description": "The exact command string to look up - hashed and normalized internally.",
 			},
 			"limit": map[string]any{
 				"type":        "integer",
@@ -270,7 +297,7 @@ func (*getLastTestResultTool) InputSchema() map[string]any {
 		"properties": map[string]any{
 			"project_root": map[string]any{
 				"type":        "string",
-				"description": "Optional — restrict to one project.",
+				"description": "Optional - restrict to one project.",
 			},
 		},
 	}
@@ -314,7 +341,7 @@ func (t *getLastTestResultTool) Invoke(ctx context.Context, raw json.RawMessage)
 		conds = append(conds, "a.target LIKE ?")
 		queryArgs = append(queryArgs, "%"+pat+"%")
 	}
-	q += strings.Join(conds, " OR ") + ")"
+	q += strings.Join(conds, " OR ") + ")" //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	if args.ProjectRoot != "" {
 		q += " AND p.root_path = ?"
 		queryArgs = append(queryArgs, args.ProjectRoot)
@@ -380,7 +407,7 @@ func (*getCostSummaryTool) InputSchema() map[string]any {
 			},
 			"source": map[string]any{
 				"type":        "string",
-				"description": "Token source: auto (default — prefer proxy, fall back to JSONL), proxy, jsonl.",
+				"description": "Token source: auto (default - prefer proxy, fall back to JSONL), proxy, jsonl.",
 			},
 		},
 	}
@@ -1221,7 +1248,7 @@ func newRetrieveStashedTool(s *stash.Stash, signals SignalRecorder, w audit.Writ
 
 func (*retrieveStashedTool) Name() string { return "retrieve_stashed" }
 func (*retrieveStashedTool) Description() string {
-	return "Retrieve stashed tool_result body bytes. Pass `sha` as a single string for byte-identical legacy retrieval, or as an array of shas (max 25) for batched retrieval. Optional `start_line` / `end_line` slice the blob (1-indexed, inclusive) — use these when the marker points at a large blob but you only need a section to save agent context budget. Single-string + no range returns the v1.7.10 shape unchanged; single-string + range augments it with `returned: {start_line, end_line}` and `total_lines_in_blob`; array input switches to a `responses: [...]` envelope with per-sha `ok`/`reason` for mixed-success batches."
+	return "Retrieve stashed tool_result body bytes. Pass `sha` as a single string for byte-identical legacy retrieval, or as an array of shas (max 25) for batched retrieval. Optional `start_line` / `end_line` slice the blob (1-indexed, inclusive) - use these when the marker points at a large blob but you only need a section to save agent context budget. Single-string + no range returns the v1.7.10 shape unchanged; single-string + range augments it with `returned: {start_line, end_line}` and `total_lines_in_blob`; array input switches to a `responses: [...]` envelope with per-sha `ok`/`reason` for mixed-success batches."
 }
 
 func (*retrieveStashedTool) InputSchema() map[string]any {

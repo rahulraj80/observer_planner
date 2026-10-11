@@ -1,3 +1,5 @@
+//go:build !sbo_omit_adapter_cursor
+
 package main
 
 import (

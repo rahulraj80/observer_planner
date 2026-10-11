@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_aggregate_share
+
 // Package aggregatesvc is the node-side COLLECTOR for the opt-in aggregate
 // rail (G25 design §6, Phase 4). It is the SINGLE seam that assembles a
 // finalized month's coarsened aggregate from the node's local tables and

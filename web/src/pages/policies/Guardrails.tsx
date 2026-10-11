@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChartShell, HostMark, InlineLoading, Pill, SegmentedControl, Toggle } from "@/components/primitives";
+import {
+  ChartShell,
+  EntityMultiPicker,
+  HostMark,
+  InlineLoading,
+  Pill,
+  SegmentedControl,
+  SinglePicker,
+  Toggle,
+} from "@/components/primitives";
+import { keepSelected, uniqueSorted } from "@/lib/pickerOptions";
+import { useModelOptions } from "@/lib/usePickerSources";
+import { TEMPLATE_CATALOG } from "./templates-catalog";
 import { useApi } from "@/lib/useApi";
-import { fetchJSON } from "@/lib/api";
+import { saveConfigSection } from "@/lib/configSectionSave";
 import { pushToast } from "@/components/Toast";
 import { markRestartPending } from "@/lib/restartPending";
 import {
@@ -313,12 +325,15 @@ function CriterionRow({
         </Labeled>
       )}
       {c.type === "denied_topics" && (
-        <Labeled label="Topics (comma-separated)" stacked className="mt-2">
-          <input
-            value={c.topics.join(", ")}
-            onChange={(e) => onChange({ topics: e.target.value.split(",").map((t) => t.trim()).filter(Boolean) })}
-            placeholder="competitors, legal advice, medical advice"
-            className={inputClass + " w-full"}
+        <Labeled label="Topics" stacked className="mt-2" group>
+          <EntityMultiPicker
+            options={keepSelected(TEMPLATE_TOPIC_OPTIONS, c.topics, "Your topics")}
+            value={c.topics}
+            onChange={(topics) => onChange({ topics })}
+            allowFreeId
+            freeIdLabel="Add topic"
+            placeholder="Pick a topic, or type one and press Enter…"
+            ariaLabel="Topics"
           />
         </Labeled>
       )}
@@ -330,8 +345,15 @@ function CriterionRow({
 
 // ---------------- Judge ----------------
 
+// TEMPLATE_TOPIC_OPTIONS suggests the denied topics the shipped templates
+// use; any other topic can still be typed (D-571: suggest known values).
+const TEMPLATE_TOPIC_OPTIONS = uniqueSorted(
+  TEMPLATE_CATALOG.flatMap((t) => (t.criteria ?? []).flatMap((c) => c.topics ?? [])),
+).map((t) => ({ id: t, label: t, group: "From the templates" }));
+
 function JudgeEditor({ configApi }: { configApi: ReturnType<typeof useApi<ConfigResponse>> }) {
   const [draft, setDraft] = useState<JudgeConfig | null>(null);
+  const models = useModelOptions();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -348,11 +370,7 @@ function JudgeEditor({ configApi }: { configApi: ReturnType<typeof useApi<Config
     setBusy(true);
     setErr("");
     try {
-      const res = await fetchJSON<{ saved: boolean; restart_required: boolean }>("/api/config/section/observability", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Judge: draft }),
-      });
+      const res = await saveConfigSection("observability", { Judge: draft });
       if (!res.saved) throw new Error("server did not confirm save");
       if (res.restart_required) markRestartPending("observability");
       pushToast("Judge saved · restart daemon to apply", "success");
@@ -375,8 +393,16 @@ function JudgeEditor({ configApi }: { configApi: ReturnType<typeof useApi<Config
       sub="The LLM that evaluates judged criteria. Hosting is derived from the base URL - a loopback URL keeps requests local with no key egress. Read at daemon start, so this always needs a restart."
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Labeled label="Model" stacked>
-          <input value={draft.Model} onChange={(e) => patch({ Model: e.target.value })} placeholder="qwen2.5:1.5b-instruct" className={inputClass + " w-full"} />
+        <Labeled label="Model" stacked group>
+          <SinglePicker
+            options={keepSelected(models.options, draft.Model ? [draft.Model] : [])}
+            value={draft.Model}
+            onChange={(Model) => patch({ Model })}
+            allowFree
+            loading={models.loading}
+            placeholder="qwen2.5:1.5b-instruct"
+            ariaLabel="Judge model"
+          />
         </Labeled>
         <Labeled label="Base URL" stacked>
           <input value={draft.BaseURL} onChange={(e) => patch({ BaseURL: e.target.value })} placeholder="http://127.0.0.1:11434/v1" className={inputClass + " w-full"} />
@@ -422,11 +448,7 @@ function BudgetEditor({ configApi }: { configApi: ReturnType<typeof useApi<Confi
     setBusy(true);
     setErr("");
     try {
-      const res = await fetchJSON<{ saved: boolean; restart_required: boolean }>("/api/config/section/observability", undefined, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Admission: { Budget: draft } }),
-      });
+      const res = await saveConfigSection("observability", { Admission: { Budget: draft } });
       if (!res.saved) throw new Error("server did not confirm save");
       if (res.restart_required) markRestartPending("observability");
       pushToast("Budget saved · restart daemon to apply", "success");

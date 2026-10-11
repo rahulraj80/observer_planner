@@ -4,12 +4,16 @@ import clsx from "clsx";
 import { ChevronLeft, X } from "lucide-react";
 import { NAV_GROUPS } from "@/lib/nav";
 import { useApi } from "@/lib/useApi";
-import { filterNavGroups, useGovernance } from "@/lib/governance";
+import { filterNavGroups, useGovernance, useGovernanceVisibility } from "@/lib/governance";
+import { hiddenNavIds } from "@/lib/visibility";
+import { filterNavByComponents } from "@/lib/componentState";
+import { useInactiveNavIds } from "@/lib/useComponents";
 import { fmtBytes, fmtCompact } from "@/lib/format";
 import { BrandMark, Icon, LiveDot, Tooltip } from "@/components/primitives";
 import { CAPTURE_DOT, liveDotProps, withDotClass } from "@/lib/liveSignals";
 import { slideFromX } from "@shared/lib/motion";
 import type { StatusSnapshot, SetupClaude, WatcherHealth } from "@/lib/types";
+import { WATCHER_LINE_LABEL, watcherLineState } from "@/lib/watcherLine";
 
 export function Sidebar({
   open = false,
@@ -48,7 +52,13 @@ export function Sidebar({
   // while loading, both of which filterNavGroups passes through
   // unchanged).
   const gov = useGovernance();
-  const navGroups = filterNavGroups(NAV_GROUPS, gov.data);
+  // Filtering fails CLOSED until the posture is known (Sol A4-05): only the
+  // floor pages are listed while /api/governance is pending or failing.
+  const visibility = useGovernanceVisibility();
+  // Pages of components that are not active on this machine leave the nav
+  // too (modular packaging plan 7.3); a direct visit renders NotInstalled.
+  const inactiveNav = useInactiveNavIds();
+  const navGroups = filterNavByComponents(filterNavGroups(NAV_GROUPS, visibility.gov), inactiveNav);
   // Desktop (lg+) icon-only rail collapse. The pref is persisted in
   // localStorage ("1"/"0", ProcessesSection pattern) and only bites at
   // lg+ — the mobile drawer keeps full width + labels regardless (the
@@ -242,9 +252,9 @@ export function Sidebar({
             pages were actually hidden, so it never appears on a solo
             node. Hidden at lg+ when collapsed for the same overflow
             reason as Foot below. */}
-        {gov.data?.active && gov.data.hidden_sections.length > 0 && (
+        {hiddenNavIds(gov.data).length > 0 && (
           <NavLink
-            to="/settings"
+            to="/privacy"
             onClick={onClose}
             className={clsx(
               "block border-t border-line-1 px-4 py-2 text-[10.5px] text-fg-3 hover:bg-bg-2 hover:text-fg-1",
@@ -368,9 +378,10 @@ function Foot({
     return () => window.clearInterval(id);
   }, []);
   void tick;
-  const proxyOn =
-    setup != null &&
-    (setup.status === "oauth_ready" || setup.status === "api_key_ready");
+  // The watcher line follows the watcher itself (watcher_running on the
+  // watcher-health payload), not the Claude Code proxy-route setup
+  // status it used to borrow (T-585).
+  const watcherState = watcherLineState(watcher);
   // Watcher-lag signal (P1.7): transcripts the watcher is behind on
   // risk dropped capture; misroute/orphan cursors mean rows silently
   // not landing. Surface a warn line the moment either is non-zero.
@@ -388,9 +399,9 @@ function Foot({
     <div className="border-t border-line-1 px-4 py-3 text-[11px] text-fg-3">
       <div className="mb-0.5 flex items-center gap-1.5 text-fg-2">
         <LiveDot
-          {...withDotClass(liveDotProps(CAPTURE_DOT, proxyOn ? "active" : "paused"), "h-1.5 w-1.5 shrink-0")}
+          {...withDotClass(liveDotProps(CAPTURE_DOT, watcherState === "active" ? "active" : "paused"), "h-1.5 w-1.5 shrink-0")}
         />
-        watcher {proxyOn ? "active" : "-"}
+        watcher {WATCHER_LINE_LABEL[watcherState]}
         {setup?.proxy_port ? (
           <>
             {" · "}

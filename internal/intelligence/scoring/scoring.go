@@ -139,7 +139,7 @@ func (s *Scorer) BatchScore(ctx context.Context, opts BatchOptions) (BatchResult
 			args = append(args, id)
 		}
 	}
-	q += " WHERE " + joinAnd(where) + " ORDER BY s.started_at DESC, s.id"
+	q += " WHERE " + joinAnd(where) + " ORDER BY s.started_at DESC, s.id" //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return BatchResult{}, fmt.Errorf("scoring: list sessions: %w", err)

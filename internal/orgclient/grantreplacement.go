@@ -92,17 +92,17 @@ func (c *Client) AcceptGrantReplacement(ctx context.Context, r orgcontract.Grant
 		return false, fmt.Errorf("orgclient.AcceptGrantReplacement: load enrolment: %w", err)
 	}
 	if enr == nil {
-		c.logger.Warn("grant replacement REFUSED: this node is not enrolled — nothing to replace")
+		c.logger.Warn("grant replacement REFUSED: this node is not enrolled - nothing to replace")
 		return false, nil
 	}
 	if r.OrgID != enr.OrgID {
-		c.logger.Warn("grant replacement REFUSED: names a different org than the current enrolment — keeping last-good grant",
+		c.logger.Warn("grant replacement REFUSED: names a different org than the current enrolment - keeping last-good grant",
 			"replacement_org_id", r.OrgID, "enrolment_org_id", enr.OrgID)
 		return false, nil
 	}
 	orgURL := strings.TrimRight(strings.TrimSpace(enr.OrgServerURL), "/")
 	if strings.TrimRight(strings.TrimSpace(r.OrgServerURL), "/") != orgURL {
-		c.logger.Warn("grant replacement REFUSED: names a different org server than the current enrolment — keeping last-good grant",
+		c.logger.Warn("grant replacement REFUSED: names a different org server than the current enrolment - keeping last-good grant",
 			"replacement_server", r.OrgServerURL, "enrolment_server", enr.OrgServerURL)
 		return false, nil
 	}
@@ -112,8 +112,22 @@ func (c *Client) AcceptGrantReplacement(ctx context.Context, r orgcontract.Grant
 	// against it before trusting anything else in the message.
 	pub, verr := orgcontract.VerifyGrantReplacement(r)
 	if verr != nil {
-		c.logger.Warn("grant replacement REFUSED: signature did not verify — keeping last-good grant", "err", verr)
+		c.logger.Warn("grant replacement REFUSED: signature did not verify - keeping last-good grant", "err", verr)
 		return false, nil
+	}
+	// The initial component set rides under its own signature (T-707). A
+	// set without a valid signature, or a signature without a set, is a
+	// tampered document: refused whole, never accepted with the set dropped.
+	initial, ierr := orgcontract.VerifyGrantReplacementInitial(r, pub)
+	if ierr != nil {
+		c.logger.Warn("grant replacement REFUSED: initial component set did not verify - keeping last-good grant", "err", ierr)
+		return false, nil
+	}
+	storedSignature := r.Signature
+	if initial != nil {
+		// Stored with the signature that covers the set, so the runtime
+		// re-verification (orgcontract.StoredGrantSigningMessage) checks it.
+		storedSignature = r.InitialSignature
 	}
 
 	// Key pin check (mirrors applyBundleGates' Gate 2) — EXCEPT a
@@ -128,17 +142,17 @@ func (c *Client) AcceptGrantReplacement(ctx context.Context, r orgcontract.Grant
 		return false, fmt.Errorf("orgclient.AcceptGrantReplacement: read key pin: %w", perr)
 	}
 	if pinnedKeyHash == "" {
-		c.logger.Warn("grant replacement REFUSED: no org policy signing key is pinned yet for this enrolment — keeping last-good grant")
+		c.logger.Warn("grant replacement REFUSED: no org policy signing key is pinned yet for this enrolment - keeping last-good grant")
 		return false, nil
 	}
 	keyHash := orgcontract.PublicKeyPinHash(pub)
 	if keyHash != pinnedKeyHash {
-		c.logger.Warn("grant replacement REFUSED: signed under a key that does not match the pin recorded at enrolment — keeping last-good grant",
+		c.logger.Warn("grant replacement REFUSED: signed under a key that does not match the pin recorded at enrolment - keeping last-good grant",
 			"replacement_key_sha256", keyHash, "pinned_key_sha256", pinnedKeyHash)
 		return false, nil
 	}
 	if r.KeyPinSHA256 != "" && r.KeyPinSHA256 != pinnedKeyHash {
-		c.logger.Warn("grant replacement REFUSED: declared key pin does not match the recorded pin — keeping last-good grant",
+		c.logger.Warn("grant replacement REFUSED: declared key pin does not match the recorded pin - keeping last-good grant",
 			"declared_key_sha256", r.KeyPinSHA256, "pinned_key_sha256", pinnedKeyHash)
 		return false, nil
 	}
@@ -146,11 +160,11 @@ func (c *Client) AcceptGrantReplacement(ctx context.Context, r orgcontract.Grant
 	if r.ExpiresAt != "" {
 		exp, terr := time.Parse(time.RFC3339, r.ExpiresAt)
 		if terr != nil {
-			c.logger.Warn("grant replacement REFUSED: expires_at is not RFC3339 — keeping last-good grant", "expires_at", r.ExpiresAt)
+			c.logger.Warn("grant replacement REFUSED: expires_at is not RFC3339 - keeping last-good grant", "expires_at", r.ExpiresAt)
 			return false, nil
 		}
 		if !time.Now().UTC().Before(exp) {
-			c.logger.Warn("grant replacement REFUSED: it is already expired — keeping last-good grant", "expires_at", r.ExpiresAt)
+			c.logger.Warn("grant replacement REFUSED: it is already expired - keeping last-good grant", "expires_at", r.ExpiresAt)
 			return false, nil
 		}
 	}
@@ -188,9 +202,10 @@ func (c *Client) AcceptGrantReplacement(ctx context.Context, r orgcontract.Grant
 		GrantedAt:             parseRFC3339OrNow(r.GrantedAt),
 		ExpiresAt:             parseRFC3339OrZero(r.ExpiresAt),
 		SignedExpiresAt:       parseRFC3339OrZero(r.ExpiresAt),
-		Signature:             r.Signature,
+		Signature:             storedSignature,
 		ReceiptHash:           orgcontract.GrantReplacementReceiptHash(r),
 		ReplacementGeneration: r.Generation,
+		InitialComponents:     initial,
 	}
 
 	applied, werr := c.store.ReplaceEnrolmentGrant(ctx, grant)
@@ -198,7 +213,7 @@ func (c *Client) AcceptGrantReplacement(ctx context.Context, r orgcontract.Grant
 		return false, fmt.Errorf("orgclient.AcceptGrantReplacement: write replacement: %w", werr)
 	}
 	if !applied {
-		c.logger.Warn("grant replacement REFUSED: generation is not strictly greater than the last accepted replacement — keeping last-good grant (stale or replayed message)",
+		c.logger.Warn("grant replacement REFUSED: generation is not strictly greater than the last accepted replacement - keeping last-good grant (stale or replayed message)",
 			"replacement_generation", r.Generation)
 		return false, nil
 	}

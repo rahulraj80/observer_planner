@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -50,8 +49,9 @@ const maxBodyBytes = 16 << 20 // 16 MiB
 const DefaultMaxDecompressedBytes = 256 << 20 // 256 MiB
 
 // HeaderEdgeToken is the HTTP header (and, lower-cased, the gRPC metadata key)
-// that carries the receiver token when Options.RequireToken is set. The node
-// never sets RequireToken, so this header is never consulted on the node path.
+// that carries the receiver token when Options.RequireToken is set. The edge
+// always sets it; the node sets it only for an opted-in non-loopback bind
+// (T-475, SR27-B5), so a loopback node never consults this header.
 const HeaderEdgeToken = "X-Observer-Edge-Token" //nolint:gosec // G101: HTTP header NAME, not a credential value
 
 // metadataEdgeTokenKey is the gRPC metadata key for the receiver token (gRPC
@@ -70,6 +70,40 @@ var ErrNonLoopback = errors.New("ingest/otlp: refusing non-loopback bind without
 // an ADDITIVE seam (plan §Phase 4, Blocker 5): the node's handlers never return
 // ErrOverCapacity, so the node path is byte-unchanged.
 var ErrOverCapacity = errors.New("ingest/otlp: over capacity")
+
+// ErrRetryLater is a sentinel an injected handler returns when the export was
+// NOT stored because of a transient condition (for example SQLite lock
+// contention) and the same export is expected to succeed on a later attempt.
+// The HTTP transport maps it to 503 with Retry-After and the gRPC transport to
+// codes.Unavailable: both are the OTLP-retryable answers, so the exporter
+// resends instead of dropping the batch (P3-10). A handler must only return it
+// for writes that are idempotent on redelivery.
+var ErrRetryLater = errors.New("ingest/otlp: retry later")
+
+// writeHandlerError answers a failed HTTP export by the handler error's class.
+func writeHandlerError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrOverCapacity):
+		http.Error(w, "over capacity", http.StatusServiceUnavailable)
+	case errors.Is(err, ErrRetryLater):
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "temporarily unavailable, retry", http.StatusServiceUnavailable)
+	default:
+		http.Error(w, "ingest failed", http.StatusInternalServerError)
+	}
+}
+
+// grpcHandlerError maps a failed gRPC export by the handler error's class.
+func grpcHandlerError(err error) error {
+	switch {
+	case errors.Is(err, ErrOverCapacity):
+		return status.Error(codes.ResourceExhausted, "over capacity")
+	case errors.Is(err, ErrRetryLater):
+		return status.Error(codes.Unavailable, "temporarily unavailable, retry")
+	default:
+		return err
+	}
+}
 
 // Handler ingests one decoded OTLP logs export. It is injected by the daemon
 // (ccotel.ParseLogs → store.UpsertTurnByRequestID) so this package carries no
@@ -161,9 +195,10 @@ const (
 	// has the receiver-token gate (RequireToken), which is a stronger check
 	// than a Host header and is what its threat model already relies on.
 	//
-	// The node cannot make the same trade — it has no token option at all —
-	// which is exactly why the two receivers now say what they want instead
-	// of sharing one inferred answer.
+	// The node cannot make the same trade on a loopback bind: it has a token
+	// only when an operator opts into a non-loopback bind (T-475), which is
+	// exactly why the two receivers now say what they want instead of sharing
+	// one inferred answer.
 	HostGuardOff
 )
 
@@ -197,17 +232,18 @@ type Options struct {
 	// EXCLUSIVELY from the HTTP handlers — no double-count.
 	OnOutcome OutcomeHook
 
-	// RequireToken enables the edge-only ingress-trust gate on BOTH transports.
-	// DEFAULT OFF — only the edge sets it; the node never does, so the node path
-	// (HTTP mux + gRPC server option list) is byte-unchanged. When true, a
+	// RequireToken enables the ingress-trust gate on BOTH transports. DEFAULT
+	// OFF. The edge always sets it; the node sets it only when
+	// [ingest.otel].allow_non_loopback is on (T-475, closing SR27-B5), so a
+	// loopback node path (HTTP mux + gRPC server option list) is byte-unchanged. When true, a
 	// request must carry HeaderEdgeToken (HTTP) / the x-observer-edge-token gRPC
 	// metadata key matching ReceiverToken (constant-time compared) or it is
 	// rejected before the handler runs (HTTP: pre-decode 401; gRPC: a two-part
 	// TagRPC-stamp + post-decode interceptor → codes.Unauthenticated, no WAL
 	// write). This is a nil-safe receiver Option, NOT a global "non-loopback
-	// requires a token" rule — the node's AllowNonLoopback-without-token path
-	// stays valid (R2-B4). Edge config validation adds the non-loopback-needs-a-
-	// token rule EDGE-side.
+	// requires a token" rule: each caller decides (R2-B4). Edge config
+	// validation adds the non-loopback-needs-a-token rule edge-side, and
+	// `observer start` adds it node-side.
 	RequireToken bool
 	// ReceiverToken is the shared secret compared against the request token when
 	// RequireToken is set. Ignored when RequireToken is false.
@@ -362,15 +398,37 @@ func (r *Receiver) Start() {
 
 // Shutdown gracefully stops both servers. It is safe to call once.
 func (r *Receiver) Shutdown(ctx context.Context) error {
+	var errs []error
 	if r.grpcServer != nil {
-		r.grpcServer.GracefulStop()
+		// GracefulStop waits for every in-flight RPC with no deadline of its
+		// own: one Export blocked in a store write would hold the daemon's
+		// stop until the process watchdog hard-exits (P3-28). It runs behind
+		// a done channel and is cut to Stop() when ctx ends.
+		done := make(chan struct{})
+		go func() {
+			r.grpcServer.GracefulStop()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			// Stop closes the listeners and connections and cancels every
+			// RPC's context, but grpc-go still waits for each handler to
+			// return before it does, and a handler that ignores its context
+			// (a write stuck in SQLite) would hold it. Stop therefore runs in
+			// the background too and Shutdown returns at the deadline; both
+			// goroutines end when the stuck handler returns.
+			go r.grpcServer.Stop()
+			errs = append(errs, fmt.Errorf("ingest/otlp: grpc graceful stop overran, stopped: %w", ctx.Err()))
+		}
 	}
 	if r.httpServer != nil {
 		if err := r.httpServer.Shutdown(ctx); err != nil {
-			return fmt.Errorf("ingest/otlp: http shutdown: %w", err)
+			_ = r.httpServer.Close()
+			errs = append(errs, fmt.Errorf("ingest/otlp: http shutdown: %w", err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // GRPCAddr / HTTPAddr report the resolved bind addresses (useful when a :0
@@ -482,29 +540,33 @@ func (r *Receiver) handleHTTPLogs(w http.ResponseWriter, req *http.Request) {
 		r.report(sigLogs, OutcomeRejected, ReasonGzip)
 		return
 	}
+	// A JSON body is decoded through a generic tree plus protojson, a
+	// several-fold copy of its size, so it is held to the plain body cap
+	// even when gzip let it inflate further (P3-39).
+	if isJSON(req) && int64(len(raw)) > r.maxBody() {
+		http.Error(w, "JSON body too large", http.StatusRequestEntityTooLarge)
+		r.report(sigLogs, OutcomeRejected, ReasonSize)
+		return
+	}
 	var in collogspb.ExportLogsServiceRequest
-	if err := proto.Unmarshal(raw, &in); err != nil {
-		http.Error(w, "bad protobuf", http.StatusBadRequest)
+	if err := decodeBody(req, raw, &in); err != nil {
+		http.Error(w, malformedText(req), http.StatusBadRequest)
 		r.report(sigLogs, OutcomeRejected, ReasonMalformed)
 		return
 	}
 	if err := r.opts.Handler(req.Context(), &in); err != nil {
 		r.opts.Logger.Warn("ingest/otlp: http handler error", "err", err)
-		if errors.Is(err, ErrOverCapacity) {
-			http.Error(w, "over capacity", http.StatusServiceUnavailable)
-		} else {
-			http.Error(w, "ingest failed", http.StatusInternalServerError)
-		}
+		writeHandlerError(w, err)
 		r.report(sigLogs, OutcomeRejected, ReasonHandler)
 		return
 	}
-	out, err := proto.Marshal(&collogspb.ExportLogsServiceResponse{})
+	out, ctype, err := encodeResponse(req, &collogspb.ExportLogsServiceResponse{})
 	if err != nil {
 		http.Error(w, "marshal response", http.StatusInternalServerError)
 		r.report(sigLogs, OutcomeRejected, ReasonHandler)
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.Header().Set("Content-Type", ctype)
 	_, _ = w.Write(out)
 	r.report(sigLogs, OutcomeAccepted, "")
 }
@@ -554,29 +616,33 @@ func (r *Receiver) handleHTTPTraces(w http.ResponseWriter, req *http.Request) {
 		r.report(sigTraces, OutcomeRejected, ReasonGzip)
 		return
 	}
+	// A JSON body is decoded through a generic tree plus protojson, a
+	// several-fold copy of its size, so it is held to the plain body cap
+	// even when gzip let it inflate further (P3-39).
+	if isJSON(req) && int64(len(raw)) > r.maxBody() {
+		http.Error(w, "JSON body too large", http.StatusRequestEntityTooLarge)
+		r.report(sigTraces, OutcomeRejected, ReasonSize)
+		return
+	}
 	var in coltracepb.ExportTraceServiceRequest
-	if err := proto.Unmarshal(raw, &in); err != nil {
-		http.Error(w, "bad protobuf", http.StatusBadRequest)
+	if err := decodeBody(req, raw, &in); err != nil {
+		http.Error(w, malformedText(req), http.StatusBadRequest)
 		r.report(sigTraces, OutcomeRejected, ReasonMalformed)
 		return
 	}
 	if err := r.opts.TraceHandler(req.Context(), &in); err != nil {
 		r.opts.Logger.Warn("ingest/otlp: http trace handler error", "err", err)
-		if errors.Is(err, ErrOverCapacity) {
-			http.Error(w, "over capacity", http.StatusServiceUnavailable)
-		} else {
-			http.Error(w, "ingest failed", http.StatusInternalServerError)
-		}
+		writeHandlerError(w, err)
 		r.report(sigTraces, OutcomeRejected, ReasonHandler)
 		return
 	}
-	out, err := proto.Marshal(&coltracepb.ExportTraceServiceResponse{})
+	out, ctype, err := encodeResponse(req, &coltracepb.ExportTraceServiceResponse{})
 	if err != nil {
 		http.Error(w, "marshal response", http.StatusInternalServerError)
 		r.report(sigTraces, OutcomeRejected, ReasonHandler)
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.Header().Set("Content-Type", ctype)
 	_, _ = w.Write(out)
 	r.report(sigTraces, OutcomeAccepted, "")
 }
@@ -627,29 +693,33 @@ func (r *Receiver) handleHTTPMetrics(w http.ResponseWriter, req *http.Request) {
 		r.report(sigMetrics, OutcomeRejected, ReasonGzip)
 		return
 	}
+	// A JSON body is decoded through a generic tree plus protojson, a
+	// several-fold copy of its size, so it is held to the plain body cap
+	// even when gzip let it inflate further (P3-39).
+	if isJSON(req) && int64(len(raw)) > r.maxBody() {
+		http.Error(w, "JSON body too large", http.StatusRequestEntityTooLarge)
+		r.report(sigMetrics, OutcomeRejected, ReasonSize)
+		return
+	}
 	var in colmetricspb.ExportMetricsServiceRequest
-	if err := proto.Unmarshal(raw, &in); err != nil {
-		http.Error(w, "bad protobuf", http.StatusBadRequest)
+	if err := decodeBody(req, raw, &in); err != nil {
+		http.Error(w, malformedText(req), http.StatusBadRequest)
 		r.report(sigMetrics, OutcomeRejected, ReasonMalformed)
 		return
 	}
 	if err := r.opts.MetricHandler(req.Context(), &in); err != nil {
 		r.opts.Logger.Warn("ingest/otlp: http metric handler error", "err", err)
-		if errors.Is(err, ErrOverCapacity) {
-			http.Error(w, "over capacity", http.StatusServiceUnavailable)
-		} else {
-			http.Error(w, "ingest failed", http.StatusInternalServerError)
-		}
+		writeHandlerError(w, err)
 		r.report(sigMetrics, OutcomeRejected, ReasonHandler)
 		return
 	}
-	out, err := proto.Marshal(&colmetricspb.ExportMetricsServiceResponse{})
+	out, ctype, err := encodeResponse(req, &colmetricspb.ExportMetricsServiceResponse{})
 	if err != nil {
 		http.Error(w, "marshal response", http.StatusInternalServerError)
 		r.report(sigMetrics, OutcomeRejected, ReasonHandler)
 		return
 	}
-	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.Header().Set("Content-Type", ctype)
 	_, _ = w.Write(out)
 	r.report(sigMetrics, OutcomeAccepted, "")
 }
@@ -665,10 +735,7 @@ type traceService struct {
 func (s *traceService) Export(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) (*coltracepb.ExportTraceServiceResponse, error) {
 	if err := s.handler(ctx, req); err != nil {
 		s.logger.Warn("ingest/otlp: grpc trace handler error", "err", err)
-		if errors.Is(err, ErrOverCapacity) {
-			return nil, status.Error(codes.ResourceExhausted, "over capacity")
-		}
-		return nil, err
+		return nil, grpcHandlerError(err)
 	}
 	return &coltracepb.ExportTraceServiceResponse{}, nil
 }
@@ -684,10 +751,7 @@ type logsService struct {
 func (s *logsService) Export(ctx context.Context, req *collogspb.ExportLogsServiceRequest) (*collogspb.ExportLogsServiceResponse, error) {
 	if err := s.handler(ctx, req); err != nil {
 		s.logger.Warn("ingest/otlp: grpc handler error", "err", err)
-		if errors.Is(err, ErrOverCapacity) {
-			return nil, status.Error(codes.ResourceExhausted, "over capacity")
-		}
-		return nil, err
+		return nil, grpcHandlerError(err)
 	}
 	return &collogspb.ExportLogsServiceResponse{}, nil
 }
@@ -703,10 +767,7 @@ type metricsService struct {
 func (s *metricsService) Export(ctx context.Context, req *colmetricspb.ExportMetricsServiceRequest) (*colmetricspb.ExportMetricsServiceResponse, error) {
 	if err := s.handler(ctx, req); err != nil {
 		s.logger.Warn("ingest/otlp: grpc metric handler error", "err", err)
-		if errors.Is(err, ErrOverCapacity) {
-			return nil, status.Error(codes.ResourceExhausted, "over capacity")
-		}
-		return nil, err
+		return nil, grpcHandlerError(err)
 	}
 	return &colmetricspb.ExportMetricsServiceResponse{}, nil
 }

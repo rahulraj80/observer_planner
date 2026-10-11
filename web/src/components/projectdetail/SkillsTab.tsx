@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Icon, Pill, Table, TruncatedPath } from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
 import { TruncationBanner } from "@/components/projectdetail/TruncationBanner";
+import { windowKey, type WindowParams } from "@/lib/projectDrawer";
 import { useApi } from "@/lib/useApi";
 import { fmtDateOnly, fmtDateRange, fmtInt, fmtRelative } from "@/lib/format";
 import {
@@ -77,13 +78,13 @@ const RELATION_LABEL: Record<SkillSessionRelation, string> = {
   fork: "fork",
 };
 
-export function SkillsTab({ projectId, days }: { projectId: number; days: number }) {
+export function SkillsTab({ projectId, win }: { projectId: number; win: WindowParams }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const skills = useApi<ProjectSkillsResponse>(
     `/api/project/${projectId}/skills`,
-    { days },
-    [projectId, days],
+    { ...win },
+    [projectId, windowKey(win)],
   );
   const d = skills.data;
   const rows = d?.skills ?? [];

@@ -1,0 +1,24 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "newModelDefault": "VerifiedOfficial",
+    "newProviderDefault": "VerifiedOfficial",
+    "state": "VerifiedOfficial",
+    "teamId": "VerifiedOfficial"
+  },
+  "fixture_sha256": "d3abc47cb1b47221f439a9d076f50cf9cd05ac4c911921b68c763357019532fd",
+  "http": {
+    "method": "GET",
+    "path": "/teams/model-access/configuration",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"Get Model Access Configuration\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Admin API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "d6cf7e1dd3314a1b28f4ac1f699c255c0fd0b6acbff5c0d03cfb7b0837325cd3",
+  "source_url": "https://cursor.com/docs/account/teams/admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.model_access"
+}

@@ -2518,8 +2518,10 @@ func TestRegisterClaudeCodeStatuslineConflictBlocksWithoutForce(t *testing.T) {
 	if res.Error == nil {
 		t.Fatal("expected conflict error for a foreign statusLine entry")
 	}
-	if !strings.Contains(res.Error.Error(), "ccstatusline") {
-		t.Errorf("error %q does not name the existing foreign command", res.Error)
+	// settings.json is a credential-bearing file (D-268): the conflict
+	// names the key and the escape, never the foreign value.
+	if !strings.Contains(res.Error.Error(), "statusLine") || strings.Contains(res.Error.Error(), "ccstatusline") {
+		t.Errorf("error %q should name statusLine and withhold the foreign command", res.Error)
 	}
 	// The foreign entry must survive untouched.
 	body, _ := os.ReadFile(path)
@@ -2814,12 +2816,13 @@ func TestUnregisterClaudeCodeStatuslineChecksumDriftGuard(t *testing.T) {
 		t.Fatalf("register: %v", regRes.Error)
 	}
 
-	// Hand-edit the file (append an unrelated key) so its hash no longer
-	// matches the recorded checksum, without touching "statusLine" itself.
+	// Hand-edit the hooks subtree, the span the checksum covers in a
+	// credential-bearing settings.json (D-268), without touching
+	// "statusLine" itself.
 	body, _ := os.ReadFile(regRes.ConfigPath)
 	var settings map[string]json.RawMessage
 	_ = json.Unmarshal(body, &settings)
-	settings["theme"] = json.RawMessage(`"dark"`)
+	settings["hooks"] = json.RawMessage(`{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"/usr/local/bin/mine"}]}]}`)
 	patched, _ := json.Marshal(settings)
 	if err := os.WriteFile(regRes.ConfigPath, patched, 0o600); err != nil {
 		t.Fatal(err)
@@ -3111,8 +3114,8 @@ func TestRegisterClaudeCodeStatuslineForeignStatuslineSubcommandBlocks(t *testin
 	if res.Error == nil {
 		t.Fatal("expected a conflict error for a foreign `<exe> statusline` command")
 	}
-	if !strings.Contains(res.Error.Error(), "/opt/acme") || !strings.Contains(res.Error.Error(), "--force") {
-		t.Errorf("error %q should name the foreign command and the --force escape", res.Error)
+	if strings.Contains(res.Error.Error(), "/opt/acme") || !strings.Contains(res.Error.Error(), "--force") {
+		t.Errorf("error %q should withhold the foreign command (D-268) and name the --force escape", res.Error)
 	}
 	body, _ := os.ReadFile(path)
 	if string(body) != pre {

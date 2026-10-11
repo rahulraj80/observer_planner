@@ -1,17 +1,10 @@
 package processobs
 
-import "time"
+import (
+	"time"
 
-// Seed is a session attribution resolved from an external source (the
-// pidbridge, or an adapter-specific session DB). The caller injects the
-// lookup; this package never imports internal/pidbridge or internal/store.
-type Seed struct {
-	SessionID  string
-	Tool       string
-	ProjectID  int64
-	Source     AttributionSource
-	Confidence Confidence
-}
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
+)
 
 // SeedLookup resolves a pid to its session seed. The bridged pid is the
 // AI-tool ROOT process (spec §9.1.1); a clean miss returns ok=false. It
@@ -200,7 +193,7 @@ func (a *Attributor) metrics(ev RawEvent) (*ProcessRun, Change) {
 	if !a.shouldPersistMetrics(run, ev.Timestamp) {
 		return nil, ChangeNone
 	}
-	run.lastMetricPersistAt = ev.Timestamp
+	run.LastMetricPersistAt = ev.Timestamp
 	return run, ChangeUpdated
 }
 
@@ -213,7 +206,7 @@ func (a *Attributor) shouldPersistMetrics(run *ProcessRun, ts time.Time) bool {
 	if p.PersistInterval <= 0 || ts.IsZero() {
 		return true
 	}
-	if run.lastMetricPersistAt.IsZero() {
+	if run.LastMetricPersistAt.IsZero() {
 		// Anchor on the run's creation so a freshly-exec'd process (already
 		// persisted at exec) does not immediately rewrite its row.
 		anchor := run.StartedAt
@@ -222,7 +215,7 @@ func (a *Attributor) shouldPersistMetrics(run *ProcessRun, ts time.Time) bool {
 		}
 		return ts.Sub(anchor) >= p.PersistInterval
 	}
-	return ts.Sub(run.lastMetricPersistAt) >= p.PersistInterval
+	return ts.Sub(run.LastMetricPersistAt) >= p.PersistInterval
 }
 
 // SetMetricPolicy installs the live-chart ring policy (sample cadence,
@@ -230,7 +223,7 @@ func (a *Attributor) shouldPersistMetrics(run *ProcessRun, ts time.Time) bool {
 // it leaves DefaultMetricPolicy in force, so existing callers are unaffected
 // (CLAUDE.md rule 6). Not safe to call concurrently with Observe — the daemon
 // sets it once at construction.
-func (a *Attributor) SetMetricPolicy(p MetricPolicy) { a.metricRing = p.withDefaults() }
+func (a *Attributor) SetMetricPolicy(p MetricPolicy) { a.metricRing = p.WithDefaults() }
 
 // metricPolicy returns the effective policy, defaulting when never set.
 func (a *Attributor) metricPolicy() MetricPolicy {
@@ -348,7 +341,7 @@ func evictMetricSamples(s []MetricSample, newest time.Time, p MetricPolicy) []Me
 			s = s[drop:]
 		}
 	}
-	if capN := p.ringCap(); len(s) > capN {
+	if capN := p.RingCap(); len(s) > capN {
 		s = s[len(s)-capN:]
 	}
 	return s
@@ -598,17 +591,5 @@ func orDefaultConf(c, def Confidence) Confidence {
 	return c
 }
 
-// basename returns the final path element of an executable path, handling
-// both '/' and '\\' separators without importing path/filepath semantics
-// that differ by host OS (process paths are remote-OS shaped).
-func basename(p string) string {
-	if p == "" {
-		return ""
-	}
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' || p[i] == '\\' {
-			return p[i+1:]
-		}
-	}
-	return p
-}
+// basename is procmodel.Basename (one owner of the slash-agnostic rule).
+func basename(p string) string { return procmodel.Basename(p) }

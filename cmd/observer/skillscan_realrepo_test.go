@@ -10,8 +10,8 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/commitscan"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/guidance"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -92,7 +92,7 @@ func TestSkillScanRealRepository(t *testing.T) {
 	}
 	newSkillScanAfterScan(st, cfg, nil)(ctx, root, res)
 
-	got, err := dashboard.ComposeProjectSkills(ctx, st, dashboard.ProjectSkillsInput{
+	got, err := dashapi.ComposeProjectSkills(ctx, st, dashapi.ProjectSkillsInput{
 		ProjectID: projectID, Days: 30, Since: time.Now().UTC().Add(-30 * 24 * time.Hour), Until: time.Now().UTC().Add(time.Hour),
 	})
 	if err != nil {

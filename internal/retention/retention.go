@@ -187,10 +187,27 @@ type Options struct {
 }
 
 // Pruner runs retention on a database.
-type Pruner struct{ db *sql.DB }
+type Pruner struct {
+	db *sql.DB
+	// sessionsDeleted runs inside the orphaned-session sweep's transaction,
+	// after it deleted at least one session (WithSessionsDeletedHook).
+	sessionsDeleted func(ctx context.Context, tx *sql.Tx) error
+}
 
 // New wraps an open database.
 func New(db *sql.DB) *Pruner { return &Pruner{db: db} }
+
+// WithSessionsDeletedHook installs a step the orphaned-session sweep runs
+// inside its own transaction after deleting sessions. The composition root
+// passes store.ClampSessionPushCursor (T-373): sessions has an implicit
+// rowid, so deleting the newest sessions lets SQLite hand the next one a
+// rowid at or below the org push cursor, and the cursor must come down in
+// the same transaction, before any new session exists. The hook is injected
+// because this package must not import the store. Chainable; nil clears it.
+func (p *Pruner) WithSessionsDeletedHook(fn func(ctx context.Context, tx *sql.Tx) error) *Pruner {
+	p.sessionsDeleted = fn
+	return p
+}
 
 // Run executes retention with opts and returns a summary. The pruner is
 // safe to call on an empty database; missing data is silently ignored.
@@ -342,6 +359,27 @@ func ConvertToIncrementalVacuum(ctx context.Context, db *sql.DB) (int, error) {
 	return mode, nil
 }
 
+// deleteAgedExcerptsSQL removes the FTS5 excerpts of every action older
+// than the cutoff.
+//
+// action_id is UNINDEXED in action_excerpts (001_initial.sql), so the old
+// `DELETE FROM action_excerpts WHERE action_id IN (SELECT id FROM actions
+// WHERE timestamp < ?)` planned as a full scan of every stored excerpt
+// under the write lock on EVERY retention pass, even one that deletes
+// nothing (T-415, the FTSSTALL class: 0.4-0.5 s in sqlite3 over 529k
+// excerpts, slower in modernc). Here the aged actions are walked by their
+// timestamp index, each is resolved to its FTS rowids through the shadow
+// table's c0 index (migration 147), and the virtual table is reached by
+// rowid equality, so the cost follows the number of aged actions, not the
+// size of the excerpt table. `+a.id` drops actions.id's INTEGER affinity so
+// the c0 index stays usable (c0 has no affinity; every writer binds int64),
+// which also makes the planner drive the join from the timestamp range.
+// Pinned by TestDeleteAgedExcerptsSeeksByRowid.
+const deleteAgedExcerptsSQL = `DELETE FROM action_excerpts
+ WHERE rowid IN (SELECT e.id FROM actions a
+                   JOIN action_excerpts_content e ON e.c0 = +a.id
+                  WHERE a.timestamp < ?)`
+
 // deleteActionsOlder deletes actions with timestamp < cutoff, plus the
 // dependent FTS5 excerpts and failure_context rows (which carry FK to
 // actions but no ON DELETE CASCADE).
@@ -352,9 +390,7 @@ func (p *Pruner) deleteActionsOlder(ctx context.Context, cutoff string, res *Res
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	exc, err := tx.ExecContext(ctx,
-		`DELETE FROM action_excerpts
-		 WHERE action_id IN (SELECT id FROM actions WHERE timestamp < ?)`, cutoff)
+	exc, err := tx.ExecContext(ctx, deleteAgedExcerptsSQL, cutoff)
 	if err != nil {
 		return fmt.Errorf("retention: delete excerpts: %w", err)
 	}
@@ -451,6 +487,7 @@ func (p *Pruner) deleteOrphanedSessions(ctx context.Context, res *Result) error 
 		return fmt.Errorf("retention: orphaned sessions: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	deleted := int64(0)
 	if err := db.WithRetentionDeletes(ctx, tx, func() error {
 		r, err := tx.ExecContext(ctx,
 			`DELETE FROM sessions
@@ -463,10 +500,16 @@ func (p *Pruner) deleteOrphanedSessions(ctx context.Context, res *Result) error 
 		}
 		if n, err := r.RowsAffected(); err == nil {
 			res.OrphanedSessionsDeleted = int(n)
+			deleted = n
 		}
 		return nil
 	}); err != nil {
 		return err
+	}
+	if deleted > 0 && p.sessionsDeleted != nil {
+		if err := p.sessionsDeleted(ctx, tx); err != nil {
+			return fmt.Errorf("retention: orphaned sessions: after delete: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("retention: orphaned sessions: commit: %w", err)

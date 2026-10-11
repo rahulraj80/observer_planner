@@ -33,7 +33,7 @@ import (
 //
 // The property under test is the one the whole rail exists for: the browser
 // approval IS the consent, so the grant lands with NO terminal interaction and
-// with the organisation-VERIFIED actor rather than the local username — and it
+// with the organization-VERIFIED actor rather than the local username — and it
 // resolves managed-class, so the managed-only authority it carries is actually
 // honoured.
 
@@ -289,7 +289,7 @@ func TestIdPEnrolEndToEnd_RecordsBrowserConsentWithoutATTY(t *testing.T) {
 		t.Fatalf("stored consent mode = %q, want %q", row.ConsentMode, govern.ConsentIdP)
 	}
 	if row.ConsentActor != org.consentActor {
-		t.Fatalf("stored consent actor = %q, want the organisation-verified address %q (never the local username)",
+		t.Fatalf("stored consent actor = %q, want the organization-verified address %q (never the local username)",
 			row.ConsentActor, org.consentActor)
 	}
 

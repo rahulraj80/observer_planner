@@ -48,7 +48,7 @@ func newKiroCmd() *cobra.Command {
 		Aliases: []string{"kiro-cli"},
 		Short:   "Launch Kiro CLI (kiro-cli); with --continue-from, seed a handover via kiro-cli chat",
 		Long: "Wraps AWS's Kiro CLI (`kiro-cli`). Kiro talks to SigV4-signed AWS\n" +
-			"endpoints with no base-URL knob, so this launcher is NON-PROXIED —\n" +
+			"endpoints with no base-URL knob, so this launcher is NON-PROXIED -\n" +
 			"token capture happens via observer's local kiro-cli dual-store\n" +
 			"adapter, not the proxy.\n\n" +
 			"Model selection is scoped to the `chat` subcommand: pass\n" +
@@ -112,7 +112,7 @@ func newKiroCmd() *cobra.Command {
 				// and exits instead of opening the session seeded. Fail fast,
 				// before the (comparatively expensive) handoff render.
 				if forwardedFlagConflict(args, "--no-interactive") {
-					err := fmt.Errorf("--continue-from opens an interactive seeded session, but you forwarded --no-interactive — drop it (use `observer handoff` for a file-only carry)")
+					err := fmt.Errorf("--continue-from opens an interactive seeded session, but you forwarded --no-interactive - drop it (use `observer handoff` for a file-only carry)")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer kiro: %v\n", err)
 					return err
 				}

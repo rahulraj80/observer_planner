@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { CircleStop, LoaderCircle, type LucideIcon } from "lucide-react";
-import { ChartShell, Pill, Table, Tooltip } from "@/components/primitives";
+import { ChartShell, Pill, SinglePicker, Table, Tooltip } from "@/components/primitives";
+import { useToolOptions } from "@/lib/usePickerSources";
 import type { Tone } from "@shared/lib/tone";
 import { TitleWithHelp } from "@/components/HelpInd";
 import { useApi } from "@/lib/useApi";
 import { fetchJSON } from "@/lib/api";
-import { fmtCompact, fmtInt, fmtUSD } from "@/lib/format";
+import { dollarsShown, fmtCompact, fmtInt, fmtUSD } from "@/lib/format";
 import type {
   ConfigResponse,
   ExperimentDef,
@@ -14,8 +15,10 @@ import type {
 
 // ExperimentsCard — productized profile A/B (P6.4), on the
 // Compression page where the evidence lives. Start/stop write
-// [[experiments]] through the dashboard API (shared config-write
-// owner + hot reload); reports recompute arm membership from the
+// [[experiments]] through the dashboard API (the one config save
+// pipeline + hot reload), each at the config_etag the list was read
+// from (`?base_etag=`, T-639) so a file changed since is refused with
+// 409 instead of overwritten; reports recompute arm membership from the
 // session hash, so the numbers here and `observer experiment report`
 // can never disagree.
 // EXPERIMENT_STATE - an A/B experiment's state: running is in flight
@@ -37,7 +40,8 @@ function ExperimentStatePill({ state }: { state: "running" | "stopped" }) {
 }
 
 export function ExperimentsCard() {
-  const list = useApi<{ experiments: ExperimentDef[] }>("/api/experiments");
+  const list = useApi<{ experiments: ExperimentDef[]; config_etag?: string }>("/api/experiments");
+  const baseEtag = list.data?.config_etag ?? "";
   const [showStart, setShowStart] = useState(false);
   const [reportFor, setReportFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +50,7 @@ export function ExperimentsCard() {
   const stop = async (name: string) => {
     setError(null);
     try {
-      await fetchJSON("/api/experiments/stop", undefined, {
+      await fetchJSON("/api/experiments/stop", { base_etag: baseEtag }, {
         method: "POST",
         body: JSON.stringify({ name }),
       });
@@ -73,6 +77,7 @@ export function ExperimentsCard() {
       {error && <p className="mb-2 text-[11px] text-danger">{error}</p>}
       {showStart && (
         <StartForm
+          baseEtag={baseEtag}
           onStarted={() => {
             setShowStart(false);
             list.reload();
@@ -128,11 +133,13 @@ export function ExperimentsCard() {
   );
 }
 
-function StartForm({ onStarted }: { onStarted: () => void }) {
+function StartForm({ baseEtag, onStarted }: { baseEtag: string; onStarted: () => void }) {
   const cfg = useApi<ConfigResponse>("/api/config");
   const [name, setName] = useState("");
   const [klass, setKlass] = useState("anthropic");
   const [toolName, setToolName] = useState("");
+  // D-571: the one-tool class picks from the tools this build knows.
+  const tools = useToolOptions(klass === "tool");
   const [control, setControl] = useState("");
   const [candidate, setCandidate] = useState("");
   const [note, setNote] = useState("");
@@ -144,7 +151,7 @@ function StartForm({ onStarted }: { onStarted: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      await fetchJSON("/api/experiments", undefined, {
+      await fetchJSON("/api/experiments", { base_etag: baseEtag }, {
         method: "POST",
         body: JSON.stringify({
           name,
@@ -179,11 +186,14 @@ function StartForm({ onStarted }: { onStarted: () => void }) {
           <option value="tool">one tool…</option>
         </select>
         {klass === "tool" && (
-          <input
+          <SinglePicker
+            className="min-w-[12rem]"
+            options={tools.options}
             value={toolName}
-            onChange={(e) => setToolName(e.target.value)}
-            placeholder="tool name (e.g. cline)"
-            className={sel + " font-mono"}
+            onChange={setToolName}
+            loading={tools.loading}
+            placeholder="Pick a tool…"
+            ariaLabel="Tool"
           />
         )}
         <select value={control} onChange={(e) => setControl(e.target.value)} className={sel}>
@@ -251,7 +261,9 @@ function ReportView({ name }: { name: string }) {
             <th className="py-1 font-medium">Arm</th>
             <th className="py-1 font-medium">Profile</th>
             <th className="py-1 text-right font-medium">Sessions</th>
-            <th className="py-1 text-right font-medium">Mean $</th>
+            {/* The dollar column is dollars-only (T-204): the token-usage
+                view keeps the arms' turns, cache and compression figures. */}
+            {dollarsShown() && <th className="py-1 text-right font-medium">Mean $</th>}
             <th className="py-1 text-right font-medium">CV</th>
             <th className="py-1 text-right font-medium">Turns</th>
             <th className="py-1 text-right font-medium">Cache r/w</th>
@@ -264,7 +276,7 @@ function ReportView({ name }: { name: string }) {
             <td className="py-1">{a.arm}</td>
             <td className="py-1 font-mono text-[10.5px]">{a.profile}</td>
             <td className="py-1 text-right tabular-nums">{fmtInt(a.sessions)}</td>
-            <td className="py-1 text-right tabular-nums">{fmtUSD(a.mean_cost_usd)}</td>
+            {dollarsShown() && <td className="py-1 text-right tabular-nums">{fmtUSD(a.mean_cost_usd)}</td>}
             <td className="py-1 text-right tabular-nums">
               {a.sessions >= 2 ? a.cv_pct.toFixed(1) + "%" : "-"}
             </td>
@@ -293,11 +305,15 @@ function ReportView({ name }: { name: string }) {
       {r.control.sessions > 0 && r.candidate.sessions > 0 && (
         <p className="text-[11px] text-fg-2">
           candidate vs control:{" "}
-          <span className="font-medium tabular-nums">
-            {r.delta_cost_pct > 0 ? "+" : ""}
-            {r.delta_cost_pct.toFixed(1)}% $/session
-          </span>
-          {" · "}
+          {dollarsShown() && (
+            <>
+              <span className="font-medium tabular-nums">
+                {r.delta_cost_pct > 0 ? "+" : ""}
+                {r.delta_cost_pct.toFixed(1)}% $/session
+              </span>
+              {" · "}
+            </>
+          )}
           <span className="tabular-nums">
             {r.delta_turns_pct > 0 ? "+" : ""}
             {r.delta_turns_pct.toFixed(1)}% turns
@@ -308,7 +324,7 @@ function ReportView({ name }: { name: string }) {
       <CauseLine label="candidate" causes={r.candidate.cache_events_by_cause} />
       <p className="text-[10.5px] leading-relaxed text-fg-3">
         Decision guidance: believe deltas at n≥8 sessions per arm and CV under
-        ~10–13%. A candidate that wins on cost but adds invalidation-class
+        ~10-13%. A candidate that wins on cost but adds invalidation-class
         cache events (tools_changed, system_changed) or inflates turns fails.
       </p>
     </div>

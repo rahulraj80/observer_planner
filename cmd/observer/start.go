@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -18,23 +19,27 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/marmutapp/superbased-observer/internal/attachsock"
+	"github.com/marmutapp/superbased-observer/internal/clientwire"
+	"github.com/marmutapp/superbased-observer/internal/componentstate"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/diag"
-	otelexp "github.com/marmutapp/superbased-observer/internal/exporter/otel"
 	"github.com/marmutapp/superbased-observer/internal/git"
+	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/hook"
 	browseringest "github.com/marmutapp/superbased-observer/internal/ingest/browser"
 	otlpingest "github.com/marmutapp/superbased-observer/internal/ingest/otlp"
+	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/advisor"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/localipc"
+	"github.com/marmutapp/superbased-observer/internal/mcpregister"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
+	"github.com/marmutapp/superbased-observer/internal/shutdown"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/surfaceenrich"
-	"github.com/marmutapp/superbased-observer/internal/termsession"
 )
 
 // newStartCmd implements `observer start` — the full-mode entrypoint that
@@ -84,7 +89,7 @@ func newStartCmd() *cobra.Command {
 			"Pass --no-dashboard to skip the dashboard goroutine (useful when\n" +
 			"you want a separate `observer dashboard` process bound to a\n" +
 			"different address).\n\n" +
-			"MCP stdio is registered separately via `observer init` — each\n" +
+			"MCP stdio is registered separately via `observer init` - each\n" +
 			"AI tool will launch its own `observer serve` subprocess.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -116,6 +121,12 @@ func newStartCmd() *cobra.Command {
 				}
 			}
 
+			// Review C156-04 (T-354): a managed node that enrolled before a
+			// policy family was mapped to its grant gets that family added
+			// once, here, before the config is loaded (the policy lists are
+			// read once at start). Fail-open; see org_managed_families.go.
+			reconcileManagedPolicyAtStart(cmd.Context(), configPath, cmd.ErrOrStderr())
+
 			// Write a per-PID lockfile in the DB dir so concurrent
 			// daemons can be detected by `observer doctor`. Two
 			// observers writing the same SQLite file race on cursor
@@ -128,6 +139,52 @@ func newStartCmd() *cobra.Command {
 			// `effective` the instant it writes a new pinned map (§1.6 /
 			// review M3).
 			cfgForLock, govOutcome, lockErr := config.LoadGovernance(config.LoadOptions{GlobalPath: configPath})
+			// Component gate (modular packaging P1, components_gate.go): the
+			// effective component set is resolved ONCE here; every goroutine
+			// and builder below consults it. The inert overlay turns off the
+			// start-time switches of inactive components in this in-memory
+			// copy only. With no [components] block every compiled component
+			// is active and both are no-ops.
+			comps := componentstate.Legacy()
+			if lockErr == nil {
+				// Governed (lane MP-GOV, ledger MODPKG-7): on an org-managed
+				// node the local block may not narrow the node; its distro and
+				// remove entries are ignored and reportComponentIssues warns.
+				comps = componentSnapshotForConfig(cfgForLock)
+				cfgForLock = applyInertOverlay(cfgForLock, comps)
+			}
+			reportComponentIssues(cmd.ErrOrStderr(), comps)
+			// Ledger MODPKG-13 (T-679): with capture.proxy inactive no proxy
+			// binds, so a route Observer left in another tool's config fails
+			// its sessions; name it and its teardown.
+			warnProxyRouteWithoutProxyFor(cmd.Context(), cmd.ErrOrStderr(), comps, configPath)
+
+			// Bounded stop (T-553): every daemon goroutine runs through
+			// stopTracker (namedGroup below), and stopWatchdog, armed the
+			// moment a stop begins, names what is still running part-way
+			// through daemonShutdownBound and forces the exit at the bound,
+			// with every goroutine's stack written beside the DB. On
+			// 2026-10-06 daemons released their ports on SIGTERM and then ran
+			// on for minutes with the DB open (one needed SIGKILL), and a
+			// second SIGTERM did nothing because the signal context kept
+			// swallowing it. Disarm is deferred here, ahead of every later
+			// defer, so it runs after the DB close and the lock removal.
+			stopTracker := shutdown.NewTracker()
+			stopDBPath := ""
+			if lockErr == nil {
+				stopDBPath = cfgForLock.Observer.DBPath
+			}
+			stopWatchdog := daemonShutdownWatchdog(stopTracker, cmd.ErrOrStderr(), shutdownStackDir(stopDBPath))
+			defer stopWatchdog.Disarm()
+			go func() {
+				<-ctx.Done()
+				// Release the signal capture: from here a second SIGTERM or
+				// ctrl-c takes the default action (terminate) instead of
+				// being absorbed by a context that is already cancelled.
+				cancel()
+				stopTracker.AdvanceStage(shutdown.StageRunning, shutdown.StageComponents)
+				stopWatchdog.Arm()
+			}()
 
 			// T3.3: WARN once, right at startup, if this daemon is running
 			// on a replaced/deleted binary (e.g. a build/release overwrote
@@ -144,6 +201,7 @@ func newStartCmd() *cobra.Command {
 					StartedAt:  time.Now().UTC(),
 					DBPath:     cfgForLock.Observer.DBPath,
 					BinaryPath: binary,
+					Version:    version,
 				})
 				if lerr == nil {
 					defer func() { _ = diag.RemoveLock(lockPath) }()
@@ -160,7 +218,7 @@ func newStartCmd() *cobra.Command {
 				for _, sib := range diag.DetectCrossEnvSiblingDBs(cfgForLock.Observer.DBPath, crossmount.AllHomes()) {
 					fmt.Fprintf(cmd.ErrOrStderr(),
 						"WARN cross-env observer.db at %s (%s): this daemon reads %s. "+
-							"Rows already in that sibling DB won't appear here — re-register that tool's hooks "+
+							"Rows already in that sibling DB won't appear here - re-register that tool's hooks "+
 							"via `observer init` so they run in this daemon's context.\n",
 						sib.Path, sib.Origin, cfgForLock.Observer.DBPath)
 				}
@@ -213,8 +271,11 @@ func newStartCmd() *cobra.Command {
 			}
 			// Command wrapping (backlog item 7): re-point already-applied
 			// shims at this binary when the one they name is gone. Inert unless
-			// [shell_wrap].enabled; never creates a shim; fail-soft.
-			refreshShellWrapShims(cmdContext(cmd), cmd.OutOrStdout(), cmd.ErrOrStderr(), configPath)
+			// [shell_wrap].enabled; never creates a shim; fail-soft. Skipped
+			// when the shell-wrap component is inactive.
+			if comps.Active("integration.shell-wrap") {
+				refreshShellWrapShims(cmdContext(cmd), cmd.OutOrStdout(), cmd.ErrOrStderr(), configPath)
+			}
 
 			// Org push client (Teams) — constructed only when
 			// orgClientShouldStart says so, so a solo-local install never
@@ -248,28 +309,43 @@ func newStartCmd() *cobra.Command {
 			// judge build treats as "no relay available" (soft fail).
 			var orgClient *orgclient.Client
 			var orgStore *store.Store
-			if lockErr == nil && orgClientShouldStart(cfgForLock.OrgClient, func() bool {
+			// orgIntelLive is the live [intelligence].org_enrichment reader the
+			// org-plane rail gate and the consent report share (nil without an
+			// org client; the dashboard's OrgIntel manager invalidates it).
+			var orgIntelLive *liveOrgEnrichment
+			if lockErr == nil && comps.Active("org.client") && orgClientShouldStart(cfgForLock.OrgClient, func() bool {
 				return hasPersistedEnrolment(ctx, cfgForLock.Observer.DBPath)
 			}) {
 				bundle, oerr := buildOrgBundle(ctx, configPath)
 				if oerr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "org push disabled — client init failed: %v\n", oerr)
+					fmt.Fprintf(cmd.ErrOrStderr(), "org push disabled: client init failed: %v\n", oerr)
 				} else {
 					orgClient, orgStore = bundle.client, bundle.store
 					defer bundle.cleanup()
 				}
-			} else if lockErr == nil && cfgForLock.OrgClient.Enabled {
+			} else if lockErr == nil && cfgForLock.OrgClient.Enabled && comps.Active("org.client") {
 				// Reachable only when Enabled but orgClientShouldStart said
 				// no — i.e. no config URL AND no persisted enrolment row.
 				// Same stream (stderr) as the sibling "client init failed"
 				// notice above (NIT-1: they used to disagree, one on stdout
 				// and one on stderr).
 				fmt.Fprintln(cmd.ErrOrStderr(),
-					"org push disabled — [org_client].enabled = true but org_server_url is empty and no enrolment record was found (not enrolled)")
+					"org push disabled: [org_client].enabled = true but org_server_url is empty and no enrolment record was found (not enrolled)")
+			}
+			// The hook-path budget admission has one publisher, the org
+			// budget service, built only with an org client below. Without
+			// one, a file left by an earlier enrolled run would deny every
+			// hook until its period ended (B-625: forever); clear it once
+			// (D-359, review P3-05).
+			if lockErr == nil && orgClient == nil {
+				if cerr := clearBudgetAdmission(cfgForLock.Observer.DBPath); cerr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "budget admission: could not remove a leftover hook admission file: %v\n", cerr)
+				}
 			}
 			orgJudgeRelay := orgJudgeRelayFuncFor(orgClient)
 
-			p, pCleanup, addr, profilesReload, routingDemotions, admissionHandle, routingHandle, err := buildProxy(ctx, configPath, recipeName, port, bindAddr, orgJudgeRelay)
+			pwire, err := buildProxy(ctx, configPath, recipeName, port, bindAddr, orgJudgeRelay)
+			p, pCleanup, addr, profilesReload, routingDemotions, admissionHandle, routingHandle := pwire.Proxy, pwire.Cleanup, pwire.Addr, pwire.ProfilesReload, pwire.RoutingDemotions, pwire.Admission, pwire.Routing
 			if err != nil {
 				return err
 			}
@@ -376,6 +452,11 @@ func newStartCmd() *cobra.Command {
 			var budgetWire *orgBudgetHandle
 			if orgClient != nil {
 				orgClient.SetRenewalSink(renewalTracker.Observe)
+				// Component posture on the org wire (plan 6.4, T-682).
+				orgClient.SetComponentPostureProvider(componentPostureProvider(configPath, cfgForLock))
+				// Follow a node.components policy change live: teardown of
+				// newly blocked components and the scheduled purge (T-682).
+				go newComponentPolicyFollower(configPath, orgStore, comps, slog.Default()).run(ctx)
 				if lockErr == nil {
 					orgClient.SetGovernanceSidecarPath(config.ResolveGovernanceSidecarPath(cfgForLock, ""))
 					// P6 item 5: Unenroll also deletes the node.features
@@ -386,6 +467,18 @@ func newStartCmd() *cobra.Command {
 					// provider resolves cfg.Share ∧ Effective.Share on every
 					// push, reading the same handle the dashboard guard reads.
 					orgClient.SetShareProvider(governanceShareProvider(cfgForLock.OrgClient, ngov))
+					// The org's push-interval CEILING (signed node-governance
+					// pin org_client.push_interval_seconds, 2026-10-02
+					// budget-latency arc) is HOT: the push loop re-reads it
+					// every cycle and composes it with the node's OWN
+					// pre-governance interval, so lowering (or releasing) it
+					// converges without a restart.
+					orgClient.SetPushIntervalGovernance(
+						govOutcome.HotLocalInt("org_client.push_interval_seconds", int64(cfgForLock.OrgClient.PushIntervalSeconds)),
+						func() int64 {
+							return config.GovernancePinnedPushInterval(ngov.Effective(context.Background()).Pinned)
+						},
+					)
 					// Arc 4 P6b managed-integrity probe (plan §9): the collector
 					// gathers this host's coarse tamper-evidence each push cycle.
 					// The client consults it only for a managed node, so this is
@@ -407,9 +500,26 @@ func newStartCmd() *cobra.Command {
 							// authority stops the stricter reading at the
 							// next push rather than at the next restart.
 							absentIsDrift := ngov.Effective(ctx).GrantsAnyEnforcement()
-							return collectManagedIntegritySignals(dbPath, home, binaryPath, absentIsDrift)
+							rep := collectManagedIntegritySignals(dbPath, home, binaryPath, absentIsDrift)
+							// Adapter config P7: an enforced org AI tool
+							// setting that no longer holds is a closed
+							// capture-risk label (detail on the envelope).
+							agentConfigDriftRisk(ctx, orgStore, &rep)
+							return rep
 						})
 					}
+					// Org AI TOOL POLICY (adapter config P6/P7). ONE gate,
+					// resolved LIVE from the governance grant: a MANAGED
+					// enrolment with a live grant fetches the signed policy,
+					// applies it to the vendor files and reports what it did.
+					// An individual node never calls the rail, never applies
+					// and never reports (a released agent ignores all of it).
+					agentConfigGate := func(c context.Context) bool { return ngov.Effective(c).ManagedDefaultsApply() }
+					orgStore.SetAgentConfigStateGate(agentConfigGate)
+					orgClient.SetAgentConfigPolicyGate(agentConfigGate)
+					agentConfigApplier := newAgentConfigOrgApplier(orgStore, cfgForLock, agentConfigGate, slog.Default())
+					orgClient.SetAgentConfigPolicySink(agentConfigApplier.Kick)
+					agentConfigApplier.Start(ctx)
 					// Org BUDGET rail (org-budget plan §3.3c/§3.3d). The
 					// boundary composes the org's per-caller caps onto the
 					// node's own [guard.budget] numbers and applies the result
@@ -432,6 +542,54 @@ func newStartCmd() *cobra.Command {
 						orgStore,
 						slog.Default(),
 					)
+					// fail_closed is resolved LIVE too (REVIEW-4 P4-04): the
+					// node's own value, or the CURRENT governance pin, so a
+					// pin from an organization this node has left does not
+					// arm B-625 for the next one until a restart.
+					budgetWire.failClosed = liveBudgetFailClosed(
+						ownBudgetFailClosed(configPath, cfgForLock, govOutcome.Applied),
+						func() map[string]any {
+							eff := ngov.Effective(context.Background())
+							if !eff.Active {
+								return nil
+							}
+							return eff.Pinned
+						})
+					// The budget-WARNING service (budgetwarn_wire.go): the
+					// org's warn ladder, once per period, onto every
+					// developer surface. It reads the SAME accounting the
+					// guard enforces with, re-measures on every committed
+					// proxied turn and once a minute otherwise.
+					budgetWire.warn = newBudgetWarnService(dbPath,
+						processGuardBudgetSpend(dbPath),
+						budgetWarnDesktopNotifier(cfgForLock.Guard.Alerts.Desktop),
+						slog.Default())
+					// Per-tool / per-model caps are warned too (Sol A5-04),
+					// measured through the guard's own accounting lookup.
+					budgetWire.warn.SetSubjectSpend(processBudgetSubjectSpend(dbPath))
+					// The hook path's budget stop (T-519): the managed
+					// decision the process controller takes, published for
+					// every hook-capable tool's next prompt or tool call.
+					budgetWire.warn.SetAdmission(processHookBudgetAdmission(dbPath))
+					// The developer cost display (org display policy):
+					// the warning messages and the guard's budget verdict
+					// text render in it. A newly verified document
+					// re-renders at once instead of at the idle tick.
+					costDisplay := newCostDisplayResolver(orgStore)
+					budgetWire.warn.SetDisplay(costDisplay.Mode)
+					if g := lookupProcessGuard(dbPath); g != nil {
+						g.SetCostDisplay(costDisplay.Mode)
+					}
+					orgClient.SetDisplayPolicySink(func() {
+						costDisplay.Invalidate()
+						budgetWire.warn.Kick()
+					})
+					processBudgetWarn.Store(budgetWire.warn)
+					processNodeActivity.Subscribe(func(kind string) {
+						if isTurnActivity(kind) {
+							budgetWire.warn.Kick()
+						}
+					})
 					orgClient.SetBudgetSink(budgetWire.onBudgetFetch)
 					orgClient.SetBudgetPostureProvider(nodeInterventionPostureProvider(ctx, orgStore, dbPath,
 						nodeBudgetPricingPostureProvider(dbPath, budgetWire.postureProvider())))
@@ -493,12 +651,30 @@ func newStartCmd() *cobra.Command {
 					// that never reaches here leaves the rail OFF. The fetch
 					// loop already lives on the shared push goroutine; this
 					// only installs the request gate.
-					orgClient.SetIntelRail(func() bool {
+					//
+					// Parity (design 3.7): the node-authored input is read
+					// LIVE from config.toml (an `observer intel accept` or a
+					// dashboard accept rewrites it after start), and on an
+					// individual-tenancy enrolment it additionally needs an
+					// active consent record (INV-13), so a hand-edited key
+					// alone never opens the org plane there.
+					orgIntelLive = newLiveOrgEnrichment(configPath, cfgForLock.Intelligence.OrgEnrichment)
+					intelRailGate := func() bool {
+						ctx := context.Background()
 						return intelRailEnabled(
-							cfgForLock.Intelligence.OrgEnrichment,
-							ngov.Effective(context.Background()),
+							orgIntelLocalOptIn(ctx, orgStore, orgIntelLive.Get()),
+							ngov.Effective(ctx),
 						)
-					})
+					}
+					orgClient.SetIntelRail(intelRailGate)
+					// The consent report rail: the node's own posture, sent
+					// when it changes (orgclient.runIntelConsentCycle).
+					orgClient.SetIntelConsentSource(orgIntelConsentSource(orgStore, orgIntelLive))
+					// Parity phase 2 (B1): the background sweep queues quiet
+					// org-authority sessions as node-built evidence under the
+					// same gate (orgintel.PlanSubmit adds the individual
+					// consent and level rules); the push cycle sends them.
+					orgClient.SetIntelSubmitSource(orgIntelSubmitSource(orgStore, orgIntelLive, intelRailGate, lookupProcessCostEngine(dbPath)))
 				}
 			}
 
@@ -518,6 +694,10 @@ func newStartCmd() *cobra.Command {
 			if eng := p.CacheEngine(); eng != nil {
 				w.SetCacheEngine(eng)
 			}
+			// Rows from transcript-only tools are node activity too
+			// (2026-10-02 budget-latency arc, P3): they kick the org push
+			// and the budget-warning re-measure exactly as a proxied turn.
+			w.SetIngestNotifier(noteIngestActivity)
 
 			// Project Identity Resolver v2 (§3.1): the ONE production wiring
 			// of the lazy root-commit exec. Adapters resolve identity with
@@ -538,11 +718,11 @@ func newStartCmd() *cobra.Command {
 			// makes zero exporter network calls. It tails api_turns
 			// independently of the org server (M0 only). A construction failure
 			// is WARN-only: the exporter must never block the daemon (P1).
-			var otelExporter *otelexp.Exporter
+			var otelExporter otelExporterHandle
 			if lockErr == nil && cfgForLock.Exporter.OTel.Enabled {
 				exp, otelCleanup, _, oerr := buildOTelExporter(ctx, configPath)
 				if oerr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "otel exporter disabled — init failed: %v\n", oerr)
+					fmt.Fprintf(cmd.ErrOrStderr(), "otel exporter disabled: init failed: %v\n", oerr)
 				} else {
 					otelExporter = exp
 					defer otelCleanup()
@@ -552,7 +732,7 @@ func newStartCmd() *cobra.Command {
 			// Dashboard wiring — opt-out so users can run a separate
 			// `observer dashboard` process bound to a non-loopback iface
 			// or a different port without conflict.
-			var dashboardServer *dashboard.Server
+			var dashboardServer daemonDashboard
 			var dashboardListen string
 			// Session-attach socket Host (design Phase 1): derived directly off
 			// the ONE shared terminal stack (buildTerminalSurfaces) below, so
@@ -561,18 +741,31 @@ func newStartCmd() *cobra.Command {
 			// whenever [terminal.attach].enabled is true — in the dashboard
 			// branch, or the --no-dashboard attach-only branch. Nil ⇒ no PTY
 			// stack ⇒ attach unserved (honest-disabled), never a parallel stack.
-			var attachHostImpl attachsock.Host
+			var attachHostImpl attachSocketHost
 			// Phase 2 (plan §4.4): the tailnet-serve backend — a dedicated
 			// loopback listener distinct from the owner-trusted direct
 			// dashboard listener, served with the full auth stack. Populated
 			// only when [remote] is enabled in tailscale mode AND Ready().
 			var remoteBackendAddr string
+			// daemonDB is the daemon's long-lived handle (dashboard or
+			// attach-only branch); the bounded stop checkpoints the WAL
+			// through it after every component has returned (T-553).
+			var daemonDB *sql.DB
+			if !noDashboard && !comps.Active("ui.dashboard") {
+				// D-514: one reason, then headless. A build without the
+				// dashboard (-tags sbo_omit_ui_dashboard) names the build;
+				// an inactive one points at the selection.
+				fmt.Fprintf(cmd.ErrOrStderr(), "components: dashboard not started (%s); running as with --no-dashboard\n", loopSkipReason(comps, []string{"ui.dashboard"}))
+				noDashboard = true
+			}
 			if !noDashboard {
 				cfg, database, dbCleanup, err := loadConfigAndDB(ctx, configPath)
 				if err != nil {
 					return err
 				}
 				defer dbCleanup()
+				cfg = applyInertOverlay(cfg, comps)
+				daemonDB = database
 				resolvedConfigPath, _ := config.ResolveGlobalPath(configPath)
 				// Build the daemon's ONE termsession.Manager + termsvc.Service
 				// (CLAUDE.md #4) and derive the two INDEPENDENT surfaces off it:
@@ -592,6 +785,13 @@ func newStartCmd() *cobra.Command {
 				// the grant from a SEPARATE process (§2.3), which no
 				// in-process sink can observe.
 				ngov.SetIdentityLoader(governanceIdentityLoader(store.New(database)))
+				// Request-grants G8: verified feature access grants lift
+				// their pins in the sidecar, and tool access grants let a
+				// dashboard launch of a disallowed tool through.
+				ngov.SetFeatureExceptions(daemonFeatureExceptions(store.New(database)))
+				ngov.SetPageGrants(daemonPageGrants(store.New(database)))
+				nf.SetToolGrant(daemonToolGrant(store.New(database)))
+				nf.SetFeatureGrant(daemonFeatureGrant(store.New(database)))
 				launchMgr, launchStatus, policyStop := surfaces.launchMgr, surfaces.launchStatus, surfaces.policyStop
 				attachHostImpl = surfaces.attachHost
 				remoteCtrl := buildRemoteController(cfg, database)
@@ -610,7 +810,7 @@ func newStartCmd() *cobra.Command {
 				// §4 W3): the §3.6 "J" judge-tier seam is build-tag-split
 				// (projects_wire.go/projects_judge_wire.go).
 				projectsJudgeGrade, projectsJudgeGradeReason := projectsDashboardOptions(&cfg)
-				opts := dashboard.Options{
+				opts := dashapi.Options{
 					ProcessArchive: processArchive,
 					Projects:       cfg.Projects,
 					// CommitAlignmentAvailability (cloud_gradecommit.go) is the
@@ -655,18 +855,30 @@ func newStartCmd() *cobra.Command {
 					ConfigPath:             resolvedConfigPath,
 					RecognizesSessionFile:  recognizesSessionFile(),
 					CursorSemanticsFor:     cursorSemanticsFor(),
-					ToolCatalog:            toolCatalog(),
+					// `observer start` always runs the watcher beside the
+					// dashboard (ng.Go("watcher") below); the sidebar keys
+					// its watcher line to this, not to Claude setup (T-585).
+					WatcherRunning: true,
+					ToolCatalog:    toolCatalog(),
+					// Connected tools hooks probe: the options the
+					// auto-registration above wrote with (T-376).
+					HookRegistryOptions: hookProbeOptionsSeam(configPath),
+					// Connected tools per-tool "Run checks" (T-421 item 3): the
+					// same report builder `observer doctor <tool>` prints.
+					ToolDoctor: dashboardToolDoctor(configPath),
 					// Cloud account seam (cloudaccount_wire.go): local sign-in probe +
 					// `observer cloud login|logout` subprocess runner behind the Settings
 					// → Cloud Intelligence Sign-in button. Spawns the CLI; links nothing new.
-					CloudAccount:   newCloudAccountSeams(resolvedConfigPath),
-					ArenaAdmission: arenaBudgetAdmissionSeam(resolvedConfigPath),
-					ProxyPort:      cfg.Proxy.Port,
-					StashDir:       cfg.Compression.Conversation.Stash.Dir,
-					GuardEnabled:   cfg.Guard.Enabled,
-					GuardMode:      cfg.Guard.Mode,
-					GuardStrict:    cfg.Guard.Strict,
-					Version:        version,
+					CloudAccount:     newCloudAccountSeams(resolvedConfigPath),
+					ArenaAdmission:   arenaBudgetAdmissionSeam(resolvedConfigPath),
+					ProxyPort:        cfg.Proxy.Port,
+					StashDir:         cfg.Compression.Conversation.Stash.Dir,
+					GuardEnabled:     cfg.Guard.Enabled,
+					GuardMode:        cfg.Guard.Mode,
+					GuardStrict:      cfg.Guard.Strict,
+					GuardHookFailure: guardHookFailureSeam(configPath),
+					GuardToolGates:   guardToolGatesSeam(configPath, surfaces.sandboxProber),
+					Version:          version,
 					// Session handoff (docs/session-handoff.md P2): the
 					// shared handoffsvc runner behind
 					// /api/session/<id>/handoff*.
@@ -713,9 +925,18 @@ func newStartCmd() *cobra.Command {
 					ToolPreflight:    toolPreflightSeam(resolvedConfigPath, allowToolInstallSeam(resolvedConfigPath)),
 					AllowToolInstall: allowToolInstallSeam(resolvedConfigPath),
 					ToolInstallHint:  toolInstallHintSeam(),
+					// Refuse a guided install whose grounded prerequisites
+					// (unzip, bzip2, ...) are missing, with the fix.
+					ToolInstallBlocked: toolInstallBlockedSeam(),
+					// The record of guided installs this dashboard ran + the
+					// matching uninstall (tool_installs, agent migration 149).
+					ToolInstalls: surfaces.toolInstalls,
 					// Command wrapping (backlog item 7): the one shim / start-up-file
 					// applier, behind the Settings -> Terminal card.
 					ShellWrap: newShellWrapService(resolvedConfigPath, dashResolveEnv),
+					// Windows-home init (T-421 item 4): `observer init
+					// --windows-*-home` behind Connected tools, WSL only.
+					WindowsHomes: newWindowsHomeService(resolvedConfigPath, cfg.Proxy.Port),
 					// Re-pricing stored costs (PRICE-REPRICE-1): the one plan/apply/
 					// revert service `observer reprice` also uses, behind the Settings card.
 					Reprice: newRepriceService(ctx, cfg, database, slog.Default(), ngov.Effective),
@@ -744,7 +965,7 @@ func newStartCmd() *cobra.Command {
 					// (never shut down into a brick) or on an OS without execve.
 					RestartFunc: func() error {
 						if !reexecSupported() {
-							return fmt.Errorf("restart from the dashboard is not supported on this OS — relaunch the daemon manually")
+							return fmt.Errorf("restart from the dashboard is not supported on this OS - relaunch the daemon manually")
 						}
 						if perr := preflightRestart(configPath); perr != nil {
 							return perr
@@ -789,6 +1010,20 @@ func newStartCmd() *cobra.Command {
 					// VS Code status item - the `observer mcp status` body
 					// plus coverage rows, effective state and connect URL.
 					MCPAccessStatus: mcpAccessStatusSeam(resolvedConfigPath, database),
+					// Settings > Enrolment management (backlog item 6): enrol / consent /
+					// status / grant / push-now / leave through the CLI's own code
+					// paths. Wired even when not enrolled - that is how a node enrols
+					// from the UI. pushLoop tells the outcome whether a restart is
+					// needed before pushes start. The governance hook makes an enrol or
+					// leave show on /api/governance at once.
+					EnrolManager:       enrolManagerFor(resolvedConfigPath, orgClient != nil, ngov).withRetire(orgClient), // T-718: Leave retires the daemon's budget rail live
+					Components:         dashboardComponents(resolvedConfigPath, database),                                 // Settings > Components + route guard (MP-DASH)
+					ComponentArtifacts: dashboardComponentArtifacts(resolvedConfigPath),                                   // artifact_states on /api/components (T-707)
+					BinaryInstall:      dashboardBinaryInstall,                                                            // binary_install on /api/components (U12)
+					// Settings > Cloud Intelligence (org plane): the same
+					// functions `observer intel` runs; a write invalidates
+					// the rail gate's live opt-in read.
+					OrgIntel: newOrgIntelDashboard(resolvedConfigPath, orgIntelLive.invalidate),
 				}
 				// Assign the concrete client only when present so Options.OrgClient
 				// stays a nil interface (not a non-nil interface holding a nil
@@ -796,8 +1031,11 @@ func newStartCmd() *cobra.Command {
 				// off that nil to report not-enrolled.
 				if orgClient != nil {
 					opts.OrgClient = orgClient
+					// The Requests page (request-grants G6) rides the same
+					// client: same server, same credential.
+					opts.Requests = orgClient
 				}
-				dashboardServer, err = dashboard.New(opts)
+				dashboardServer, err = newDaemonDashboard(opts)
 				if err != nil {
 					return err
 				}
@@ -820,12 +1058,15 @@ func newStartCmd() *cobra.Command {
 					dashFlag = dashAddr
 				}
 				dashboardListen = resolveDashboardAddr(dashFlag, cfg.Dashboard.Addr, "127.0.0.1:8081")
-				// Fail closed on a non-loopback dashboard bind (plan §4.6):
-				// remote exposure requires the [remote] security substrate,
-				// not yet wired here, so `--dashboard-addr 0.0.0.0:8081`
-				// refuses rather than exposing an unauthenticated surface.
-				if err := dashboard.CheckRemoteBind(dashboardListen, remoteCtrl); err != nil {
-					return err
+				// Never expose an unauthenticated dashboard (plan §4.6): a
+				// non-loopback bind without a ready [remote] substrate binds
+				// 127.0.0.1 on the same port instead and says why once
+				// (D-514 / D-516: start with the setting off, never refuse).
+				dashboardListen = feasibleDashboardAddr(dashboardListen, remoteCtrl, cmd.ErrOrStderr())
+				// D-514: the settings config.Load switched off because this
+				// build cannot honour them yet, one line each.
+				for _, line := range cfg.Deferred {
+					fmt.Fprintln(cmd.ErrOrStderr(), "WARN config: "+line)
 				}
 				// Enterprise update management, daemon side (plan §3.7/§3.9).
 				// One block, placed here because everything below it depends
@@ -881,6 +1122,8 @@ func newStartCmd() *cobra.Command {
 					return err
 				}
 				defer dbCleanup()
+				cfg = applyInertOverlay(cfg, comps)
+				daemonDB = database
 				surfaces, err := buildTerminalSurfaces(ctx, cfg, database, slog.Default(), nf)
 				if err != nil {
 					return err
@@ -890,13 +1133,20 @@ func newStartCmd() *cobra.Command {
 				// even with no dashboard to govern, the node must still
 				// report a truthful node.governance effective-state row.
 				ngov.SetIdentityLoader(governanceIdentityLoader(store.New(database)))
+				// Request-grants G8: verified feature access grants lift
+				// their pins in the sidecar, and tool access grants let a
+				// dashboard launch of a disallowed tool through.
+				ngov.SetFeatureExceptions(daemonFeatureExceptions(store.New(database)))
+				ngov.SetPageGrants(daemonPageGrants(store.New(database)))
+				nf.SetToolGrant(daemonToolGrant(store.New(database)))
+				nf.SetFeatureGrant(daemonFeatureGrant(store.New(database)))
 				attachHostImpl = surfaces.attachHost
 			}
 
 			if dashboardServer != nil {
 				dashURL := "http://" + dashboardListen
 				fmt.Fprintf(cmd.OutOrStdout(),
-					"start: proxy %s + watcher + dashboard — ctrl-c to stop\n", addr)
+					"start: %s + watcher + dashboard - ctrl-c to stop\n", proxyStartLabel(addr, comps))
 				fmt.Fprintf(cmd.OutOrStdout(), "  dashboard → %s (starting…)\n", dashURL)
 				// Print a distinct "ready" line the moment the listener
 				// actually accepts a connection, so the operator isn't told
@@ -920,9 +1170,15 @@ func newStartCmd() *cobra.Command {
 					}()
 				}
 			} else {
+				why := "dashboard disabled via --no-dashboard"
+				if !dashboardInBuild {
+					why = "no dashboard: ui.dashboard is not in this build"
+				} else if !comps.Active("ui.dashboard") {
+					why = "dashboard inactive (ui.dashboard)"
+				}
 				fmt.Fprintf(cmd.OutOrStdout(),
-					"start: proxy %s + watcher (dashboard disabled via --no-dashboard) — ctrl-c to stop\n",
-					addr)
+					"start: %s + watcher (%s) - ctrl-c to stop\n",
+					proxyStartLabel(addr, comps), why)
 			}
 
 			// Plane-A P0-5 Phase W (plan §6.5): load a verified
@@ -944,11 +1200,22 @@ func newStartCmd() *cobra.Command {
 					loadPolicyResourceLKG(ctx, pcfg, orgClient, store.New(pdb), admissionHandle, gw, ngov, nf, newLogger(pcfg.Observer.LogLevel))
 					pcleanup()
 				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "policy resource: LKG load skipped — db open failed: %v\n", perr)
+					fmt.Fprintf(cmd.ErrOrStderr(), "policy resource: LKG load skipped: db open failed: %v\n", perr)
 				}
 			}
 
 			g, gctx := errgroup.WithContext(ctx)
+			// Every goroutine below is tracked by name (T-553), and a stop
+			// that begins because a component failed (gctx cancelled without
+			// a signal) arms the same watchdog as a SIGTERM does.
+			// Every loop is gated by its component (components_gate.go:
+			// daemonLoopComponents); with no [components] block all start.
+			ng := newGatedGroup(namedGroup{g: g, t: stopTracker}, comps, cmd.ErrOrStderr())
+			go func() {
+				<-gctx.Done()
+				stopTracker.AdvanceStage(shutdown.StageRunning, shutdown.StageComponents)
+				stopWatchdog.Arm()
+			}()
 			// Listener scope for the in-place update handshake
 			// (enterprise-update-management plan §3.7 step 7). The proxy and
 			// the dashboard listen on THIS context, not gctx directly, so an
@@ -981,17 +1248,23 @@ func newStartCmd() *cobra.Command {
 			// (state + empty pinned map) rather than nothing, because
 			// presence-with-empty is unambiguous while absence is
 			// indistinguishable from "the daemon never ran".
-			g.Go(func() error {
+			ng.Go("governance-sidecar", func() error {
 				runGovernanceSidecarWriter(gctx, ngov)
 				return nil
 			})
-			g.Go(func() error {
+			// The budget-warning service loop (nil-safe: an unenrolled node
+			// never builds one).
+			ng.Go("budget-warn", func() error {
+				processBudgetWarn.Load().Run(gctx)
+				return nil
+			})
+			ng.Go("proxy", func() error {
 				if err := p.ListenAndServe(listenerCtx, addr); err != nil && !errors.Is(err, context.Canceled) {
 					return fmt.Errorf("proxy: %w", err)
 				}
 				return nil
 			})
-			g.Go(func() error {
+			ng.Go("watcher", func() error {
 				if err := w.Watch(gctx); err != nil && !errors.Is(err, context.Canceled) {
 					return fmt.Errorf("watcher: %w", err)
 				}
@@ -1005,7 +1278,7 @@ func newStartCmd() *cobra.Command {
 			// the watcher on the watcher store's two surface seams; inert
 			// on a box with no JetBrains vendor directory; P1 fail-soft —
 			// every miss is logged and retried, never cancels a sibling.
-			g.Go(func() error {
+			ng.Go("surface-enricher", func() error {
 				load, stamp := w.SurfaceSeams()
 				surfaceenrich.New(surfaceenrich.Options{
 					Load:   load,
@@ -1021,7 +1294,7 @@ func newStartCmd() *cobra.Command {
 			// hashes and front-matter only — never a body. Self-gating on
 			// [guidance].enabled and P1 fail-soft like every sibling loop: a
 			// failed root is logged and retried, never cancels the daemon.
-			g.Go(func() error {
+			ng.Go("guidance-scan", func() error {
 				guidanceScanLoop(gctx, configPath)
 				return nil
 			})
@@ -1032,7 +1305,7 @@ func newStartCmd() *cobra.Command {
 			// fail-soft like every sibling loop — a failed root is logged and
 			// retried with backoff, and a missing git binary just idles the
 			// scanner (doctor + the page surface the reason honestly).
-			g.Go(func() error {
+			ng.Go("commit-scan", func() error {
 				commitScanLoop(gctx, configPath)
 				return nil
 			})
@@ -1044,7 +1317,7 @@ func newStartCmd() *cobra.Command {
 			// `observer score`, so the Sessions table's quality columns and the
 			// session Quality card stayed empty. Self-gating on
 			// [intelligence.scoring].auto (default on); P1 fail-soft.
-			g.Go(func() error {
+			ng.Go("session-score", func() error {
 				sessionScoreLoop(gctx, configPath)
 				return nil
 			})
@@ -1054,7 +1327,7 @@ func newStartCmd() *cobra.Command {
 			// Analysis, the guard's budget windows) apply the session
 			// header's rule without re-deriving on the read path. P1
 			// fail-soft.
-			g.Go(func() error {
+			ng.Go("spend-verdicts", func() error {
 				spendVerdictLoop(gctx, configPath)
 				return nil
 			})
@@ -1065,10 +1338,10 @@ func newStartCmd() *cobra.Command {
 			// to run once per synchronous daemon open) runs HERE, exactly once,
 			// after the proxy/dashboard are already serving. Fail-soft (P1):
 			// logs loudly on corruption, never cancels siblings.
-			g.Go(func() error {
+			ng.Go("db-maintenance", func() error {
 				// One concise heads-up so the multi-minute quick_check on a
 				// large DB isn't silent — the dashboard is already serving.
-				fmt.Fprintln(cmd.OutOrStdout(), "  (background) verifying database integrity — does not block the dashboard")
+				fmt.Fprintln(cmd.OutOrStdout(), "  (background) verifying database integrity - does not block the dashboard")
 				fmt.Fprintln(cmd.OutOrStdout(), "  full integrity check + compaction are on-demand: `observer doctor db`, `observer prune --vacuum`")
 				runStartupDBMaintenance(gctx, configPath)
 				return nil
@@ -1076,8 +1349,10 @@ func newStartCmd() *cobra.Command {
 			// Code-intelligence index-on-start (ADR-0002: index time only,
 			// never the proxy hot path). Best-effort like the org loops —
 			// a codeintel failure NEVER cancels proxy/watcher/dashboard.
-			g.Go(func() error {
-				runCodeIntelOnStart(gctx, configPath)
+			// Opt-in since D-307: when off it only prints the one-line
+			// upgrade note for an install that default change turned off.
+			ng.Go("codeintel", func() error {
+				runCodeIntelOnStart(gctx, configPath, cmd.ErrOrStderr())
 				return nil
 			})
 			// Periodic maintenance tick (Ticket B of the 2026-07-12
@@ -1088,7 +1363,7 @@ func newStartCmd() *cobra.Command {
 			// manual `observer prune`. P1 fail-soft like every sibling:
 			// the loop logs failures and never cancels
 			// proxy/watcher/dashboard. ≤ 0 disables the tick.
-			g.Go(func() error {
+			ng.Go("retention", func() error {
 				retentionTickLoop(gctx, configPath)
 				return nil
 			})
@@ -1098,7 +1373,7 @@ func newStartCmd() *cobra.Command {
 			// checkpointed but file never released" state can never again
 			// sit at 15.5 GB unnoticed. P1 fail-soft like the retention
 			// sibling; wal_alert_mb <= 0 disables.
-			g.Go(func() error {
+			ng.Go("wal-watchdog", func() error {
 				walWatchdogLoop(gctx, configPath)
 				return nil
 			})
@@ -1108,7 +1383,7 @@ func newStartCmd() *cobra.Command {
 			// plus this process's own deleted-but-open files cross a
 			// threshold — visible before the disk fills, not discovered
 			// after. Same P1 fail-soft posture as every sibling loop.
-			g.Go(func() error {
+			ng.Go("temp-watchdog", func() error {
 				tempWatchdogLoop(gctx, configPath)
 				return nil
 			})
@@ -1121,7 +1396,7 @@ func newStartCmd() *cobra.Command {
 			// rationale, pinned by tests/invariant/cloud_egress_test.go).
 			// Fail-soft + P1 like every sibling: inert unless opted in, and it
 			// never cancels proxy/watcher/dashboard.
-			g.Go(func() error {
+			ng.Go("cloud-auto-sync", func() error {
 				runCloudAutoSyncFromConfig(gctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), configPath)
 				return nil
 			})
@@ -1134,7 +1409,7 @@ func newStartCmd() *cobra.Command {
 			// cmd/observer/cloudautoenrich.go). The policy is re-read live on
 			// every tick, so a dashboard toggle takes effect without a daemon
 			// restart. Fail-soft + P1 like every sibling loop.
-			g.Go(func() error {
+			ng.Go("cloud-auto-enrich", func() error {
 				runCloudAutoEnrichFromConfig(gctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), configPath)
 				return nil
 			})
@@ -1144,12 +1419,12 @@ func newStartCmd() *cobra.Command {
 			// (the one typed egress) and re-prices the live cost engine on an
 			// applied feed (finding F5), refuses on an org-enrolled node, never
 			// cancels the daemon.
-			g.Go(func() error {
+			ng.Go("pricing-auto-sync", func() error {
 				runPricingAutoSyncFromConfig(gctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), configPath)
 				return nil
 			})
 			if dashboardServer != nil {
-				g.Go(func() error {
+				ng.Go("dashboard", func() error {
 					if err := dashboardServer.ListenAndServe(listenerCtx, dashboardListen); err != nil && !errors.Is(err, context.Canceled) {
 						return fmt.Errorf("dashboard: %w", err)
 					}
@@ -1173,12 +1448,16 @@ func newStartCmd() *cobra.Command {
 			case lockErr != nil:
 				// Config never loaded; the daemon already warned at startup.
 				// Stay silent here rather than emit a misleading attach notice.
+			case !comps.Active("terminals"):
+				// The inert overlay switched attach off; name the real cause.
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"session-attach disabled: the terminals component is inactive or not in this build (observer components status).")
 			case !cfgForLock.Terminal.Attach.Enabled:
 				// Honest disabled copy naming the EXACT config key (repo
 				// convention): attach is off by explicit choice — it defaults on.
 				fmt.Fprintln(cmd.ErrOrStderr(),
-					"session-attach disabled — set [terminal.attach].enabled = true to let `observer <tool> --attach` join daemon-owned sessions.")
-			case !termsession.PTYSupported():
+					"session-attach disabled: set [terminal.attach].enabled = true to let `observer <tool> --attach` join daemon-owned sessions.")
+			case !ptySupported():
 				// Enabled but this OS has no in-process PTY backend. The
 				// This arm is gated on PTYSupported() alone, so name THAT
 				// cause (audit DI-16) rather than the stale "run the daemon
@@ -1197,7 +1476,7 @@ func newStartCmd() *cobra.Command {
 				// so name the surface honestly rather than pretend it serves.
 				fmt.Fprintln(cmd.ErrOrStderr(),
 					"session-attach ([terminal.attach].enabled) is on but no terminal stack was built this run; attach is unavailable.")
-			case !attachsock.Supported():
+			case !localipc.Supported():
 				// This OS has no attach TRANSPORT whose owner-only security
 				// model actually holds (DI-09 full): unix serves an AF_UNIX
 				// socket under a 0700 directory, Windows a named pipe with a
@@ -1208,7 +1487,7 @@ func newStartCmd() *cobra.Command {
 				// Jump-in via the in-dashboard terminal are unaffected — only
 				// the standalone `--attach` client is.
 				fmt.Fprintf(cmd.ErrOrStderr(),
-					"session-attach ([terminal.attach].enabled) is on but there is no owner-only attach transport on this OS (%s) — "+
+					"session-attach ([terminal.attach].enabled) is on but there is no owner-only attach transport on this OS (%s) - "+
 						"dashboard launch and Jump-in via the terminal still work; `observer <tool> --attach` does not.\n",
 					runtime.GOOS)
 			default:
@@ -1217,16 +1496,16 @@ func newStartCmd() *cobra.Command {
 					// The endpoint itself is unusable (on unix: a socket path
 					// past UNIX_PATH_MAX). The transport's message names the
 					// cause and the fix; don't bury it.
-					fmt.Fprintf(cmd.ErrOrStderr(), "session-attach disabled — %v\n", eerr)
+					fmt.Fprintf(cmd.ErrOrStderr(), "session-attach disabled: %v\n", eerr)
 				} else {
-					ln, lerr := attachsock.ListenSocket(endpoint)
+					ln, lerr := localipc.ListenSocket(endpoint)
 					if lerr != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "session-attach disabled — cannot listen on %s: %v\n", endpoint, lerr)
+						fmt.Fprintf(cmd.ErrOrStderr(), "session-attach disabled: cannot listen on %s: %v\n", endpoint, lerr)
 					} else {
 						fmt.Fprintf(cmd.OutOrStdout(), "  session-attach → %s (%s; observer <tool> --attach)\n",
-							endpoint, attachsock.DefaultTransport().Describe())
+							endpoint, localipc.DefaultTransport().Describe())
 						host := attachHostImpl
-						g.Go(func() error {
+						ng.Go("attach-socket", func() error {
 							// Serve closes ln on gctx-cancel. On unix ln.Close
 							// (the lockedListener) OWNS the socket unlink —
 							// ordered before its flock release and
@@ -1239,7 +1518,7 @@ func newStartCmd() *cobra.Command {
 							// disappears with its last handle, so Close is the
 							// whole teardown. A serve error is logged, never
 							// propagated.
-							serr := attachsock.Serve(gctx, ln, host, slog.Default())
+							serr := serveAttach(gctx, ln, host, slog.Default())
 							_ = ln.Close()
 							if serr != nil && !errors.Is(serr, context.Canceled) {
 								fmt.Fprintf(cmd.ErrOrStderr(), "session-attach: %v\n", serr)
@@ -1255,7 +1534,7 @@ func newStartCmd() *cobra.Command {
 			// direct dashboard listener above.
 			if dashboardServer != nil && remoteBackendAddr != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  remote (tailnet backend) → %s\n", remoteBackendAddr)
-				g.Go(func() error {
+				ng.Go("tailnet-backend", func() error {
 					if err := dashboardServer.ListenAndServeTailnetBackend(gctx, remoteBackendAddr); err != nil && !errors.Is(err, context.Canceled) {
 						return fmt.Errorf("remote backend: %w", err)
 					}
@@ -1318,12 +1597,12 @@ func newStartCmd() *cobra.Command {
 						orgClient.SetGuardOutcomeSink(rep.recordGuard)
 						orgClient.SetRoutingOutcomeSink(rep.recordRouting)
 						policyResourceSink = rep.recordPolicyResource
-						g.Go(func() error {
+						ng.Go("policy-state-reporter", func() error {
 							defer rcleanup()
 							return rep.run(gctx, policyStateHeartbeat(rcfg))
 						})
 					} else {
-						fmt.Fprintf(cmd.ErrOrStderr(), "policy-state reporter disabled — db open failed: %v\n", rerr)
+						fmt.Fprintf(cmd.ErrOrStderr(), "policy-state reporter disabled: db open failed: %v\n", rerr)
 					}
 				}
 				// COLD START for the BUDGET rail (finding H3), and the first
@@ -1350,8 +1629,31 @@ func newStartCmd() *cobra.Command {
 				// auth failure or ctx-cancel. Its FIRST cycle runs immediately
 				// rather than one interval later (finding H3b), so the budget
 				// rail's first real answer arrives in seconds.
-				g.Go(func() error {
+				ng.Go("org-push", func() error {
 					_ = orgClient.PushLoop(gctx)
+					return nil
+				})
+				// Policy freshness (P2, 2026-10-02 budget-latency arc): node
+				// activity - a proxied request, a prompt hook's activity
+				// stamp - triggers a tiny conditional probe of the org's
+				// policy version vector (30 s floor, 5 min backstop), and only
+				// the rails that moved are fetched through their own signed
+				// paths. Like the push loop it never propagates an error.
+				processNodeActivity.Subscribe(func(string) { orgClient.NoteActivity() })
+				// Activity-driven push (P3): new rows pull the next push
+				// forward (15 s floor, 3-10 s coalesce, ceiling = the push
+				// interval; internal/pushsched).
+				processNodeActivity.Subscribe(func(kind string) {
+					if isPushActivity(kind) {
+						orgClient.NotePushActivity()
+					}
+				})
+				ng.Go("policy-freshness", func() error {
+					_ = orgClient.PolicyFreshnessLoop(gctx)
+					return nil
+				})
+				ng.Go("activity-stamp", func() error {
+					watchActivityStamp(gctx, cfgForLock.Observer.DBPath, processNodeActivity.Note)
 					return nil
 				})
 				// Org policy-bundle poll (guard spec §14.2): fetch once at
@@ -1361,7 +1663,7 @@ func newStartCmd() *cobra.Command {
 				// on the guard being on (a guard-off agent ignores the
 				// channel — the §14.2 compat posture) and P1 like every
 				// sibling: never propagates an error.
-				g.Go(func() error {
+				ng.Go("org-policy-bundle-poll", func() error {
 					pcfg, pdb, pcleanup, perr := loadConfigAndDB(gctx, configPath)
 					if perr != nil {
 						return nil
@@ -1377,6 +1679,11 @@ func newStartCmd() *cobra.Command {
 					plogger := newLogger(pcfg.Observer.LogLevel)
 					runner := newPolicyBundleRunner(pcfg, store.New(pdb), plogger,
 						strings.TrimRight(pcfg.OrgClient.OrgServerURL, "/"))
+					// An applied org bundle can change enforcement:
+					// re-publish the hook posture right away.
+					runner.onGuardReload = func(gd *guard.Guard) {
+						publishGuardPosture(configPath, pcfg.Guard, gd, plogger)
+					}
 					_ = orgClient.PolicyPollLoop(gctx, cachePath, runner.onResult)
 					return nil
 				})
@@ -1390,7 +1697,7 @@ func newStartCmd() *cobra.Command {
 				// ErrNotEnrolled or an identity/generation mismatch. P1
 				// like every sibling poll loop: never propagates an
 				// error.
-				g.Go(func() error {
+				ng.Go("policy-resource-poller", func() error {
 					pcfg, ok := cfgForLock, lockErr == nil
 					if !ok {
 						return nil
@@ -1402,7 +1709,7 @@ func newStartCmd() *cobra.Command {
 				// propagates an error, and a node that cannot renew simply
 				// lapses at its current expiry — which is the offboarding
 				// behaviour, not a failure.
-				g.Go(func() error {
+				ng.Go("grant-renewal", func() error {
 					rcfg, rdb, rcleanup, rerr := loadConfigAndDB(gctx, configPath)
 					if rerr != nil {
 						return nil
@@ -1419,7 +1726,7 @@ func newStartCmd() *cobra.Command {
 			// [mcp_relay].gateway_url is set). P1 like every sibling: never
 			// propagates an error; a failed start logs and the seams bound by
 			// buildProxy keep answering from the cached table.
-			g.Go(func() error {
+			ng.Go("mcp-relay", func() error {
 				h := processMCPRelay.Load()
 				if h == nil {
 					return nil
@@ -1446,7 +1753,7 @@ func newStartCmd() *cobra.Command {
 			// on + [guard.cloud].enabled + at least one event-fed
 			// feature configured (reputation alone is the on-demand
 			// CLI surface).
-			g.Go(func() error {
+			ng.Go("guard-cloud", func() error {
 				ccfg, cdb, ccleanup, cerr := loadConfigAndDB(gctx, configPath)
 				if cerr != nil {
 					return nil
@@ -1473,7 +1780,7 @@ func newStartCmd() *cobra.Command {
 				// dashboard, or push loop (P1). Start returns when gctx-cancel
 				// closes the row tail; then flush remaining spans with a
 				// detached, bounded context so shutdown doesn't drop them.
-				g.Go(func() error {
+				ng.Go("otel-exporter", func() error {
 					if err := otelExporter.Start(gctx); err != nil && !errors.Is(err, context.Canceled) {
 						fmt.Fprintf(cmd.ErrOrStderr(), "otel exporter stopped: %v\n", err)
 					}
@@ -1489,7 +1796,7 @@ func newStartCmd() *cobra.Command {
 				// [guard.export].otel (both default off). Fail-soft and P1
 				// like every sibling; the exporter's Stop above flushes
 				// whatever this tail emitted.
-				g.Go(func() error {
+				ng.Go("guard-otel-tail", func() error {
 					tcfg, tdb, tcleanup, terr := loadConfigAndDB(gctx, configPath)
 					if terr != nil {
 						return nil
@@ -1509,14 +1816,16 @@ func newStartCmd() *cobra.Command {
 					return nil
 				})
 			}
-			// Native OTLP logs receiver (native-console integration, Phase 2b):
-			// ingests a coding assistant's native telemetry (Claude Code with
-			// CLAUDE_CODE_ENABLE_TELEMETRY=1) straight into the store, deduped
-			// by request_id against proxy/JSONL. Gated by [ingest.otel] enabled
+			// Native OTLP receiver (native-console Rail A, made vendor-agnostic
+			// by T-475): ingests any mapped AI tool's own telemetry export
+			// (internal/otlpvendor: Claude Code, Codex, Gemini CLI, Qwen Code,
+			// Copilot, ...) straight into the store, deduped against the proxy
+			// and the tool's transcript. Gated by [ingest.otel] enabled
 			// (default off → no listener, solo-local UX unchanged), loopback-
-			// only unless allow_non_loopback. Fail-soft + P1: a bind failure
-			// logs and returns nil, never cancelling siblings.
-			g.Go(func() error {
+			// only unless allow_non_loopback, which then requires the receiver
+			// token. Fail-soft + P1: a bind failure logs and returns nil,
+			// never cancelling siblings.
+			ng.Go("otlp-receiver", func() error {
 				rcfg, rdb, rcleanup, rerr := loadConfigAndDB(gctx, configPath)
 				if rerr != nil {
 					return nil
@@ -1536,13 +1845,36 @@ func newStartCmd() *cobra.Command {
 					AllowNonLoopback: rcfg.Ingest.OTel.AllowNonLoopback,
 					Logger:           rlogger,
 				}
-				if rcfg.Ingest.OTel.Enabled {
-					opts.Handler = otlpLogsHandler(store.New(rdb), rlogger, rcfg.Ingest.OTel.CapturesContent(), rcfg.Ingest.OTel.MaxContentBytes())
+				// A receiver opened to the network authenticates every
+				// request (SR27-B5, T-475): the shared token is generated
+				// once and kept 0600 beside the DB. Fail closed: no
+				// token, no non-loopback listener.
+				if rcfg.Ingest.OTel.AllowNonLoopback {
+					tok, terr := resolveLocalTokenFile(otlpIngestTokenPath(rcfg))
+					if terr != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "otlp receiver disabled: allow_non_loopback needs a receiver token and it could not be resolved: %v\n", terr)
+						return nil
+					}
+					opts.RequireToken, opts.ReceiverToken = true, tok
+					rlogger.Info("otlp receiver: non-loopback bind requires the receiver token header",
+						"header", otlpingest.HeaderEdgeToken, "token_file", otlpIngestTokenPath(rcfg))
 				}
-				opts.TraceHandler = newObsTraceHandler(gctx, rcfg, rdb, rlogger)
+				// Plane A (internal/obs) gets every trace resource no
+				// coding-tool mapping row claims; Plane B (the vendor
+				// table) gets the claimed ones, plus every logs export.
+				planeA := newObsTraceHandler(gctx, rcfg, rdb, rlogger)
+				opts.TraceHandler = planeA
+				if rcfg.Ingest.OTel.Enabled {
+					// The vendor table and logs handler belong to
+					// ingest.otlp (otlp_ingest.go / otlp_ingest_omit.go).
+					opts.Handler, opts.TraceHandler = wireVendorOTLPIngest(rcfg, rdb, rlogger, planeA)
+				}
+				if opts.Handler == nil && opts.TraceHandler == nil {
+					return nil // nothing this build can serve
+				}
 				recv, err := otlpingest.New(opts)
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "otlp receiver disabled — init failed: %v\n", err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "otlp receiver disabled: init failed: %v\n", err)
 					return nil
 				}
 				recv.Start()
@@ -1563,7 +1895,7 @@ func newStartCmd() *cobra.Command {
 			// so the transport is a deployment detail, not a schema fork.
 			// Fail-soft + P1: a bind failure logs and returns nil, never
 			// cancelling siblings.
-			g.Go(func() error {
+			ng.Go("browser-listener", func() error {
 				bcfg, bdb, bcleanup, berr := loadConfigAndDB(gctx, configPath)
 				if berr != nil {
 					return nil
@@ -1574,6 +1906,11 @@ func newStartCmd() *cobra.Command {
 				}
 				blogger := newLogger(bcfg.Observer.LogLevel)
 				bst := store.New(bdb)
+				// Same guard as the watcher (acquireProcessGuard keys on the
+				// DB path), so a browser prompt arriving over the loopback
+				// rail runs the post-hoc capture lane at ingest instead of
+				// waiting for `observer guard rescan` (PGC-2 / P3).
+				wireGuard(gctx, bcfg, bst, blogger)
 				browserCfg := bcfg.Browser
 				browserHealthPath := filepath.Join(browserObserverDir(bcfg), browserHealthFileName)
 				// Resolve the shared ingress token: the configured value, else
@@ -1583,7 +1920,7 @@ func newStartCmd() *cobra.Command {
 				// (fail-soft) — the receiver still enforces loopback-only.
 				browserToken, terr := resolveBrowserIngestToken(bcfg)
 				if terr != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "browser listener: token resolve failed (%v) — continuing loopback-only\n", terr)
+					fmt.Fprintf(cmd.ErrOrStderr(), "browser listener: token resolve failed (%v) - continuing loopback-only\n", terr)
 				}
 				recv, err := browseringest.New(browseringest.Options{
 					Addr:             bcfg.Browser.Listener.ListenAddr,
@@ -1595,7 +1932,7 @@ func newStartCmd() *cobra.Command {
 					},
 				})
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "browser listener disabled — init failed: %v\n", err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "browser listener disabled: init failed: %v\n", err)
 					return nil
 				}
 				recv.Start()
@@ -1614,8 +1951,34 @@ func newStartCmd() *cobra.Command {
 			// per crossing — the reason it is opt-in + default-off. Fail-soft +
 			// P1 like every sibling: a webhook outage degrades to local
 			// recording and never cancels proxy/watcher/dashboard.
-			g.Go(func() error {
+			ng.Go("obs-alerts", func() error {
 				obsAlertLoop(gctx, configPath)
+				return nil
+			})
+			// Hook failure semantics (hook-parity audit section 5.7): the
+			// ONE writer of guard-posture.json (the hook reads it before
+			// stdin to decide whether a gate hook failure blocks) and the
+			// ONE drainer of guard-hookfail.jsonl into guard_events. P1
+			// like every sibling: never cancels proxy/watcher/dashboard.
+			ng.Go("guard-posture", func() error {
+				guardPostureLoop(gctx, configPath)
+				return nil
+			})
+			// T-323: a user guard-policy.toml that does not load is
+			// dropped (built-ins + the org bundle stay in force); this
+			// loop makes that loud with one guard event per distinct file
+			// content, which reaches the org on the guard_events push.
+			// P1 like every sibling.
+			ng.Go("guard-user-policy", func() error {
+				guardUserPolicyLoop(gctx, configPath)
+				return nil
+			})
+			// The ONE drainer of the lifecycle hook spool (hook-parity Lane
+			// C1): lifecycle hooks append session / turn / sub-agent end rows
+			// DB-free beside the config; this loop ingests them. P1 like
+			// every sibling.
+			ng.Go("hook-lifecycle", func() error {
+				hookLifecycleLoop(gctx, configPath)
 				return nil
 			})
 			// Scheduled personal cost digest (gap-register G13): a weekly /
@@ -1624,7 +1987,7 @@ func newStartCmd() *cobra.Command {
 			// [email].enabled (digestLoop returns immediately otherwise).
 			// Fail-soft + P1 like obsAlertLoop: a digest outage logs a warning
 			// and never cancels proxy/watcher/dashboard.
-			g.Go(func() error {
+			ng.Go("digest", func() error {
 				digestLoop(gctx, configPath)
 				return nil
 			})
@@ -1633,7 +1996,7 @@ func newStartCmd() *cobra.Command {
 			// the MCP get_suggestions tool point-read instead of
 			// computing. Self-contained config+DB handle; best-effort
 			// (P1) — failures log and never cancel siblings.
-			g.Go(func() error {
+			ng.Go("advisor-digest", func() error {
 				acfg, adb, acleanup, aerr := loadConfigAndDB(gctx, configPath)
 				if aerr != nil || !acfg.Advisor.Enabled {
 					return nil
@@ -1683,7 +2046,7 @@ func newStartCmd() *cobra.Command {
 			// One pass each, best-effort (P1) — failures log inside the
 			// runners and never cancel siblings. Live config edits
 			// re-check via the shared watcher trigger (guardwire.go).
-			g.Go(func() error {
+			ng.Go("guard-baseline-scan", func() error {
 				mcfg, mdb, mcleanup, merr := loadConfigAndDB(gctx, configPath)
 				if merr != nil {
 					return nil
@@ -1731,24 +2094,34 @@ func newStartCmd() *cobra.Command {
 			// [observer.process].enabled (default off) and fail-open: a
 			// missing/unsupported backend or any runtime error degrades to a
 			// WARN and never cancels the proxy/watcher/dashboard.
-			g.Go(func() error {
+			ng.Go("process-observer", func() error {
 				return runProcessObserver(gctx, configPath)
 			})
 			// Org intervention is an enrollment capability, independent of the
 			// optional process-observation setting. It resolves live authority
 			// on every action and includes already-running vendor processes.
-			g.Go(func() error {
+			ng.Go("node-intervention", func() error {
 				return runNodeIntervention(gctx, configPath, w)
 			})
-			if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-				return err
+			waitErr := g.Wait()
+			// Every component has returned: checkpoint the WAL once on the
+			// daemon's own handle, then the deferred cleanups run (T-553).
+			stopTracker.SetStage(shutdown.StageCheckpoint)
+			checkpointOnShutdown(daemonDB)
+			stopTracker.SetStage(shutdown.StageClosing)
+			if ctx.Err() != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "shutdown: components stopped in %s; closing\n",
+					stopWatchdog.Elapsed().Round(time.Millisecond))
+			}
+			if waitErr != nil && !errors.Is(waitErr, context.Canceled) {
+				return waitErr
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
 	cmd.Flags().StringVar(&recipeName, "recipe", "", "DEPRECATED: run with the named compression profile ("+strings.Join(config.RecipeNames(), ", ")+") as the default for ALL proxy traffic this run. Use [profiles] in config.toml instead.")
-	_ = cmd.Flags().MarkDeprecated("recipe", "recipes are now compression profiles resolved per provider — this run maps the name onto [profiles].default for all proxy traffic; set [profiles] in config.toml for a durable assignment (watcher-side [compression.shell]/[compression.indexing] recipe keys no longer apply)")
+	_ = cmd.Flags().MarkDeprecated("recipe", "recipes are now compression profiles resolved per provider - this run maps the name onto [profiles].default for all proxy traffic; set [profiles] in config.toml for a durable assignment (watcher-side [compression.shell]/[compression.indexing] recipe keys no longer apply)")
 	cmd.Flags().IntVar(&port, "port", 0, "Override [proxy].port")
 	cmd.Flags().StringVar(&bindAddr, "bind", "127.0.0.1", "Proxy bind address (default localhost only)")
 	cmd.Flags().StringVar(&dashAddr, "dashboard-addr", "", "Dashboard listen address (default 127.0.0.1:8081)")
@@ -1900,75 +2273,315 @@ func announceDashboardReady(ctx context.Context, w io.Writer, listenAddr, url st
 // Enabled/HookLane checks) — a mechanism whose ENTIRE hook surface is
 // that one event has nothing to do when this is false.
 func autoRegisterHooks(stdout, stderr io.Writer, configPath string, promptLaneEnabled bool) {
-	binary, err := absoluteBinaryPath()
-	if err != nil {
-		fmt.Fprintf(stderr, "auto-register: cannot resolve binary path: %v\n", err)
+	// Component gate (modular packaging P1, ledger MODPKG-6): hooks are
+	// registered only while integration.hooks is active, and only for
+	// tools whose adapter is active, so a removed component's hooks never
+	// come back on the next start.
+	comps := componentSnapshotFor(configPath)
+	if !comps.Active("integration.hooks") {
 		return
 	}
-	resolvedConfig, _ := config.ResolveGlobalPath(configPath)
-	reg, err := hook.NewRegistry(hook.Options{
-		BinaryPath: binary,
-		ConfigPath: resolvedConfig,
-		WSLDistro:  os.Getenv("WSL_DISTRO_NAME"),
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "auto-register: %v\n", err)
+	reg, ok := newAutoRegisterRegistry(stderr, configPath)
+	if !ok {
 		return
 	}
 	for _, tool := range reg.Installed() {
-		if !hookSupported(tool) {
+		if !comps.AdapterActive(tool) {
 			continue
 		}
-		// B4 (phase-3a review): a mechanism whose ONLY hook is the
-		// prompt-submit event (internal/integration's PromptLaneOnly —
-		// Gemini CLI, Qwen Code, Factory Droid, Qoder, Poolside,
-		// Windsurf/Devin Desktop Cascade, commandcode) has nothing
-		// useful to register when the operator's own config says the
-		// prompt-submit engine won't evaluate the hook lane at all.
-		// Writing that vendor's config file anyway would be dead
-		// weight at best — a hook entry pointing at a receiver that
-		// always no-ops — and a surprise settings.json edit at worst,
-		// for an operator who deliberately turned [guard.prompt] off.
-		// A mechanism that ALSO carries non-prompt-submit value
-		// (Claude Code, Cursor, Codex — PromptLaneOnly false) is
-		// unaffected: session/tool-call capture stays worth
-		// registering regardless of this switch.
-		// FIXED (B3, final-fix review): this used to look up tool
-		// straight in integration.For, a bare map keyed by the BASE
-		// registry id — but reg.Installed() (hook.Registry, the
-		// Windows-vs-native install detector) yields "-windows"
-		// SUFFIXED variants for a cross-OS bridge install (see
-		// advertisedCapability's own doc comment). integration.For
-		// therefore missed on every "-windows" tool (ok=false), the
-		// whole condition short-circuited to false, and the PromptLaneOnly
-		// skip below never fired — so with the prompt-submit hook lane
-		// disabled, the six PromptLaneOnly Windows-bridge vendor configs
-		// (gemini-cli-windows, qwen-code-windows, droid-windows,
-		// qoder-windows, poolside-windows, commandcode-windows) still
-		// got written, each pointing at a receiver that always no-ops.
-		// advertisedCapability strips the suffix the same way
-		// hookSupported (above) already does, so both checks resolve
-		// the SAME underlying capability for a bridge install.
-		if c, _, ok := advertisedCapability(tool); ok && c.Hook.PromptLaneOnly && !promptLaneEnabled {
+		autoRegisterTarget(reg, tool, promptLaneEnabled, stdout, stderr)
+	}
+	autoRepairMCP(stdout, stderr, configPath, comps)
+}
+
+// autoRepairMCP repairs an EXISTING Observer MCP entry whose command no
+// longer exists (U2, FIX-UPGRADE): an npm or pip upgrade deletes the binary
+// path an older init wrote, and only `observer init --force` used to fix
+// it. MCP stays opt-in: nothing is added where no Observer entry exists,
+// and an entry naming a command that still exists (another install, a
+// user's own edit) is left alone (mcpregister RepairOnly). Gated like
+// init's MCP step by integration.mcp-server.
+func autoRepairMCP(stdout, stderr io.Writer, configPath string, comps componentstate.Snapshot) {
+	if !comps.Active("integration.mcp-server") {
+		return
+	}
+	binary, err := absoluteBinaryPath()
+	if err != nil {
+		return
+	}
+	resolvedConfig, _ := config.ResolveGlobalPath(configPath)
+	command := registrationCommand(binary)
+	reg, err := mcpregister.NewRegistrar(mcpregister.RegisterOptions{
+		BinaryPath: command,
+		ConfigPath: registrationConfigArg(resolvedConfig, ""),
+		SelfBinary: binary,
+		RepairOnly: true,
+	})
+	if err != nil {
+		return
+	}
+	for _, tool := range reg.Installed() {
+		if !comps.AdapterActive(tool) {
 			continue
 		}
 		res := reg.Register(tool)
-		if res.ConfigPath != "" {
-			if perr := reg.RecordAutoRegisterResult(res.ConfigPath, res.Error); perr != nil {
-				fmt.Fprintf(stderr, "auto-register %s: failed to persist result to hook_checksums.json: %v\n", tool, perr)
-			}
-		}
 		switch {
 		case res.Error != nil:
-			fmt.Fprintf(stderr,
-				"WARN auto-register %s: %s: %v — %s\n",
-				tool, res.ConfigPath, res.Error, autoRegisterRemediation(tool))
-		case len(res.HooksAdded) > 0:
-			fmt.Fprintf(stdout,
-				"auto-register %s: installed %d hook(s) at %s\n",
-				tool, len(res.HooksAdded), res.ConfigPath)
+			fmt.Fprintf(stderr, "WARN auto-repair mcp %s: %v\n", tool, res.Error)
+		case res.Added:
+			fmt.Fprintf(stdout, "auto-repair mcp %s: the observer entry in %s named a binary that no longer exists; it now runs %s\n",
+				tool, res.ConfigPath, command)
 		}
 	}
+}
+
+// proxyStartLabel is the start banner's proxy half: today's "proxy <addr>",
+// or a plain statement that the proxy listener is inactive.
+func proxyStartLabel(addr string, comps componentstate.Snapshot) string {
+	if !comps.Active("capture.proxy") {
+		return "proxy inactive (capture.proxy)"
+	}
+	return "proxy " + addr
+}
+
+// autoRegisterOptions is the ONE builder of the hook.Options every
+// auto-registration writes with (this binary, the resolved global config,
+// the WSL distro, the owes-live filter). The dashboard's Connected tools
+// hooks probe dry-runs through the same options (hookProbeOptionsSeam),
+// because the registrars only count an entry as registered when its
+// command matches the one they would write exactly (T-376).
+func autoRegisterOptions(configPath string) (hook.Options, error) {
+	binary, err := absoluteBinaryPath()
+	if err != nil {
+		return hook.Options{}, err
+	}
+	resolvedConfig, _ := config.ResolveGlobalPath(configPath)
+	return hook.Options{
+		Getenv: os.Getenv,
+		// U1 + U5 (FIX-UPGRADE): the same command and --config argument
+		// `observer init` writes (registration.go), so the two writers no
+		// longer rewrite each other, and an npm / pip install registers the
+		// package manager's launcher, which survives an upgrade.
+		BinaryPath: registrationCommand(binary),
+		ConfigPath: registrationConfigArg(resolvedConfig, ""),
+		WSLDistro:  os.Getenv("WSL_DISTRO_NAME"),
+		SkipEvent:  autoRegisterSkipEvent,
+		// T-725: a start from another binary path (or a hook written
+		// without --config) must leave an equivalent existing hook, and
+		// the user's file, untouched; only a missing or broken hook is
+		// rewritten. The dashboard probe shares this, so it reports an
+		// equivalent hook as registered.
+		KeepEquivalentHooks: true,
+	}, nil
+}
+
+// hookProbeOptionsSeam is the dashboard's Options.HookRegistryOptions:
+// autoRegisterOptions with DryRun on (the dashboard forces it too).
+func hookProbeOptionsSeam(configPath string) func() (hook.Options, error) {
+	return func() (hook.Options, error) {
+		opts, err := autoRegisterOptions(configPath)
+		opts.DryRun = true
+		return opts, err
+	}
+}
+
+// newAutoRegisterRegistry builds the hook.Registry every auto-registration
+// writes through (autoRegisterOptions).
+func newAutoRegisterRegistry(stderr io.Writer, configPath string) (*hook.Registry, bool) {
+	opts, err := autoRegisterOptions(configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "auto-register: cannot resolve binary path: %v\n", err)
+		return nil, false
+	}
+	reg, err := hook.NewRegistry(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "auto-register: %v\n", err)
+		return nil, false
+	}
+	return reg, true
+}
+
+// autoRegisterOwesLive is the CLOSED set of bindings added to a
+// grandfathered mechanism AFTER the live-grounding ruling (2026-10-02) that
+// have not passed a live test yet: `observer start` does not write them
+// (`observer init`, consented, does), so a grandfathered mechanism cannot
+// carry a new doc-grounded event into auto-registration. Keyed "tool
+// NativeEvent". TestAutoRegisterOwesLiveIsCurrent fails once an entry's
+// binding is live (remove it) or is no longer registered.
+var autoRegisterOwesLive = map[string]string{
+	"poolside PreToolUse": "hook-parity A4: the pool CLI is not installed on demo node 1; doc-grounded",
+	// Integration 5: the shell PreToolUse gate is no longer written (the
+	// Lane D mod's beforeToolCall is the gate of record), so the entry
+	// moved to the mod event. The mod is one file, so this keeps the gate
+	// from being a REASON to auto-register; it cannot drop the event from
+	// a mod written for the prompt gate.
+	"command-code beforeToolCall": "hook-parity A4 / Lane D: command-code is not installed on demo node 1; doc-grounded",
+	"devin pre_run_command":       "hook-parity A5: Windsurf / Devin Desktop is not installed on demo node 1; doc-grounded",
+	"devin pre_write_code":        "hook-parity A5: Windsurf / Devin Desktop is not installed on demo node 1; doc-grounded",
+	"devin pre_read_code":         "hook-parity A5: Windsurf / Devin Desktop is not installed on demo node 1; doc-grounded",
+	"devin pre_mcp_tool_use":      "hook-parity A5: Windsurf / Devin Desktop is not installed on demo node 1; doc-grounded",
+	// Review M2-10: droid's UserPromptSubmit has NEVER fired live (D-247;
+	// on node 1 `droid exec` 0.233.0 fired PreToolUse from the same file but
+	// never UserPromptSubmit). The grandfather basis ("worked before the
+	// ruling") does not hold for a hook that never ran, so `observer start`
+	// writes only the live PreToolUse gate, and the root-shape repair no
+	// longer lifts a wrapped UserPromptSubmit group into activity.
+	"droid UserPromptSubmit": "review M2-10: never fired live (D-247, droid exec 0.233.0 on node 1); doc-grounded",
+}
+
+// autoRegisterSkipEvent is `observer start`'s per-event filter (hook.Options
+// SkipEvent): skip a binding that owes its live test.
+func autoRegisterSkipEvent(tool, event string) bool {
+	base := strings.TrimSuffix(tool, "-windows")
+	_, owes := autoRegisterOwesLive[base+" "+event]
+	return owes
+}
+
+// autoRegisterTarget registers ONE target when autoRegisterDecision admits
+// it, records the result in hook_checksums.json and reports it: the one
+// per-target body every auto-registration shares.
+func autoRegisterTarget(reg *hook.Registry, tool string, promptLaneEnabled bool, stdout, stderr io.Writer) {
+	if !autoRegisterDecision(tool, promptLaneEnabled) {
+		return
+	}
+	res := reg.Register(tool)
+	if res.ConfigPath != "" {
+		if perr := reg.RecordAutoRegisterResult(res.ConfigPath, res.Error); perr != nil {
+			fmt.Fprintf(stderr, "auto-register %s: failed to persist result to hook_checksums.json: %v\n", tool, perr)
+		}
+	}
+	logAutoRegisterRewrites(stdout, tool, res)
+	switch {
+	case res.Error != nil:
+		fmt.Fprintf(stderr,
+			"WARN auto-register %s: %s: %v - %s\n",
+			tool, res.ConfigPath, res.Error, autoRegisterRemediation(tool))
+	case len(res.HooksAdded) > 0:
+		fmt.Fprintf(stdout,
+			"auto-register %s: installed %d hook(s) at %s\n",
+			tool, len(res.HooksAdded), res.ConfigPath)
+	}
+}
+
+// logAutoRegisterRewrites names every existing observer hook entry an
+// auto-registration replaced and why (T-725), so a rewrite of the user's
+// config file is never silent. Kept-equivalent entries are summarised in
+// one line. Commands are paths and argument names only.
+func logAutoRegisterRewrites(w io.Writer, tool string, res hook.RegistrationResult) {
+	if res.DryRun || res.Error != nil {
+		return
+	}
+	for _, rw := range res.Rewrites {
+		fmt.Fprintf(w, "auto-register %s: rewrote hook %s in %s (%s): %q -> %q\n",
+			tool, rw.Event, res.ConfigPath, rw.Reason, rw.From, rw.To)
+	}
+	if n := len(res.KeptEquivalent); n > 0 {
+		fmt.Fprintf(w, "auto-register %s: kept %d equivalent existing hook(s) in %s unchanged\n",
+			tool, n, res.ConfigPath)
+	}
+}
+
+// autoRegisterInstalledTool is the post-guided-install twin of
+// autoRegisterHooks: the same writer (hook.Registry.Register), the same
+// per-target decision (autoRegisterDecision: capability, prompt lane, live
+// gate) and the same result bookkeeping, scoped to the one tool the
+// dashboard just installed, so its hooks land without a daemon restart. A
+// successful guided install IS the detection signal for that tool, so the
+// native target is registered even before the vendor created its config
+// directory; a cross-OS "-windows" variant is registered only when detected,
+// exactly as at start. The caller applies the [observer.hooks]
+// auto_register switch (the same consent `observer start` honours).
+func autoRegisterInstalledTool(stdout, stderr io.Writer, configPath string, promptLaneEnabled bool, tool string) {
+	if comps := componentSnapshotFor(configPath); !comps.Active("integration.hooks") || !comps.AdapterActive(tool) {
+		return
+	}
+	reg, ok := newAutoRegisterRegistry(stderr, configPath)
+	if !ok {
+		return
+	}
+	autoRegisterTarget(reg, tool, promptLaneEnabled, stdout, stderr)
+	for _, t := range reg.Installed() {
+		if base, isWindows := strings.CutSuffix(t, "-windows"); isWindows && base == tool {
+			autoRegisterTarget(reg, t, promptLaneEnabled, stdout, stderr)
+		}
+	}
+}
+
+// autoRegisterDecision is autoRegisterHooks' pure per-target decision:
+// whether `observer start` registers tool (a hook.Registry.Installed()
+// target, "-windows" variants included) given the prompt-lane switch. It
+// writes nothing; the hook-parity golden gate calls it directly.
+func autoRegisterDecision(tool string, promptLaneEnabled bool) bool {
+	if !hookSupported(tool) {
+		return false
+	}
+	// Capability-shaped gate (hook-parity Lane C2, audit section 5.4),
+	// replacing B4's PromptLaneOnly skip: a mechanism is written only when
+	// one of its WIRED bindings serves a feature that is on. A mechanism
+	// whose wired bindings are all prompt-family (Gemini CLI, Poolside,
+	// Cascade, commandcode) has nothing to do with the prompt hook lane off,
+	// exactly as before; one that also wires lifecycle or capture bindings
+	// (Claude Code, Cursor, Codex, and since Lane C Qwen Code and Qoder) is
+	// always worth registering. advertisedCapability strips a
+	// "-windows" suffix (B3, final-fix review), so a cross-OS bridge target
+	// resolves the same capability as its native twin. Only the bindings
+	// `observer start` would actually write count (autoRegisterSkipEvent
+	// drops a tool gate that still owes its live test), so a mechanism whose
+	// one non-prompt binding is skipped is not written for its prompt event
+	// alone while the prompt lane is off.
+	if !hookRegistrationWanted(tool, promptLaneEnabled, autoRegisterSkipEvent) {
+		return false
+	}
+	// Live gate (hook-parity audit section 7 ruling 4, Lane 0 step 9):
+	// `observer start` writes a vendor config only when every event it
+	// registers passed a live test on a real install, or the mechanism is
+	// grandfathered. Anything else is `observer init` only (consented).
+	c, _, _ := advertisedCapability(tool)
+	return autoRegisterLiveGate(c)
+}
+
+// hookRegistrationWanted is the capability-shaped registration gate shared
+// by `observer start` (autoRegisterDecision) and `observer init`
+// (wireAIClients): tool's mechanism carries a wired binding whose feature is
+// on. The tool gate is treated as on here (refining it from [guard].mode is
+// still open). skip, when non-nil, excludes the bindings the caller will not
+// write (`observer start` passes autoRegisterSkipEvent; `observer init`
+// writes every Registered binding and passes nil).
+func hookRegistrationWanted(tool string, promptLaneEnabled bool, skip func(tool, event string) bool) bool {
+	return clientwire.HookRegistrationWanted(tool, promptLaneEnabled, skip)
+}
+
+// grandfatheredAutoRegister is the CLOSED set of mechanisms `observer start`
+// auto-registered before the live-grounding ruling (2026-10-02). Each keeps
+// its status but owes a live test: TestGrandfatheredAutoRegisterOwesLive-
+// Grounding fails once an entry's registered bindings are all live, so the
+// entry is then removed rather than left as dead weight. A NEW mechanism
+// never joins this list: it joins auto-registration by going live.
+var grandfatheredAutoRegister = map[integration.HookMechanism]string{
+	integration.HookClaudeSettings: "live grounding owed: 19 of 22 registered events are doc-grounded (PreToolUse, UserPromptSubmit and SessionEnd are live)",
+	integration.HookCursor:         "live grounding owed: registered events are fixture-grounded (testdata/cursor/hooks-log)",
+	integration.HookCodexConfig:    "live grounding owed: PreToolUse, PermissionRequest, PostToolUse and Stop are doc-grounded (SessionStart and UserPromptSubmit are live)",
+	integration.HookQwenSettings:   "live grounding owed: UserPromptSubmit is doc-grounded (Part B, 2026-09-07)",
+	integration.HookFactoryJSON:    "live grounding owed: UserPromptSubmit is doc-grounded (Part B, 2026-09-07)",
+	integration.HookQoderJSON:      "live grounding owed: UserPromptSubmit is doc-grounded (Part B, 2026-09-07)",
+	integration.HookPoolsideYAML:   "live grounding owed: UserPromptSubmit is doc-grounded (Part B, 2026-09-07)",
+	integration.HookCascadeJSON:    "live grounding owed: pre_user_prompt is doc-grounded (Part B, 2026-09-07)",
+	integration.HookCommandCodeMod: "live grounding owed: the Mods export shape is unverified against a live install",
+	// Antigravity (HookAntigravityJSON) is deliberately NOT here (Sol
+	// A2-08): its PreInvocation hook was added on 2026-10-02, the same day
+	// as the ruling, and had never had a live run, so listing it let a NEW
+	// mechanism into auto-registration through the exemption D-043 closes.
+	// It is `observer init` only until its bindings go live.
+}
+
+// autoRegisterLiveGate reports whether `observer start` may write c's
+// mechanism: every registered binding live, or a grandfathered mechanism.
+func autoRegisterLiveGate(c integration.Capability) bool {
+	if c.Hook.RegisteredAllLive() {
+		return true
+	}
+	_, ok := grandfatheredAutoRegister[c.Hook.Mechanism]
+	return ok
 }
 
 // autoRegisterRemediation returns a one-line, tool-specific fix
@@ -2001,7 +2614,7 @@ func autoRegisterRemediation(tool string) string {
 		"qoder": true, "poolside": true, "devin": true, "command-code": true,
 	}
 	if noDedicatedInitFlag[tool] {
-		return "run: observer init --force (no dedicated --" + tool + " flag; --all also selects it) — or clear the conflicting hooks entry by hand"
+		return "run: observer init --force (no dedicated --" + tool + " flag; --all also selects it) - or clear the conflicting hooks entry by hand"
 	}
 	return "run: observer init --force (or clear the conflicting hooks entry by hand)"
 }
@@ -2026,7 +2639,7 @@ func allowedNotWatchedWarning(unwatched []string, enabledLen, defaultLen int) st
 	}
 	return fmt.Sprintf(
 		"WARN [terminal.launch].allowed_tools lists %d tool(s) that your explicit "+
-			"[observer.watch].enabled_adapters (%d entries; the default has %d) does not watch — "+
+			"[observer.watch].enabled_adapters (%d entries; the default has %d) does not watch - "+
 			"they will launch from the dashboard but never be captured: %s. "+
 			"Add them to enabled_adapters or delete the key to watch the default set.\n",
 		len(unwatched), enabledLen, defaultLen, strings.Join(unwatched, ", "),

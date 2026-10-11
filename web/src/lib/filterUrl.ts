@@ -1,16 +1,17 @@
 // filterUrl - the global FilterBar state <-> query-string codec.
 //
 // The node dashboard's global filters (window, custom range, tool, project,
-// free-text query) live in the URL so a reload, back/forward and a copied
+// model, free-text query) live in the URL so a reload, back/forward and a copied
 // link all land on the same view. This module is the ONE owner of that
 // mapping: FILTER_PARAMS is a table walked top-down (param name -> filter
 // field -> parse/validate -> default). A value that does not parse is
 // IGNORED (the field falls back), never guessed.
 //
 // Param names deliberately avoid the page-owned ones (Sessions ?session=
-// ?watch=, the session drawer's ?tab=, Settings ?section=, Search ?q=,
-// Projects/Report ?project= ?root=, Benchmarks ?run=, Routing ?reason=
-// ?applied=, Report ?month=, Terminals ?tab= ?dock=): applyFilterParams only
+// ?watch=, the session and project drawers' ?dtab=, every page tab's ?tab=,
+// Settings ?section=, Search ?q=, Projects/Cost statement ?project= ?root=,
+// Benchmarks ?run=, Routing ?reason= ?applied=, Cost statement ?month=,
+// Terminals ?dock=): applyFilterParams only
 // ever sets or deletes the names in this table, so a page's own params are
 // never clobbered.
 //
@@ -43,6 +44,13 @@ export type UrlFilters = {
   customRange: CustomRange;
   tool: string;
   project: string;
+  /**
+   * model is the global Model filter (`model=`; "all" = unfiltered). The
+   * value is a model id exactly as the store holds it ("claude-opus-4-7",
+   * "openrouter/qwen/qwen3-coder:free"); the server decides grain
+   * (internal/modelfilter).
+   */
+  model: string;
   query: string;
   /**
    * gran is the chart time granularity (`gran=`; "auto" = the shared Auto
@@ -108,6 +116,7 @@ export const FILTER_DEFAULTS: UrlFilters = {
   customRange: { since: "", until: "" },
   tool: "all",
   project: "all",
+  model: "all",
   query: "",
   gran: "auto",
 };
@@ -135,7 +144,7 @@ function parseText(max: number) {
  */
 export type FilterParam = {
   param: string;
-  field: "win" | "since" | "until" | "tool" | "project" | "query" | "gran";
+  field: "win" | "since" | "until" | "tool" | "project" | "model" | "query" | "gran";
   parse: (raw: string) => string | null;
   write: (f: UrlFilters) => string | null;
 };
@@ -174,6 +183,15 @@ export const FILTER_PARAMS: readonly FilterParam[] = [
     field: "project",
     parse: parseText(4096),
     write: (f) => (f.project === FILTER_DEFAULTS.project || f.project === "" ? null : f.project),
+  },
+  {
+    // Model ids carry "/", ":" and "." ("openrouter/qwen/qwen3-coder:free"),
+    // so the parse is the bounded free-text rule, capped where the server's
+    // own bound (internal/modelfilter.MaxLen) is.
+    param: "model",
+    field: "model",
+    parse: parseText(200),
+    write: (f) => (f.model === FILTER_DEFAULTS.model || f.model === "" ? null : f.model),
   },
   {
     param: "search",
@@ -220,6 +238,7 @@ export function parseFilterParams(search: string): Partial<UrlFilters> {
   }
   if (raw.tool != null) out.tool = raw.tool;
   if (raw.project != null) out.project = raw.project;
+  if (raw.model != null) out.model = raw.model;
   if (raw.query != null) out.query = raw.query;
   if (raw.gran != null) out.gran = raw.gran as GranChoice;
   return out;
@@ -278,6 +297,7 @@ export function reconcileFromUrl(
     customRange: fromUrl.customRange ?? current.customRange,
     tool: fromUrl.tool ?? base.tool,
     project: fromUrl.project ?? base.project,
+    model: fromUrl.model ?? base.model,
     query: fromUrl.query ?? base.query,
     gran: fromUrl.gran ?? base.gran,
   };
@@ -291,6 +311,7 @@ export function sameUrlFilters(a: UrlFilters, b: UrlFilters): boolean {
     a.customRange.until === b.customRange.until &&
     a.tool === b.tool &&
     a.project === b.project &&
+    a.model === b.model &&
     a.query === b.query &&
     a.gran === b.gran
   );

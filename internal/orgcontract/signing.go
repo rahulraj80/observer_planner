@@ -165,7 +165,10 @@ func VerifyPolicyBundle(b PolicyBundle) (ed25519.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("orgcontract.VerifyPolicyBundle: decode signature: %w", err)
 	}
-	if !ed25519.Verify(ed25519.PublicKey(pub), PolicyBundleSigningMessage(b.Version, []byte(b.BundleTOML)), sig) {
+	// The message is v2 (org + subject bound) when the envelope carries a
+	// binding, v1 otherwise (policybinding.go); a cached envelope therefore
+	// re-verifies self-contained either way.
+	if !ed25519.Verify(ed25519.PublicKey(pub), policyBundleSignedMessage(b), sig) {
 		return nil, errors.New("orgcontract.VerifyPolicyBundle: signature verification failed")
 	}
 	return ed25519.PublicKey(pub), nil
@@ -433,9 +436,10 @@ func PolicyResourceSigningMessage(id string, version int64, family, compilerVers
 // base64url signature in the wire encoding SignedPolicyResource.Signature
 // carries. The caller must set r.BodyHash = hex(SHA-256(r.Body)) beforehand
 // — this function signs the message as given; it does not recompute or
-// verify BodyHash (that is VerifyPolicyResource's job on the other end).
+// verify BodyHash (that is VerifyPolicyResource's job on the other end). The
+// message is v2 when r carries a Binding, v1 otherwise (policybinding.go).
 func SignPolicyResource(priv ed25519.PrivateKey, r SignedPolicyResource) (string, error) {
-	msg, err := PolicyResourceSigningMessage(r.ID, r.Version, r.Family, r.CompilerVersion, r.BodyHash, r.SelectorsJSON, r.RequiredCapabilities)
+	msg, err := policyResourceSignedMessage(r)
 	if err != nil {
 		return "", fmt.Errorf("orgcontract.SignPolicyResource: %w", err)
 	}
@@ -466,7 +470,7 @@ func VerifyPolicyResource(r SignedPolicyResource) (ed25519.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("orgcontract.VerifyPolicyResource: decode signature: %w", err)
 	}
-	msg, err := PolicyResourceSigningMessage(r.ID, r.Version, r.Family, r.CompilerVersion, r.BodyHash, r.SelectorsJSON, r.RequiredCapabilities)
+	msg, err := policyResourceSignedMessage(r)
 	if err != nil {
 		return nil, fmt.Errorf("orgcontract.VerifyPolicyResource: %w", err)
 	}
@@ -484,6 +488,11 @@ func VerifyPolicyResource(r SignedPolicyResource) (ed25519.PublicKey, error) {
 // WHOLE signed message (not just Body) means a same-version republish that
 // changes only capabilities/selectors is also caught, not just a changed
 // Body.
+//
+// It is the v1 CONTENT identity and ignores a v2 Binding on purpose: the
+// replay floor, the publish row's msg_digest and the withdrawal lookup all
+// compare documents, and the same document bound to another member is the
+// same document. PolicyResourceDeliveryDigest names a bound delivery.
 func PolicyResourceMessageDigest(r SignedPolicyResource) (string, error) {
 	msg, err := PolicyResourceSigningMessage(r.ID, r.Version, r.Family, r.CompilerVersion, r.BodyHash, r.SelectorsJSON, r.RequiredCapabilities)
 	if err != nil {

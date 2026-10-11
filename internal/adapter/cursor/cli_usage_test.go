@@ -147,3 +147,33 @@ func TestCLIUsageModelDoesNotGuessAcrossModels(t *testing.T) {
 		})
 	}
 }
+
+// TestCLIUsageRootsNeverReadAnotherUsersTempDir is U10: in a shared temp
+// directory only the current user's own cursor-agent-logs-<uid|username>
+// is watched, and only when the current user owns it; another user's
+// directory is never listed.
+func TestCLIUsageRootsNeverReadAnotherUsersTempDir(t *testing.T) {
+	tmp := t.TempDir()
+	mine := filepath.Join(tmp, "cursor-agent-logs-1000")
+	other := filepath.Join(tmp, "cursor-agent-logs-1001")
+	squatted := filepath.Join(tmp, "cursor-agent-logs-alice")
+	for _, d := range []string{mine, other, squatted} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := cliRootEnv{
+		tempDir: tmp,
+		ids:     []string{"1000", "alice"},
+		owned:   func(p string) bool { return p == mine },
+	}
+	got := cliUsageRootsFor(nil, env)
+	if len(got) != 1 || got[0] != mine {
+		t.Fatalf("roots = %v, want only %s", got, mine)
+	}
+	// Before the first CLI run the canonical directory is still watched.
+	env.tempDir = t.TempDir()
+	if got := cliUsageRootsFor(nil, env); len(got) != 1 || got[0] != filepath.Join(env.tempDir, "cursor-agent-logs-1000") {
+		t.Fatalf("canonical root missing: %v", got)
+	}
+}

@@ -86,7 +86,7 @@ func TestEmbeddedTestBrokerFootprintIsExplicit(t *testing.T) {
 		t.Fatalf("the test broker is using the production storage default (%d)", DefaultMaxBytes)
 	}
 
-	oversized, err := Embedded(context.Background(), t.TempDir(), Options{
+	oversized, err := Embedded(context.Background(), testStoreDir(t), Options{
 		MaxBytes:         DefaultMaxBytes,
 		EmbeddedMaxStore: testBrokerMaxStore,
 		ConnectTimeout:   3 * time.Second,
@@ -105,7 +105,7 @@ func TestEmbeddedTestBrokerFootprintIsExplicit(t *testing.T) {
 func newTestLog(t *testing.T, o Options) *Log {
 	t.Helper()
 	o = EmbeddedTestOptions(o)
-	l, err := Embedded(context.Background(), t.TempDir(), o)
+	l, err := Embedded(context.Background(), testStoreDir(t), o)
 	if err != nil {
 		t.Fatalf("Embedded: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestConnectStreamStorageCapacity(t *testing.T) {
 				Host:               "127.0.0.1",
 				Port:               natsserver.RANDOM_PORT,
 				JetStream:          true,
-				StoreDir:           t.TempDir(),
+				StoreDir:           testStoreDir(t),
 				JetStreamMaxStore:  brokerMaxStore,
 				JetStreamMaxMemory: 8 << 20,
 				NoSigs:             true,

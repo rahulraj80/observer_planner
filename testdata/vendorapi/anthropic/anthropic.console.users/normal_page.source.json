@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].added_at": "VerifiedOfficial",
+    "data[].email": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].name": "VerifiedOfficial",
+    "data[].role": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "first_id": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "last_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "7e78a2858b43981bbe701dfd1daa0059b7816b43cc63b0f7d7b754752c12a8a3",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/users",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.console.users"
+}

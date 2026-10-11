@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -168,6 +170,6 @@ func TestPtyLauncherSpawnShellRequest(t *testing.T) {
 		t.Fatalf("ShellArgv = %v, want %v (the server-derived shell argv)", spec.ShellArgv, wantShell)
 	}
 	if len(spec.ShellArgv) == 0 {
-		t.Fatal("ShellArgv is empty — a plain-shell launch must always carry a program")
+		t.Fatal("ShellArgv is empty - a plain-shell launch must always carry a program")
 	}
 }

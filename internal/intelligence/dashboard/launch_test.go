@@ -353,7 +353,7 @@ func TestTerminalLaunchFeatureGate(t *testing.T) {
 		var gotSandbox bool
 		gate := func(sandbox bool) (bool, string) {
 			gotSandbox = sandbox
-			return false, "disabled by organization policy — request access via 'observer org request'"
+			return false, "disabled by organization policy - request access via 'observer org request'"
 		}
 		s := newServerWithGate(t, lm, gate)
 		rec := postTerminalLaunch(t, s.Handler(), "codex", "")
@@ -764,7 +764,7 @@ func TestLaunchWSRejectsCrossOrigin(t *testing.T) {
 		HTTPHeader: http.Header{"Origin": {"http://evil.example"}},
 	}); err == nil {
 		c.Close(websocket.StatusNormalClosure, "")
-		t.Fatal("cross-origin ws upgrade was accepted — CSWSH hole")
+		t.Fatal("cross-origin ws upgrade was accepted - CSWSH hole")
 	}
 
 	// Same-origin: must succeed.
@@ -810,7 +810,7 @@ func TestLaunchWSUnknownHandleClosed(t *testing.T) {
 // they present requestedSandbox=false (an org sandbox_required policy denies
 // them, correctly fail-closed).
 func TestSiblingLaunchFeatureGates(t *testing.T) {
-	const denyReason = "disabled by organization policy — request access via 'observer org request'"
+	const denyReason = "disabled by organization policy - request access via 'observer org request'"
 	newDenyServer := func(t *testing.T, lm LaunchManager) *Server {
 		t.Helper()
 		tdir := t.TempDir()
@@ -847,6 +847,14 @@ func TestSiblingLaunchFeatureGates(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
 			rec := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rec, req)
+			if answeredCompiledOut(rec.Code, rec.Body.Bytes()) {
+				// The route's component (terminals) is compiled out of this
+				// build: the stub refuses before any gate or launch (D-535).
+				if !reflect.DeepEqual(lm.lastSpec, LaunchSpec{}) || !reflect.DeepEqual(lm.lastResumeSpec, ResumeLaunchSpec{}) {
+					t.Errorf("launch manager reached in a build without the route's component: %+v / %+v", lm.lastSpec, lm.lastResumeSpec)
+				}
+				return
+			}
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403 (body=%s)", rec.Code, rec.Body.String())
 			}

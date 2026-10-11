@@ -38,7 +38,7 @@ func FormatVerdict(tool, pathFlag string, r Resolution) string {
 		fmt.Fprintf(&b, "  using the native %s at %s instead (the shim would crash under this OS).\n", tool, r.Bin)
 
 	case VerdictForeignOnly:
-		fmt.Fprintf(&b, "%s: installed on Windows, not in WSL — the daemon cannot launch it. Install it natively:\n", tool)
+		fmt.Fprintf(&b, "%s: installed on Windows, not in WSL - the daemon cannot launch it. Install it natively:\n", tool)
 		if cmd := firstInstallDisplay(r.Installs); cmd != "" {
 			fmt.Fprintf(&b, "  %s\n", cmd)
 		} else {

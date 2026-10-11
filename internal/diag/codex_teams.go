@@ -29,7 +29,7 @@ func checkCodexTeams(cfg config.Config) Check {
 
 	present := presentCodexManagedPaths()
 	if len(present) == 0 {
-		return Check{Name: name, Status: StatusOK, Message: "codex managed-config not deployed (no /etc/codex/*.toml — run `observer org emit-managed-settings --provider codex`)"}
+		return Check{Name: name, Status: StatusOK, Message: "codex managed-config not deployed (no /etc/codex/*.toml - run `observer org emit-managed-settings --provider codex`)"}
 	}
 
 	var details []string
@@ -53,9 +53,9 @@ func checkCodexTeams(cfg config.Config) Check {
 	// (b) MCP pin resolvable: the [mcp_servers.superbased-observer] pin runs
 	// `npx -y @superbased/observer …`, so npx must be on PATH to start it.
 	if _, err := exec.LookPath("npx"); err == nil {
-		note(StatusOK, "npx present — the [mcp_servers.superbased-observer] pin can bootstrap the MCP server")
+		note(StatusOK, "npx present - the [mcp_servers.superbased-observer] pin can bootstrap the MCP server")
 	} else {
-		note(StatusWarn, "npx not on PATH — the [mcp_servers.superbased-observer] `npx -y @superbased/observer` pin will not start")
+		note(StatusWarn, "npx not on PATH - the [mcp_servers.superbased-observer] `npx -y @superbased/observer` pin will not start")
 	}
 
 	// (c) When the OTLP receiver is configured (Rail A enabled), confirm it is
@@ -68,14 +68,14 @@ func checkCodexTeams(cfg config.Config) Check {
 			if dialable(addr) {
 				note(StatusOK, "OTLP receiver reachable at "+addr+" (Rail A redirect target)")
 			} else {
-				note(StatusWarn, "OTLP receiver NOT reachable at "+addr+" — is `observer start` running with [ingest.otel].enabled?")
+				note(StatusWarn, "OTLP receiver NOT reachable at "+addr+" - is `observer start` running with [ingest.otel].enabled?")
 			}
 		}
 	}
 
-	msg := "codex managed-config deployed — all checks passed"
+	msg := "codex managed-config deployed - all checks passed"
 	if worst != StatusOK {
-		msg = "codex managed-config deployed — see warnings below"
+		msg = "codex managed-config deployed - see warnings below"
 	}
 	return Check{Name: name, Status: worst, Message: msg, Details: details}
 }

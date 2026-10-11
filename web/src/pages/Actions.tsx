@@ -11,9 +11,12 @@ import {
   PageHeader,
   Pill,
   SegmentedControl,
+  SinglePicker,
   ToolBadge,
   Tooltip,
 } from "@/components/primitives";
+import { keepSelected } from "@/lib/pickerOptions";
+import { useSessionOptions } from "@/lib/usePickerSources";
 import { HelpInd } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
 import { DataTable, Pagination } from "@/components/DataTable";
@@ -56,9 +59,10 @@ const PAGE_LIMIT = 50;
 const TIMELINE_LIMIT = 500;
 
 export function ActionsPage() {
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const projectParam = project === "all" ? undefined : project;
 
   const [page, setPage] = useState(1);
@@ -114,7 +118,7 @@ export function ActionsPage() {
   // day pick. Switching from "Apr 23 (2275)" to "May 15 (4173)"
   // should re-anchor at page 1, not preserve the prior page
   // offset that may be past the new day's row count.
-  const filterKey = `${win}|${tool}|${project}|${actionType}|${effortLevel}|${permissionMode}|${isInterrupt}|${assistantText}|${sessionFilter}|${pickedDay ?? ""}`;
+  const filterKey = `${win}|${tool}|${project}|${model}|${actionType}|${effortLevel}|${permissionMode}|${isInterrupt}|${assistantText}|${sessionFilter}|${pickedDay ?? ""}`;
   useMemo(() => setPage(1), [filterKey]);
 
   const actions = useApi<ActionsResponse>(
@@ -127,6 +131,7 @@ export function ActionsPage() {
       // (only the Timeline day-counts strip honored it).
       ...winParams,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       action_type: actionType || undefined,
       effort_level: effortLevel || undefined,
@@ -148,6 +153,7 @@ export function ActionsPage() {
       customRange,
       tool,
       project,
+      model,
       actionType,
       effortLevel,
       permissionMode,
@@ -175,9 +181,10 @@ export function ActionsPage() {
     {
       ...winParams,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
     },
-    [view, win, customRange, tool, project],
+    [view, win, customRange, tool, model, project],
   );
 
   const columns = useMemo<ColumnDef<ActionListRow, unknown>[]>(
@@ -537,6 +544,9 @@ function FilterRail({
   anyFilter: boolean;
   clearAll: () => void;
 }) {
+  // D-571: the session facet picks from this node's recent sessions; an
+  // older id can still be pasted.
+  const sessions = useSessionOptions();
   return (
     <aside className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto border-r border-line-1 bg-bg-1 p-4">
       <div className="flex items-baseline justify-between gap-2">
@@ -619,13 +629,16 @@ function FilterRail({
         />
       </FacetGroup>
 
-      <FacetGroup label="Session id">
-        <input
-          type="search"
-          placeholder="Exact match…"
+      <FacetGroup label="Session">
+        <SinglePicker
+          options={keepSelected(sessions.options, sessionFilter ? [sessionFilter] : [])}
           value={sessionFilter}
-          onChange={(e) => setSessionFilter(e.target.value)}
-          className="h-7 w-full rounded-2 border border-line-2 bg-bg-2 px-2 font-mono text-[11px] text-fg-1 placeholder:font-sans placeholder:text-fg-4 focus:border-accent focus:outline-none"
+          onChange={setSessionFilter}
+          allowFree
+          freeLabel="Use session id"
+          loading={sessions.loading}
+          placeholder="Any session"
+          ariaLabel="Session"
         />
       </FacetGroup>
     </aside>

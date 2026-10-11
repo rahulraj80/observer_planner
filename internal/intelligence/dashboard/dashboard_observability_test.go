@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -222,5 +223,107 @@ func TestAPICompressionRollingCost_HappyPath(t *testing.T) {
 	}
 	if got["net_delta_usd"].(float64) >= 0 {
 		t.Errorf("net should be negative when no savings, got %v", got["net_delta_usd"])
+	}
+}
+
+// TestAPICompressionRollingCost_ModelFilterIsTurnGrain (Sol A3-05): the card
+// is a spend surface, so a model filter narrows to that model's own rows
+// (D-070), not to whole sessions that used it. One session mixes an Opus and
+// a Sonnet turn, each with a rolling_summary event, plus one Haiku and one
+// Opus summarizer call. model=opus must see only the Opus turn's savings and
+// the Opus summarizer's call; the session grain used to admit all four.
+func TestAPICompressionRollingCost_ModelFilterIsTurnGrain(t *testing.T) {
+	s, _ := newTestServer(t)
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	turn := func(model string, saved int64) {
+		t.Helper()
+		res, err := s.opts.DB.Exec(
+			`INSERT INTO api_turns (session_id, timestamp, provider, model, input_tokens, output_tokens)
+			 VALUES ('sMix', ?, 'anthropic', ?, 100, 50)`, ts, model)
+		if err != nil {
+			t.Fatalf("seed api_turn: %v", err)
+		}
+		id, _ := res.LastInsertId()
+		if _, err := s.opts.DB.Exec(
+			`INSERT INTO compression_events (api_turn_id, timestamp, mechanism, original_bytes, compressed_bytes, msg_index, importance_score)
+			 VALUES (?, ?, 'rolling_summary', ?, 0, 0, 0)`, id, ts, saved); err != nil {
+			t.Fatalf("seed rolling_summary: %v", err)
+		}
+	}
+	turn("claude-opus-4-7", 4000)
+	turn("claude-sonnet-4-5", 8000)
+	for _, sc := range []struct {
+		model string
+		cost  float64
+	}{{"claude-haiku-4-5", 0.01}, {"claude-opus-4-7", 0.02}} {
+		if _, err := s.opts.DB.Exec(
+			`INSERT INTO summary_calls (session_id, timestamp, model, input_tokens, output_tokens, cost_usd)
+			 VALUES ('sMix', ?, ?, 1000, 200, ?)`, ts, sc.model, sc.cost); err != nil {
+			t.Fatalf("seed summary_calls: %v", err)
+		}
+	}
+	get := func(q string) map[string]any {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/compression/rolling-cost?days=7"+q, nil))
+		if rr.Code != 200 {
+			t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+		}
+		var got map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	for _, tc := range []struct {
+		name         string
+		q            string
+		calls, saved int
+		cost         float64
+	}{
+		{"unfiltered", "", 2, 12000, 0.03},
+		{"opus: its own turn and summarizer call", "&model=claude-opus-4-7", 1, 4000, 0.02},
+		{"sonnet: its turn, no summarizer call of its own", "&model=claude-sonnet-4-5", 0, 8000, 0},
+		{"haiku: the haiku summarizer call, no turns", "&model=claude-haiku-4-5", 1, 0, 0.01},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := get(tc.q)
+			if c := int(got["summary_calls"].(float64)); c != tc.calls {
+				t.Errorf("summary_calls = %d, want %d", c, tc.calls)
+			}
+			if b := int(got["rolling_savings_bytes"].(float64)); b != tc.saved {
+				t.Errorf("rolling_savings_bytes = %d, want %d", b, tc.saved)
+			}
+			if c := got["summary_cost_usd"].(float64); c < tc.cost-1e-9 || c > tc.cost+1e-9 {
+				t.Errorf("summary_cost_usd = %v, want %v", c, tc.cost)
+			}
+		})
+	}
+}
+
+// TestAPIModels_SummaryCallsHonourTool (Sol A3-06): the model picker is
+// narrowed by the selected tool (D-071); a model whose only rows are the
+// observer's own rolling-summary calls is not offered under tool=codex.
+func TestAPIModels_SummaryCallsHonourTool(t *testing.T) {
+	s, _ := newTestServer(t)
+	if _, err := s.opts.DB.Exec(
+		`INSERT INTO summary_calls (session_id, timestamp, model, input_tokens, output_tokens, cost_usd)
+		 VALUES ('sA', ?, 'claude-haiku-summ-only', 1000, 200, 0.004)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("seed summary_calls: %v", err)
+	}
+	offered := func(q string) bool {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/models?days=7"+q, nil))
+		if rr.Code != 200 {
+			t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+		}
+		return strings.Contains(rr.Body.String(), `"claude-haiku-summ-only"`)
+	}
+	if !offered("") {
+		t.Fatal("unfiltered /api/models does not list the summary-call model; the fixture is wrong")
+	}
+	if offered("&tool=codex") {
+		t.Error("/api/models?tool=codex lists a model seen only in the observer's rolling-summary calls")
 	}
 }

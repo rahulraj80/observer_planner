@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/govern"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/orgbudget"
+	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -68,6 +70,11 @@ type managedBudgetLaunchState struct {
 	// publish exactly the document the requirement was decided on.
 	Cached   store.OrgBudgetCache
 	CacheErr error
+	// Warning is set when the managed authority could not be verified for a
+	// reason outside the request (an expired or unverifiable grant) and the
+	// org did not opt into fail_closed: the launch proceeds on the node's own
+	// caps and the launcher says so (REVIEW-4 P4-03, ruling D-521).
+	Warning string
 }
 
 // resolveManagedBudgetLaunchState recomposes the cold-process budget posture
@@ -78,7 +85,7 @@ func resolveManagedBudgetLaunchState(ctx context.Context, cfg config.Config, dat
 		return managedBudgetLaunchState{}, errors.New("budget launch state: no database")
 	}
 	st := store.New(database)
-	granted, err := resolveBudgetLaunchAuthority(ctx, st)
+	granted, warning, err := resolveBudgetLaunchAuthority(ctx, st, cfg.Guard.Budget.FailClosed)
 	if err != nil {
 		return managedBudgetLaunchState{}, err
 	}
@@ -91,49 +98,128 @@ func resolveManagedBudgetLaunchState(ctx context.Context, cfg config.Config, dat
 	} else {
 		cached, cacheErr = st.LoadOrgBudget(ctx)
 	}
-	return composeManagedBudgetLaunchState(cfg, cached, cacheErr, granted), nil
+	state := composeManagedBudgetLaunchState(cfg, cached, cacheErr, granted)
+	state.Warning = warning
+	return state, nil
 }
 
-// resolveBudgetLaunchAuthority returns a tri-state answer over the durable
-// enrolment and grant. A clean solo/individual or explicit non-enforce grant
-// is known false. An unreadable or incomplete managed identity is an error,
-// because treating missing evidence as revoked authority would create a cold
-// launch bypass. Enrolment grants are written only after verification.
-func resolveBudgetLaunchAuthority(ctx context.Context, st *store.Store) (bool, error) {
+// resolveBudgetLaunchAuthority answers "does the managed enforce.budget
+// authority govern this launch?" over the durable enrolment and grant, walking
+// budgetLaunchAuthorityRules (CLAUDE.md #5). A clean solo/individual node, a
+// confirmed leave (the fenced, tombstoned generation a partly failed leave
+// leaves behind) or an explicit non-enforce grant is known false. A store read
+// failure is an error (the launch state is unknown).
+//
+// A managed grant that is missing, expired or not verifiable is a reason
+// OUTSIDE the request (D-502). It follows the same switch as the proxy
+// (REVIEW-4 P4-03, ruling D-521 "follow fail_closed"): refused only when the
+// organization opted into [guard.budget].fail_closed, otherwise the tool
+// starts on the node's own caps with a warning.
+func resolveBudgetLaunchAuthority(ctx context.Context, st *store.Store, failClosed bool) (granted bool, warning string, err error) {
 	if st == nil {
-		return false, errors.New("budget launch authority: no store")
+		return false, "", errors.New("budget launch authority: no store")
 	}
 	enrolment, err := st.LoadEnrolment(ctx)
 	if err != nil {
-		return false, fmt.Errorf("budget launch authority: %w", err)
+		return false, "", fmt.Errorf("budget launch authority: %w", err)
 	}
 	if enrolment == nil {
-		return false, nil
+		return false, "", nil
+	}
+	// The same identity read the proxy uses: a tombstoned generation is a
+	// leave that already fenced, so nothing the enrolment conferred governs
+	// this launch, exactly as the proxy admits it.
+	if _, active, idErr := orgclient.CurrentBudgetIdentity(ctx, st); idErr != nil {
+		return false, "", fmt.Errorf("budget launch authority: %w", idErr)
+	} else if !active {
+		return false, "", nil
 	}
 	grant, live, err := governanceIdentityLoader(st)(ctx)
 	if err != nil {
-		return false, fmt.Errorf("budget launch authority: %w", err)
+		return false, "", fmt.Errorf("budget launch authority: %w", err)
 	}
-	if grant == nil {
-		if enrolment.IsManaged() {
-			return false, errors.New("budget launch authority: managed enrolment has no readable grant")
-		}
-		return false, nil
+	in := budgetLaunchAuthorityInput{managed: enrolment.IsManaged(), noGrant: grant == nil}
+	var effective govern.Effective
+	if grant != nil {
+		effective = govern.Resolve(govern.Delivered{}, grant, live, time.Now().UTC())
+		in.state = effective.State
 	}
-	effective := govern.Resolve(govern.Delivered{}, grant, live, time.Now().UTC())
-	switch effective.State {
-	case govern.StateGrantExpired:
-		if enrolment.IsManaged() {
-			return false, errors.New("budget launch authority: managed enrolment grant is expired")
+	for _, r := range budgetLaunchAuthorityRules {
+		if !r.when(in) {
+			continue
 		}
-		return false, nil
+		switch r.out {
+		case budgetAuthorityUnverifiable:
+			problem := r.problem(in)
+			if failClosed {
+				return false, "", errors.New("budget launch authority: " + problem)
+			}
+			return false, "the managed budget authority cannot be verified (" + problem +
+				"); starting on this machine's own budget settings because the organization did not set guard.budget.fail_closed", nil
+		case budgetAuthorityNone:
+			return false, "", nil
+		default:
+			return effective.GrantsBudgetEnforcement(), "", nil
+		}
+	}
+	return effective.GrantsBudgetEnforcement(), "", nil
+}
+
+// budgetLaunchAuthority is one outcome of budgetLaunchAuthorityRules.
+type budgetLaunchAuthority uint8
+
+const (
+	// budgetAuthorityFromGrant: the verified grant decides.
+	budgetAuthorityFromGrant budgetLaunchAuthority = iota
+	// budgetAuthorityNone: no managed authority governs this launch.
+	budgetAuthorityNone
+	// budgetAuthorityUnverifiable: a managed grant exists in principle but
+	// cannot be verified now; the fail_closed switch decides.
+	budgetAuthorityUnverifiable
+)
+
+// budgetLaunchAuthorityInput is what the launcher knows about the grant.
+type budgetLaunchAuthorityInput struct {
+	managed bool
+	noGrant bool
+	state   govern.State
+}
+
+// budgetLaunchAuthorityRules is the ordered table resolveBudgetLaunchAuthority
+// walks; one test case per row (TestBudgetLaunchAuthorityRules).
+var budgetLaunchAuthorityRules = []struct {
+	name    string
+	when    func(budgetLaunchAuthorityInput) bool
+	out     budgetLaunchAuthority
+	problem func(budgetLaunchAuthorityInput) string
+}{
+	{
+		name: "managed_no_grant", when: func(in budgetLaunchAuthorityInput) bool { return in.managed && in.noGrant },
+		out: budgetAuthorityUnverifiable, problem: func(budgetLaunchAuthorityInput) string { return "managed enrolment has no readable grant" },
+	},
+	{name: "individual_no_grant", when: func(in budgetLaunchAuthorityInput) bool { return in.noGrant }, out: budgetAuthorityNone},
+	{name: "managed_grant_expired", when: func(in budgetLaunchAuthorityInput) bool {
+		return in.managed && in.state == govern.StateGrantExpired
+	}, out: budgetAuthorityUnverifiable, problem: func(budgetLaunchAuthorityInput) string { return "managed enrolment grant is expired" }},
+	{name: "managed_identity_unverifiable", when: func(in budgetLaunchAuthorityInput) bool {
+		return in.managed && budgetLaunchUnverifiableState(in.state)
+	}, out: budgetAuthorityUnverifiable, problem: func(in budgetLaunchAuthorityInput) string {
+		return fmt.Sprintf("managed identity is not verifiable (%s)", in.state)
+	}},
+	{name: "individual_grant_unusable", when: func(in budgetLaunchAuthorityInput) bool {
+		return in.state == govern.StateGrantExpired || budgetLaunchUnverifiableState(in.state)
+	}, out: budgetAuthorityNone},
+	{name: "verified_grant", when: func(budgetLaunchAuthorityInput) bool { return true }, out: budgetAuthorityFromGrant},
+}
+
+// budgetLaunchUnverifiableState names the governance states in which the
+// grant's identity cannot be verified.
+func budgetLaunchUnverifiableState(s govern.State) bool {
+	switch s {
 	case govern.StateIdentityChanged, govern.StateKeyPinMismatch, govern.StateGrantSignatureInvalid:
-		if enrolment.IsManaged() {
-			return false, fmt.Errorf("budget launch authority: managed identity is not verifiable (%s)", effective.State)
-		}
-		return false, nil
+		return true
 	default:
-		return effective.GrantsBudgetEnforcement(), nil
+		return false
 	}
 }
 
@@ -150,6 +236,7 @@ func composeManagedBudgetLaunchState(cfg config.Config, cached store.OrgBudgetCa
 		FromOrg:          cfg.Guard.Budget.FromOrg,
 		OrgAuthoritative: granted,
 		RequireOrgBudget: granted,
+		FailClosed:       cfg.Guard.Budget.FailClosed,
 		GuardMode:        guardMode,
 	}
 	switch {
@@ -203,16 +290,25 @@ func enforceBudgetControlledLaunch(ctx context.Context, configPath, tool string,
 	}
 	defer cleanup()
 
+	// T-497: the org's "Proxied tool without a sandbox" choice, the same
+	// decision the dashboard's fresh launch makes (launch_sandbox_gate.go).
+	if err := enforceSandboxFallbackLaunch(ctx, cfg, store.New(database), configPath, tool); err != nil {
+		return err
+	}
+
 	state, err := resolveManagedBudgetLaunchState(ctx, cfg, database)
 	if err != nil {
 		return budgetLaunchStateFailure(tool, err)
+	}
+	if state.Warning != "" {
+		// Not a refusal (D-521): say it at the terminal the tool starts in.
+		fmt.Fprintf(os.Stderr, "observer %s: warning: %s\n", tool, state.Warning)
 	}
 	if !state.Required {
 		return nil
 	}
 	if !state.GuardReady {
-		return budgetLaunchRefusal(tool,
-			"the configured Guard is disabled or is not in enforce mode")
+		return budgetLaunchRefusal(tool, budgetLaunchCauseGuardNotReady)
 	}
 	st := store.New(database)
 	if err := budgetLaunchCoverage(ctx, cfg, st, tool, evidence); err != nil {
@@ -221,32 +317,20 @@ func enforceBudgetControlledLaunch(ctx context.Context, configPath, tool string,
 	return budgetLaunchSpendAdmission(ctx, cfg, configPath, st, tool, state)
 }
 
-// budgetLaunchCoverage answers question 1 above. Every branch dispatches on a
-// registry capability SHAPE — proven route, declared surface class — never on
-// the tool's name.
+// budgetLaunchCoverage answers question 1 above through the one cause
+// classifier (budgetlaunch_remedy.go), which the New Terminal picker's
+// preflight also asks, so the picker and the launcher never disagree.
 func budgetLaunchCoverage(ctx context.Context, cfg config.Config, st *store.Store, tool string, evidence budgetLaunchEvidence) error {
-	capability, _ := integration.For(tool)
-	if capability.RouteProven() && evidence.Route == budgetLaunchRouteObserverProxy &&
-		urlRoutesToProxy(evidence.ProxyURL, resolveProxyURL(cfg.Proxy.Port, "")) {
+	var why string
+	cause := budgetLaunchCoverageCause(func() bool {
+		var covered bool
+		covered, why = nodeProcessCutoffCoverage(ctx, cfg, st, tool, evidence)
+		return covered
+	}, tool, evidence, resolveProxyURL(cfg.Proxy.Port, ""))
+	if cause == budgetLaunchCovered {
 		return nil
 	}
-	if nodeProcessCutoffCoversLaunch(ctx, cfg, st, tool, evidence) {
-		return nil
-	}
-	if budgetLaunchSurfaceUnbindable(tool, evidence) {
-		// The registry says this surface has no process boundary a cutoff
-		// could ever bind to. Refusing it at $0 would report a coverage gap
-		// the org's posture already reports honestly (proxy_only / partial),
-		// while blocking work that is under the cap. The spend gate below
-		// still applies.
-		return nil
-	}
-	if capability.BudgetAdmissionChannel() != integration.BudgetAdmissionObserverProxy {
-		return budgetLaunchRefusal(tool,
-			"this tool has no verified Observer budget-admission route")
-	}
-	return budgetLaunchRefusal(tool,
-		"this invocation's final model route is direct or cannot be verified")
+	return budgetLaunchRefusalWith(tool, cause, why)
 }
 
 // budgetLaunchSurfaceUnbindable reports whether the registry declares that no
@@ -270,7 +354,25 @@ func budgetLaunchSurfaceUnbindable(tool string, evidence budgetLaunchEvidence) b
 	}
 }
 
-func budgetLaunchRefusal(tool, reason string) error {
+// budgetLaunchRefusal renders a coverage refusal: the cause's reason, then
+// what the developer can do about it (T-685), so the refusal is never a dead
+// end in the CLI or in a dashboard terminal, which shows the same text.
+func budgetLaunchRefusal(tool string, cause budgetLaunchCause) error {
+	return budgetLaunchRefusalWith(tool, cause, "")
+}
+
+// budgetLaunchRefusalWith is budgetLaunchRefusal carrying the live process-
+// cutoff check that failed for this launch (empty when none was asked).
+func budgetLaunchRefusalWith(tool string, cause budgetLaunchCause, why string) error {
+	advice, ok := budgetLaunchAdviceFor(cause)
+	if !ok {
+		advice = budgetLaunchAdvice{reason: "no enforcement point covers this invocation"}
+	}
+	capability, _ := integration.For(tool)
+	reason := advice.reason
+	if advice.remedy != nil {
+		reason += ". " + budgetLaunchRemedySentence(advice.remedy(capability, budgetLaunchCutoffGapClause(tool, why)))
+	}
 	err := fmt.Errorf("observer %s: %w; refusing to start the AI process because %s",
 		tool, errBudgetLaunchUncontrolled, reason)
 	return newVisibleLauncherError(err, err.Error())
@@ -298,6 +400,27 @@ func envBudgetLaunchEvidence(tool, proxyURL string, expected map[string]string, 
 		return budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
 	}
 	if !budgetLaunchEnvironmentMatches(capability.Proxy.EnvVar, proxyURL, expected, actualEnv) {
+		return budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
+	}
+	return budgetLaunchEvidence{Route: budgetLaunchRouteObserverProxy, ProxyURL: proxyURL}
+}
+
+// fileRouteBudgetLaunchEvidence verifies a config-file route (T-208): a
+// capability whose proven route is a provider entry the launcher wrote and
+// selected, rather than an env var. The evidence is the entry's base URL read
+// back from the file right before the process starts; it must be the proxy
+// plus the route's own suffix. An operator selector in args (generic or the
+// row's SelectorArguments) leaves the route unknown, exactly as for an env
+// route. No tool name is compared here (CLAUDE.md #3).
+func fileRouteBudgetLaunchEvidence(tool, proxyURL string, readBack func() (string, bool), args []string) budgetLaunchEvidence {
+	capability, _ := integration.For(tool)
+	if readBack == nil || !capability.RouteProven() || strings.TrimSpace(capability.Proxy.EnvVar) != "" ||
+		ambiguousBudgetRoutingArgs(capability, args) {
+		return budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
+	}
+	base, ok := readBack()
+	want := strings.TrimRight(proxyURL, "/") + capability.Proxy.Suffix
+	if !ok || strings.TrimRight(strings.TrimSpace(base), "/") != strings.TrimRight(want, "/") {
 		return budgetLaunchEvidence{Route: budgetLaunchRouteUnknown}
 	}
 	return budgetLaunchEvidence{Route: budgetLaunchRouteObserverProxy, ProxyURL: proxyURL}

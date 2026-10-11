@@ -36,7 +36,7 @@ func resolveSpawnArgv(argv []string) ([]string, error) {
 	}
 	p, err := lookProgram(argv[0])
 	if errors.Is(err, exec.ErrDot) {
-		return nil, fmt.Errorf("termsession: %q resolves only in the daemon's working directory — refusing to launch it: %w", argv[0], err)
+		return nil, fmt.Errorf("termsession: %q resolves only in the daemon's working directory - refusing to launch it: %w", argv[0], err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("termsession: cannot find %q on PATH: %w", argv[0], err)

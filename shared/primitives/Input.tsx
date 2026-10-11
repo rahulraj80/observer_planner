@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import type { InputHTMLAttributes, ReactNode } from "react";
+import { callerSetsWidth } from "../lib/fieldWidth";
 
 // Input / Select / Textarea share one chrome so a form never drifts field
 // by field. The class string is the one the Settings forms already used,
@@ -8,10 +9,12 @@ import type { InputHTMLAttributes, ReactNode } from "react";
 // faded white field on a white light-theme card reads as editable.
 
 /** fieldClasses is the shared control chrome. Exported for the handful of
- *  places that must style a native control directly. */
-export function fieldClasses(opts?: { mono?: boolean; invalid?: boolean }): string {
+ *  places that must style a native control directly. `ownWidth` drops the
+ *  default `w-full` (the caller sets a width; see lib/fieldWidth.ts). */
+export function fieldClasses(opts?: { mono?: boolean; invalid?: boolean; ownWidth?: boolean }): string {
   return clsx(
-    "w-full rounded-2 border bg-bg-2 px-2.5 py-1.5 text-[12px] text-fg-1 placeholder:text-fg-4 focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-3 disabled:text-fg-3",
+    !opts?.ownWidth && "w-full",
+    "rounded-2 border bg-bg-2 px-2.5 py-1.5 text-[12px] text-fg-1 placeholder:text-fg-4 focus:outline-none disabled:cursor-not-allowed disabled:bg-bg-3 disabled:text-fg-3",
     opts?.mono && "font-mono",
     opts?.invalid
       ? "border-danger/60 focus:border-danger"
@@ -84,7 +87,7 @@ export function Input({
       <input
         {...rest}
         className={clsx(
-          fieldClasses({ mono, invalid: Boolean(error) }),
+          fieldClasses({ mono, invalid: Boolean(error), ownWidth: callerSetsWidth(className) }),
           className,
         )}
       />

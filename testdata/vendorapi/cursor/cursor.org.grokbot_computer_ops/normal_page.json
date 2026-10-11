@@ -1,0 +1,17 @@
+{
+  "operationId": "b81c4e27-6a90-4f3d-9e15-2c8d7a4f6b03",
+  "action": "terminate_vm",
+  "state": "running",
+  "counts": {
+    "total": 2400,
+    "queued": 2340,
+    "running": 20,
+    "succeeded": 38,
+    "skipped": 2,
+    "failed": 0,
+    "noVmSkipped": 2
+  },
+  "items": null,
+  "itemsTruncated": true,
+  "nextCursor": null
+}

@@ -1,0 +1,20 @@
+{
+  "session_id": "4f3c2a10-5b6d-4e8f-9a0b-1c2d3e4f5a6b",
+  "parent_session_id": null,
+  "start_time": "2026-10-03T07:59:55.000000+00:00",
+  "end_time": "2026-10-03T08:00:09.500000+00:00",
+  "git_commit": null,
+  "git_branch": null,
+  "environment": {
+    "working_directory": "/home/dev/work/sample-app"
+  },
+  "origin_directory": "/home/dev/work/sample-app",
+  "username": "dev",
+  "child_sessions": [],
+  "loops": [],
+  "title": null,
+  "title_source": "auto",
+  "config": null,
+  "import_provenance": null,
+  "created_worktree": null
+}

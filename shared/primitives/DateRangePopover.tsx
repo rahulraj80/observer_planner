@@ -92,11 +92,14 @@ export function DateRangePopover({
         onClose();
       }
     }
+    // Capture phase: this runs before an enclosing overlay's bubble-phase
+    // document listener, so its preventDefault is seen and the overlay
+    // stays open (shared/lib/overlayEscape.ts).
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
   }, [onClose]);
 

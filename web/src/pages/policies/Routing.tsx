@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChartShell, HostMark, Icon, InlineLoading, Pill, SegmentedControl, Tooltip } from "@/components/primitives";
+import { ChartShell, HostMark, Icon, InlineLoading, Pill, SegmentedControl, SinglePicker, Tooltip } from "@/components/primitives";
+import { contentClassOptions, keepSelected, uniqueSorted, type PickOption } from "@/lib/pickerOptions";
+import { useCriterionIds, useEndUserOptions, useModelOptions } from "@/lib/usePickerSources";
 import { Summary } from "@/components/Summary";
 import { useApi } from "@/lib/useApi";
 import { pushToast } from "@/components/Toast";
@@ -51,9 +53,26 @@ const ACTION_KINDS: { value: EgressActionKind; label: string }[] = [
   { value: "no_route", label: "No route (log only)" },
 ];
 
+// RulePickers carries the known sets a rule's matchers and actions pick from
+// (D-571): criterion ids of the admission policy, the draft's cohort labels,
+// end users seen on verdicts, and the models this node uses or prices.
+type RulePickers = {
+  criteria: string[];
+  cohorts: string[];
+  users: PickOption[];
+  models: { options: PickOption[]; loading: boolean };
+};
+
 export function RoutingTab({ onApplied }: { onApplied?: () => void }) {
   const api = useApi<EgressPolicyGet>("/api/obs/egress/policy");
   const [draft, setDraft] = useState<EgressPolicy | null>(null);
+  const criteria = useCriterionIds();
+  const models = useModelOptions();
+  const namedUsers = useMemo(
+    () => [...Object.keys(draft?.cohorts ?? {}), ...(draft?.rules ?? []).map((r) => r.when.user)],
+    [draft],
+  );
+  const users = useEndUserOptions(namedUsers);
   const [busy, setBusy] = useState<"" | "apply" | "save">("");
   const [issues, setIssues] = useState<LintIssue[]>([]);
   const [err, setErr] = useState("");
@@ -116,6 +135,12 @@ export function RoutingTab({ onApplied }: { onApplied?: () => void }) {
   }
 
   const targetIds = draft.targets.map((t) => t.id).filter(Boolean);
+  const pickers: RulePickers = {
+    criteria: criteria.ids,
+    cohorts: uniqueSorted(Object.values(draft.cohorts ?? {})),
+    users: users.options,
+    models,
+  };
 
   return (
     <div className="space-y-4">
@@ -151,7 +176,7 @@ export function RoutingTab({ onApplied }: { onApplied?: () => void }) {
       </ChartShell>
 
       {/* Cohorts */}
-      <CohortsCard value={draft.cohorts} onChange={(cohorts) => patch({ cohorts })} />
+      <CohortsCard value={draft.cohorts} onChange={(cohorts) => patch({ cohorts })} users={users.options} />
 
       {/* Rules */}
       <ChartShell
@@ -190,6 +215,7 @@ export function RoutingTab({ onApplied }: { onApplied?: () => void }) {
               index={i}
               count={draft.rules.length}
               targetIds={targetIds}
+              pickers={pickers}
               issues={issues.filter((x) => x.rule_name === r.name && r.name !== "")}
               onChange={(p) => patchRule(i, p)}
               onRemove={() => patch({ rules: draft.rules.filter((_, n) => n !== i) })}
@@ -233,7 +259,15 @@ export function RoutingTab({ onApplied }: { onApplied?: () => void }) {
 // keys on. It holds the rows in local state (seeded once) so a user id — the map
 // KEY — can be typed without the entry vanishing mid-edit; every change emits a
 // cleaned map (empty user ids dropped, values trimmed) up to the draft.
-function CohortsCard({ value, onChange }: { value: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+function CohortsCard({
+  value,
+  onChange,
+  users,
+}: {
+  value: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+  users: PickOption[];
+}) {
   const [rows, setRows] = useState<[string, string][]>(() => Object.entries(value ?? {}));
   const emit = (next: [string, string][]) => {
     setRows(next);
@@ -247,9 +281,26 @@ function CohortsCard({ value, onChange }: { value: Record<string, string>; onCha
         {rows.length === 0 && <Muted>No cohorts mapped.</Muted>}
         {rows.map(([u, c], i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
-            <TextInput value={u} onChange={(v) => emit(rows.map((r, n) => (n === i ? [v, r[1]] : r)))} placeholder="user id" className="min-w-[10rem]" />
+            <SinglePicker
+              className="min-w-[12rem]"
+              options={keepSelected(users, u ? [u] : [])}
+              value={u}
+              onChange={(v) => emit(rows.map((r, n) => (n === i ? [v, r[1]] : r)))}
+              allowFree
+              placeholder="end user"
+              ariaLabel="End user id"
+            />
             <span className="text-fg-3">→</span>
-            <TextInput value={c} onChange={(v) => emit(rows.map((r, n) => (n === i ? [r[0], v] : r)))} placeholder="cohort (e.g. eu)" className="min-w-[8rem]" />
+            <SinglePicker
+              className="min-w-[10rem]"
+              options={uniqueSorted(rows.map((r) => r[1]))}
+              value={c}
+              onChange={(v) => emit(rows.map((r, n) => (n === i ? [r[0], v] : r)))}
+              allowFree
+              freeLabel="New cohort"
+              placeholder="cohort (e.g. eu)"
+              ariaLabel="Cohort"
+            />
             <button type="button" onClick={() => emit(rows.filter((_, n) => n !== i))} className={btnGhostDanger}>Remove</button>
           </div>
         ))}
@@ -264,6 +315,7 @@ function RuleRow({
   index,
   count,
   targetIds,
+  pickers,
   issues,
   onChange,
   onRemove,
@@ -273,6 +325,7 @@ function RuleRow({
   index: number;
   count: number;
   targetIds: string[];
+  pickers: RulePickers;
   issues: LintIssue[];
   onChange: (p: Partial<EgressRule>) => void;
   onRemove: () => void;
@@ -314,8 +367,20 @@ function RuleRow({
           <Labeled label="Severity ≥">
             <Select value={rule.when.severity_at_least} onChange={(v) => setWhen({ severity_at_least: v })} options={SEVERITIES.map((s) => ({ value: s, label: s || "(any)" }))} />
           </Labeled>
-          <Labeled label="Criterion">
-            <TextInput value={rule.when.criterion} onChange={(v) => setWhen({ criterion: v })} placeholder="(any)" />
+          <Labeled label="Criterion" group>
+            <SinglePicker
+              className="min-w-[10rem]"
+              options={keepSelected(
+                pickers.criteria.map((c) => ({ id: c, label: c })),
+                rule.when.criterion ? [rule.when.criterion] : [],
+                "Not in the admission policy",
+              )}
+              value={rule.when.criterion}
+              onChange={(v) => setWhen({ criterion: v })}
+              placeholder="(any)"
+              emptyHint="The admission policy has no criteria yet."
+              ariaLabel="Criterion"
+            />
           </Labeled>
           <Labeled label="Provider">
             <Select value={rule.when.provider} onChange={(v) => setWhen({ provider: v })} options={[{ value: "", label: "(any)" }, { value: "anthropic", label: "anthropic" }, { value: "openai", label: "openai" }]} />
@@ -333,15 +398,56 @@ function RuleRow({
             />
           </Labeled>
           <Labeled label="Cohort">
-            <TextInput value={rule.when.user_cohort} onChange={(v) => setWhen({ user_cohort: v })} placeholder="(any)" />
+            <Select
+              value={rule.when.user_cohort}
+              onChange={(v) => setWhen({ user_cohort: v })}
+              options={[
+                { value: "", label: "(any)" },
+                ...uniqueSorted([...pickers.cohorts, rule.when.user_cohort]).map((c) => ({ value: c, label: c })),
+              ]}
+            />
           </Labeled>
         </div>
         <details className="mt-2">
           <Summary className="w-fit text-[10.5px] text-fg-3 hover:text-fg-2">More matchers</Summary>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Labeled label="Content class"><TextInput value={rule.when.content_class} onChange={(v) => setWhen({ content_class: v })} placeholder="(any)" /></Labeled>
-            <Labeled label="Model glob"><TextInput value={rule.when.model_glob} onChange={(v) => setWhen({ model_glob: v })} placeholder="(any)" /></Labeled>
-            <Labeled label="User"><TextInput value={rule.when.user} onChange={(v) => setWhen({ user: v })} placeholder="(any)" /></Labeled>
+            <Labeled label="Content class" group>
+              <SinglePicker
+                className="min-w-[12rem]"
+                options={keepSelected(
+                  contentClassOptions(pickers.criteria, SEVERITIES),
+                  rule.when.content_class ? [rule.when.content_class] : [],
+                )}
+                value={rule.when.content_class}
+                onChange={(v) => setWhen({ content_class: v })}
+                placeholder="(any)"
+                ariaLabel="Content class"
+              />
+            </Labeled>
+            <Labeled label="Model glob" group>
+              <SinglePicker
+                className="min-w-[12rem]"
+                options={keepSelected(pickers.models.options, rule.when.model_glob ? [rule.when.model_glob] : [])}
+                value={rule.when.model_glob}
+                onChange={(v) => setWhen({ model_glob: v })}
+                allowFree
+                freeLabel="Use glob"
+                loading={pickers.models.loading}
+                placeholder="(any)"
+                ariaLabel="Model glob"
+              />
+            </Labeled>
+            <Labeled label="User" group>
+              <SinglePicker
+                className="min-w-[10rem]"
+                options={keepSelected(pickers.users, rule.when.user ? [rule.when.user] : [])}
+                value={rule.when.user}
+                onChange={(v) => setWhen({ user: v })}
+                allowFree
+                placeholder="(any)"
+                ariaLabel="User"
+              />
+            </Labeled>
             <Labeled label="Min prompt tokens"><NumberInput value={rule.when.min_prompt_tokens} onChange={(n) => setWhen({ min_prompt_tokens: n })} /></Labeled>
           </div>
         </details>
@@ -362,7 +468,21 @@ function RuleRow({
             </Labeled>
           )}
           {kind === "route_to_model" && (
-            <Labeled label="Model"><TextInput value={rule.action.route_to_model} onChange={(v) => setAction({ route_to_model: v })} placeholder="claude-haiku-4-5" /></Labeled>
+            <Labeled label="Model" group>
+              <SinglePicker
+                className="min-w-[12rem]"
+                options={keepSelected(
+                  pickers.models.options,
+                  rule.action.route_to_model ? [rule.action.route_to_model] : [],
+                )}
+                value={rule.action.route_to_model}
+                onChange={(v) => setAction({ route_to_model: v })}
+                allowFree
+                loading={pickers.models.loading}
+                placeholder="Pick a model…"
+                ariaLabel="Route to model"
+              />
+            </Labeled>
           )}
           {kind === "set_effort" && (
             <Labeled label="Effort">

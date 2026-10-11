@@ -36,10 +36,10 @@ var restartRequested atomic.Bool
 func preflightRestart(configPath string) error {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: configPath})
 	if err != nil {
-		return fmt.Errorf("restart refused — the current config would not load (fix it first): %w", err)
+		return fmt.Errorf("restart refused - the current config would not load (fix it first): %w", err)
 	}
 	if verr := config.Validate(cfg); verr != nil {
-		return fmt.Errorf("restart refused — the current config is invalid (fix it first): %w", verr)
+		return fmt.Errorf("restart refused - the current config is invalid (fix it first): %w", verr)
 	}
 	return nil
 }

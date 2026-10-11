@@ -29,8 +29,8 @@ func newObsEgressCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "egress",
 		Short: "Plane-A egress routing: status, recent decisions, and config lint",
-		Long: "Show the Plane-A policy egress-routing config ([observability.egress]) —\n" +
-			"mode (off/advise/enforce), typed upstream targets, and rules — plus the\n" +
+		Long: "Show the Plane-A policy egress-routing config ([observability.egress]) -\n" +
+			"mode (off/advise/enforce), typed upstream targets, and rules - plus the\n" +
 			"most-recent recorded egress decisions with the realized outcome the proxy\n" +
 			"reported back, and a tamper-evident hash-chain verification of the\n" +
 			"obs_egress_decisions audit log (requires [observability] enabled).\n\n" +
@@ -38,7 +38,7 @@ func newObsEgressCmd() *cobra.Command {
 			"flagged request to an on-prem model, swap a budget-pressured end-user to a\n" +
 			"cheaper model, or deny. advise evaluates + records but never applies;\n" +
 			"enforce applies on the proxy path. This is Plane-A (hosted-app end-user\n" +
-			"traffic) — distinct from `observer guard` (Plane-B, the developer's own\n" +
+			"traffic) - distinct from `observer guard` (Plane-B, the developer's own\n" +
 			"coding-agent tool calls). The audit log is NODE-LOCAL, never pushed.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
@@ -65,7 +65,7 @@ func newObsEgressCmd() *cobra.Command {
 		Short: "Validate the [observability.egress] policy (compile + static lint)",
 		Long: "Compile the [observability.egress] policy the way the daemon does\n" +
 			"(enforce-strict) and run the static lint, reporting every finding. A\n" +
-			"FATAL finding means the policy would fail to install — the daemon then\n" +
+			"FATAL finding means the policy would fail to install - the daemon then\n" +
 			"disables egress and keeps admission running (fail-safe). Exit is non-zero\n" +
 			"when any finding is fatal.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -107,12 +107,12 @@ func printObsEgressStatus(cmd *cobra.Command, st obsEgressStatus) {
 		fmt.Fprintf(out, "policy hash:      %s\n", short)
 	}
 	if st.CompileErr != "" {
-		fmt.Fprintf(out, "compile:          ERROR — %s\n", st.CompileErr)
+		fmt.Fprintf(out, "compile:          ERROR - %s\n", st.CompileErr)
 	}
 
 	fmt.Fprintf(out, "\ntargets (%d):\n", len(st.Targets))
 	if len(st.Targets) == 0 {
-		fmt.Fprintln(out, "  (none — enforce-mode route_to_upstream needs a typed target)")
+		fmt.Fprintln(out, "  (none - enforce-mode route_to_upstream needs a typed target)")
 	}
 	for _, t := range st.Targets {
 		fmt.Fprintf(out, "  %-16s %-10s %s\n", t.ID, t.Shape, t.URL)
@@ -120,7 +120,7 @@ func printObsEgressStatus(cmd *cobra.Command, st obsEgressStatus) {
 
 	fmt.Fprintf(out, "\nrules (%d):\n", len(st.Rules))
 	if len(st.Rules) == 0 {
-		fmt.Fprintln(out, "  (none configured — add [[observability.egress.rules]] entries)")
+		fmt.Fprintln(out, "  (none configured - add [[observability.egress.rules]] entries)")
 	}
 	for _, r := range st.Rules {
 		unavail := r.OnUnavailable

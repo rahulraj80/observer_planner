@@ -258,21 +258,18 @@ type LOCSummaryResponse struct {
 	ClassifierVersion int `json:"classifier_version"`
 }
 
-// handleLOCSummary serves GET /api/loc/summary?days=N[&project=<id>].
+// handleLOCSummary serves GET /api/loc/summary?days=N[&project=<id>], or
+// the closed custom range since/until through windowRange (T-550).
 func (s *Server) handleLOCSummary(w http.ResponseWriter, r *http.Request) {
-	days := 7
-	if v := strings.TrimSpace(r.URL.Query().Get("days")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 3650 {
-			days = n
-		}
-	}
+	days := intArg(r, "days", 7, 1, 3650)
+	since, until := windowRange(r, 7, 1, 3650)
 	var projectID int64
 	if v := strings.TrimSpace(r.URL.Query().Get("project")); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			projectID = n
 		}
 	}
-	res, err := store.New(s.db()).LoadLOCSummary(r.Context(), days, projectID)
+	res, err := store.New(s.db()).LoadLOCSummaryRange(r.Context(), days, since, until, projectID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load loc summary: %v", err), http.StatusInternalServerError)
 		return

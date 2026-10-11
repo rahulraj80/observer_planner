@@ -94,7 +94,7 @@ endpoint = "http://localhost:9999/v1/chat/completions"
 		`"email":"off","phone_e164":"off","phone_nanp":"off","github_pat":"block"}}}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/guard", strings.NewReader(body)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/guard", strings.NewReader(body))))
 	if rr.Code != 200 {
 		t.Fatalf("PUT guard: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -263,7 +263,7 @@ email = "warn"
 		`"Prompt":` + string(promptJSON) + `}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/guard", strings.NewReader(body)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/guard", strings.NewReader(body))))
 	if rr.Code != 200 {
 		t.Fatalf("PUT guard: %d body=%s", rr.Code, rr.Body.String())
 	}

@@ -2,6 +2,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ToolBadge } from "@/components/primitives";
 import { DataTable } from "@/components/DataTable";
 import { ChartState } from "@/components/ChartState";
+import { windowKey, type WindowParams } from "@/lib/projectDrawer";
 import { useApi } from "@/lib/useApi";
 import { fmtInt, fmtTaskUSD } from "@/lib/format";
 import type { TaskCostBucket, TaskRollup } from "@/lib/types";
@@ -12,11 +13,11 @@ import type { TaskCostBucket, TaskRollup } from "@/lib/types";
 // scoped by the numeric project_id this panel already has (rather than the
 // root-path `project` filter most other pages use).
 
-export function TasksTab({ projectId, days }: { projectId: number; days: number }) {
+export function TasksTab({ projectId, win }: { projectId: number; win: WindowParams }) {
   const rollup = useApi<TaskRollup>(
     "/api/tasks",
-    { project_id: projectId, days },
-    [projectId, days],
+    { project_id: projectId, ...win },
+    [projectId, windowKey(win)],
   );
   const data = rollup.data;
 

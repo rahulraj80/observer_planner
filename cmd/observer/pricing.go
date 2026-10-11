@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_pricing_feed
+
 package main
 
 import (
@@ -137,7 +139,7 @@ func runPricingSync(ctx context.Context, st *store.Store, enrolled bool, opts pr
 	if enrolled {
 		return pricingSyncResult{
 			State: pricingSyncRefusedEnrolled,
-			Message: "this node is enrolled with an organization — prices arrive through your org rail " +
+			Message: "this node is enrolled with an organization - prices arrive through your org rail " +
 				"(GET /api/agent/pricing); the public pricing feed is not consulted (plan §C.3/D8).",
 		}, nil
 	}
@@ -157,7 +159,7 @@ func runPricingSync(ctx context.Context, st *store.Store, enrolled bool, opts pr
 		}
 		return pricingSyncResult{
 			State:   state,
-			Message: fmt.Sprintf("pricing feed not applied (%s): %v — keeping the previously applied prices.", state, err),
+			Message: fmt.Sprintf("pricing feed not applied (%s): %v - keeping the previously applied prices.", state, err),
 		}, nil
 	}
 	if res.NotModified {
@@ -400,9 +402,9 @@ func buildPricingStatus(enabled, auto bool, url string, interval int, enrolled, 
 // sentence asserted the wrong one for every node with from_org off.
 func enrolledFeedLine(orgRailApplies bool) string {
 	if orgRailApplies {
-		return "no — node is enrolled; prices come from the org rail"
+		return "no - node is enrolled; prices come from the org rail"
 	}
-	return "no — node is enrolled, and [guard.budget].from_org is off, so the org's " +
+	return "no - node is enrolled, and [guard.budget].from_org is off, so the org's " +
 		"negotiated rates are not applied either; prices come from the built-in table " +
 		"plus any [intelligence.pricing] override"
 }
@@ -444,7 +446,7 @@ func printPricingStatus(w io.Writer, rep pricingStatusReport) {
 	case rep.FeedVersion > 0:
 		fmt.Fprintf(bw, "  applied\tfeed v%d (fetched %s, %s)\n", rep.FeedVersion, rep.FeedFetchedAt, rep.FeedState)
 	default:
-		fmt.Fprintf(bw, "  applied\tnone yet — run `observer pricing sync`\n")
+		fmt.Fprintf(bw, "  applied\tnone yet - run `observer pricing sync`\n")
 	}
 	if len(rep.Economics) > 0 {
 		fmt.Fprintln(bw, "Economics (feed-carried)")

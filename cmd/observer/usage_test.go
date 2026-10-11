@@ -206,7 +206,7 @@ func TestUsageCmd_TableAndZeroSideEffects(t *testing.T) {
 		t.Fatalf("usage: %v (stderr=%s)", err, errOut)
 	}
 	for _, want := range []string{
-		"SuperBased — observed agent spend, last 30 days",
+		"SuperBased - observed agent spend, last 30 days",
 		"one-shot · no daemon",
 		"TOOL", "MODEL", "CACHE_R", "CACHE_W", "TURNS", "USD",
 		"claude-code",
@@ -435,14 +435,14 @@ func TestUsageCmd_MirrorBaseRedirectedIntoScratchDir(t *testing.T) {
 
 	bases := probe.observedBases()
 	if len(bases) == 0 {
-		t.Fatal("mirrorbase.Base() was never queried during the scan — the probe adapter did not run")
+		t.Fatal("mirrorbase.Base() was never queried during the scan - the probe adapter did not run")
 	}
 	for _, b := range bases {
 		if !strings.HasPrefix(b, env.tmpdir) {
-			t.Errorf("mirrorbase.Base() = %q during the scan, want it under the scratch TMPDIR (%s) — F1", b, env.tmpdir)
+			t.Errorf("mirrorbase.Base() = %q during the scan, want it under the scratch TMPDIR (%s) - F1", b, env.tmpdir)
 		}
 		if strings.HasPrefix(b, fakeCache) {
-			t.Errorf("mirrorbase.Base() = %q leaked the real os.UserCacheDir() (%s) during a one-shot run — F1", b, fakeCache)
+			t.Errorf("mirrorbase.Base() = %q leaked the real os.UserCacheDir() (%s) during a one-shot run - F1", b, fakeCache)
 		}
 	}
 	if _, serr := os.Stat(filepath.Join(fakeCache, "superbased-observer")); !os.IsNotExist(serr) {
@@ -471,7 +471,7 @@ func TestOneShotMirrorBaseSetBeforeScan(t *testing.T) {
 	}
 	first := bases[0]
 	if first == "" {
-		t.Fatal("the first observed mirrorbase.Base() was empty — SetBaseForProcess had not run yet")
+		t.Fatal("the first observed mirrorbase.Base() was empty - SetBaseForProcess had not run yet")
 	}
 	if filepath.Base(first) != oneShotMirrorDirName {
 		t.Errorf("first observed base = %q, want its final path element to be %q (the scratch dir's mirror subdir, set before scanning)", first, oneShotMirrorDirName)
@@ -509,10 +509,10 @@ func TestUsageCmd_GroupByDayDistinctCountsAreNeverDayCounts(t *testing.T) {
 		t.Fatalf("expected at least 3 day-buckets, got %d: %+v", len(env2.Rows), env2.Rows)
 	}
 	if env2.Total.Tools != 1 {
-		t.Errorf("total.tools = %d, want 1 (one tool spread across %d days) — F11 regression", env2.Total.Tools, len(env2.Rows))
+		t.Errorf("total.tools = %d, want 1 (one tool spread across %d days) - F11 regression", env2.Total.Tools, len(env2.Rows))
 	}
 	if env2.Total.Models != 1 {
-		t.Errorf("total.models = %d, want 1 (day-grouping must not zero out the model count) — F11 regression", env2.Total.Models)
+		t.Errorf("total.models = %d, want 1 (day-grouping must not zero out the model count) - F11 regression", env2.Total.Models)
 	}
 }
 
@@ -530,12 +530,15 @@ func TestUsageCmd_KeepDBFailurePreservesScratchDir(t *testing.T) {
 	env.deps.adapters = func() []adapter.Adapter {
 		return []adapter.Adapter{claudecode.NewWithOptions(nil, root)}
 	}
+	// Make the copy fallback's publish step fail without relying on file
+	// permissions (a root-mapped test namespace ignores a 0o500 dir): dest
+	// is an existing non-empty DIRECTORY, so the same-directory temp file
+	// can be written but never renamed over it, for any uid.
 	destDir := t.TempDir()
-	if err := os.Chmod(destDir, 0o500); err != nil {
-		t.Fatalf("chmod destDir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(destDir, 0o700) })
 	dest := filepath.Join(destDir, "kept.db")
+	if err := os.MkdirAll(filepath.Join(dest, "occupied"), 0o700); err != nil {
+		t.Fatalf("occupy dest: %v", err)
+	}
 
 	if _, _, err := env.run(t, "--keep-db", dest); err == nil {
 		t.Fatal("expected an error when --keep-db can neither move nor copy the scratch database")
@@ -981,7 +984,7 @@ func TestCountOneShotSessionFiles_RespectsSinceWindow(t *testing.T) {
 	since := time.Now().Add(-30 * 24 * time.Hour)
 
 	if got := countOneShotSessionFiles(context.Background(), []adapter.Adapter{a}, since, 0); got != 1 {
-		t.Errorf("countOneShotSessionFiles(since=30d) = %d, want 1 — the backdated file must be excluded (F12)", got)
+		t.Errorf("countOneShotSessionFiles(since=30d) = %d, want 1 - the backdated file must be excluded (F12)", got)
 	}
 	if got := countOneShotSessionFiles(context.Background(), []adapter.Adapter{a}, time.Time{}, 0); got != 2 {
 		t.Errorf("countOneShotSessionFiles(since=zero) = %d, want 2 (no window filter at all)", got)
@@ -1017,7 +1020,7 @@ func TestRunUsageInstallsSignalHandlerBeforeScratchDir(t *testing.T) {
 		t.Fatalf("expected both signal.NotifyContext(...) and os.MkdirTemp(...) inside runUsage (sigIdx=%d mkdirIdx=%d)", sigIdx, mkdirIdx)
 	}
 	if sigIdx > mkdirIdx {
-		t.Errorf("signal.NotifyContext (offset %d) must precede os.MkdirTemp (offset %d) inside runUsage — F4", sigIdx, mkdirIdx)
+		t.Errorf("signal.NotifyContext (offset %d) must precede os.MkdirTemp (offset %d) inside runUsage - F4", sigIdx, mkdirIdx)
 	}
 }
 
@@ -1101,7 +1104,7 @@ func TestOneShotFallthroughEligible_IgnoresListeningPort(t *testing.T) {
 		getenv:  func(string) string { return "" },
 	}
 	if !oneShotFallthroughEligible(deps) {
-		t.Error("a listening daemon port must not affect eligibility (F2) — only ~/.observer state does")
+		t.Error("a listening daemon port must not affect eligibility (F2) - only ~/.observer state does")
 	}
 }
 
@@ -1131,7 +1134,7 @@ func TestBareRootFallthroughMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bare root: %v (stderr=%s)", err, errOut)
 		}
-		if !strings.Contains(out, "SuperBased — observed agent spend") || !strings.Contains(out, "claude-code") {
+		if !strings.Contains(out, "SuperBased - observed agent spend") || !strings.Contains(out, "claude-code") {
 			t.Errorf("bare root should print the usage table:\n%s", out)
 		}
 		if !strings.Contains(errOut, "no local SuperBased state found") {

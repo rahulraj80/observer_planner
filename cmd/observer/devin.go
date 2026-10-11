@@ -39,7 +39,7 @@ func newDevinCmd() *cobra.Command {
 		Use:   "devin [-- devin-args...]",
 		Short: "Launch Devin; with --continue-from, seed a handover as devin's `--`-separated positional prompt",
 		Long: "Wraps Cognition's Devin terminal agent (`devin`). This launcher is\n" +
-			"NON-PROXIED — devin speaks to Cognition's own backend with no\n" +
+			"NON-PROXIED - devin speaks to Cognition's own backend with no\n" +
 			"base-URL knob, so the proxy lane is a registry native-exempt item.\n" +
 			"Token capture happens via observer's local devin adapter\n" +
 			"(per-message metrics in the message_nodes store), not the proxy.\n\n" +

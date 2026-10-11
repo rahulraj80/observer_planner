@@ -19,7 +19,14 @@ func TestPackageImports_Bounded(t *testing.T) {
 		"database/sql": true, "net/http": true, "os": true, "os/exec": true,
 		"path/filepath": true, "github.com/fsnotify/fsnotify": true,
 	}
-	const allowedInternal = "github.com/marmutapp/superbased-observer/internal/integration"
+	// internal/shimguard is the core owner of the shim marker and IsShim since
+	// lane MP-L1E moved them there so the recursion guard survives the
+	// shell-wrap component compiling out (merged under D-505); shellwrap only
+	// re-exports those two pure symbols.
+	allowedInternal := map[string]bool{
+		"github.com/marmutapp/superbased-observer/internal/integration": true,
+		"github.com/marmutapp/superbased-observer/internal/shimguard":   true,
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +46,7 @@ func TestPackageImports_Bounded(t *testing.T) {
 			if forbidden[p] {
 				t.Errorf("%s: forbidden import %q", filepath.Base(path), p)
 			}
-			if strings.HasPrefix(p, "github.com/marmutapp/superbased-observer/internal/") && p != allowedInternal {
+			if strings.HasPrefix(p, "github.com/marmutapp/superbased-observer/internal/") && !allowedInternal[p] {
 				t.Errorf("%s: forbidden observer import %q", filepath.Base(path), p)
 			}
 		}

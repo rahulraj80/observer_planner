@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xuri/excelize/v2"
-
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -1069,57 +1067,6 @@ func TestAPICost_TokenMathReconciles(t *testing.T) {
 	}
 }
 
-// TestAPIExportXLSX_Sheets seeds minimal data and verifies the export
-// endpoint returns a non-empty xlsx with the expected sheet names.
-// Catches regressions where a sheet writer panics or excelize fails to
-// render the workbook.
-func TestAPIExportXLSX_Sheets(t *testing.T) {
-	s, _ := newTestServer(t)
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/export.xlsx?days=30", nil)
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != 200 {
-		t.Fatalf("/api/export.xlsx: %d  body=%s", rr.Code, rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); !strings.Contains(got, "spreadsheetml") {
-		t.Errorf("Content-Type: got %q want xlsx", got)
-	}
-	if cd := rr.Header().Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") {
-		t.Errorf("Content-Disposition: got %q", cd)
-	}
-	body := rr.Body.Bytes()
-	if len(body) < 1024 {
-		t.Fatalf("xlsx body suspiciously small: %d bytes", len(body))
-	}
-	// xlsx is a zip — check the magic.
-	if body[0] != 'P' || body[1] != 'K' {
-		t.Errorf("body doesn't start with PK zip magic: %q", body[:8])
-	}
-	// Open the workbook from the response bytes and assert the expected
-	// sheet names exist.
-	f, err := excelize.OpenReader(strings.NewReader(string(body)))
-	if err != nil {
-		t.Fatalf("excelize.OpenReader: %v", err)
-	}
-	defer f.Close()
-	want := map[string]bool{
-		"Overview": false, "Cost": false, "Sessions": false,
-		"Actions": false, "Tools": false, "Compression": false,
-		"Discovery — stale rereads": false, "Discovery — repeated commands": false,
-		"Patterns": false,
-	}
-	for _, name := range f.GetSheetList() {
-		if _, ok := want[name]; ok {
-			want[name] = true
-		}
-	}
-	for k, ok := range want {
-		if !ok {
-			t.Errorf("missing sheet: %q", k)
-		}
-	}
-}
-
 // Phase 8 cutover (2026-05-16) removed the legacy vanilla-JS
 // SPA whose static markup these regression guards asserted on:
 //
@@ -2025,13 +1972,13 @@ func TestAPISessionDetail_CursorContextBudget(t *testing.T) {
 			SourceFile: "f", SourceEventID: "pc1", SessionID: "sCB",
 			ProjectRoot: root, Timestamp: ts, Tool: models.ToolCursor,
 			ActionType: models.ActionPromptContext,
-			Target:     "Rules — 15580 tokens, 61924 chars", Success: true,
+			Target:     "Rules - 15580 tokens, 61924 chars", Success: true,
 		},
 		{
 			SourceFile: "f", SourceEventID: "pc2", SessionID: "sCB",
 			ProjectRoot: root, Timestamp: ts, Tool: models.ToolCursor,
 			ActionType: models.ActionPromptContext,
-			Target:     "Tool definitions — 7339 tokens, 29154 chars", Success: true,
+			Target:     "Tool definitions - 7339 tokens, 29154 chars", Success: true,
 		},
 	}, nil, store.IngestOptions{}); err != nil {
 		t.Fatal(err)
@@ -2194,7 +2141,7 @@ func TestAPISessionDetail_ZeroActionsWithTokens(t *testing.T) {
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session/sZero", nil))
 	if rr.Code != 200 {
-		t.Fatalf("status: %d body=%s (NULL-scan regression — SUM over zero actions)", rr.Code, rr.Body.String())
+		t.Fatalf("status: %d body=%s (NULL-scan regression - SUM over zero actions)", rr.Code, rr.Body.String())
 	}
 	var got struct {
 		TotalActions   int    `json:"total_actions"`
@@ -2422,7 +2369,7 @@ func TestAPISessionDetail_TotalsSurviveIDlessLegacyRows(t *testing.T) {
 		t.Fatalf("messages: want 2 rows (1 action-only + 1 surfaced id-less token row), got %d: %+v", len(mgot.Messages), mgot.Messages)
 	}
 	if msgTotalInput != 1000 {
-		t.Errorf("messages: sum(input) = %v, want 1000 (must match Detail's tokens.input exactly — the id-less row must not be dropped)", msgTotalInput)
+		t.Errorf("messages: sum(input) = %v, want 1000 (must match Detail's tokens.input exactly - the id-less row must not be dropped)", msgTotalInput)
 	}
 }
 
@@ -3651,7 +3598,7 @@ func TestAPISessionMessages_TwinFoldClaimOnceCardinality(t *testing.T) {
 	// key), the proxy+twin (m1, closest in time), and the genuinely
 	// distinct m2 — matching the org's claim-once Derive exactly.
 	if len(got.Messages) != 3 {
-		t.Fatalf("messages: got %d, want 3 (claim-once twin fold — the S1 cardinality fix); rows=%+v", len(got.Messages), got.Messages)
+		t.Fatalf("messages: got %d, want 3 (claim-once twin fold - the S1 cardinality fix); rows=%+v", len(got.Messages), got.Messages)
 	}
 	byID := map[string]struct{ Input, Output int64 }{}
 	for _, m := range got.Messages {
@@ -4526,7 +4473,7 @@ func TestAPISessions_CostReconcilesWithModels(t *testing.T) {
 	// the stale turn and balloon.
 	staleApprox := 5 * sessionsCostSum
 	if sessionsCostSum >= staleApprox/2 {
-		t.Errorf("sessions cost sum %.6f is suspiciously high — Days param may not be honored",
+		t.Errorf("sessions cost sum %.6f is suspiciously high - Days param may not be honored",
 			sessionsCostSum)
 	}
 }

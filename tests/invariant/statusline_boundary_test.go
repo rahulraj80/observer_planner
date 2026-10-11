@@ -341,6 +341,11 @@ var pinnedClaudeCodeEvents = []string{
 	"InstructionsLoaded",
 	"ConfigChange",
 	"WorktreeRemove",
+	// T-322 (fix/live-ground-2026-10-04-bef, 42c0f9cf1): the task hooks,
+	// live-grounded; a deliberate hook-list change unrelated to the
+	// statusline arc (Integration 6).
+	"TaskCreated",
+	"TaskCompleted",
 }
 
 // extractStringSliceVar parses src (a full parse, not ImportsOnly — a
@@ -401,14 +406,14 @@ func extractStringSliceVar(t *testing.T, filename string, src []byte, varName st
 }
 
 // TestClaudeCodeEventsListUnchangedByStatuslineArc is the real assertion:
-// internal/hook/register.go's claudeCodeEvents var still contains exactly
+// internal/hook/register_claude.go's claudeCodeEvents var still contains exactly
 // pinnedClaudeCodeEvents, in the same order. A deliberate hard failure —
 // see the comment in the Errorf message — is the point: this arc adds a
 // NEW top-level key ("statusLine"), never folds anything into the
 // existing hook-events list.
 func TestClaudeCodeEventsListUnchangedByStatuslineArc(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join("..", "..", "internal", "hook", "register.go")
+	path := filepath.Join("..", "..", "internal", "hook", "register_claude.go")
 	src, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

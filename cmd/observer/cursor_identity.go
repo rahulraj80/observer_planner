@@ -124,7 +124,7 @@ func cursorFreshLaunchEligible(args []string) bool {
 			}
 			continue
 		}
-		if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") {
+		if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") { //nolint:gosec // G602: the index is bounds-checked above
 			return false
 		}
 		i++

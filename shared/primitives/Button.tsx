@@ -57,9 +57,23 @@ const SIZE_CLASS: Record<ButtonSize, string> = {
 const BASE =
   "inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-2 border font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent-ring";
 
-// DISABLED is deliberately opaque rather than an opacity fade: a faded
-// `bg-accent` on a light card reads as "still clickable".
-const DISABLED = "cursor-not-allowed border-line-2 bg-bg-3 text-fg-3";
+// DISABLED swaps the variant fill for `bg-bg-3` (never a faded
+// `bg-accent`, which on a light card reads as "still clickable"), then dims
+// the whole control and drops the label to `text-fg-4`. Without the dim, a
+// disabled `secondary` button (also `bg-bg-3` + `border-line-2`) differed
+// from an enabled one only by fg-2 vs fg-3 text and looked clickable
+// (web/src/lib/buttonDisabledStyle.test.ts pins this).
+const DISABLED = "cursor-not-allowed border-line-2 bg-bg-3 text-fg-4 opacity-60";
+
+/** buttonDisabledLook is DISABLED as `disabled:` variants, for a hand-rolled
+ *  `<button>` whose class string cannot know its disabled state (a shared
+ *  class constant): append it so a disabled solid-accent control turns into
+ *  the same opaque bg-bg-3 look as a disabled Button, in both themes, instead
+ *  of a faded but still filled accent (T-339). Spelled out literally so the
+ *  Tailwind scanner sees every class; web/src/lib/buttonDisabledStyle.test.ts
+ *  pins it to DISABLED. Prefer the Button component where it fits. */
+export const buttonDisabledLook =
+  "disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-bg-3 disabled:text-fg-4 disabled:opacity-60";
 
 /** buttonClasses returns the class string a Button would render, for the
  *  rare caller that must put the look on an element Button cannot be

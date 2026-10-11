@@ -42,6 +42,7 @@ import (
 // proxy lanes, so the guard and router rows must report none / empty-hash /
 // zero versions (R2-B3) and the gateway row must report none / no_policy.
 func TestStartupEmitsFullSnapshot(t *testing.T) {
+	requireComponents(t, "org.client")
 	dir := t.TempDir()
 	// Isolate the daemon's home so the real start path can never read or write
 	// the developer's ~/.claude etc. (t.Setenv forbids t.Parallel — this test
@@ -157,7 +158,7 @@ func TestStartupEmitsFullSnapshot(t *testing.T) {
 		case <-done:
 		case <-time.After(10 * time.Second):
 		}
-		t.Fatal("no policy-state report received within 15s — the reporter is not registered in start.go's org loop")
+		t.Fatal("no policy-state report received within 15s - the reporter is not registered in start.go's org loop")
 	}
 
 	// Clean shutdown: cancel and wait for ExecuteContext to return.

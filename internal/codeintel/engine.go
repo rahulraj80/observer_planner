@@ -23,6 +23,11 @@ type engine struct {
 	// skip the COUNT query. It only ever goes false→true during a
 	// daemon's life (the index grows), so caching the positive is safe.
 	availCached atomic.Bool
+	// disabled marks the provider built for an install whose
+	// [codeintel].enabled is false. It answers exactly like Unavailable();
+	// the flag only lets a surface say WHY ("off by choice") instead of
+	// the generic "index missing". See Disabled and IsDisabled.
+	disabled bool
 }
 
 // NewEngine builds the native provider over a store read surface.
@@ -37,6 +42,19 @@ func NewEngine(store EngineStore) Provider {
 func Unavailable() Provider {
 	return &engine{}
 }
+
+// Disabled returns the [Provider] for an install that has code
+// intelligence turned OFF ([codeintel].enabled = false, the default since
+// D-307). It behaves exactly like [Unavailable] (empty answers, fail open,
+// no store reads) and additionally reports IsDisabled(p) == true, so the
+// MCP tools and other surfaces can tell "the user has not turned this on"
+// apart from "the index is not built yet".
+func Disabled() Provider {
+	return &engine{disabled: true}
+}
+
+// CodeIntelDisabled is the optional-interface hook behind [IsDisabled].
+func (e *engine) CodeIntelDisabled() bool { return e != nil && e.disabled }
 
 // engineStaleSlack is the staleness tolerance: file-
 // system mtime jitter + index latency shouldn't flap Stale().

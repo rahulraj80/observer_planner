@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -47,11 +49,11 @@ func cloudSyncStructural(ctx context.Context, st *store.Store, gw *cloudgateway.
 	grant, err := gw.ResolveStandingGrant(ctx, cloudcontract.PurposeStructuralInsights)
 	if err != nil {
 		if errors.Is(err, cloudgateway.ErrNoLiveGrant) || errors.Is(err, cloudgateway.ErrNoConsentSource) {
-			fmt.Fprintln(w, "Structural: skipped — no standing grant, so no window was captured and nothing was sent.")
+			fmt.Fprintln(w, "Structural: skipped - no standing grant, so no window was captured and nothing was sent.")
 			fmt.Fprintln(w, "  Grant one with `observer cloud consent grant --purpose structural_activity_insights`.")
 			return
 		}
-		fmt.Fprintf(w, "Structural: skipped — could not resolve the standing grant: %v\n", err)
+		fmt.Fprintf(w, "Structural: skipped - could not resolve the standing grant: %v\n", err)
 		return
 	}
 
@@ -63,7 +65,7 @@ func cloudSyncStructural(ctx context.Context, st *store.Store, gw *cloudgateway.
 		// The day-one cliff, stated rather than left mysterious: the rule the
 		// receipt bound covers COMPLETED days at or after the grant, and a grant
 		// made today has none yet.
-		fmt.Fprintln(w, "Structural: no window yet — the grant covers completed days from the day it was")
+		fmt.Fprintln(w, "Structural: no window yet - the grant covers completed days from the day it was")
 		fmt.Fprintln(w, "  made, and today is still in progress. The first window is captured tomorrow.")
 	}
 	sent, retryable, failed, derr := cloudDrainStructural(ctx, st, gw, w)
@@ -102,7 +104,7 @@ func cloudSyncStructural(ctx context.Context, st *store.Store, gw *cloudgateway.
 func cloudCaptureStructuralWindows(ctx context.Context, st *store.Store, grant cloudgateway.Grant, now time.Time) (int, error) {
 	loc, err := time.LoadLocation(grant.DeclaredTimezone)
 	if err != nil {
-		return 0, fmt.Errorf("the grant declares timezone %q, which this host cannot load (%w) — "+
+		return 0, fmt.Errorf("the grant declares timezone %q, which this host cannot load (%w) - "+
 			"re-grant with `observer cloud consent grant --purpose %s --timezone <IANA zone>`",
 			grant.DeclaredTimezone, err, cloudcontract.PurposeStructuralInsights)
 	}
@@ -238,7 +240,7 @@ func cloudDrainStructural(ctx context.Context, st *store.Store, gw *cloudgateway
 			sent++
 		case errors.Is(serr, cloudgateway.ErrNoLiveGrant), errors.Is(serr, cloudgateway.ErrGrantRevoked),
 			errors.Is(serr, store.ErrCloudStructuralSendUnauthorized):
-			fmt.Fprintf(w, "  window %s: NOT SENT — the standing grant is no longer live; nothing left this machine\n", it.ID)
+			fmt.Fprintf(w, "  window %s: NOT SENT - the standing grant is no longer live; nothing left this machine\n", it.ID)
 			failed++
 		case errors.Is(serr, errCloudStructuralRetryable):
 			retryable++
@@ -268,14 +270,14 @@ func cloudSendStructuralOne(ctx context.Context, st *store.Store, sess cloudgate
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrCloudEndpointMismatch):
-			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION — the sync endpoint is not the one the grant bound\n", it.ID)
+			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION - the sync endpoint is not the one the grant bound\n", it.ID)
 		case errors.Is(err, store.ErrCloudGrantGenerationDrift):
-			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION — the grant's terms changed after this snapshot was queued\n", it.ID)
+			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION - the grant's terms changed after this snapshot was queued\n", it.ID)
 		case errors.Is(err, store.ErrCloudGrantExpired):
-			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION — the standing grant's review date has passed; re-grant with\n", it.ID)
+			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION - the standing grant's review date has passed; re-grant with\n", it.ID)
 			fmt.Fprintf(w, "    `observer cloud consent grant --purpose %s`\n", cloudcontract.PurposeStructuralInsights)
 		case errors.Is(err, store.ErrCloudReconfirmationRequired), errors.Is(err, store.ErrCloudGrantNotStanding):
-			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION — the standing grant no longer authorizes it (%v)\n", it.ID, err)
+			fmt.Fprintf(w, "  window %s: NEEDS RECONFIRMATION - the standing grant no longer authorizes it (%v)\n", it.ID, err)
 		}
 		return err
 	}

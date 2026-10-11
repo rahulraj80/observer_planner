@@ -332,9 +332,13 @@ func TestValidateManagedWorkspace(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ValidateManagedWorkspace(%q, %q): unexpected error %v", tc.path, tc.managedRoot, err)
 			}
-			wantCanon, cerr := canonicalDir(tc.path)
+			abs, cerr := filepath.Abs(tc.path)
 			if cerr != nil {
-				t.Fatalf("canonicalDir: %v", cerr)
+				t.Fatalf("filepath.Abs: %v", cerr)
+			}
+			wantCanon, cerr := filepath.EvalSymlinks(abs)
+			if cerr != nil {
+				t.Fatalf("filepath.EvalSymlinks: %v", cerr)
 			}
 			if got != wantCanon {
 				t.Fatalf("got %q, want canonical %q", got, wantCanon)

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { ModelMark, SegmentedControl, SlideOver, Toggle, Tooltip } from "@/components/primitives";
 import { shortModel } from "@/lib/models";
+import { dollarsShown } from "@/lib/format";
 import type { Reliability, SessionRow } from "@/lib/types";
 
 // SessionFilters — drawer-managed filter state. Applied locally to
@@ -210,21 +211,25 @@ export function SessionsFiltersDrawer({
             )}
           </Group>
 
-          <Group label="Total cost (USD)">
-            <div className="flex items-center gap-2">
-              <RangeInput
-                value={draft.minCostUsd}
-                onChange={(v) => set("minCostUsd", v)}
-                placeholder="min"
-              />
-              <span className="text-fg-4">-</span>
-              <RangeInput
-                value={draft.maxCostUsd}
-                onChange={(v) => set("maxCostUsd", v)}
-                placeholder="max"
-              />
-            </div>
-          </Group>
+          {/* A dollar range filter is not offered in the org's token-usage
+              view (format.ts cost affordances). */}
+          {dollarsShown() && (
+            <Group label="Total cost (USD)">
+              <div className="flex items-center gap-2">
+                <RangeInput
+                  value={draft.minCostUsd}
+                  onChange={(v) => set("minCostUsd", v)}
+                  placeholder="min"
+                />
+                <span className="text-fg-4">-</span>
+                <RangeInput
+                  value={draft.maxCostUsd}
+                  onChange={(v) => set("maxCostUsd", v)}
+                  placeholder="max"
+                />
+              </div>
+            </Group>
+          )}
 
           <Group label="Actions per session">
             <div className="flex items-center gap-2">
@@ -247,8 +252,8 @@ export function SessionsFiltersDrawer({
               options={[
                 { value: "any", label: "Any" },
                 { value: "short", label: "<5m" },
-                { value: "medium", label: "5–30m" },
-                { value: "long", label: "30m–2h" },
+                { value: "medium", label: "5-30m" },
+                { value: "long", label: "30m-2h" },
                 { value: "xlong", label: ">2h" },
               ]}
               value={draft.duration}

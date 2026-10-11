@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
 // `observer project <id|root> --skills` (S10-SKILLS): the CLI face of the
 // Projects-page Skills tab, composed through the same
-// dashboard.ComposeProjectSkills seam GET /api/project/{id}/skills uses.
+// dashapi.ComposeProjectSkills seam GET /api/project/{id}/skills uses.
 // Three facts are printed side by side and never merged: what a hook
 // snapshot observed on disk at session start, what the commit HEAD was on
 // held (from the reflog), and what was invoked.
@@ -26,7 +26,7 @@ func runProjectSkills(cmd *cobra.Command, st *store.Store, skewSeconds int, proj
 	if skewSeconds > 0 {
 		skew = time.Duration(skewSeconds) * time.Second
 	}
-	out, err := dashboard.ComposeProjectSkills(cmd.Context(), st, dashboard.ProjectSkillsInput{
+	out, err := dashapi.ComposeProjectSkills(cmd.Context(), st, dashapi.ProjectSkillsInput{
 		ProjectID: projectID, Days: days, Since: since, Until: until, SkewMargin: skew,
 	})
 	if err != nil {
@@ -76,7 +76,7 @@ var (
 )
 
 // versionIndex maps skill key -> version id -> "#<ordinal> <id>".
-func versionIndex(p dashboard.ProjectSkills) map[string]map[string]string {
+func versionIndex(p dashapi.ProjectSkills) map[string]map[string]string {
 	idx := map[string]map[string]string{}
 	for _, s := range p.Skills {
 		m := map[string]string{}
@@ -148,7 +148,7 @@ func cliHead(idx map[string]map[string]string, key, state, version, reason strin
 	return state
 }
 
-func cliCurrent(s dashboard.ProjectSkills, i int) string {
+func cliCurrent(s dashapi.ProjectSkills, i int) string {
 	sk := s.Skills[i]
 	txt := cliInGitLabels[sk.Current.InGit]
 	if txt == "" {
@@ -170,7 +170,7 @@ func cliCurrent(s dashboard.ProjectSkills, i int) string {
 	return txt
 }
 
-func printProjectSkills(w io.Writer, p dashboard.ProjectSkills) {
+func printProjectSkills(w io.Writer, p dashapi.ProjectSkills) {
 	idx := versionIndex(p)
 	fmt.Fprintf(w, "Skills for %s (last %d days)\n", p.RootPath, p.WindowDays)
 	if p.Capture.ObservedSince != "" {
@@ -278,7 +278,7 @@ func printProjectSkills(w io.Writer, p dashboard.ProjectSkills) {
 	}
 }
 
-func skillName(p dashboard.ProjectSkills, key string) string {
+func skillName(p dashapi.ProjectSkills, key string) string {
 	for _, s := range p.Skills {
 		if s.Key == key {
 			return s.Name

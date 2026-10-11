@@ -233,6 +233,13 @@ func nodeInterventionStatusLine(ctx context.Context, st *store.Store, dbPath str
 		// confusion the 2026-09-15 ruling removed from the decision.
 		line += "; accounting delayed (measured total used): " + delayed
 	}
+	if len(status.ControlledSurfaces) > 0 {
+		// The per-surface witness a direct launch is admitted on
+		// (nodeProcessCutoffCoversLaunch). A launch refused for "no
+		// budget-admission route" points here, so the surface it needs must
+		// be readable without opening the status file.
+		line += "; controlled surfaces: " + strings.Join(status.ControlledSurfaces, ", ")
+	}
 	if len(status.UnclassifiedSurfaces) > 0 {
 		// Per-surface coverage gap, not a node-wide one: these surfaces saw a
 		// process whose invocation their declaration could not classify.

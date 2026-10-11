@@ -2,6 +2,17 @@ package integration
 
 import "sort"
 
+// ProxyLane is one `/up/<id>/` proxy lane a route depends on.
+type ProxyLane struct {
+	// ID is the lane id (the `<id>` path segment).
+	ID string
+	// DefaultUpstream is the GROUNDED host root (no version suffix; the
+	// client's base URL carries it) the proxy uses for this lane when
+	// neither [proxy.upstreams] nor [proxy.agent_upstreams] names the id.
+	// "" = no built-in default: the operator must configure the lane.
+	DefaultUpstream string
+}
+
 // RouteKind names HOW a proxy route is applied — the capability shape the
 // init proxy-route step dispatches on (CLAUDE.md #3), distinguishing a
 // persisted config write from an ephemeral launcher env var.
@@ -97,6 +108,17 @@ type ProxyRoute struct {
 	// Note documents config-file-routed tools (EnvVar == ""), where the
 	// base URL lives in a config file rather than an env var.
 	Note string
+	// Lane is the proxy `/up/<id>/` lane this route addresses, for a tool
+	// whose traffic must reach a NON-default host. Nil = the route rides
+	// the proxy's fixed upstreams and needs no lane. Since Sol A5-02 an
+	// unresolvable lane is refused (HTTP 502) rather than forwarded to a
+	// fixed provider, so a launcher checks Lane before it routes.
+	Lane *ProxyLane
+	// PromptScope says which of the tool's turns the route actually
+	// carries when that is not every turn (e.g. only one provider entry of
+	// several). Coverage surfaces print it beside the proxy seam. "" = the
+	// route carries every turn of a routed session.
+	PromptScope string
 	// CrossOSBridge mirrors HookSpec.CrossOSBridge for the proxy route: this
 	// persisted route's config file can ALSO be written into a foreign
 	// Windows home from a WSL daemon — the `<tool>-windows` virtual-target
@@ -121,6 +143,27 @@ type ProxyRoute struct {
 	// row lists only what that generic set misses. Keys only — the scan
 	// compares the token before any '=' — and never a value.
 	SelectorArguments []string
+	// Gate, when non-nil, says the route is CONDITIONAL: the vendor lane the
+	// launcher points at the proxy only works with the developer's own
+	// provider credential (and possibly an explicit model), and without it the
+	// product runs on its own sign-in, which no base URL can route. A gated
+	// launcher applies the route only when EvaluateRouteGate says so and
+	// otherwise launches the product UNROUTED, saying why. Nil = the route
+	// applies to every launch. See RouteGate.
+	Gate *RouteGate
+	// Setting names, for people, the setting a persisted route writes into
+	// the tool's config, when the EnvVar does not already name it (a
+	// config-file route under vendor keys). Leaving an organization says
+	// "Removes <setting> from <file>" from it (RouteSetting, T-495). "" =
+	// the EnvVar names it, or no grounded name.
+	Setting string
+	// ProviderOverrides lists the tool's BUILT-IN providers and, for each,
+	// the proxy path that can stand in for its base URL (or why none can).
+	// A launcher whose route rides one provider entry of several writes the
+	// covered rows on a managed node so a mid-session provider switch stays
+	// on the proxy (T-035, PROVIDER-SWITCH-1). Nil = the route carries every
+	// turn already, or the tool has no overridable built-in providers.
+	ProviderOverrides []ProviderOverride
 }
 
 // Capability is one adapter's row in the registry: everything observer
@@ -168,7 +211,17 @@ type Capability struct {
 	Hook        HookSpec
 	MCP         *MCPTarget
 	Native      NativeRails
-	TokenTier   TokenTier
+	// OTLP declares the tool's own OpenTelemetry export (where it is sent
+	// from, how to enable it, whether internal/otlpvendor maps it). Owned
+	// by the otlpExports table in otlpexport.go; zero value = none grounded.
+	OTLP OTLPExport
+	// Enterprise is the tool's vendor enterprise-plane answer: the vendor
+	// surface catalog rows that cover it, a parent it inherits from, or an
+	// honest none (enterprise vendor API plan 4.2). Owned by the
+	// enterpriseAnswers table in enterprise_table.go; the only authored tool to
+	// surface relation (invariant I2).
+	Enterprise EnterpriseAnswer
+	TokenTier  TokenTier
 	// Limit records an AUDITED negative finding for the 5h/weekly usage-
 	// limit gauge (docs/cost-predictor.md; LimitCapability's doc comment).
 	// Zero value = not audited, falls through to the existing proxy/
@@ -301,13 +354,13 @@ var registry = map[string]Capability{
 			Launcher: "observer claude", CrossOSBridge: true, Proof: RouteProofLauncherRoute,
 		},
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookClaudeSettings, CrossOSBridge: true, AutoWired: true},
+		Hook:        HookSpec{Mechanism: HookClaudeSettings, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsClaudeCode, HooksShareCredentialFile: true, CredentialFileReason: credFileClaudeCode},
 		// Remote grounded 2026-09-24 against code.claude.com/docs/en/mcp:
 		// `{"type":"http"|"sse","url":…,"headers":{…}}` — a url WITHOUT a
 		// type is a configuration ERROR Claude Code skips, so the writer
 		// always emits `type`. Written by internal/mcp's shared JSON remote
 		// writer (W4a).
-		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".claude.json", Implemented: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".claude.json", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredClaudeCode, Remote: &MCPRemoteTarget{
 			Transports:   []MCPRemoteTransport{MCPRemoteStreamableHTTP, MCPRemoteSSE},
 			Headers:      true,
 			TransportKey: "type",
@@ -336,10 +389,13 @@ var registry = map[string]Capability{
 				// layout (code.claude.com/docs/en/setup uninstall section).
 				{OS: ProbeWindows, Rel: ".local/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @anthropic-ai/claude-code 2.1.289 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "22.0.0", Product: "Claude Code", Source: "npm registry engines.node, @anthropic-ai/claude-code 2.1.289, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@anthropic-ai/claude-code"}, Display: "npm install -g @anthropic-ai/claude-code"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://claude.ai/install.sh | bash"}, Display: "curl -fsSL https://claude.ai/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://claude.ai/install.sh | bash"}, Display: "curl -fsSL https://claude.ai/install.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://claude.ai/install.sh | bash"}, Display: "curl -fsSL https://claude.ai/install.sh | bash", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://claude.ai/install.sh | bash"}, Display: "curl -fsSL https://claude.ai/install.sh | bash", Requires: []string{"curl"}},
 				// grounded 2026-09-02: bootstrap.ps1 (claude.ai/install.ps1)
 				// downloads the platform .exe and execs `& $binaryPath
 				// install`; the winget manifest (Anthropic.ClaudeCode,
@@ -373,7 +429,13 @@ var registry = map[string]Capability{
 		// 'claude-fable-5')". The `observer claude` launcher is
 		// DisableFlagParsing + launcherArgsOrDone (B6), so a forwarded
 		// `--model <value>` reaches the claude binary unmodified.
-		Model: ModelSpec{Kind: ModelArg, Flag: "--model", Known: []string{"opus", "sonnet", "fable"}},
+		// Catalog: Anthropic only. ANTHROPIC_BASE_URL is the whole route
+		// (above) and every model id the CLI accepts is a Claude alias or a
+		// full Claude model name (the --help text quoted above).
+		Model: ModelSpec{
+			Kind: ModelArg, Flag: "--model", Known: []string{"opus", "sonnet", "fable"},
+			Catalog: ModelCatalog{Kind: ModelCatalogVendor, Providers: []string{"anthropic"}},
+		},
 		// Sandbox filesystem-isolation row (B9). GROUNDED: the tool's own
 		// state lives at ~/.claude (settings/hooks/projects transcripts),
 		// ~/.claude.json + ~/.claude.json.backup (trust/onboarding/MCP
@@ -407,6 +469,7 @@ var registry = map[string]Capability{
 			Kind: RouteConfigFile, EnvVar: "", Launcher: "observer codex",
 			Note:          "codex routes through ~/.codex/config.toml (model_provider=openai-observer base_url, or openai_base_url for the built-in openai provider; not an env var); a selected provider that resolves its own endpoint (amazon-bedrock, SigV4 to AWS) bypasses the proxy - `observer doctor codex` reports it",
 			CrossOSBridge: true, Proof: RouteProofLauncherRoute,
+			Setting: "the Observer model provider (model_provider and [model_providers.openai-observer])",
 		},
 		Routability: RouteStatusRoutableNow,
 		// CrossOSBridge grounded 2026-09-02 (IDE-surface remediation T2):
@@ -414,7 +477,10 @@ var registry = map[string]Capability{
 		// Windows-side ~/.codex/hooks.json exactly like the claude-code and
 		// cursor targets, so init/start's hookSupported() may auto-wire the
 		// `codex-windows` target.
-		Hook: HookSpec{Mechanism: HookCodexConfig, CrossOSBridge: true, AutoWired: true},
+		// PromptShadowsTranscript (T-563): the UserPromptSubmit row and the
+		// rollout's user_message / item_completed UserMessage row record the
+		// same prompt; session messages keep the rollout row.
+		Hook: HookSpec{Mechanism: HookCodexConfig, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsCodex, HooksShareCredentialFile: true, CredentialFileReason: credFileCodex, PromptShadowsTranscript: true},
 		// Remote grounded 2026-09-24 against the Codex config reference
 		// (learn.chatgpt.com/docs/config-file/config-reference, the
 		// developers.openai.com redirect) + docs/plans/native-console-codex-
@@ -423,7 +489,7 @@ var registry = map[string]Capability{
 		// the discriminator), `http_headers` = static headers,
 		// `bearer_token_env_var`/`env_http_headers` = secret-by-reference
 		// (never written by the relay writer). No SSE spelling exists.
-		MCP: &MCPTarget{Format: MCPCodexTOML, PathHint: ".codex/config.toml", Implemented: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPCodexTOML, PathHint: ".codex/config.toml", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredCodex, Remote: &MCPRemoteTarget{
 			Transports:  []MCPRemoteTransport{MCPRemoteStreamableHTTP},
 			Headers:     true,
 			Implemented: true,
@@ -448,6 +514,9 @@ var registry = map[string]Capability{
 			ProbeDirs: []ProbeDir{
 				{OS: ProbeWindows, Rel: "AppData/Local/Programs/OpenAI/Codex/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @openai/codex 0.160.0 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "16", Product: "Codex CLI", Source: "npm registry engines.node, @openai/codex 0.160.0, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@openai/codex"}, Display: "npm install -g @openai/codex"},
 				// DI-10 fix: codex is a brew CASK (formulae.brew.sh/cask/codex),
@@ -456,7 +525,11 @@ var registry = map[string]Capability{
 				// grounded 2026-09-02: releases.openai.com/codex/install.ps1
 				// (302 from chatgpt.com/codex/install.ps1), vendor form uses
 				// -ExecutionPolicy ByPass. No winget id exists.
-				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-ExecutionPolicy", "ByPass", "-c", "irm https://chatgpt.com/codex/install.ps1 | iex"}, Display: "irm https://chatgpt.com/codex/install.ps1 | iex"},
+				// T-034j (2026-10-07, script re-read): install.ps1's one
+				// Read-Host ("Start Codex now?", plus the replace / conflict
+				// questions) blocks in a ConPTY; CODEX_NON_INTERACTIVE=1
+				// answers every one "no" without asking.
+				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-ExecutionPolicy", "ByPass", "-c", "$env:CODEX_NON_INTERACTIVE='1'; irm https://chatgpt.com/codex/install.ps1 | iex"}, Display: "$env:CODEX_NON_INTERACTIVE='1'; irm https://chatgpt.com/codex/install.ps1 | iex"},
 			},
 		},
 		// Attachable: `observer codex --attach` hands the PTY to the daemon
@@ -483,7 +556,13 @@ var registry = map[string]Capability{
 		// `observer codex` launcher is DisableFlagParsing + launcherArgsOrDone
 		// (B6), so a forwarded `--model <value>` reaches the codex binary
 		// unmodified.
-		Model: ModelSpec{Kind: ModelArg, Flag: "--model", Known: []string{"o3"}},
+		// Catalog: OpenAI. The route above is the openai provider's base URL;
+		// a config.toml model_provider that resolves its own endpoint is the
+		// documented bypass, not a second catalogue this row can enumerate.
+		Model: ModelSpec{
+			Kind: ModelArg, Flag: "--model", Known: []string{"o3"},
+			Catalog: ModelCatalog{Kind: ModelCatalogVendor, Providers: []string{"openai"}},
+		},
 		// Sandbox filesystem-isolation row (B9). GROUNDED against the adapter's
 		// own roots (internal/adapter/codex/adapter.go WatchPaths → <home>/.codex/
 		// sessions) plus the CLI's config/auth siblings: ~/.codex holds config.toml,
@@ -522,13 +601,18 @@ var registry = map[string]Capability{
 		// OPENAI_BASE_URL is the route AND the provider selection: the
 		// launcher's injected environment names the openai-compatible provider
 		// opencode then uses, and the live 2026-06-27 verification above ran
-		// through exactly that injection.
+		// through exactly that injection. OpenCode's built-in Zen provider
+		// ("opencode", e.g. big-pickle) ignores OPENAI_BASE_URL; since
+		// 2026-10-02 the launcher also routes it through
+		// OPENCODE_CONFIG_CONTENT onto the proxy's `opencode-zen` agent lane
+		// (demo node 1: a Zen session had bypassed the proxy and with it
+		// the only prompt lane OpenCode has).
 		Proxy: &ProxyRoute{
 			Kind: RouteLauncher, EnvVar: "OPENAI_BASE_URL", Suffix: "/v1",
 			Launcher: "observer opencode", Proof: RouteProofLauncherRoute,
 		},
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookPluginShimTS, AutoWired: true, Bindings: hookBindingsOpenCode}, // plugin shim (Lane D)
 		// OpenCode hosts MCP under its own "mcp" object in
 		// ~/.config/opencode/opencode.json (live-grounded 2026-06-26 against
 		// the operator's install: {"type":"local","command":[…],"enabled"}),
@@ -537,7 +621,7 @@ var registry = map[string]Capability{
 		// `{"type":"remote","url":…,"enabled":true,"headers":{…}}` — the
 		// typed-remote sibling of the local shape above; transport is
 		// inferred from the url. Written by registerOpenCodeRemote (W4a).
-		MCP: &MCPTarget{Format: MCPOpenCodeJSON, PathHint: ".config/opencode/opencode.json", Implemented: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPOpenCodeJSON, PathHint: ".config/opencode/opencode.json", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredOpenCode, Remote: &MCPRemoteTarget{
 			Transports:  []MCPRemoteTransport{MCPRemoteStreamableHTTP, MCPRemoteSSE},
 			Headers:     true,
 			Flags:       map[string]bool{"enabled": true},
@@ -577,8 +661,8 @@ var registry = map[string]Capability{
 			},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "opencode-ai@latest"}, Display: "npm install -g opencode-ai@latest"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://opencode.ai/install | bash"}, Display: "curl -fsSL https://opencode.ai/install | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://opencode.ai/install | bash"}, Display: "curl -fsSL https://opencode.ai/install | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://opencode.ai/install | bash"}, Display: "curl -fsSL https://opencode.ai/install | bash", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://opencode.ai/install | bash"}, Display: "curl -fsSL https://opencode.ai/install | bash", Requires: []string{"curl", "unzip"}},
 				// grounded 2026-09-02: opencode.ai/docs lists scoop (Scoop
 				// main bucket) alongside npm for Windows. The choco listing
 				// (author SST = the vendor org) publishes a stale 0.11.1
@@ -590,8 +674,13 @@ var registry = map[string]Capability{
 		// lists `-m, --model  model to use in the format of provider/model`.
 		// The `observer opencode` launcher is DisableFlagParsing +
 		// launcherArgsOrDone (B6), so a forwarded `--model <value>` reaches
-		// the opencode binary unmodified.
-		Model: ModelSpec{Kind: ModelArg, Flag: "--model"},
+		// the opencode binary unmodified. Catalog: open (provider/model ids
+		// for any configured provider), so a picker offers models this node
+		// has used rather than a catalogue it cannot prove keys for.
+		Model: ModelSpec{Kind: ModelArg, Flag: "--model", Catalog: ModelCatalog{
+			Kind: ModelCatalogOpen,
+			Note: "Arena routes opencode through OpenRouter, so a model must be an openrouter/<vendor>/<model> id",
+		}},
 		// Headless one-shot, LIVE-GROUNDED 2026-08-22 (arena headless-drive
 		// arc): `opencode run <prompt> --format json` streams NDJSON events
 		// (step_start/text/step_finish), each carrying sessionID; the last
@@ -655,7 +744,7 @@ var registry = map[string]Capability{
 					{Name: "OPENAI_BASE_URL", Suffix: "/v1"},
 				},
 				ColdStartOnly: true,
-				Reason: "child_env, NOT config_write, and the plan §2.2 sketch said the opposite — here is " +
+				Reason: "child_env, NOT config_write, and the plan §2.2 sketch said the opposite - here is " +
 					"why. WrapConfigWrite's contract is that an EXISTING config-lane writer applies the route, " +
 					"but internal/proxyroute has no opencode registrar (claude/codex/crush/kimi/qwen only) and " +
 					"this row carries no ProxyProbe, so naming one would point the operator at a writer that " +
@@ -663,13 +752,13 @@ var registry = map[string]Capability{
 					"this row's Proxy above: `observer opencode` exports OPENAI_BASE_URL=<proxy>/v1, and the " +
 					"desktop app embeds the same core. Injecting it on a cold start is the honest best effort; " +
 					"whether the Electron shell honours the env var (rather than only the per-provider baseURL " +
-					"in ~/.config/opencode/opencode.json, inventory §4.1) is NOT verified — treat a launch " +
+					"in ~/.config/opencode/opencode.json, inventory §4.1) is NOT verified - treat a launch " +
 					"that produces no api_turns row as the config lane winning.",
 			},
 			Hosts:    []string{"opencode"},
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: " +
-				"%LOCALAPPDATA%\\Programs\\@opencode-aidesktop\\OpenCode.exe, with NO bin\\ dir — hence " +
+				"%LOCALAPPDATA%\\Programs\\@opencode-aidesktop\\OpenCode.exe, with NO bin\\ dir - hence " +
 				"ProjectDirArgv=false. macOS bundle \"OpenCode.app\" grounded from the Homebrew cask " +
 				"`opencode-desktop`; winget id `SST.OpenCodeDesktop` grounded from a live " +
 				"`winget search --exact` the same day (note the sibling `SST.opencode`, which is the CLI).",
@@ -689,12 +778,12 @@ var registry = map[string]Capability{
 		// no route today); the surface is recorded in Routability, not faked.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookCursor, CrossOSBridge: true, AutoWired: true},
+		Hook:        HookSpec{Mechanism: HookCursor, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsCursor},
 		// Remote grounded 2026-09-24 against cursor.com/docs/context/mcp:
 		// `{"url":…,"headers":{…}}` — NO type key on a remote entry (type is
 		// only used for `"stdio"`); Cursor auto-detects Streamable HTTP vs
 		// SSE from the endpoint. Written by the shared JSON remote writer.
-		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".cursor/mcp.json", Implemented: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".cursor/mcp.json", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredCursor, Remote: &MCPRemoteTarget{
 			Transports:  []MCPRemoteTransport{MCPRemoteStreamableHTTP, MCPRemoteSSE},
 			Headers:     true,
 			Implemented: true,
@@ -734,6 +823,14 @@ var registry = map[string]Capability{
 		// INPUT payload to <userData>/logs/*/window*/output_*/cursor.hooks*.log,
 		// which the watcher replays under the live hook's own identity.
 		// Cloud Agents (bc-… ids) carry no usage in any local hook.
+		// Re-grounded 2026-10-05 on Cursor 3.23.12: a Cloud Agent fires only
+		// sessionStart and afterAgentThought locally (no stop, no
+		// afterAgentResponse, no tool hooks; the turns run in Cursor's
+		// remote VM), and state.vscdb keeps it under bcCachedDetails:<id>
+		// as protobuf with no usage either. The adapter now captures the
+		// session and one step row per thought (internal/adapter/cursor/
+		// cloudagent.go); tokens and model cost stay honestly absent, so
+		// the Gap text below is unchanged.
 		//
 		// 2026-09-27 (tracker item 17, grounded on node-1 + the 2026.09.18 /
 		// 2026.09.26 cursor-agent bundles): the INTERACTIVE CLI reports usage
@@ -821,8 +918,8 @@ var registry = map[string]Capability{
 				{OS: ProbeWindows, Rel: "AppData/Local/cursor-agent"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl https://cursor.com/install -fsS | bash"}, Display: "curl https://cursor.com/install -fsS | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl https://cursor.com/install -fsS | bash"}, Display: "curl https://cursor.com/install -fsS | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl https://cursor.com/install -fsS | bash"}, Display: "curl https://cursor.com/install -fsS | bash", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl https://cursor.com/install -fsS | bash"}, Display: "curl https://cursor.com/install -fsS | bash", Requires: []string{"curl", "tar"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm 'https://cursor.com/install?win32=true' | iex"}, Display: "irm 'https://cursor.com/install?win32=true' | iex"},
 			},
 		},
@@ -838,7 +935,7 @@ var registry = map[string]Capability{
 		// amendment A3) — only claude-code has a verified state-dir bind
 		// list; every other launchable tool carries the honest zero note
 		// until a per-tool probe grounds its StateRW/StateRO paths.
-		Sandbox: SandboxSpec{Note: "state dirs not yet grounded — not sandbox-launchable"},
+		Sandbox: SandboxSpec{Note: "state dirs not yet grounded - not sandbox-launchable"},
 		// GUI launch row (plan §2.2). Cursor IS an IDE, so the spec rides
 		// its own registry row rather than the guiHosts table.
 		GUI: &GUILaunchSpec{
@@ -867,7 +964,7 @@ var registry = map[string]Capability{
 			ProjectDirArgv: true,
 			Wrap: WrapSpec{
 				Kind: WrapNone,
-				Reason: "the in-IDE agent's backend is hard-wired to Cursor's own service — no base-URL env " +
+				Reason: "the in-IDE agent's backend is hard-wired to Cursor's own service - no base-URL env " +
 					"var exists. The one BYOK knob (\"OpenAI Base URL\") is a VS Code setting persisted in the " +
 					"live `state.vscdb`, which Observer will not write; it is a manual paste, which is why this " +
 					"row's Routability is probe_required with RouteManual rather than a driven route " +
@@ -880,7 +977,7 @@ var registry = map[string]Capability{
 				"%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe (+ resources\\app\\bin\\{cursor,cursor.cmd}, which " +
 				"grounds `cursor <dir>`). macOS bundle \"Cursor.app\" grounded from the Homebrew cask `cursor`; " +
 				"winget id `Anysphere.Cursor` grounded from a live `winget search --exact` against the official " +
-				"winget source the same day — the inventory rates Anysphere's vendor blessing of that package " +
+				"winget source the same day - the inventory rates Anysphere's vendor blessing of that package " +
 				"LOW, so treat it as a grounded id, not a vendor-endorsed channel.",
 		},
 	},
@@ -906,7 +1003,7 @@ var registry = map[string]Capability{
 			"roovscode.roo-cline / roovscode.roo-code / rooveterinaryinc.roo-cline / " +
 			"rooveterinaryinc.roo-code / rooveterinaryinc.roo-code-nightly globalStorage ids and retags " +
 			"those rows Tool=\"roo-code\" per file. No roo-code registry row exists by design (every cell " +
-			"would be zero or copied) — see productLifecycles[\"roo-code\"] for that product's lifecycle. " +
+			"would be zero or copied) - see productLifecycles[\"roo-code\"] for that product's lifecycle. " +
 			"Cline itself is active.",
 		// VS Code extension → backend. The "OpenAI Compatible" Base URL surface
 		// is routable, but it is a MANUAL-PASTE route, not an auto-writer:
@@ -920,7 +1017,10 @@ var registry = map[string]Capability{
 		// extension UI (RouteManual), surfaced via proxyroute.VSCodeBaseURLHint.
 		Proxy:       nil,
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookNone},
+		// T-342 (2026-10-04): the ~/.cline/hooks tool-gate registration lives
+		// on the cline-cli row (the CLI reads that directory, live); whether
+		// this extension does is unconfirmed, so its bindings are vendor-only.
+		Hook: HookSpec{Mechanism: HookNone, Bindings: hookBindingsCline},
 		// Cline (saoudrizwan.claude-dev) hosts MCP in VS Code globalStorage
 		// cline_mcp_settings.json (standard {"mcpServers":{…}} shape, live-
 		// confirmed 2026-06-26: {"mcpServers":{}}). Written natively on the
@@ -932,7 +1032,7 @@ var registry = map[string]Capability{
 		// the legacy sse transport, so the writer always emits it. autoApprove
 		// is left unset (its absence = no auto-approval, the safe default).
 		// Same writer natively AND through the cline-windows bridge path.
-		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: "<vscode>/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json", Implemented: true, CrossOSBridge: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: "<vscode>/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredCline, CrossOSBridge: true, Remote: &MCPRemoteTarget{
 			Transports:   []MCPRemoteTransport{MCPRemoteStreamableHTTP, MCPRemoteSSE},
 			Headers:      true,
 			TransportKey: "type",
@@ -959,7 +1059,7 @@ var registry = map[string]Capability{
 		// before flipping. Native hosted + inline completions stay exempt.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookNone, Bindings: hookBindingsCopilot},
 		MCP:         nil,
 		Native:      NativeRails{A: true, B: true, C: true, Note: "rails partial; identity = GitHub login, cost seat/account-level"},
 		TokenTier:   TokenTier{Best: "events_jsonl", Gap: "no cache tier", OutputOnlyShadow: true, GenerationTiming: GenTimingNative}, // legacy OTel llm_request span dur only
@@ -1001,9 +1101,39 @@ var registry = map[string]Capability{
 				"--provider-type", "--provider_type", "--provider-base-url",
 				"--provider_base_url", "--backend", "--auth-type", "--auth_type",
 			},
+			// CONDITIONAL route (fix/copilot-cli-unrouted-launch, 2026-10-04).
+			// Grounded against `copilot help providers` / `copilot help
+			// environment` on Copilot CLI 1.0.91: COPILOT_PROVIDER_BASE_URL
+			// alone switches Copilot into BYOK mode ("GitHub authentication is
+			// not required"), so a GitHub-subscription session cannot ride a
+			// custom base URL at all, and BYOK refuses to start without a model
+			// ("A model is required for BYOK. Set COPILOT_MODEL,
+			// COPILOT_PROVIDER_MODEL_ID, or --model."). Credential sources per
+			// the same help: API_KEY, API_KEY_COMMAND, BEARER_TOKEN (the key is
+			// optional only for local providers, which the proxy does not
+			// front). Live 2026-10-04 on demo node 1: the ungated launcher made
+			// a signed-in subscription user's Copilot exit with "BYOK providers
+			// require an explicit model".
+			//
+			// Provider type (pass-2 review C156-19): the route is the proxy's
+			// OpenAI-compatible endpoint (`<proxy>/v1`, COPILOT_PROVIDER_TYPE
+			// set to openai by the launcher). A developer who chose another
+			// type (anthropic, azure, ...) holds that provider's key, and
+			// routing it would hand that key to the OpenAI lane, so such a
+			// launch stays unrouted on the developer's own provider settings.
+			Gate: &RouteGate{
+				CredentialEnv:         []string{"COPILOT_PROVIDER_API_KEY", "COPILOT_PROVIDER_API_KEY_COMMAND", "COPILOT_PROVIDER_BEARER_TOKEN"},
+				ModelEnv:              []string{"COPILOT_MODEL", "COPILOT_PROVIDER_MODEL_ID"},
+				ModelArguments:        []string{"--model"},
+				UnroutedBecause:       "Copilot is using your GitHub sign-in",
+				ProviderTypeEnv:       "COPILOT_PROVIDER_TYPE",
+				RoutableProviderTypes: []string{"openai"},
+				ProviderTypeArguments: []string{"--provider-type", "--provider_type"},
+			},
+			PromptScope: "Only BYOK sessions (your own COPILOT_PROVIDER_API_KEY plus a model) go through the proxy; a session on your GitHub Copilot sign-in cannot be routed and launches unrouted, captured from Copilot's own session files.",
 		},
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookCopilotCLIHooks, AutoWired: true, Bindings: hookBindingsCopilotCLI},
 		MCP:         nil,
 		Native:      NativeRails{}, // shares Copilot's GitHub governance but no separate node rail grounded.
 		// Captures cache read + creation and nets input (log.go). Live
@@ -1030,8 +1160,10 @@ var registry = map[string]Capability{
 		// "Authenticating GitHub Copilot CLI"): COPILOT_GITHUB_TOKEN > GH_TOKEN
 		// > GITHUB_TOKEN, and an env value silently overrides stored OAuth — so
 		// forwarding the caller's value preserves the profile a bare launch
-		// would use. NAMES only.
-		AuthEnv: []string{"COPILOT_PROVIDER_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"},
+		// would use. NAMES only. The two BYOK alternates
+		// (COPILOT_PROVIDER_API_KEY_COMMAND, COPILOT_PROVIDER_BEARER_TOKEN) are
+		// grounded in `copilot help environment` (CLI 1.0.91).
+		AuthEnv: []string{"COPILOT_PROVIDER_API_KEY", "COPILOT_PROVIDER_API_KEY_COMMAND", "COPILOT_PROVIDER_BEARER_TOKEN", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"},
 		// Binary resolution + grounded installs. Unix launcher resolves
 		// "copilot"; npm @github/copilot (any OS) + the cask/script/winget
 		// channels (docs.github.com copilot-cli install).
@@ -1050,25 +1182,24 @@ var registry = map[string]Capability{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@github/copilot"}, Display: "npm install -g @github/copilot"},
 				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "--cask", "copilot-cli"}, Display: "brew install --cask copilot-cli"},
 				{OS: "linux", Channel: "brew", Argv: []string{"brew", "install", "--cask", "copilot-cli"}, Display: "brew install --cask copilot-cli"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://gh.io/copilot-install | bash"}, Display: "curl -fsSL https://gh.io/copilot-install | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://gh.io/copilot-install | bash"}, Display: "curl -fsSL https://gh.io/copilot-install | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://gh.io/copilot-install | bash"}, Display: "curl -fsSL https://gh.io/copilot-install | bash", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://gh.io/copilot-install | bash"}, Display: "curl -fsSL https://gh.io/copilot-install | bash", Requires: []string{"curl", "tar"}},
 				{OS: "windows", Channel: "winget", Argv: []string{"winget", "install", "GitHub.Copilot"}, Display: "winget install GitHub.Copilot"},
 			},
 		},
 		// Model picker (B5). The `observer copilot-cli` launcher OWNS its
 		// own `--model` cobra flag (cmd/observer/copilotcli.go) and
-		// translates it to COPILOT_MODEL in the child env for the BYOK
-		// provider — it is NOT forwarded verbatim to the wrapped `copilot`
-		// binary's own `--model` flag (which picks among GitHub-hosted
-		// models, e.g. `copilot --model gpt-5.4`). ModelArg is still the
-		// correct delivery shape from the dashboard's perspective: the
-		// picker still appends `--model <value>` to the launcher's argv,
-		// just to a flag the launcher itself consumes rather than passes
-		// through. Known left empty: COPILOT_MODEL values are BYOK-provider-
-		// specific (operator's own upstream catalog), not the GitHub-hosted
-		// `copilot --model` values (e.g. gpt-5.4) that this row's flag does
-		// NOT select — no example was grounded for the BYOK lane, so none
-		// is fabricated here.
+		// translates it to COPILOT_MODEL in the child env — it is NOT
+		// forwarded verbatim to the wrapped `copilot` binary's own `--model`
+		// flag. `copilot help environment` (CLI 1.0.91) documents
+		// COPILOT_MODEL as the general agent model ("Can be overridden by the
+		// --model command line option"), so it selects a GitHub-hosted model
+		// on an unrouted subscription launch and the BYOK wire model on a
+		// routed one. ModelArg is still the correct delivery shape from the
+		// dashboard's perspective: the picker appends `--model <value>` to
+		// the launcher's argv, to a flag the launcher itself consumes. Known
+		// left empty: the valid values differ by lane (GitHub-hosted catalog
+		// vs the BYOK provider's own), so no example is fabricated here.
 		Model: ModelSpec{Kind: ModelArg, Flag: "--model"},
 		// Sandbox filesystem-isolation row (B9). GROUNDED against
 		// internal/adapter/copilotcli/paths.go candidateRoots (<home>/.copilot/
@@ -1087,7 +1218,7 @@ var registry = map[string]Capability{
 		// (RouteManual / proxyroute.VSCodeBaseURLHint), not an auto-writer.
 		Proxy:       nil,
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookNone, Bindings: kiloBindings(false)},
 		MCP:         nil,
 		Native:      NativeRails{},
 		TokenTier:   TokenTier{Best: "sqlite"}, // inherits cline's full per-message capture.
@@ -1111,7 +1242,7 @@ var registry = map[string]Capability{
 		// reclassify it; a re-probe is optional/low-priority.
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookPluginShimTS, AutoWired: true, Bindings: kiloBindings(true)}, // plugin shim (Lane D)
 		MCP:         nil,
 		Native:      NativeRails{},
 		// Per-message tokens NET (Anthropic-shape, verified). kilo-auto/* has
@@ -1156,8 +1287,8 @@ var registry = map[string]Capability{
 			},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@kilocode/cli"}, Display: "npm install -g @kilocode/cli"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://kilo.ai/cli/install | bash"}, Display: "curl -fsSL https://kilo.ai/cli/install | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://kilo.ai/cli/install | bash"}, Display: "curl -fsSL https://kilo.ai/cli/install | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://kilo.ai/cli/install | bash"}, Display: "curl -fsSL https://kilo.ai/cli/install | bash", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://kilo.ai/cli/install | bash"}, Display: "curl -fsSL https://kilo.ai/cli/install | bash", Requires: []string{"curl", "unzip"}},
 				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "Kilo-Org/tap/kilo"}, Display: "brew install Kilo-Org/tap/kilo"},
 			},
 		},
@@ -1195,9 +1326,23 @@ var registry = map[string]Capability{
 		// (provider=openai, gpt-4o-2024-08-06, HTTP 200). RouteProviderJSON; the
 		// operator supplies the key once via `cline auth openai-compatible -k …`.
 		// (docs/proxy-routing-blockers.md)
-		Proxy:       &ProxyRoute{Kind: RouteProviderJSON, EnvVar: "", Suffix: "/v1", Launcher: "observer cline-cli", Note: "routes via the openai-compatible provider's settings.baseUrl in ~/.cline/data/settings/providers.json; launcher writes baseUrl, never a key"},
+		// T-208: the launcher selects that provider with `-P` and re-reads
+		// its persisted baseUrl right before cline starts, so applying the
+		// route settles the invocation's backend (RouteProofLauncherRoute);
+		// a forwarded `-P` / `--provider` of the operator's own takes the
+		// proof away for that invocation.
+		Proxy: &ProxyRoute{
+			Kind: RouteProviderJSON, EnvVar: "", Suffix: "/v1", Launcher: "observer cline-cli",
+			Note:              "routes via the openai-compatible provider's settings.baseUrl in ~/.cline/data/settings/providers.json; launcher writes baseUrl, never a key",
+			Proof:             RouteProofLauncherRoute,
+			SelectorArguments: []string{"-P"},
+		},
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookClineCLIJSONL, AutoWired: false}, // receiver exists (clinecli/hook.go); the live hooks.jsonl is lifecycle-only (no token payload) → stays a tailer, not auto-wired.
+		// T-342 (2026-10-04): Observer writes ~/.cline/hooks/PreToolUse (the
+		// tool gate, `observer hook cline-cli PreToolUse`); the lifecycle and
+		// tool-result bindings stay the hooks.jsonl tailer (clinecli/hook.go),
+		// which writing a hook in that directory also switches on.
+		Hook: HookSpec{Mechanism: HookClineHookFiles, AutoWired: true, Bindings: hookBindingsClineCLI},
 		// MCP: nil here means "no WRITER", not "not capable" — re-grounded
 		// 2026-08-01 against cline 3.0.48. There is still NO
 		// cline_mcp_settings.json on the live install (the settings dir holds
@@ -1275,7 +1420,7 @@ var registry = map[string]Capability{
 			// required to ship everywhere).
 			Note: "Windows layout grounded on this box 2026-09-20: %LOCALAPPDATA%\\Cline\\cline-app.exe " +
 				"(Electron GUI) alongside a code-sidecar.exe backend and a Cline.lnk shortcut. macOS/Linux " +
-				"spellings NOT grounded — Windows-only for now. Sessions land in ~/.cline/data with " +
+				"spellings NOT grounded - Windows-only for now. Sessions land in ~/.cline/data with " +
 				"source='desktop', captured by the clinecli adapter (surface_host=cline-desktop).",
 		},
 		// AuthEnv zero: cline-cli reads provider keys from its providers.json
@@ -1368,9 +1513,12 @@ var registry = map[string]Capability{
 		// [proxy.upstreams] entry (default `openrouter`). NB: hermes'
 		// auxiliary/moa providers (provider: auto) make separate calls that
 		// don't follow the override. (docs/proxy-routing-blockers.md)
-		Proxy:       &ProxyRoute{Kind: RouteProviderJSON, EnvVar: "", Suffix: "/up/openrouter/api/v1", Launcher: "observer hermes", Note: "routes via a user-config `observer` provider (providers: section) in ~/.hermes/config.yaml with key_env (secret-free); launcher writes the provider additively, never a key; needs a matching [proxy.upstreams] upstream (default openrouter)"},
+		// The openrouter lane is the live-verified host root above
+		// (docs/proxy-routing.md, docs/hermes-adapter.md); built in so the
+		// default --upstream resolves without a [proxy.upstreams] entry.
+		Proxy:       &ProxyRoute{Kind: RouteProviderJSON, EnvVar: "", Suffix: "/up/openrouter/api/v1", Launcher: "observer hermes", Note: "routes via a user-config `observer` provider (providers: section) in ~/.hermes/config.yaml with key_env (secret-free); launcher writes the provider additively, never a key; the default openrouter lane is built in (a [proxy.upstreams] openrouter entry overrides it); another --upstream needs its own [proxy.upstreams] entry", Lane: &ProxyLane{ID: "openrouter", DefaultUpstream: "https://openrouter.ai"}},
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookHermesPlugin, AutoWired: true}, // embedded plugin via `observer init --hermes`.
+		Hook:        HookSpec{Mechanism: HookHermesPlugin, AutoWired: true, Bindings: hookBindingsHermes, HooksShareCredentialFile: true, CredentialFileReason: credFileHermes}, // embedded plugin via `observer init --hermes`.
 		// Remote grounded 2026-09-24 against hermes-agent.nousresearch.com/
 		// docs/user-guide/features/mcp: `mcp_servers.<name>: {url: …,
 		// headers: {…}}` (transport inferred; `auth: oauth` optional). The
@@ -1381,11 +1529,11 @@ var registry = map[string]Capability{
 		// Remote.Implemented=false (honest zero, doc3 §12.1 R8.24.u — doc3
 		// does NOT claim hermes remote projection until a locate row + a
 		// YAML remote writer land).
-		MCP: &MCPTarget{Format: MCPHermesYAML, PathHint: ".hermes/config.yaml", Implemented: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPHermesYAML, PathHint: ".hermes/config.yaml", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredHermes, Remote: &MCPRemoteTarget{
 			Transports:  []MCPRemoteTransport{MCPRemoteStreamableHTTP, MCPRemoteSSE},
 			Headers:     true,
 			Implemented: false,
-			Note:        "hermes docs 2026-09-24: url + headers (transport inferred); NO writer — internal/hook's YAML writer is stdio-only and locate has no hermes row",
+			Note:        "hermes docs 2026-09-24: url + headers (transport inferred); NO writer - internal/hook's YAML writer is stdio-only and locate has no hermes row",
 		}},
 		Native:    NativeRails{},
 		TokenTier: TokenTier{Best: "sqlite", GenerationTiming: GenTimingNative, ReportsCost: true}, // post_api_request token rows; full. api_duration (float s) -> gen_ms.
@@ -1446,9 +1594,16 @@ var registry = map[string]Capability{
 				{OS: ProbeWindows, Rel: "AppData/Local/hermes/hermes-agent/venv/Scripts"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"}, Display: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"}, Display: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"},
-				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "iex (irm https://hermes-agent.nousresearch.com/install.ps1)"}, Display: "iex (irm https://hermes-agent.nousresearch.com/install.ps1)"},
+				// T-034j (2026-10-07, script re-read): both installers end in
+				// `hermes setup` (a wizard) and `hermes gateway install`,
+				// which read /dev/tty / the console, so the guided install
+				// sat in the wizard. --non-interactive / -NonInteractive skip
+				// both stages (and the libatomic sudo cache). install.ps1 has
+				// no env alternative, so it runs through the vendor's
+				// documented scriptblock form, which accepts the switch.
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive"}, Display: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive", Requires: []string{"curl", "git"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive"}, Display: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive", Requires: []string{"curl", "git"}},
+				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive"}, Display: "& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive"},
 			},
 		},
 		// Model picker (B5). Grounded live 2026-08-08: `hermes --help` lists
@@ -1485,7 +1640,7 @@ var registry = map[string]Capability{
 					"this row's verified Proxy above routes via a user-config `observer` provider in " +
 					"~/.hermes/config.yaml (written additively by the `observer hermes` launcher, never a " +
 					"key), and Desktop shares that same ~/.hermes. So a route already applied to the CLI " +
-					"applies to Desktop too — the GUI launch itself writes nothing and records " +
+					"applies to Desktop too - the GUI launch itself writes nothing and records " +
 					"wrap_applied=false naming that writer. Carry the CLI's known bug forward: an " +
 					"OpenRouter-catalog-matching model name can silently override an explicit custom " +
 					"base_url (upstream #39753).",
@@ -1493,9 +1648,9 @@ var registry = map[string]Capability{
 			Hosts:    []string{"hermes"},
 			Grounded: false,
 			Note: "UNVERIFIED on the grounding box (2026-09-03): %LOCALAPPDATA%\\hermes exists but is the " +
-				"CLI's DATA dir (HERMES_HOME — config.yaml, auth.json, bin\\), and " +
+				"CLI's DATA dir (HERMES_HOME - config.yaml, auth.json, bin\\), and " +
 				"%LOCALAPPDATA%\\com.nousresearch.hermes.setup contains only an EBWebView profile left by an " +
-				"installer — neither grounds a desktop executable. No Homebrew cask `hermes` and no winget " +
+				"installer - neither grounds a desktop executable. No Homebrew cask `hermes` and no winget " +
 				"package (both checked live the same day). The vendor documents a `hermes desktop` verb " +
 				"(inventory §2.12) which would make this nearly free once someone grounds one install. " +
 				"Grounded=false ⇒ empty Binary, never launchable, listed for the record.",
@@ -1512,7 +1667,7 @@ var registry = map[string]Capability{
 		// before any claim. Bucketed probe-required to reflect that surface.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookNone, Note: hookNoteCowork},
 		MCP:         nil,
 		Native:      NativeRails{},
 		TokenTier:   TokenTier{Best: "transcript", Gap: "capture depth un-audited", GenerationTiming: GenTimingNative}, // result.duration_api_ms, single-model results only
@@ -1540,6 +1695,7 @@ var registry = map[string]Capability{
 				},
 				InstallNote: "no Linux channel: Anthropic ships Claude Desktop for Windows and macOS only " +
 					"(claude.ai/download).",
+				UserInstallHint: "Claude Desktop is available for Windows and macOS only.",
 			},
 			// PATH walk disabled: `claude.exe` on PATH is the Claude Code
 			// CLI, an entirely different product (gui.go's ProbeOnly doc
@@ -1551,7 +1707,7 @@ var registry = map[string]Capability{
 			Wrap: WrapSpec{
 				Kind: WrapNone,
 				Reason: "two independent reasons, either sufficient. (1) Claude Desktop reads base-URL / " +
-					"proxy / mTLS settings ONLY from managed settings and ~/.claude/settings.json — never from " +
+					"proxy / mTLS settings ONLY from managed settings and ~/.claude/settings.json - never from " +
 					"repo-local config, and no process env var is documented (inventory §4.2). (2) An " +
 					"AppsFolder launch goes through explorer.exe, so the child inherits explorer's " +
 					"environment, not the daemon's: a child_env wrap could not reach it even if a var existed " +
@@ -1565,7 +1721,7 @@ var registry = map[string]Capability{
 			Grounded: true,
 			Note: "Windows identity grounded on this box 2026-09-03 via Get-AppxPackage: " +
 				"PackageFullName Claude_1.44121.4.0_x64__pzs8sxrjxfjjc, PackageFamilyName " +
-				"Claude_pzs8sxrjxfjjc, and the manifest's single Application Id \"Claude\" — so the AUMID is " +
+				"Claude_pzs8sxrjxfjjc, and the manifest's single Application Id \"Claude\" - so the AUMID is " +
 				"Claude_pzs8sxrjxfjjc!Claude (the family suffix is the publisher hash and is stable across " +
 				"versions). macOS bundle \"Claude.app\" grounded from the Homebrew cask `claude`; winget id " +
 				"`Anthropic.Claude` grounded from a live `winget search --exact` the same day.",
@@ -1580,7 +1736,7 @@ var registry = map[string]Capability{
 		// Lifecycle stays ACTIVE: Google retired Gemini CLI / GCA only for the individual and
 		// AI Pro/Ultra tiers on 2026-06-18 (Standard/Enterprise unchanged) — see the rowless
 		// "gemini-code-assist-individuals" product entry in lifecycle.go.
-		LifecycleNote: "Individual / AI Pro / AI Ultra tiers retired by Google on 2026-06-18 in favour of Antigravity (agy); Standard/Enterprise still served — https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals",
+		LifecycleNote: "Individual / AI Pro / AI Ultra tiers retired by Google on 2026-06-18 in favour of Antigravity (agy); Standard/Enterprise still served - https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals",
 		Vocabulary:    Vocabulary{InTaxonomy: true},
 		// Phase E SHIPPED + LIVE-VERIFIED 2026-06-27: the proxy bridges Google
 		// generateContent (providerForPath → ProviderGoogle, the
@@ -1589,7 +1745,34 @@ var registry = map[string]Capability{
 		// /v1 suffix — the CLI appends the /v1beta path). A live `observer
 		// gemini -- -p …` turn produced google api_turns rows (gemini-3.5-flash
 		// 11092/132) with accurate token capture.
-		Proxy:       &ProxyRoute{Kind: RouteLauncher, EnvVar: "GOOGLE_GEMINI_BASE_URL", Suffix: "", Launcher: "observer gemini"},
+		//
+		// CONDITIONAL route (T-345, 2026-10-04). Grounded against the
+		// installed @google/gemini-cli 0.62.0 bundle on demo node 1
+		// (bundle/chunk-2DHAEQE2.js): createContentGenerator sends the
+		// "oauth-personal" (sign in with Google) and
+		// "compute-default-credentials" auth types to the Code Assist server
+		// at CODE_ASSIST_ENDPOINT (default https://cloudcode-pa.googleapis.com)
+		// and NEVER reads GOOGLE_GEMINI_BASE_URL; only "gemini-api-key" and
+		// "gateway" honour it ("vertex-ai" reads GOOGLE_VERTEX_BASE_URL). The
+		// auth type is the saved settings choice (security.auth.selectedType)
+		// first, else getAuthTypeFromEnv: GOOGLE_GENAI_USE_GCA=true -> Google
+		// sign-in, GOOGLE_GENAI_USE_VERTEXAI=true -> Vertex,
+		// GOOGLE_GEMINI_BASE_URL set -> "gateway", GEMINI_API_KEY -> key.
+		// So setting the base URL with no key on a fresh install selects
+		// "gateway" with an EMPTY key instead of offering Google sign-in.
+		// Gate: route only when GEMINI_API_KEY is in the launch environment;
+		// a key kept only in a .env file Gemini loads itself is invisible to
+		// the launcher (unrouted, and the notice says how to route it), and a
+		// saved Google sign-in with a key exported is named by RoutedCaveat.
+		Proxy: &ProxyRoute{
+			Kind: RouteLauncher, EnvVar: "GOOGLE_GEMINI_BASE_URL", Suffix: "", Launcher: "observer gemini",
+			Gate: &RouteGate{
+				CredentialEnv:   []string{"GEMINI_API_KEY"},
+				UnroutedBecause: "Gemini CLI has no GEMINI_API_KEY in this environment, so it uses your Google sign-in (or Vertex AI), which talks to Google directly",
+				RoutedCaveat:    "if Gemini CLI is set to sign in with Google or to use Vertex AI (/auth, GOOGLE_GENAI_USE_GCA or GOOGLE_GENAI_USE_VERTEXAI), it ignores this and talks to Google directly",
+			},
+			PromptScope: "Only Gemini API-key sessions (GEMINI_API_KEY exported where you launch) go through the proxy; a session signed in with Google, or on Vertex AI, talks to Google directly and is captured from Gemini's own session files.",
+		},
 		Routability: RouteStatusRoutableNow,
 		// Part B item 1: the prompt-submit hook lane (BeforeAgent),
 		// registered by registerGenericSettingsHooks into
@@ -1602,7 +1785,7 @@ var registry = map[string]Capability{
 		// CrossOSBridge: true — internal/hook's gemini-cli-windows target
 		// (registerGeminiCLIWindows) wraps the command in the wsl.exe
 		// bridge, mirroring claude-code/cursor/codex's own bridges.
-		Hook:      HookSpec{Mechanism: HookGeminiSettings, CrossOSBridge: true, AutoWired: true, PromptLaneOnly: true},
+		Hook:      HookSpec{Mechanism: HookGeminiSettings, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsGeminiCLI},
 		MCP:       nil,
 		Native:    NativeRails{},                   // Google Cloud usage API not yet investigated (Phase-4 ledger).
 		TokenTier: TokenTier{Best: "events_jsonl"}, // gross-input netting fixed (tokenEventFor nets cached); no known gap.
@@ -1638,6 +1821,9 @@ var registry = map[string]Capability{
 				Unix:    []string{"gemini"},
 				Windows: []string{"gemini.cmd", "gemini"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @google/gemini-cli 0.62.0 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "20", Product: "Gemini CLI", Source: "npm registry engines.node, @google/gemini-cli 0.62.0, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@google/gemini-cli"}, Display: "npm install -g @google/gemini-cli"},
 			},
@@ -1695,7 +1881,7 @@ var registry = map[string]Capability{
 		// one. (docs/proxy-routing-blockers.md)
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookPluginShimTS, Bindings: hookBindingsOpenClaw}, // shim renders; no grounded install location (Lane D)
 		MCP:         nil,
 		Native:      NativeRails{},
 		TokenTier:   TokenTier{Best: "transcript"}, // <id>.jsonl message.usage covers EVERY call (accurate; re-grounded 2026-07-31 — byte-identical to the trajectory's lastCallUsage where they overlap); *.trajectory.jsonl model.completed is a one-row-per-run SUBSET that only fills gateway-injected usage-zero turns. The runs.sqlite task path genuinely has no token columns.
@@ -1737,14 +1923,24 @@ var registry = map[string]Capability{
 			ProbeDirs: []ProbeDir{
 				{OS: ProbeWindows, Rel: ".local/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): openclaw 2026.9.8 (">=24.16.0<25||>=26.1.0"; the 25.x hole is not modelled) declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "24.16.0", Range: ">=24.16.0 <25 || >=26.1.0", Product: "OpenClaw", Source: "npm registry engines.node, openclaw 2026.9.8, read 2026-10-04"},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://openclaw.ai/install.sh | bash"}, Display: "curl -fsSL https://openclaw.ai/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://openclaw.ai/install.sh | bash"}, Display: "curl -fsSL https://openclaw.ai/install.sh | bash"},
+				// T-034j (2026-10-07, script re-read): install.sh runs
+				// `openclaw onboard` after `exec </dev/tty` and asks y/N and
+				// menu questions; --no-onboard skips onboarding and
+				// --no-prompt disables every prompt (a missing Node then
+				// fails with instructions instead of asking). install.ps1
+				// reads OPENCLAW_NO_ONBOARD=1 (exactly "1") and has no other
+				// prompt.
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard --no-prompt"}, Display: "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard --no-prompt", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard --no-prompt"}, Display: "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard --no-prompt", Requires: []string{"curl"}},
 				// grounded 2026-09-02: openclaw.ai/install.ps1 installs Node
 				// (winget → choco → scoop → portable) then npm-installs
 				// itself; the CMD form here mirrors the vendor's Unix
 				// script shape for a native-Windows daemon.
-				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "iwr -useb https://openclaw.ai/install.ps1 | iex"}, Display: "iwr -useb https://openclaw.ai/install.ps1 | iex"},
+				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "$env:OPENCLAW_NO_ONBOARD='1'; iwr -useb https://openclaw.ai/install.ps1 | iex"}, Display: "$env:OPENCLAW_NO_ONBOARD='1'; iwr -useb https://openclaw.ai/install.ps1 | iex"},
 				// DI-12 fix: openclaw's own install.ps1
 				// (Get-NpmLifecycleAllowArgument) passes
 				// --allow-scripts=openclaw on a modern npm so the postinstall
@@ -1778,7 +1974,7 @@ var registry = map[string]Capability{
 				// (`openclaw`) above, so none is declared either.
 				WindowsNote: "the Windows Hub installer's layout is unverified: it is not installed on the " +
 					"grounding box (2026-09-03), no winget package exists, and the Hub provisions its own " +
-					"`OpenClawGateway` WSL distro — %LOCALAPPDATA%\\OpenClawTray\\ is state/logs, not a " +
+					"`OpenClawGateway` WSL distro - %LOCALAPPDATA%\\OpenClawTray\\ is state/logs, not a " +
 					"grounded executable path (inventory §2.12).",
 				Installs: []InstallHint{
 					{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "--cask", "openclaw"}, Display: "brew install --cask openclaw"},
@@ -1790,9 +1986,9 @@ var registry = map[string]Capability{
 			ProjectDirArgv: false,
 			Wrap: WrapSpec{
 				Kind: WrapNone,
-				Reason: "config-write is the ONLY route OpenClaw honours — ANTHROPIC_BASE_URL explicitly " +
+				Reason: "config-write is the ONLY route OpenClaw honours - ANTHROPIC_BASE_URL explicitly " +
 					"does not work (upstream #56679) and a pre-existing auth-profiles.json can silently " +
-					"bypass a configured baseUrl — but this row carries NEITHER a verified Proxy nor a " +
+					"bypass a configured baseUrl - but this row carries NEITHER a verified Proxy nor a " +
 					"ProxyProbe writer binding (Routability is probe_required and internal/proxyroute has no " +
 					"openclaw registrar), so a config_write ConfigTool here would name a writer that does not " +
 					"exist. Honest zero until a registrar for ~/.openclaw/openclaw.json " +
@@ -1804,7 +2000,7 @@ var registry = map[string]Capability{
 			Note: "Grounded from the macOS side ONLY: the Homebrew cask `openclaw` (name \"OpenClaw\", " +
 				"homepage openclaw.ai) installs \"OpenClaw.app\", read from the cask API 2026-09-03. Whether " +
 				"that bundle is the menu-bar companion the inventory §2.12 describes or a different desktop " +
-				"shell was NOT separately verified. Windows Hub layout unverified — Names.Windows empty. " +
+				"shell was NOT separately verified. Windows Hub layout unverified - Names.Windows empty. " +
 				"Gateway-scoped, so ProjectDirArgv=false by design, and the Hub's own WSL Gateway is a " +
 				"documented double-counting risk (a distinct OPENCLAW_HOME).",
 		},
@@ -1837,9 +2033,15 @@ var registry = map[string]Capability{
 		// compression_event captured despite genuine attempts. Routing works;
 		// the compression benefit is small by pi's architecture, not a gate.
 		// (docs/proxy-routing-blockers.md)
-		Proxy:       &ProxyRoute{Kind: RouteProviderJSON, EnvVar: "", Suffix: "/v1", Launcher: "observer pi", Note: "routes via ~/.pi/agent/models.json custom 'observer' provider baseUrl (not an env var); launcher writes it, never a key"},
+		Proxy: &ProxyRoute{
+			Kind: RouteProviderJSON, EnvVar: "", Suffix: "/v1", Launcher: "observer pi", Note: "routes via ~/.pi/agent/models.json custom 'observer' provider baseUrl (not an env var); launcher writes it, never a key",
+			// Demo node 1, 2026-10-02: a pi session on another provider
+			// (baseten) never reached the proxy.
+			PromptScope:       "Only turns sent to the \"observer\" provider the launcher writes go through the proxy, plus, on a managed node, every built-in provider the launcher can point at a proxy lane for the session; a switch to a built-in provider with no proxy lane (Bedrock, Azure, Vertex, Cloudflare, Mistral, the ChatGPT sign-in, GitHub Copilot, OpenCode) or to your own custom provider bypasses it and is flagged after send.",
+			ProviderOverrides: joinProviderOverrides(piFamilyProviderOverrides, piOnlyProviderOverrides),
+		},
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookPluginShimTS, AutoWired: true, Bindings: hookBindingsPi}, // plugin shim (Lane D)
 		MCP:         nil,
 		Native:      NativeRails{},
 		TokenTier:   TokenTier{Best: "transcript", Gap: "capture depth un-audited", ReportsCost: true},
@@ -1879,10 +2081,13 @@ var registry = map[string]Capability{
 				{OS: ProbeUnix, Rel: ".pi/agent/bin"},
 				{OS: ProbeWindows, Rel: ".pi/agent/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @earendil-works/pi-coding-agent 1.0.2 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "22.19.0", Product: "pi", Source: "npm registry engines.node, @earendil-works/pi-coding-agent 1.0.2, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent"}, Display: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://pi.dev/install.sh | sh"}, Display: "curl -fsSL https://pi.dev/install.sh | sh"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://pi.dev/install.sh | sh"}, Display: "curl -fsSL https://pi.dev/install.sh | sh"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://pi.dev/install.sh | sh"}, Display: "curl -fsSL https://pi.dev/install.sh | sh", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://pi.dev/install.sh | sh"}, Display: "curl -fsSL https://pi.dev/install.sh | sh", Requires: []string{"curl"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://pi.dev/install.ps1 | iex"}, Display: "irm https://pi.dev/install.ps1 | iex"},
 			},
 		},
@@ -1907,7 +2112,7 @@ var registry = map[string]Capability{
 		// gateway knob.
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookNone, Bindings: hookBindingsAntigravity},
 		MCP:         nil,
 		Native:      NativeRails{}, // Google Cloud usage API not yet investigated (Phase-4 ledger).
 		// Desktop CAPTURE (text + tool actions + model + surface) comes
@@ -1971,12 +2176,12 @@ var registry = map[string]Capability{
 					"sibling `agy` CLI documents GOOGLE_GEMINI_BASE_URL but the antigravity-cli row records " +
 					"that as an UNVERIFIED contradiction, inventory §2.3). Launch yes, wrap no; capture " +
 					"rides the IDE's plaintext brain/<uuid>/.system_generated/logs/transcript.jsonl " +
-					"(text + tool actions + model + surface; tokens absent — the .pb cipher stays parked).",
+					"(text + tool actions + model + surface; tokens absent - the .pb cipher stays parked).",
 			},
 			Hosts:    []string{"antigravity"},
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: " +
-				"%LOCALAPPDATA%\\Programs\\antigravity\\Antigravity.exe — and NO bin\\ dir, hence " +
+				"%LOCALAPPDATA%\\Programs\\antigravity\\Antigravity.exe - and NO bin\\ dir, hence " +
 				"ProjectDirArgv=false and no unix shim name (the inventory left both \"to ground\"). macOS " +
 				"bundle \"Antigravity.app\" grounded from the Homebrew cask `antigravity`; winget id " +
 				"`Google.Antigravity` grounded from a live `winget search --exact` the same day. This row is " +
@@ -1997,12 +2202,29 @@ var registry = map[string]Capability{
 		LifecycleNote: "Google's successor to Gemini CLI after the 2026-06-18 individual-tier retirement " +
 			"(https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/); " +
 			"family inventory: docs/audits/antigravity-family-surfaces-2026-09-03.md.",
-		// agy CLI itself is non-proxied (runs locally).
+		// Two auth modes (audit P2, 2026-10-02). Google sign-in (the
+		// default; demo node 1) has no base-URL knob and is not
+		// proxy-routable. API-key mode (settings.json modelProvider
+		// "gemini" + GEMINI_API_KEY) honours GOOGLE_GEMINI_BASE_URL per
+		// the vendor install doc (antigravity.google/docs/cli/install),
+		// which `observer antigravity-cli` now sets in that mode onto the
+		// proxy's Gemini generateContent lane. No API-key install has been
+		// probed yet, so Proxy stays nil (flip only after a live api_turns
+		// row) and Routability says probe_required.
 		Proxy:       nil,
-		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookNone},
-		MCP:         nil,
-		Native:      NativeRails{},
+		Routability: RouteStatusProbeRequired,
+		// Prompt coverage WARNS before the model call (PromptWarnOnly).
+		// The PreInvocation warn hook (audit P1, 2026-10-02) was retired
+		// by the node 1 live test of agy 1.2.16 (2026-10-03: the
+		// transcript held the prompt only after the reply) and restored by
+		// T-476 after agy 1.3.0 (node 1, 2026-10-06) wrote the USER_INPUT
+		// step before invocationNum 0 and the injected notice reached the
+		// model. It can never block, so a prompt rule is also flagged after
+		// send by the capture lane. The mechanism also registers the
+		// PreToolUse tool gate (hook-parity Lane A6).
+		Hook:   HookSpec{Mechanism: HookAntigravityJSON, AutoWired: true, PromptWarnOnly: true, Bindings: hookBindingsAntigravityCLI},
+		MCP:    nil,
+		Native: NativeRails{},
 		// CLI (agy) writes plaintext-protobuf SQLite .db — parsed directly (clidb.go).
 		TokenTier: TokenTier{Best: "sqlite"},
 		// CLI (agy) plaintext .db readable; seeds agy -i.
@@ -2041,8 +2263,8 @@ var registry = map[string]Capability{
 				{OS: ProbeWindows, Rel: "AppData/Local/agy/bin"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://antigravity.google/cli/install.sh | bash"}, Display: "curl -fsSL https://antigravity.google/cli/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://antigravity.google/cli/install.sh | bash"}, Display: "curl -fsSL https://antigravity.google/cli/install.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://antigravity.google/cli/install.sh | bash"}, Display: "curl -fsSL https://antigravity.google/cli/install.sh | bash", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://antigravity.google/cli/install.sh | bash"}, Display: "curl -fsSL https://antigravity.google/cli/install.sh | bash", Requires: []string{"curl", "tar"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://antigravity.google/cli/install.ps1 | iex"}, Display: "irm https://antigravity.google/cli/install.ps1 | iex"},
 			},
 		},
@@ -2060,7 +2282,7 @@ var registry = map[string]Capability{
 		// amendment A3) — only claude-code has a verified state-dir bind
 		// list; every other launchable tool carries the honest zero note
 		// until a per-tool probe grounds its StateRW/StateRO paths.
-		Sandbox: SandboxSpec{Note: "state dirs not yet grounded — not sandbox-launchable"},
+		Sandbox: SandboxSpec{Note: "state dirs not yet grounded - not sandbox-launchable"},
 	},
 	"qwen-code": {
 		Tool:       "qwen-code",
@@ -2112,7 +2334,7 @@ var registry = map[string]Capability{
 		// CrossOSBridge: true — internal/hook's qwen-code-windows target
 		// (registerQwenCodeWindows) wraps the command in the wsl.exe
 		// bridge, mirroring claude-code/cursor/codex's own bridges.
-		Hook: HookSpec{Mechanism: HookQwenSettings, CrossOSBridge: true, AutoWired: true, PromptLaneOnly: true},
+		Hook: HookSpec{Mechanism: HookQwenSettings, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsQwenCode, HooksShareCredentialFile: true, CredentialFileReason: credFileQwenCode},
 		// MCP client exists (Gemini lineage, mcpServers in settings.json),
 		// but settings.json embeds plaintext provider keys — an MCP writer
 		// needs a guarded additive write path before this can be grounded.
@@ -2159,10 +2381,13 @@ var registry = map[string]Capability{
 			ProbeDirs: []ProbeDir{
 				{OS: ProbeWindows, Rel: "AppData/Local/qwen-code/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @qwen-code/qwen-code 0.24.7 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "22.0.0", Product: "Qwen Code", Source: "npm registry engines.node, @qwen-code/qwen-code 0.24.7, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@qwen-code/qwen-code@latest"}, Display: "npm install -g @qwen-code/qwen-code@latest"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"}, Display: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"}, Display: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"}, Display: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash"}, Display: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash", Requires: []string{"curl"}},
 				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "qwen-code"}, Display: "brew install qwen-code"},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex"}, Display: "irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex"},
 			},
@@ -2188,14 +2413,14 @@ var registry = map[string]Capability{
 		Routability: RouteStatusNativeExempt,
 		// Kiro has first-class agent hooks (~/.kiro/hooks) upstream, but no
 		// observer receiver is wired — honest none.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookNone, Bindings: hookBindingsKiroCLI},
 		// ~/.kiro/settings/mcp.json is the documented MCP surface; absent on
 		// this install, shape unconfirmed — no writer until grounded.
 		MCP:    nil,
 		Native: NativeRails{},
 		// Mode-dependent dual store (flat bundles + conversations_v2 sqlite);
 		// local token counts were structurally 0/null in every capture.
-		TokenTier: TokenTier{Best: "transcript", Gap: "no proxy tier (SigV4); local token counts 0/null in practice — credit metering only, not stored as tokens"},
+		TokenTier: TokenTier{Best: "transcript", Gap: "no proxy tier (SigV4); local token counts 0/null in practice - credit metering only, not stored as tokens"},
 		// Both layouts re-readable (adapter implements ReadTranscript);
 		// `kiro-cli chat "<seed>"` positional seed verified live 2026-07-09;
 		// launched non-proxied by `observer kiro` (SigV4 — nothing to route).
@@ -2245,8 +2470,8 @@ var registry = map[string]Capability{
 				{OS: ProbeWindows, Rel: "Kiro-Cli", EnvRoot: "ProgramFiles"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.kiro.dev/install | bash"}, Display: "curl -fsSL https://cli.kiro.dev/install | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.kiro.dev/install | bash"}, Display: "curl -fsSL https://cli.kiro.dev/install | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.kiro.dev/install | bash"}, Display: "curl -fsSL https://cli.kiro.dev/install | bash", Requires: []string{"curl", "unzip", "sha256sum"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.kiro.dev/install | bash"}, Display: "curl -fsSL https://cli.kiro.dev/install | bash", Requires: []string{"curl", "shasum"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm 'https://cli.kiro.dev/install.ps1' | iex"}, Display: "irm 'https://cli.kiro.dev/install.ps1' | iex"},
 			},
 		},
@@ -2288,13 +2513,13 @@ var registry = map[string]Capability{
 				},
 				InstallNote: "no grounded Linux channel: kiro.dev/downloads offers a deb/AppImage download, " +
 					"not a scriptable one-liner. (Distinct from the Kiro CLI's own cli.kiro.dev/install script " +
-					"in this row's Binary above — that installs the CLI, not the IDE.)",
+					"in this row's Binary above - that installs the CLI, not the IDE.)",
 			},
 			DarwinApp:      "Kiro",
 			ProjectDirArgv: true,
 			Wrap: WrapSpec{
 				Kind: WrapNone,
-				Reason: "AWS ships no BYOK / base-URL surface for Kiro at all — four open vendor issues, and " +
+				Reason: "AWS ships no BYOK / base-URL surface for Kiro at all - four open vendor issues, and " +
 					"a third-party `kiro-gateway` proxy exists precisely because of the gap (inventory §2.8 / " +
 					"§4.2; this row's Routability is native_exempt). Launch yes, wrap no; capture rides " +
 					"~/.kiro/sessions.",
@@ -2303,7 +2528,7 @@ var registry = map[string]Capability{
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: " +
 				"%LOCALAPPDATA%\\Programs\\Kiro\\Kiro.exe (+ bin\\{kiro,kiro.cmd}, which grounds both the unix " +
-				"shim stem and `kiro <dir>` — the inventory left the IDE binary name \"to ground\"). macOS " +
+				"shim stem and `kiro <dir>` - the inventory left the IDE binary name \"to ground\"). macOS " +
 				"bundle \"Kiro.app\" grounded from the Homebrew cask `kiro`; winget id `Amazon.Kiro` grounded " +
 				"from a live `winget search --exact` the same day.",
 		},
@@ -2343,13 +2568,18 @@ var registry = map[string]Capability{
 			EnvVar:   "GROK_CLI_CHAT_PROXY_BASE_URL",
 			Suffix:   "/up/grok/v1",
 			Launcher: "observer grok --proxy",
-			Note:     "Opt-in via the --proxy launcher flag; routes at the [proxy.upstreams] grok upstream (cli-chat-proxy.grok.com), not the default lane.",
+			Note:     "Opt-in via the --proxy launcher flag; routes at the grok lane (cli-chat-proxy.grok.com, built in; a [proxy.upstreams] grok entry overrides it), not the default lane.",
+			// The live-verified lane above (api_turns 23025, then the
+			// launcher's own turn 2026-08-21): host root, the /v1 rides the
+			// client's base URL. Built in so `--proxy` never depends on a
+			// hand-written [proxy.upstreams] entry (Sol A5-02 follow-up).
+			Lane: &ProxyLane{ID: "grok", DefaultUpstream: "https://cli-chat-proxy.grok.com"},
 		},
 		Routability: RouteStatusRoutableNow,
 		// updates.jsonl shows hook_execution records (ACP pre_tool_use fired
 		// live) — a real upstream hook system, but no observer receiver is
 		// wired; honest none.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookGrokHooksJSON, AutoWired: true, Bindings: hookBindingsGrok},
 		// events.jsonl shows an MCP client connecting (mcp_server_connected,
 		// 25 tools), but no grounded config-writer surface — nil until then.
 		MCP:    nil,
@@ -2398,18 +2628,22 @@ var registry = map[string]Capability{
 				{OS: ProbeUnix, Rel: ".grok/bin"},
 				{OS: ProbeWindows, Rel: ".grok/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @xai-official/grok 1.0.46 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "20", Product: "Grok CLI", Source: "npm registry engines.node, @xai-official/grok 1.0.46, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@xai-official/grok"}, Display: "npm install -g @xai-official/grok"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://x.ai/cli/install.sh | bash"}, Display: "curl -fsSL https://x.ai/cli/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://x.ai/cli/install.sh | bash"}, Display: "curl -fsSL https://x.ai/cli/install.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://x.ai/cli/install.sh | bash"}, Display: "curl -fsSL https://x.ai/cli/install.sh | bash", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://x.ai/cli/install.sh | bash"}, Display: "curl -fsSL https://x.ai/cli/install.sh | bash", Requires: []string{"curl"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://x.ai/cli/install.ps1 | iex"}, Display: "irm https://x.ai/cli/install.ps1 | iex"},
 			},
 		},
 		// Model picker (B5). Grounded live 2026-08-08: `grok --help` lists
 		// `-m, --model <MODEL>  Model ID to use`. The `observer grok` launcher
 		// is DisableFlagParsing + launcherArgsOrDone (B6), so a forwarded
-		// `--model <value>` reaches the grok binary unmodified.
-		Model: ModelSpec{Kind: ModelArg, Flag: "--model"},
+		// `--model <value>` reaches the grok binary unmodified. Catalog: xAI
+		// (the CLI fetches its model list from grok's own chat proxy, above).
+		Model: ModelSpec{Kind: ModelArg, Flag: "--model", Catalog: ModelCatalog{Kind: ModelCatalogVendor, Providers: []string{"xai"}}},
 		// Headless one-shot, LIVE-GROUNDED 2026-08-22 (arena headless-drive
 		// arc): `grok -p <prompt> --output-format json --always-approve`
 		// prints a single JSON envelope keyed text/sessionId/usage/
@@ -2427,8 +2661,10 @@ var registry = map[string]Capability{
 		Sandbox: SandboxSpec{StateRW: []string{".grok"}},
 	},
 	"kimi-code": {
-		Tool:       "kimi-code",
-		PromptLane: PromptLaneProbeRequired,
+		Tool: "kimi-code",
+		// PromptLaneHook since T-378: the UserPromptSubmit gate blocked a
+		// fake-token prompt live (kimi 2.1.1, demo node 1, 2026-10-07).
+		PromptLane: PromptLaneHook,
 		Vocabulary: Vocabulary{InTaxonomy: true},
 		// Live wire traces show an openai-compat endpoint (provider:openai,
 		// gpt-4o) configured in ~/.kimi-code/config.toml — a NEVER-READ file
@@ -2461,8 +2697,15 @@ var registry = map[string]Capability{
 			Note:     "proxyroute.RegisterKimiCode adds base_url under [providers.openai] in ~/.kimi-code/config.toml (additive, never a key)",
 		},
 		Routability: RouteStatusRoutableNow,
-		// No hook surface observed on the live install — honest none.
-		Hook: HookSpec{Mechanism: HookNone},
+		// T-378 (D-270): the [[hooks]] tables of ~/.kimi-code/config.toml,
+		// written by the credential-file writer (internal/hook
+		// register_kimi.go). Both registered bindings went live on demo node
+		// 1 (2026-10-07), so `observer start` auto-registers it through the
+		// live gate (autoRegisterLiveGate) as well as `observer init`.
+		Hook: HookSpec{
+			Mechanism: HookKimiCodeTOML, AutoWired: true, Bindings: hookBindingsKimiCode,
+			HooksShareCredentialFile: true, CredentialFileReason: credFileKimiCode,
+		},
 		// MCP client exists (mcp__* names in tools.set_active_tools), but the
 		// only config surface is the never-read config.toml — no writer until
 		// a guarded additive path is grounded.
@@ -2480,7 +2723,7 @@ var registry = map[string]Capability{
 			Transcript: TranscriptFull,
 			Inject:     []InjectKind{InjectFile},
 			Launch:     &LaunchSpec{Subcommand: "kimi", Mode: LaunchDocAssisted},
-			Note:       "no seed lane (-p prints+exits; TUI seedless) — doc-assisted launch",
+			Note:       "no seed lane (-p prints+exits; TUI seedless) - doc-assisted launch",
 		},
 		// Attach grounded 2026-07-24 (attach-all-launchers); PTY handoff only
 		// — no prompt seeding, token capture path unchanged. DocAssisted only
@@ -2525,10 +2768,13 @@ var registry = map[string]Capability{
 				{OS: ProbeUnix, Rel: ".kimi-code/bin"},
 				{OS: ProbeWindows, Rel: ".kimi-code/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @moonshot-ai/kimi-code 2.1.1 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "22.19.0", Product: "Kimi Code", Source: "npm registry engines.node, @moonshot-ai/kimi-code 2.1.1, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@moonshot-ai/kimi-code"}, Display: "npm install -g @moonshot-ai/kimi-code"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"}, Display: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"}, Display: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"}, Display: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash", Requires: []string{"curl", "tar", "shasum|sha256sum"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"}, Display: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash", Requires: []string{"curl", "tar", "shasum|sha256sum"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://code.kimi.com/kimi-code/install.ps1 | iex"}, Display: "irm https://code.kimi.com/kimi-code/install.ps1 | iex"},
 			},
 		},
@@ -2588,7 +2834,7 @@ var registry = map[string]Capability{
 			Note: "proxyroute.RegisterCrush sets providers.openai.base_url in crush.json (additive, never a key)",
 		},
 		Routability: RouteStatusRoutableNow,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookCrushJSON, AutoWired: true, Bindings: hookBindingsCrush, HooksShareCredentialFile: true, CredentialFileReason: credFileCrush},
 		// MCP client exists, but its config also lives in crush.json — same
 		// guarded-write constraint as the proxy lane.
 		MCP:    nil,
@@ -2600,19 +2846,51 @@ var registry = map[string]Capability{
 		// (docs/crush-adapter.md, corrected 2026-09-27).
 		TokenTier: TokenTier{Best: "sqlite", Gap: "session-level only: the cost is cumulative, but token counts are reported only for one-step sessions; no cache/reasoning breakdown", SessionCumulative: true, ReportsCost: true},
 		// messages.parts carry full text/reasoning/tool bodies; NO seed lane
-		// (upstream charmbracelet/crush#1791) — file-lane carry only.
+		// (upstream charmbracelet/crush#1791, still OPEN 2026-10-03: the root
+		// command accepts positional args but ignores them, per
+		// internal/cmd/root.go). So the launch is DOC-ASSISTED (2026-10-03,
+		// terminal-picker coverage): `observer crush`, which already ensured
+		// the crush.json route before every launch, now also writes the
+		// handover doc for --continue-from and opens the TUI in the source
+		// project. Native resume (`crush -s/--session <id>`, root.go) is
+		// vendor-source grounded but NOT live-verified, so Resume stays zero.
 		Handoff: HandoffCapability{
 			Transcript: TranscriptFull,
 			Inject:     []InjectKind{InjectFile},
-			Note:       "no interactive-seed lane (upstream #1791)",
+			Launch:     &LaunchSpec{Subcommand: "crush", Mode: LaunchDocAssisted},
+			Note:       "no interactive-seed lane (upstream #1791): launch writes the handover doc and opens the crush TUI",
+		},
+		Attach: &AttachSpec{Subcommand: "crush"},
+		// Binary resolution + grounded installs (2026-10-03, from the
+		// github.com/charmbracelet/crush README "Installation" section):
+		// npm `@charmland/crush` (every OS), the vendor's own Homebrew tap
+		// formula `charmbracelet/tap/crush` (crush is NOT in homebrew-core:
+		// formulae.brew.sh/api/formula/crush.json 404s), and winget
+		// `charmbracelet.crush`. Scoop needs a `scoop bucket add charm ...`
+		// first (two commands, not one argv) and the apt/yay/nix/pkg
+		// channels are distro-specific, so none of those is offered. There
+		// is no curl|sh script. Windows: winget lays down crush.exe; a global
+		// npm install writes the crush.cmd shim. The tap formula is offered
+		// on macOS only: an OS-specific hint outranks the any-OS npm hint in
+		// the guided-install plan, and Homebrew is rarely present on Linux,
+		// so Linux falls through to npm.
+		Binary: &BinaryResolveSpec{
+			Names: BinaryNames{
+				Unix:    []string{"crush"},
+				Windows: []string{"crush.exe", "crush.cmd"},
+			},
+			Installs: []InstallHint{
+				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@charmland/crush"}, Display: "npm install -g @charmland/crush"},
+				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "charmbracelet/tap/crush"}, Display: "brew install charmbracelet/tap/crush"},
+				{OS: "windows", Channel: "winget", Argv: []string{"winget", "install", "--id", "charmbracelet.crush", "-e", "--source", "winget"}, Display: "winget install --id charmbracelet.crush -e --source winget"},
+			},
 		},
 		// Sandbox filesystem-isolation row (B9). GROUNDED against
 		// internal/adapter/crush/discover.go stateDirsForHome
 		// (<home>/.local/share/crush) plus the global config
 		// ($HOME/.config/crush/crush.json, plugins/crush/README.md). The
-		// project-local <repo>/.crush store needs no row — it lives inside the
-		// workspace, which the sandbox already binds rw. Declared even though
-		// crush has no launcher verb today (Handoff.Launch is nil).
+		// project-local <repo>/.crush store needs no row: it lives inside the
+		// workspace, which the sandbox already binds rw.
 		Sandbox: SandboxSpec{
 			StateRW: []string{".config/crush", ".local/share/crush"},
 		},
@@ -2654,7 +2932,16 @@ var registry = map[string]Capability{
 		// stays honest-none. The mechanism below targets a DIFFERENT,
 		// now-grounded surface instead: Devin Desktop (Cascade)'s own
 		// pre_user_prompt hooks.json, distinct from the CLI's unwired file.
-		Hook: HookSpec{Mechanism: HookCascadeJSON, AutoWired: true, PromptLaneOnly: true},
+		// The Cascade hook file is the Devin Desktop / Windsurf surface.
+		// The devin CLI reads its own Claude-shaped hooks from
+		// ~/.config/devin/config.json (vendor docs, 2026-10-02), which no
+		// writer registers yet: on demo node 1 a devin CLI prompt went
+		// through unseen (prompt-guard audit, node 1 findings).
+		Hook: HookSpec{
+			Mechanism: HookCascadeJSON, AutoWired: true,
+			PromptScope: "Devin Desktop / Windsurf only (Cascade pre_user_prompt). Devin CLI sessions have no registered prompt hook, so the rule flags them after send.",
+			Bindings:    hookBindingsDevin,
+		},
 		// MCP client only (reads .devin/ config). The registration format IS
 		// now grounded (`.devin-plugin/plugin.json` + root `mcp_config.json`,
 		// coverage wave A 2026-07-31 — see plugins/devin/); distribution is
@@ -2708,8 +2995,8 @@ var registry = map[string]Capability{
 				{OS: ProbeWindows, Rel: "AppData/Local/devin/cli/bin"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.devin.ai/install.sh | bash"}, Display: "curl -fsSL https://cli.devin.ai/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.devin.ai/install.sh | bash"}, Display: "curl -fsSL https://cli.devin.ai/install.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.devin.ai/install.sh | bash"}, Display: "curl -fsSL https://cli.devin.ai/install.sh | bash", Requires: []string{"curl", "tar", "sha256sum|shasum"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://cli.devin.ai/install.sh | bash"}, Display: "curl -fsSL https://cli.devin.ai/install.sh | bash", Requires: []string{"curl", "tar", "sha256sum|shasum"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://static.devin.ai/cli/setup.ps1 | iex"}, Display: "irm https://static.devin.ai/cli/setup.ps1 | iex"},
 				{OS: "windows", Channel: "winget", Argv: []string{"winget", "install", "--id", "CognitionAI.DevinCLI", "-e", "--source", "winget"}, Display: "winget install --id CognitionAI.DevinCLI -e --source winget"},
 			},
@@ -2725,7 +3012,7 @@ var registry = map[string]Capability{
 		// amendment A3) — only claude-code has a verified state-dir bind
 		// list; every other launchable tool carries the honest zero note
 		// until a per-tool probe grounds its StateRW/StateRO paths.
-		Sandbox: SandboxSpec{Note: "state dirs not yet grounded — not sandbox-launchable"},
+		Sandbox: SandboxSpec{Note: "state dirs not yet grounded - not sandbox-launchable"},
 		// GUI launch row (plan §2.2): Devin Desktop is the rebranded
 		// Windsurf IDE and shares ~/.devin with this row's CLI. See
 		// productLifecycles["windsurf"] for the deprecated alias.
@@ -2748,7 +3035,7 @@ var registry = map[string]Capability{
 				InstallNote: "no Windows or Linux channel offered on purpose. A winget package " +
 					"`Codeium.Windsurf` exists (grounded live 2026-09-03) but it carries the DEPRECATED " +
 					"Windsurf identity under the pre-rename vendor name, and whether it tracks post-rename " +
-					"Devin Desktop builds was not verified — advertising it could install the sunset product " +
+					"Devin Desktop builds was not verified - advertising it could install the sunset product " +
 					"(docs/harness-lifecycle-policy.md). Use the vendor download at devin.ai/desktop.",
 			},
 			DarwinApp:      "Devin",
@@ -2757,7 +3044,7 @@ var registry = map[string]Capability{
 				Kind: WrapNone,
 				Reason: "no DEVIN_BASE_URL or any documented base-URL knob for the desktop lane (this row's " +
 					"Routability is native_exempt; inventory §2.10 / §4.2). Launch yes, wrap no; the bundled " +
-					"devin.exe lane writes the CLI store this row's watcher already reads — CORRECTED " +
+					"devin.exe lane writes the CLI store this row's watcher already reads - CORRECTED " +
 					"and VERIFIED LIVE 2026-09-03: the store is %APPDATA%\\Devin\\cli\\sessions.db (the " +
 					"same NTFS directory as the CLI's %APPDATA%\\devin\\cli, schema-identical at " +
 					"refinery version 16), NOT ~/.devin, which holds only argv.json + extensions. No root " +
@@ -2770,7 +3057,7 @@ var registry = map[string]Capability{
 			Hosts:    []string{"devin"},
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: the install dir STILL carries the " +
-				"deprecated Windsurf name — %LOCALAPPDATA%\\Programs\\Windsurf\\Windsurf.exe (+ " +
+				"deprecated Windsurf name - %LOCALAPPDATA%\\Programs\\Windsurf\\Windsurf.exe (+ " +
 				"bin\\{windsurf,windsurf.cmd}), NOT the `Devin.exe` the inventory §4.1 sketch guessed. macOS " +
 				"is the opposite: the Homebrew cask `devin-desktop` (name \"Devin Desktop\", homepage " +
 				"devin.ai/desktop) installs \"Devin.app\", so DarwinApp is \"Devin\". Names.Unix carries both " +
@@ -2807,7 +3094,7 @@ var registry = map[string]Capability{
 		// CrossOSBridge: true — internal/hook's qoder-windows target
 		// (registerQoderWindows) wraps the command in the wsl.exe
 		// bridge, mirroring claude-code/cursor/codex's own bridges.
-		Hook: HookSpec{Mechanism: HookQoderJSON, CrossOSBridge: true, AutoWired: true, PromptLaneOnly: true},
+		Hook: HookSpec{Mechanism: HookQoderJSON, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsQoder},
 		// MCP client exists (`qodercli mcp`, --mcp-config). The bundling
 		// format IS now grounded (`.qoder-plugin/plugin.json` + dotted
 		// `.mcp.json`, validated by `qodercli plugins validate` — coverage
@@ -2820,7 +3107,7 @@ var registry = map[string]Capability{
 		// (structurally zero even with healthy auth — live-disproven
 		// auth-refresh hypothesis 2026-07-09); usage is server-side only.
 		// The segment parse is zero-guarded so future counts would flow.
-		TokenTier: TokenTier{Best: "none", Gap: "usage server-side only — local logs carry zero tokens and no model; no base-URL knob"},
+		TokenTier: TokenTier{Best: "none", Gap: "usage server-side only - local logs carry zero tokens and no model; no base-URL knob"},
 		// CC-shaped transcript folds prompts/text/tool bodies (ReadTranscript
 		// both lanes); `-i/--prompt-interactive <text>` seed verified live →
 		// `observer qoder --continue-from` (non-proxied).
@@ -2862,10 +3149,13 @@ var registry = map[string]Capability{
 				{OS: ProbeUnix, Rel: ".qoder/bin"},
 				{OS: ProbeWindows, Rel: ".qoder/bin"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @qoder-ai/qodercli 1.1.65 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "20.0.0", Product: "Qoder CLI", Source: "npm registry engines.node, @qoder-ai/qodercli 1.1.65, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@qoder-ai/qodercli"}, Display: "npm install -g @qoder-ai/qodercli"},
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qoder.com/install | bash"}, Display: "curl -fsSL https://qoder.com/install | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qoder.com/install | bash"}, Display: "curl -fsSL https://qoder.com/install | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qoder.com/install | bash"}, Display: "curl -fsSL https://qoder.com/install | bash", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://qoder.com/install | bash"}, Display: "curl -fsSL https://qoder.com/install | bash", Requires: []string{"curl", "tar"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://qoder.com/install.ps1 | iex"}, Display: "irm https://qoder.com/install.ps1 | iex"},
 			},
 		},
@@ -2918,9 +3208,9 @@ var registry = map[string]Capability{
 			Hosts:    []string{"qoder"},
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: %LOCALAPPDATA%\\Programs\\Qoder " +
-				"IDE\\Qoder IDE.exe (+ bin\\{qoder,qoder.cmd} — and, betraying the VS Code fork lineage, " +
+				"IDE\\Qoder IDE.exe (+ bin\\{qoder,qoder.cmd} - and, betraying the VS Code fork lineage, " +
 				"bin\\{code,code.cmd} too), which grounds both the unix shim stem and `qoder <dir>`. macOS " +
-				"bundle name NOT grounded (no cask) — DarwinApp left empty rather than guessed. The IDE's " +
+				"bundle name NOT grounded (no cask) - DarwinApp left empty rather than guessed. The IDE's " +
 				"sessions ARE captured (batch-3 T4, 2026-09-03): the IDE writes " +
 				"~/.qoder/projects/<slug>/transcript/<task>.session.execution.jsonl into the same tree the " +
 				"CLI uses, which the qoder adapter ingests and stamps ide/qoder; its " +
@@ -2966,7 +3256,7 @@ var registry = map[string]Capability{
 		},
 		Routability: RouteStatusRoutableNow,
 		// No pre/post-tool hook surface exists.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookNone, Note: hookNoteAider},
 		// Not an MCP client host observer writes into.
 		MCP:    nil,
 		Native: NativeRails{},
@@ -2977,15 +3267,23 @@ var registry = map[string]Capability{
 		TokenTier: TokenTier{Best: "transcript", Gap: "prose-only rounded counts (unreliable precision); no reasoning split; no per-turn timestamps", SynthesizedTimestamps: true, ReportsCost: true},
 		// The per-repo .aider.chat.history.md is fully re-readable, but
 		// there is NO seed lane: --message runs one turn and exits, the
-		// REPL takes no preload flag — file-lane carry only. `observer aider`
-		// (2026-08-21) is a minimal exec+env-inject launcher only — no
-		// --continue-from/--attach/--resume wiring, so no Launch/Attach/
-		// Resume block below.
+		// REPL takes no preload flag. `observer aider` (2026-08-21) started as
+		// a minimal exec+env-inject launcher; on 2026-10-03 (terminal-picker
+		// coverage) it gained the DOC-ASSISTED --continue-from lane (handover
+		// doc written, REPL opened in the source project) and the shared
+		// attach gate, so the New Terminal picker lists it. aider.chat's
+		// options page documents `--read FILE` and `--load FILE` as
+		// REPL-preserving preloads; neither is wired as a seed (not
+		// live-verified). No native resume (aider has no session-id surface;
+		// `--restore-chat-history` replays the per-repo history, not a
+		// chosen session).
 		Handoff: HandoffCapability{
 			Transcript: TranscriptFull,
 			Inject:     []InjectKind{InjectFile},
-			Note:       "no interactive-seed lane (--message exits after the turn)",
+			Launch:     &LaunchSpec{Subcommand: "aider", Mode: LaunchDocAssisted},
+			Note:       "no interactive-seed lane (--message exits after the turn): launch writes the handover doc and opens the aider REPL",
 		},
+		Attach: &AttachSpec{Subcommand: "aider"},
 		// Headless one-shot, LIVE-GROUNDED 2026-08-22 (arena headless-drive
 		// arc): `aider --yes --no-auto-commits --message <prompt>` runs the
 		// turn non-interactively and prints the reply + "Tokens: N sent, M
@@ -3000,6 +3298,18 @@ var registry = map[string]Capability{
 		// No session-id surface exists. A live Arena run must prove process
 		// attribution binds the routed api_turn to the candidate; if it does
 		// not, the candidate rollup stays honestly zero.
+		//
+		// Model: `--model <id>` is grounded by the 2026-07-09 live probe quoted
+		// on the Proxy row (`aider --message … --model gpt-4o-mini` landed an
+		// api_turns row as gpt-4o-mini-2024-07-18). Consumers: the Arena's
+		// headless drive and, since aider became launchable (2026-10-03), the
+		// New Terminal model picker (forwarded to `observer aider`). Catalog:
+		// open (LiteLLM ids for any provider) - and only the OpenAI-compatible
+		// lane is routed, which the Note says.
+		Model: ModelSpec{Kind: ModelArg, Flag: "--model", Catalog: ModelCatalog{
+			Kind: ModelCatalogOpen,
+			Note: "Arena routes only aider's OpenAI-compatible lane through Observer; a model on another provider runs direct and its tokens are not captured",
+		}},
 		Headless: &HeadlessSpec{
 			PromptFlag:  "--message",
 			OutputArgs:  []string{"--yes", "--no-auto-commits"},
@@ -3022,8 +3332,8 @@ var registry = map[string]Capability{
 				{OS: ProbeWindows, Rel: ".local/bin"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"sh", "-lc", "curl https://aider.chat/install.sh | sh"}, Display: "curl https://aider.chat/install.sh | sh"},
-				{OS: "darwin", Channel: "script", Argv: []string{"sh", "-lc", "curl https://aider.chat/install.sh | sh"}, Display: "curl https://aider.chat/install.sh | sh"},
+				{OS: "linux", Channel: "script", Argv: []string{"sh", "-lc", "curl https://aider.chat/install.sh | sh"}, Display: "curl https://aider.chat/install.sh | sh", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"sh", "-lc", "curl https://aider.chat/install.sh | sh"}, Display: "curl https://aider.chat/install.sh | sh", Requires: []string{"curl", "tar"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-ExecutionPolicy", "ByPass", "-c", "irm https://aider.chat/install.ps1 | iex"}, Display: "irm https://aider.chat/install.ps1 | iex"},
 			},
 		},
@@ -3031,10 +3341,7 @@ var registry = map[string]Capability{
 		// internal/adapter/aider/doc.go: the transcripts are PROJECT-local
 		// (<repo>/.aider.chat.history.md), which the sandbox already binds rw
 		// as the workspace, and the only home-relative state is ~/.aider
-		// (analytics.json / installs.json / the model-price cache). Rows are
-		// declared for every adapter, not only the launchable ones — aider has
-		// no launcher verb today (Handoff.Launch is nil), so this row is data
-		// waiting for one.
+		// (analytics.json / installs.json / the model-price cache).
 		Sandbox: SandboxSpec{StateRW: []string{".aider"}},
 	},
 	"deepseek": {
@@ -3055,7 +3362,7 @@ var registry = map[string]Capability{
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
 		// No pre/post-tool hook surface is documented; none registered.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookPluginShimTS, Bindings: hookBindingsDeepSeek}, // shim renders; no grounded install location (Lane D)
 		// Not an MCP client host observer writes into.
 		MCP:    nil,
 		Native: NativeRails{},
@@ -3118,7 +3425,7 @@ var registry = map[string]Capability{
 		Routability: RouteStatusRoutableNow,
 		// No pre/post-tool hook surface exists (extensions are MCP servers,
 		// not hooks).
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookGoosePlugin, AutoWired: true, Bindings: hookBindingsGoose},
 		// Goose IS an MCP client — extensions in config.yaml are MCP
 		// servers, a future additive-registration candidate — but no
 		// guarded write path into config.yaml is grounded; no writer.
@@ -3172,6 +3479,24 @@ var registry = map[string]Capability{
 		// 2026-09-02. CONFIGURE=false keeps the install non-interactive
 		// (skips `goose configure`) in the PTY. Windows ARM64 is
 		// refused by the vendor script (exit 1); no winget id exists.
+		//
+		// RE-GROUNDED 2026-10-02 (after a failed guided install on a Linux
+		// node): the curl|bash URL, the brew formula `block-goose-cli`
+		// (1.52.0) and the raw download_cli.ps1 URL are still exactly what
+		// https://goose-docs.ai/docs/getting-started/installation documents,
+		// and `stable` + v1.52.0 both carry goose-x86_64-unknown-linux-gnu
+		// .tar.bz2. The failure was NOT this hint: download_cli.sh downloads
+		// the archive into the CURRENT directory, and the setup PTY
+		// inherited the daemon's cwd "/" (curl exit 23, hidden by -s, then a
+		// misleading "Failed to download from fallback url"). Setup PTYs now
+		// start in the operator's home (cmd/observer setupWorkDir).
+		//
+		// FIXED 2026-10-03 (demo node 1): the unix curl|bash hint lacked the
+		// CONFIGURE=false the Windows hint already carries, so after a
+		// successful download download_cli.sh ran an interactive `goose
+		// configure` in the setup PTY. That PTY never exited, so the guided
+		// install record stayed "installing" (the ledger settles on PTY exit,
+		// correctly). `| CONFIGURE=false bash` sets it for the piped script.
 		Binary: &BinaryResolveSpec{
 			Names: BinaryNames{
 				Unix:    []string{"goose"},
@@ -3183,8 +3508,8 @@ var registry = map[string]Capability{
 				{OS: ProbeWindows, Rel: "goose"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"}, Display: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"}, Display: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash"}, Display: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash", Requires: []string{"curl", "tar", "bzip2"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash"}, Display: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash", Requires: []string{"curl", "tar"}},
 				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "block-goose-cli"}, Display: "brew install block-goose-cli"},
 				{OS: "linux", Channel: "brew", Argv: []string{"brew", "install", "block-goose-cli"}, Display: "brew install block-goose-cli"},
 				{
@@ -3253,7 +3578,7 @@ var registry = map[string]Capability{
 				ColdStartOnly: true,
 				Reason: "OPENAI_HOST at the proxy ROOT (goose appends /v1) is the SAME knob this row's " +
 					"opt-in `observer goose --proxy` launcher lane uses, and the vendor says Desktop shares " +
-					"the CLI's config surface (inventory §2.11) — but the env lane is verified for the CLI " +
+					"the CLI's config surface (inventory §2.11) - but the env lane is verified for the CLI " +
 					"only, NOT for the desktop app. Same caveats as the CLI: it needs GOOSE_PROVIDER=openai " +
 					"(or another OPENAI_HOST-honouring provider), and an ambient OPENAI_HOST in the operator's " +
 					"environment wins over the injection by design.",
@@ -3262,7 +3587,7 @@ var registry = map[string]Capability{
 			Grounded: true,
 			Note: "Grounded from the macOS side ONLY: bundle \"Goose.app\" and the cask token `block-goose` " +
 				"read from the Homebrew cask API on 2026-09-03. Goose Desktop is NOT installed on the " +
-				"Windows grounding box, so its Windows layout is unverified and Names.Windows is empty — " +
+				"Windows grounding box, so its Windows layout is unverified and Names.Windows is empty - " +
 				"the row is launchable on macOS and will preflight as unresolved on Windows until someone " +
 				"grounds the zip layout.",
 		},
@@ -3290,7 +3615,7 @@ var registry = map[string]Capability{
 		// consent step writes the per-browser native-messaging host manifest
 		// (extensionSupported → browserhost.Registrar), so the doctor
 		// honestly reports the rail as auto-wired.
-		Hook:   HookSpec{Mechanism: HookBrowserExtension, AutoWired: true},
+		Hook:   HookSpec{Mechanism: HookBrowserExtension, AutoWired: true, Bindings: browserBindings()},
 		MCP:    nil,
 		Native: NativeRails{}, // no vendor admin/usage API for the consumer web app.
 		// Tokens are ALWAYS estimated: no target UI returns authoritative
@@ -3316,7 +3641,7 @@ var registry = map[string]Capability{
 		Vocabulary:  Vocabulary{Note: "no native tool vocabulary: browser-captured Claude.ai chat turns only (no tool-call surface in the DOM/WS capture)"},
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true},
+		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true, Bindings: browserBindings()},
 		MCP:         nil,
 		Native:      NativeRails{},
 		TokenTier:   TokenTier{Best: "browser_extension", Gap: "no server-side usage field; estimated only (Anthropic tokenizer is documented-inaccurate for Claude 3+)"},
@@ -3333,10 +3658,10 @@ var registry = map[string]Capability{
 		Vocabulary:  Vocabulary{Note: "no native tool vocabulary: browser-captured Perplexity chat turns only"},
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true},
+		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true, Bindings: browserBindings()},
 		MCP:         nil,
 		Native:      NativeRails{},
-		TokenTier:   TokenTier{Best: "browser_extension", Gap: "no server-side usage field; estimated only (no light client tokenizer — chars/4 heuristic)"},
+		TokenTier:   TokenTier{Best: "browser_extension", Gap: "no server-side usage field; estimated only (no light client tokenizer - chars/4 heuristic)"},
 		Handoff:     HandoffCapability{},
 		// Sandbox filesystem-isolation row (B9). Honest zero: this row's data
 		// arrives from the browser-capture extension, not from a process observer
@@ -3351,7 +3676,7 @@ var registry = map[string]Capability{
 		Vocabulary:  Vocabulary{Note: "no native tool vocabulary: browser-captured Gemini chat turns only (BatchExecute best-effort)"},
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true},
+		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true, Bindings: browserBindings()},
 		MCP:         nil,
 		Native:      NativeRails{},
 		TokenTier:   TokenTier{Best: "browser_extension", Gap: "no server-side usage field; estimated only; BatchExecute RPC parser is best-effort/incomplete (highest-maintenance site)"},
@@ -3370,7 +3695,7 @@ var registry = map[string]Capability{
 		Vocabulary:  Vocabulary{Note: "no native tool vocabulary: browser-captured consumer-Copilot chat turns only (WebSocket capture, cf_clearance-gated)"},
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true},
+		Hook:        HookSpec{Mechanism: HookBrowserExtension, AutoWired: true, Bindings: browserBindings()},
 		MCP:         nil,
 		Native:      NativeRails{},
 		TokenTier:   TokenTier{Best: "browser_extension", Gap: "no server-side usage field; estimated only; WebSocket-frame parser (cf_clearance-gated)"},
@@ -3399,7 +3724,7 @@ var registry = map[string]Capability{
 		// (registerFactoryDroidWindows) wraps the command in the
 		// wsl.exe bridge, mirroring claude-code/cursor/codex's own
 		// bridges.
-		Hook: HookSpec{Mechanism: HookFactoryJSON, CrossOSBridge: true, AutoWired: true, PromptLaneOnly: true},
+		Hook: HookSpec{Mechanism: HookFactoryJSON, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsDroid},
 		// ~/.factory/mcp.json reuses claude-code/cursor's {"mcpServers":{}}
 		// shape (format confirmed live via a zero-cost `droid mcp add`/
 		// `remove` probe). A writer now exists (internal/mcp/register.go's
@@ -3409,7 +3734,7 @@ var registry = map[string]Capability{
 		// mcp + the 2026-07-29 live `droid mcp add … --type http` probe (which
 		// wrote `{"url":…,"disabled":false,"type":"http"}`): `type` http|sse
 		// + url + headers + disabled. Written by the shared JSON remote writer.
-		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".factory/mcp.json", Implemented: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".factory/mcp.json", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredDroid, Remote: &MCPRemoteTarget{
 			Transports:   []MCPRemoteTransport{MCPRemoteStreamableHTTP, MCPRemoteSSE},
 			Headers:      true,
 			TransportKey: "type",
@@ -3475,7 +3800,7 @@ var registry = map[string]Capability{
 			Wrap: WrapSpec{
 				Kind: WrapNone,
 				Reason: "probe_required and no writer: droid's BYOK route is the customModels array in " +
-					"~/.factory/settings.json (a file Observer never reads — plaintext keys) and this row " +
+					"~/.factory/settings.json (a file Observer never reads - plaintext keys) and this row " +
 					"carries neither a verified Proxy nor a ProxyProbe binding; the desktop reuses the " +
 					"bundled droid's provider config, so there is nothing to wrap. Launch yes, wrap no.",
 			},
@@ -3483,7 +3808,7 @@ var registry = map[string]Capability{
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: %LOCALAPPDATA%\\Factory\\factory-desktop.exe " +
 				"(Squirrel stub) → app-0.168.0\\factory-desktop.exe (Electron) bundling " +
-				"app-0.168.0\\resources\\bin\\droid.exe. macOS bundle NOT grounded — DarwinApp left empty. " +
+				"app-0.168.0\\resources\\bin\\droid.exe. macOS bundle NOT grounded - DarwinApp left empty. " +
 				"Sessions land in ~/.factory/sessions/<slug>/<uuid>.jsonl exactly like the CLI's; " +
 				"cloudSessionSync defaults TRUE on the vendor side (mirrors to Factory's backend).",
 		},
@@ -3523,9 +3848,12 @@ var registry = map[string]Capability{
 			// piped-execution convention (no session cookie) — it is
 			// observer's construction, not a literal vendor one-liner;
 			// noted honestly rather than mis-attributed.
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): droid 0.233.0 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "20.0.0", Product: "Droid", Source: "npm registry engines.node, droid 0.233.0, read 2026-10-04"},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.factory.ai/cli | sh"}, Display: "curl -fsSL https://app.factory.ai/cli | sh"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.factory.ai/cli | sh"}, Display: "curl -fsSL https://app.factory.ai/cli | sh"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.factory.ai/cli | sh"}, Display: "curl -fsSL https://app.factory.ai/cli | sh", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.factory.ai/cli | sh"}, Display: "curl -fsSL https://app.factory.ai/cli | sh", Requires: []string{"curl"}},
 				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://app.factory.ai/cli/windows | iex"}, Display: "irm https://app.factory.ai/cli/windows | iex"},
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "droid"}, Display: "npm install -g droid"},
 			},
@@ -3572,7 +3900,7 @@ var registry = map[string]Capability{
 		Routability: RouteStatusProbeRequired,
 		// Codex's hook mechanism (HookCodexConfig) may port, but this
 		// fork's config.toml has no [hooks] observed live — unverified.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookOpenInterpreterHooks, AutoWired: true, Bindings: hookBindingsOpenInterpreter},
 		// [mcp_servers] TOML table almost certainly matches codex's format,
 		// but MCP must be nil here: no writer exists yet (TestMCPTargets
 		// requires nil for every tool without a grounded implemented
@@ -3617,7 +3945,7 @@ var registry = map[string]Capability{
 			Wrap: WrapSpec{
 				Kind: WrapNone,
 				Reason: "the desktop's provider base URLs live per profile in its own codex-home/config.toml " +
-					"(alongside plaintext API keys — a file Observer never reads), and this row carries " +
+					"(alongside plaintext API keys - a file Observer never reads), and this row carries " +
 					"neither a verified Proxy nor a ProxyProbe writer binding, so config_write would name a " +
 					"writer that does not exist. Launch yes, wrap no.",
 			},
@@ -3625,7 +3953,7 @@ var registry = map[string]Capability{
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: %ProgramFiles%\\Interpreter\\Interpreter.exe " +
 				"(the updater payload sits at %LOCALAPPDATA%\\interpreter-updater\\installer.exe). macOS " +
-				"bundle NOT grounded — DarwinApp left empty. Sessions: %APPDATA%\\interpreter\\codex-home\\" +
+				"bundle NOT grounded - DarwinApp left empty. Sessions: %APPDATA%\\interpreter\\codex-home\\" +
 				"sessions\\YYYY\\MM\\DD\\rollout-*.jsonl, ingested by this row's adapter (tool id " +
 				"open-interpreter, surface desktop/open-interpreter).",
 		},
@@ -3673,9 +4001,13 @@ var registry = map[string]Capability{
 			// open-interpreter` is the UNRELATED Python project of the same
 			// name and must never be offered here.
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://www.openinterpreter.com/install | sh"}, Display: "curl -fsSL https://www.openinterpreter.com/install | sh"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://www.openinterpreter.com/install | sh"}, Display: "curl -fsSL https://www.openinterpreter.com/install | sh"},
-				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "irm https://www.openinterpreter.com/install.ps1 | iex"}, Display: "irm https://www.openinterpreter.com/install.ps1 | iex"},
+				// T-034j (2026-10-07, script re-read): both scripts end with
+				// "Start ... now?" (a y/N read through /dev/tty or Read-Host);
+				// OPEN_INTERPRETER_NONINTERACTIVE=1 answers it "no" without
+				// asking (their only prompt).
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://www.openinterpreter.com/install | OPEN_INTERPRETER_NONINTERACTIVE=1 sh"}, Display: "curl -fsSL https://www.openinterpreter.com/install | OPEN_INTERPRETER_NONINTERACTIVE=1 sh", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://www.openinterpreter.com/install | OPEN_INTERPRETER_NONINTERACTIVE=1 sh"}, Display: "curl -fsSL https://www.openinterpreter.com/install | OPEN_INTERPRETER_NONINTERACTIVE=1 sh", Requires: []string{"curl", "tar"}},
+				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-Command", "$env:OPEN_INTERPRETER_NONINTERACTIVE='1'; irm https://www.openinterpreter.com/install.ps1 | iex"}, Display: "$env:OPEN_INTERPRETER_NONINTERACTIVE='1'; irm https://www.openinterpreter.com/install.ps1 | iex"},
 			},
 		},
 		// Model picker (B5). This fork is a rebadged codex build
@@ -3731,7 +4063,7 @@ var registry = map[string]Capability{
 		// target (registerCommandCodeWindows) bakes the wsl.exe bridge
 		// into the go:embed'd TS mod's own runtime (resolveExec()),
 		// mirroring claude-code/cursor/codex's own bridges.
-		Hook: HookSpec{Mechanism: HookCommandCodeMod, CrossOSBridge: true, AutoWired: true, PromptLaneOnly: true},
+		Hook: HookSpec{Mechanism: HookCommandCodeMod, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsCommandCode},
 		// ~/.commandcode/mcp.json reuses claude-code/cursor/droid's
 		// {"mcpServers":{}} shape, grounded 2026-07-29 from the npm
 		// package's cli.mjs getUserMcpConfigPath + bundled reference/mcp.md.
@@ -3744,7 +4076,7 @@ var registry = map[string]Capability{
 		// HTTP) is documented for remote, no SSE spelling. `${VAR}` values
 		// resolve at runtime and OAuth tokens live in mcp-tokens.json, so the
 		// relay writer never needs (and never writes) a secret here.
-		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".commandcode/mcp.json", Implemented: true, Remote: &MCPRemoteTarget{
+		MCP: &MCPTarget{Format: MCPServersJSON, PathHint: ".commandcode/mcp.json", Implemented: true, SharesCredentialFile: true, CredentialFileReason: mcpCredCommandCode, Remote: &MCPRemoteTarget{
 			Transports:   []MCPRemoteTransport{MCPRemoteStreamableHTTP},
 			Headers:      true,
 			TransportKey: "transport",
@@ -3811,6 +4143,9 @@ var registry = map[string]Capability{
 			// Official channel: the npm package `command-code` (registry-
 			// confirmed name/description/bins). No script or brew channel
 			// is documented.
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): command-code 1.74.1 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "22", Product: "Command Code", Source: "npm registry engines.node, command-code 1.74.1, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "command-code"}, Display: "npm install -g command-code"},
 			},
@@ -3872,7 +4207,7 @@ var registry = map[string]Capability{
 		// the on-disk matcher schema is not grounded and observer ships no
 		// receiver, so the honest value is None: a mechanism named here would
 		// make init claim a registration it cannot write.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookMuseSettings, AutoWired: true, Bindings: hookBindingsMuse},
 		// Muse is an MCP client (settings.json carries a server block with
 		// transport/command/env/framing/url/headers + stdio |
 		// streamable_http, and the binary reports "MCP tool name collision
@@ -3943,8 +4278,8 @@ var registry = map[string]Capability{
 		Binary: &BinaryResolveSpec{
 			Names: BinaryNames{Unix: []string{"muse"}},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"}, Display: "curl -fsSL https://dev.meta.ai/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"}, Display: "curl -fsSL https://dev.meta.ai/install.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"}, Display: "curl -fsSL https://dev.meta.ai/install.sh | bash", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"}, Display: "curl -fsSL https://dev.meta.ai/install.sh | bash", Requires: []string{"curl"}},
 			},
 			// Honest-zero carriers (2026-09-02): Names.Windows stays nil
 			// AND no Windows InstallHint exists — GROUNDED against
@@ -3952,8 +4287,9 @@ var registry = map[string]Capability{
 			// uname -s other than Darwin/Linux) and Meta's developer blog
 			// ("Install Muse Code in macOS or Linux with a single
 			// command"). WSL2 works because uname -s reports Linux there.
-			WindowsNote: "macOS/Linux only per vendor (muse-launcher.sh detect_platform dies on any uname -s other than Darwin/Linux); runs under WSL2 because uname -s = Linux there",
-			InstallNote: "no Windows install channel — install inside WSL2 and run the observer daemon there",
+			WindowsNote:     "macOS/Linux only per vendor (muse-launcher.sh detect_platform dies on any uname -s other than Darwin/Linux); runs under WSL2 because uname -s = Linux there",
+			InstallNote:     "no Windows install channel - install inside WSL2 and run the observer daemon there",
+			UserInstallHint: "Muse runs on macOS and Linux only. On Windows, install it inside WSL and run SuperBased there.",
 		},
 		// Model picker (B5). Grounded live 2026-08-08: `muse --help` lists
 		// `--model <MODEL>` — "Model id for non-echo providers" — under
@@ -4010,14 +4346,21 @@ var registry = map[string]Capability{
 		// turn landed api_turns rows through the proxy with REAL usage
 		// captured (id 166806, provider openai, gpt-4o-mini, 4119/2 tokens,
 		// valid key) — checklist §10.1f fully met.
-		Proxy:       &ProxyRoute{Kind: RouteLauncher, EnvVar: "", Suffix: "/v1", Launcher: "observer prime-agent", Note: "Routes via the 'observer' provider entry the launcher writes into ~/.prime/agent/models.json (baseUrl = proxy /v1); exec with --provider observer."},
+		Proxy: &ProxyRoute{
+			Kind: RouteLauncher, EnvVar: "", Suffix: "/v1", Launcher: "observer prime-agent", Note: "Routes via the 'observer' provider entry the launcher writes into ~/.prime/agent/models.json (baseUrl = proxy /v1); exec with --provider observer.",
+			// Demo node 1, 2026-10-02: the session started on the observer
+			// provider (2 proxied turns), then switched to openrouter, and
+			// the secret-bearing prompt went there directly.
+			PromptScope:       "Only turns sent to the \"observer\" provider the launcher writes go through the proxy, plus, on a managed node, every built-in provider the launcher can point at a proxy lane for the session; a switch to a built-in provider with no proxy lane (Bedrock, Azure, Vertex, Cloudflare, Mistral, the ChatGPT sign-in, GitHub Copilot, OpenCode) or to your own custom provider bypasses it and is flagged after send.",
+			ProviderOverrides: joinProviderOverrides(piFamilyProviderOverrides, primeAgentOnlyProviderOverrides),
+		},
 		Routability: RouteStatusRoutableNow,
 		// Prime Agent's extension points are TypeScript EXTENSIONS
 		// (-e/--extension, pi.registerTool / lifecycle callbacks), not a
 		// settings.json hook-command vocabulary observer can register into.
 		// Observer ships no receiver → None rather than a mechanism init
 		// cannot write.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookNone, Bindings: hookBindingsPrimeAgent},
 		// Prime Agent IS an MCP client, but its servers are configured
 		// through the TUI's /login → "MCP Connections" flow with
 		// credentials in auth.json, and are called from inside the Python
@@ -4086,22 +4429,37 @@ var registry = map[string]Capability{
 		// `os` restriction (tarball v0.9.1 package.json bin
 		// {prime-agent: dist/bundle/cli.js}), but the package is NOT
 		// published to the public npm registry (see the CORRECTED
-		// 2026-08-07 comment above) — so a Windows spelling is grounded
-		// through the SAME vendor install script the Unix rows use,
-		// runnable only under a bash shell (Git for Windows is
-		// sufficient per vendor docs/windows.md). No npm channel is
-		// declared here (TestGuidedInstallGapClosed pins that).
+		// 2026-08-07 comment above). No npm channel is declared here
+		// (TestGuidedInstallGapClosed pins that).
+		// T-037 (2026-10-07, script re-read): the Windows GUIDED install is
+		// withdrawn. The vendor install.sh has no Windows branch (every
+		// `uname -s` case knows only Darwin and Linux; no MINGW / MSYS /
+		// CYGWIN), so on Windows it falls back to an existing Node.js + npm,
+		// and its Node-path confirmation always prompts. Spawned by the
+		// dashboard as `bash -lc` it would also pick whichever bash.exe is
+		// first on PATH, often the WSL launcher in System32, installing into
+		// WSL instead of Windows. The Windows spelling stays in Names so a
+		// manual install from Git Bash still resolves; the dashboard shows
+		// InstallNote / UserInstallHint instead of a guided command.
+		// T-034j (same re-read): the unix script asks "Install Prime Agent
+		// v...?" and whether to set up the Python kernel runtime through
+		// /dev/tty, which a PTY provides, so the guided install sat at the
+		// prompt. PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 skips the first and
+		// PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 answers the second
+		// (yes: ipython is Prime Agent's only tool). The env sits on the
+		// interpreter side of the pipe so the piped script sees it.
 		Binary: &BinaryResolveSpec{
 			Names: BinaryNames{
 				Unix:    []string{"prime-agent"},
 				Windows: []string{"prime-agent.cmd", "prime-agent"},
 			},
 			Installs: []InstallHint{
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh"}, Display: "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh"}, Display: "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh"},
-				{OS: "windows", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh"}, Display: "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 sh"}, Display: "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 sh", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 sh"}, Display: "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 sh", Requires: []string{"curl"}},
 			},
-			WindowsNote: "vendor: requires a bash shell on Windows (Git for Windows is sufficient); the install and the runtime both need bash — never PowerShell/CMD",
+			WindowsNote:     "vendor: requires a bash shell on Windows (Git for Windows is sufficient); the install and the runtime both need bash - never PowerShell/CMD",
+			InstallNote:     "no guided Windows install (T-037, 2026-10-07): the vendor install.sh has no Windows branch (uname cases are Darwin and Linux only), falls back to a pre-installed Node.js + npm and always prompts on that path, and a dashboard-spawned bash may be the WSL launcher; install by hand from Git Bash",
+			UserInstallHint: "Prime Agent's installer supports Linux and macOS; on Windows, install it yourself from Git Bash with Node.js and npm already installed.",
 		},
 		// Model picker (B5). Grounded live 2026-08-08: `prime-agent --help`
 		// lists a "Model options:" block with `--model <id>` — "Select a
@@ -4119,8 +4477,11 @@ var registry = map[string]Capability{
 	},
 	// JetBrains Junie (docs/junie-adapter.md). Phase-0 grounded 2026-08-17
 	// against two real hello-world-scale sessions captured on the
-	// operator's own WSL2 Ubuntu install (Junie runs as a TUI embedded in
-	// a JetBrains IDE, not a standalone CLI observer can launch/attach).
+	// operator's own WSL2 Ubuntu install. Three surfaces share one
+	// ${JUNIE_HOME:-~/.junie}/sessions store: the IDE plugin (now inside
+	// JetBrains AI Assistant), the standalone `junie` CLI (a terminal TUI,
+	// live-captured 2026-09-07) and its `/local` mode. The CLI is what
+	// `observer junie` launches (2026-10-03, terminal-picker coverage).
 	"junie": {
 		Tool: "junie",
 		// Junie's events.jsonl is event-sourced: every record is a fixed
@@ -4138,13 +4499,17 @@ var registry = map[string]Capability{
 		// (grounded live 2026-09-03, batch-3 T6): internal/tooltax carries
 		// the four exercised rows, the rest fall through to mcp_call.
 		Vocabulary: Vocabulary{InTaxonomy: true, Note: "typed block kinds are structural; the tool names in the taxonomy are the JetBrains `idea/*` MCP server tools an IDE-hosted run calls"},
-		// No base-URL knob has been grounded (only ~/.junie/settings.json's
-		// non-credential model/provider fields were read, per the task's
-		// off-limits list) — honest "not yet investigated", not a proven
-		// negative.
+		// No observer route is driven. The CLI does document endpoint knobs
+		// (2026-10-03): JUNIE_LITELLM_URL ("Base URL of your LiteLLM proxy",
+		// junie.jetbrains.com/docs/environment-variables.html), custom model
+		// profiles in $JUNIE_HOME/models/*.json carrying `baseUrl` + `apiType`
+		// (docs/custom-llm-models.html) and config.json `proxies` entries
+		// selected with --provider (docs/custom-proxies.html). None is the
+		// default JetBrains-account lane and none has a live api_turns proof,
+		// so this stays probe_required rather than a fabricated route.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookJunieConfig, AutoWired: true, Bindings: hookBindingsJunie, HooksShareCredentialFile: true, CredentialFileReason: credFileJunie},
 		MCP:         nil,
 		Native:      NativeRails{},
 		// Per-call model + cost + token counts come straight off
@@ -4155,21 +4520,83 @@ var registry = map[string]Capability{
 		// events.jsonl reconstructs the full turn (verbatim prompt, agent
 		// narration, terminal/file/result blocks) — a genuinely re-readable
 		// transcript, same tier as cline's api_conversation_history.json.
-		// No InjectPrompt: Junie is IDE-embedded with no verified
-		// interactive-seed/launch contract, so Handoff.Launch stays nil
-		// (not launchable in-terminal) and cmd/observer/continuefrom.go has
-		// no "junie" case.
-		Handoff: HandoffCapability{Transcript: TranscriptFull, Inject: []InjectKind{InjectFile}},
-		// Sandbox filesystem-isolation row (B9). Honest zero: the agent runs
-		// inside its host IDE's process tree, which observer never spawns, so
-		// there is no launch to wrap in a filesystem boundary.
-		Sandbox: SandboxSpec{Note: "not sandbox-launchable: the agent runs inside its host IDE, which observer does not spawn"},
+		//
+		// Launch (2026-10-03, terminal-picker coverage): the standalone CLI
+		// runs as an interactive TUI by default and `observer junie` starts it
+		// in a PTY. DOC-ASSISTED, not Seeded: junie.jetbrains.com/docs/
+		// parameters.html documents `--prompt` ("Start interactive mode with
+		// an initial prompt already submitted"), but that seed lane has no
+		// live verification yet, and a positional argument or `--task` runs
+		// HEADLESS and exits, so the launcher writes the handover doc and
+		// opens the TUI. Native resume (`--resume --session-id <id>`, same
+		// page) is documented but not live-verified either: Resume stays
+		// zero and the dashboard offers the handoff-fork resume instead.
+		Handoff: HandoffCapability{
+			Transcript: TranscriptFull,
+			Inject:     []InjectKind{InjectFile},
+			Launch:     &LaunchSpec{Subcommand: "junie", Mode: LaunchDocAssisted},
+			Note:       "documented --prompt seed not live-verified: launch writes the handover doc and opens the junie TUI",
+		},
+		Attach: &AttachSpec{Subcommand: "junie"},
+		// Credential env NAMES (never values), grounded 2026-10-03 against
+		// junie.jetbrains.com/docs/environment-variables.html: the
+		// usage-billed JUNIE_API_KEY plus the Junie-prefixed BYOK keys. The
+		// plain ANTHROPIC_API_KEY / OPENAI_API_KEY spellings are not
+		// documented for Junie, so they are not listed.
+		AuthEnv: []string{
+			"JUNIE_API_KEY", "JUNIE_ANTHROPIC_API_KEY", "JUNIE_OPENAI_API_KEY",
+			"JUNIE_GOOGLE_API_KEY", "JUNIE_GROK_API_KEY", "JUNIE_OPENROUTER_API_KEY",
+			"JUNIE_META_API_KEY",
+		},
+		// Binary resolution + grounded installs (2026-10-03,
+		// junie.jetbrains.com/docs/junie-cli.html + github.com/JetBrains/junie
+		// README + the install scripts themselves). install.sh needs curl
+		// plus unzip on Linux / ditto on macOS (it exits naming each when
+		// missing) and writes a bash SHIM at ~/.local/bin/junie that execs the
+		// versioned native binary under ~/.local/share/junie/versions/<v>/.
+		// install.ps1 uses PowerShell built-ins only and puts a junie.bat shim
+		// in %USERPROFILE%\.local\bin (added to the user PATH). npm
+		// `@jetbrains/junie` (registry.npmjs.org, Node >= 20) writes the usual
+		// junie.cmd shim on Windows. The README's Homebrew route is a
+		// third-party-tap two-step (`brew tap jetbrains-junie/junie` then
+		// `brew install junie`), so it is not offered as one argv.
+		Binary: &BinaryResolveSpec{
+			Names: BinaryNames{
+				Unix:    []string{"junie"},
+				Windows: []string{"junie.bat", "junie.cmd"},
+			},
+			ProbeDirs: []ProbeDir{
+				{OS: ProbeWindows, Rel: ".local/bin"},
+			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): @jetbrains/junie 3110.7.0 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "20", Product: "Junie CLI", Source: "npm registry engines.node, @jetbrains/junie 3110.7.0, read 2026-10-04"},
+			Installs: []InstallHint{
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://junie.jetbrains.com/install.sh | bash"}, Display: "curl -fsSL https://junie.jetbrains.com/install.sh | bash", Requires: []string{"curl", "unzip"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -fsSL https://junie.jetbrains.com/install.sh | bash"}, Display: "curl -fsSL https://junie.jetbrains.com/install.sh | bash", Requires: []string{"curl", "ditto"}},
+				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "iex (irm 'https://junie.jetbrains.com/install.ps1')"}, Display: "iex (irm 'https://junie.jetbrains.com/install.ps1')"},
+				{OS: "", Channel: "npm", Argv: []string{"npm", "install", "-g", "@jetbrains/junie"}, Display: "npm install -g @jetbrains/junie"},
+			},
+		},
+		// Sandbox filesystem-isolation row (B9) for the CLI surface. GROUNDED
+		// against internal/adapter/junie/adapter.go defaultRoots (the
+		// ~/.junie/sessions store; ~/.junie also holds allowlist.json and the
+		// custom models/ dir the CLI reads) plus the versioned native install
+		// the ~/.local/bin/junie shim execs, which the CLI only reads. The
+		// IDE-plugin surface is still never spawned by observer.
+		Sandbox: SandboxSpec{
+			StateRW: []string{".junie"},
+			StateRO: []string{".local/share/junie"},
+		},
 	},
 	// Poolside (docs/poolside-adapter.md). Phase-0 grounded 2026-09-05
-	// against a live JetBrains IDEA 2026.2.2 run on Windows — Poolside
-	// ships today ONLY as a JetBrains AI Assistant ACP agent
-	// (`acp.registry.poolside`), the same IDE-embedded shape as Junie: no
-	// standalone CLI/TUI process for `observer poolside` to launch.
+	// against a live JetBrains IDEA 2026.2.2 run on Windows, where Poolside
+	// ran as a JetBrains AI Assistant ACP agent (`acp.registry.poolside`).
+	// Poolside ALSO ships a standalone terminal CLI, `pool`
+	// (docs.poolside.ai/cli/install.md + cli/cli-reference.md, read
+	// 2026-10-03: "pool starts an interactive session by default"; the ACP
+	// agent is `pool acp`), which `observer pool` launches (2026-10-03,
+	// terminal-picker coverage).
 	"poolside": {
 		Tool: "poolside",
 		// FIX-7 (phase-2 review) promoted this from
@@ -4194,10 +4621,12 @@ var registry = map[string]Capability{
 		// actually called.
 		Vocabulary: Vocabulary{InTaxonomy: true},
 		// Model traffic goes to https://inference.poolside.ai per
-		// ~/.config/poolside/settings.yaml's pool.api_url. The agent is
-		// IDE-driven (no independent launch), so no base-URL override
-		// flag or env var could be grounded — probe_required, not a
-		// fabricated route.
+		// ~/.config/poolside/settings.yaml's pool.api_url. The standalone CLI
+		// documents POOLSIDE_STANDALONE_BASE_URL (a custom OpenAI-compatible
+		// endpoint, docs.poolside.ai/cli/install.md, 2026-10-03), but that is
+		// an alternative-provider mode, not a pass-through of the Poolside
+		// platform lane, and no routed turn has been observed, so this stays
+		// probe_required rather than a fabricated route.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
 		// No hook mechanism is documented or grounded for the JetBrains
@@ -4210,7 +4639,7 @@ var registry = map[string]Capability{
 		// CrossOSBridge: true — internal/hook's poolside-windows target
 		// (registerPoolsideWindows) wraps the command in the wsl.exe
 		// bridge, mirroring claude-code/cursor/codex's own bridges.
-		Hook: HookSpec{Mechanism: HookPoolsideYAML, CrossOSBridge: true, AutoWired: true, PromptLaneOnly: true},
+		Hook: HookSpec{Mechanism: HookPoolsideYAML, CrossOSBridge: true, AutoWired: true, Bindings: hookBindingsPoolside, HooksShareCredentialFile: true, CredentialFileReason: credFilePoolside},
 		// Poolside is itself an MCP CLIENT inside the ACP session (the
 		// JetBrains host hands it the IDE's own `idea` MCP server), not a
 		// target any existing {"mcpServers":{…}}-shaped writer could
@@ -4230,13 +4659,57 @@ var registry = map[string]Capability{
 		},
 		// The trajectory re-reads in full (prompts, reasoning, assistant
 		// text, every tool call + outcome) — a genuinely re-readable
-		// transcript. No Launch/Attach/Resume: there is no standalone
-		// process — matches Junie's JetBrains-embedded precedent exactly.
-		Handoff: HandoffCapability{Transcript: TranscriptFull, Inject: []InjectKind{InjectFile}},
-		// Sandbox filesystem-isolation row (B9). Honest zero: the agent runs
-		// inside its host IDE's process tree, which observer never spawns, so
-		// there is no launch to wrap in a filesystem boundary.
-		Sandbox: SandboxSpec{Note: "not sandbox-launchable: the agent runs inside its host IDE, which observer does not spawn"},
+		// transcript.
+		//
+		// Launch (2026-10-03): `observer pool` starts the standalone `pool`
+		// TUI in a PTY. DOC-ASSISTED: cli-reference.md documents
+		// `-q/--prompt-queue` ("Queue a prompt to send after the interactive
+		// session... finish initializing") as the interactive seed, but it is
+		// not live-verified, so the launcher writes the handover doc and opens
+		// the TUI. Native resume (`-r/--resume [id]`) is documented but not
+		// live-verified, so Resume stays zero. Capture (T-706, demo node 1,
+		// 2026-10-08): a standalone Linux `pool` run writes the same
+		// trajectory format under ~/.local/state/poolside/trajectories, which
+		// the adapter watches next to the Windows ACP store
+		// (%LOCALAPPDATA%\poolside); macOS stays an unverified expectation.
+		Handoff: HandoffCapability{
+			Transcript: TranscriptFull,
+			Inject:     []InjectKind{InjectFile},
+			Launch:     &LaunchSpec{Subcommand: "pool", Mode: LaunchDocAssisted},
+			Note:       "documented -q seed not live-verified: launch writes the handover doc and opens the pool TUI; standalone-CLI capture is grounded on Linux (~/.local/state/poolside) and the Windows ACP store, not yet on macOS",
+		},
+		Attach: &AttachSpec{Subcommand: "pool"},
+		// Credential env NAME (never a value): POOLSIDE_API_KEY, the
+		// documented non-interactive alternative to `pool login`
+		// (docs.poolside.ai/cli/install.md, 2026-10-03).
+		AuthEnv: []string{"POOLSIDE_API_KEY"},
+		// Binary resolution + grounded installs (2026-10-03,
+		// docs.poolside.ai/cli/install.md and the install.sh it serves):
+		// install.sh needs curl (or wget) to download and tar to extract, and
+		// MOVES the native `pool` binary to ${XDG_BIN_HOME:-~/.local/bin}
+		// (the checksum tools are optional); the Windows installer (marked
+		// beta by the vendor) puts pool.exe in
+		// %LOCALAPPDATA%\Programs\pool\bin. No npm, brew or winget channel is
+		// documented.
+		Binary: &BinaryResolveSpec{
+			Names: BinaryNames{
+				Unix:    []string{"pool"},
+				Windows: []string{"pool.exe"},
+			},
+			ProbeDirs: []ProbeDir{
+				{OS: ProbeWindows, Rel: "AppData/Local/Programs/pool/bin"},
+			},
+			Installs: []InstallHint{
+				{OS: "linux", Channel: "script", Argv: []string{"sh", "-lc", "curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh"}, Display: "curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh", Requires: []string{"curl", "tar"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"sh", "-lc", "curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh"}, Display: "curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh", Requires: []string{"curl", "tar"}},
+				{OS: "windows", Channel: "script", Argv: []string{"powershell", "-ExecutionPolicy", "ByPass", "-c", "irm https://downloads.poolside.ai/pool/install.ps1 | iex"}, Display: "irm https://downloads.poolside.ai/pool/install.ps1 | iex"},
+			},
+		},
+		// Sandbox filesystem-isolation row (B9). Honest zero: the Linux state
+		// dirs are now known (T-706, node 1, 2026-10-08: ~/.config/poolside,
+		// ~/.local/state/poolside, ~/.local/share/poolside), but no sandboxed
+		// pool launch has been built or run, so a profile would be untested.
+		Sandbox: SandboxSpec{Note: "Linux state dirs known (~/.config/poolside, ~/.local/state/poolside, ~/.local/share/poolside) but no sandboxed pool launch has been tested - not sandbox-launchable"},
 	},
 	// zcode (Z.AI's OpenCode fork, docs/zcode-adapter.md). Phase-0 grounded
 	// 2026-08-18: a structural transposition of the opencode adapter with
@@ -4272,10 +4745,14 @@ var registry = map[string]Capability{
 		// zcode 0.16.3) — routing it through the proxy would be a guess.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		// AutoWired:false — see the PromptLane comment above: the
-		// receiver/dialect exist and are tested, but registration is
-		// gated on the zai-org/feedback#32 liveness question.
-		Hook: HookSpec{Mechanism: HookZcodeJSON, AutoWired: false, PromptLaneOnly: true},
+		// AutoWired since hook-parity Lane A4 (2026-10-03): the writer
+		// registers the PreToolUse tool gate and the UserPromptSubmit prompt
+		// gate (and sets hooks.enabled). zai-org/feedback#841 (open,
+		// v3.14.3) reports PreToolUse firing for main-session tool calls
+		// while UserPromptSubmit never fired, so prompt coverage stays
+		// unproven (see the PromptLane comment above). Doc-grounded: `observer init` writes it,
+		// `observer start` does not (not live).
+		Hook: HookSpec{Mechanism: HookZcodeJSON, AutoWired: true, Bindings: hookBindingsZcode, HooksShareCredentialFile: true, CredentialFileReason: credFileZcode},
 		// config.json carries an `mcp` object, but its shape is zcode's own
 		// and no writer emits it.
 		MCP:    nil,
@@ -4312,9 +4789,10 @@ var registry = map[string]Capability{
 		// Installs is deliberately empty with an honest InstallNote
 		// rather than a fabricated command.
 		Binary: &BinaryResolveSpec{
-			Names:       BinaryNames{Unix: []string{"zcode"}, Windows: []string{"zcode.exe"}},
-			WindowsNote: "zcode.exe is bundled by the Z.ai desktop app; there is no CLI install channel",
-			InstallNote: "Z.ai ships a desktop installer only (zcode.z.ai/en/docs/install); the npm package zcode-app-cli is unaffiliated — no grounded CLI channel",
+			Names:           BinaryNames{Unix: []string{"zcode"}, Windows: []string{"zcode.exe"}},
+			WindowsNote:     "zcode.exe is bundled by the Z.ai desktop app; there is no CLI install channel",
+			InstallNote:     "Z.ai ships a desktop installer only (zcode.z.ai/en/docs/install); the npm package zcode-app-cli is unaffiliated - no grounded CLI channel",
+			UserInstallHint: "ZCode comes with the Z.ai desktop app. Install that app to get it.",
 		},
 		// `zcode --help` (0.16.3) exposes no top-level --model flag, so no
 		// ModelArg is claimed.
@@ -4358,14 +4836,14 @@ var registry = map[string]Capability{
 				Reason: "probe_required, and no writer exists to make it config_write: the base URL lives in " +
 					"~/.zcode/cli/config.json (plus a separate app-level HTTP proxy under Settings → General → " +
 					"Network that needs a restart), and this registry row carries NEITHER a verified Proxy nor " +
-					"a ProxyProbe writer binding — internal/proxyroute has registrars for claude/codex/crush/" +
+					"a ProxyProbe writer binding - internal/proxyroute has registrars for claude/codex/crush/" +
 					"kimi/qwen only. Naming a config_write ConfigTool here would point the operator at a " +
 					"writer that does not exist (inventory §4.1). Revisit when a zcode registrar lands.",
 			},
 			Hosts:    []string{"zcode"},
 			Grounded: true,
 			Note: "Windows layout grounded on this box 2026-09-03: " +
-				"%LOCALAPPDATA%\\Programs\\ZCode\\ZCode.exe, with NO bin\\ dir — hence ProjectDirArgv=false " +
+				"%LOCALAPPDATA%\\Programs\\ZCode\\ZCode.exe, with NO bin\\ dir - hence ProjectDirArgv=false " +
 				"(the inventory left the argv form \"to ground\"). macOS bundle \"ZCode.app\" grounded from the " +
 				"Homebrew cask `zcode` (homepage zcode.z.ai); winget id `ZhipuAI.ZCode` grounded from a live " +
 				"`winget search --exact` the same day, which also confirms the inventory §4.1 citation.",
@@ -4385,7 +4863,7 @@ var registry = map[string]Capability{
 		// live through the proxy, so routing it there would be a guess.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookVibeHooksTOML, AutoWired: true, Bindings: hookBindingsMistralCode},
 		// config.mcp_servers exists but no writer emits vibe's shape.
 		MCP:    nil,
 		Native: NativeRails{},
@@ -4394,7 +4872,10 @@ var registry = map[string]Capability{
 		// session_cached_tokens, session_cost) — no per-message usage
 		// field. The adapter emits one session-level token event per
 		// session (netInput = session_prompt_tokens - session_cached_
-		// tokens), MAX-upgraded as the session grows.
+		// tokens), MAX-upgraded as the session grows. vibe 2.25+'s unified
+		// store carries the same SESSION-cumulative shape in the projection
+		// envelope's tokenUsage (GROSS inputTokens netted vs
+		// cachedInputTokens) but no cost field (unified.go).
 		TokenTier: TokenTier{Best: "session_meta", Gap: "no per-message usage field; one session-level token row, MAX-upgraded as the session grows", SessionCumulative: true, SynthesizedTimestamps: true, ReportsCost: true},
 		// messages.jsonl reconstructs the full turn (prompt, tool calls +
 		// results). Launcher `observer vibe`: --continue-from seeds a
@@ -4433,8 +4914,8 @@ var registry = map[string]Capability{
 				// grounded 2026-09-02: docs.mistral.ai's vibe install page
 				// documents this curl|bash form as the pip-alternative-free
 				// recommendation alongside uv on Linux/macOS.
-				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -LsSf https://mistral.ai/vibe/install.sh | bash"}, Display: "curl -LsSf https://mistral.ai/vibe/install.sh | bash"},
-				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -LsSf https://mistral.ai/vibe/install.sh | bash"}, Display: "curl -LsSf https://mistral.ai/vibe/install.sh | bash"},
+				{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -LsSf https://mistral.ai/vibe/install.sh | bash"}, Display: "curl -LsSf https://mistral.ai/vibe/install.sh | bash", Requires: []string{"curl"}},
+				{OS: "darwin", Channel: "script", Argv: []string{"bash", "-lc", "curl -LsSf https://mistral.ai/vibe/install.sh | bash"}, Display: "curl -LsSf https://mistral.ai/vibe/install.sh | bash", Requires: []string{"curl"}},
 			},
 		},
 		// `vibe --help` exposes no --model flag (model comes from
@@ -4468,7 +4949,7 @@ var registry = map[string]Capability{
 		// the proxy would be a guess.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookNone, Note: hookNoteFreebuf},
 		MCP:         nil,
 		Native:      NativeRails{},
 		// Freebuff records NO billable token accounting at all.
@@ -4482,7 +4963,7 @@ var registry = map[string]Capability{
 		// (~/.config/freebuff-desktop/projects/*/desktop-v2.db,
 		// messages.metrics_json.usage) carries real per-turn input /
 		// cached-input / output. Best names the better of the two.
-		TokenTier: TokenTier{Best: "sqlite", Gap: "desktop layout only — the CLI chats store has no billable usage field; the launchable CLI surface still records sessions + actions without tokens", SynthesizedTimestamps: true, ReportsCost: true},
+		TokenTier: TokenTier{Best: "sqlite", Gap: "desktop layout only - the CLI chats store has no billable usage field; the launchable CLI surface still records sessions + actions without tokens", SynthesizedTimestamps: true, ReportsCost: true},
 		// chat-messages.json reconstructs the full turn (prompt, reasoning,
 		// tool calls + results). NO --continue-from seed lane: freebuff
 		// exposes no positional prompt or one-shot flag to seed
@@ -4518,6 +4999,9 @@ var registry = map[string]Capability{
 				{OS: ProbeUnix, Rel: ".config/manicode"},
 				{OS: ProbeWindows, Rel: ".config/manicode"},
 			},
+			// Minimum host runtime, grounded 2026-10-04 from the npm registry
+			// (`npm view <pkg> engines`): freebuff 0.2.13 declares engines.node.
+			Runtime: &RuntimeRequirement{Runtime: RuntimeNode, MinVersion: "16", Product: "Freebuff", Source: "npm registry engines.node, freebuff 0.2.13, read 2026-10-04"},
 			Installs: []InstallHint{
 				{OS: "linux", Channel: "npm", Argv: []string{"npm", "install", "-g", "freebuff"}, Display: "npm install -g freebuff"},
 				{OS: "darwin", Channel: "npm", Argv: []string{"npm", "install", "-g", "freebuff"}, Display: "npm install -g freebuff"},
@@ -4529,7 +5013,7 @@ var registry = map[string]Capability{
 		Model: ModelSpec{Kind: ModelNone},
 		// Sandbox filesystem-isolation row (B9). Not grounded — only
 		// claude-code has a verified state-dir bind list.
-		Sandbox: SandboxSpec{Note: "state dirs not yet grounded — not sandbox-launchable"},
+		Sandbox: SandboxSpec{Note: "state dirs not yet grounded - not sandbox-launchable"},
 		// GUI launch row (plan §2.2): Freebuff Desktop. Grounded on the
 		// operator's live Windows install 2026-09-03 (batch-3 T2); the
 		// desktop keeps its OWN store (~/.config/freebuff-desktop/projects/
@@ -4570,7 +5054,7 @@ var registry = map[string]Capability{
 			Note: "Windows layout grounded on this box 2026-09-03: " +
 				"%LOCALAPPDATA%\\Programs\\@codebufffreebuff-desktop\\Freebuff.exe (Electron; uninstaller " +
 				"`Uninstall Freebuff.exe` beside it; no bin\\ shim, hence ProjectDirArgv=false). macOS bundle " +
-				"NOT grounded (no cask, no install to read) — DarwinApp left empty rather than guessed. The " +
+				"NOT grounded (no cask, no install to read) - DarwinApp left empty rather than guessed. The " +
 				"inventory's open question is SETTLED: the desktop does NOT share ~/.config/manicode with the " +
 				"CLI (that dir never appeared); it writes its own desktop-v2.db per project, which the " +
 				"freebuff adapter now ingests (sessions, actions, real usage), stamped desktop/freebuff-desktop.",
@@ -4598,7 +5082,7 @@ var registry = map[string]Capability{
 		// this is exempt, not merely un-probed.
 		Proxy:       nil,
 		Routability: RouteStatusNativeExempt,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookNone, Note: hookNoteGrokbot},
 		// settings.json has an `mcpBoxServers` array, but that is OUTBOUND
 		// — MCP servers the REMOTE BOX connects out to. It is not a client
 		// config we can register an observer stdio server into, so this is
@@ -4675,7 +5159,7 @@ var registry = map[string]Capability{
 			Grounded: true,
 			Note: "Grounded from the macOS side ONLY: the Homebrew cask `grok-bot` (name \"Grok Bot\", " +
 				"homepage x.ai/bot) installs \"Grok Bot.app\", read from the cask API 2026-09-03. Windows " +
-				"layout unverified (not installed here, no winget package) — Names.Windows empty. This also " +
+				"layout unverified (not installed here, no winget package) - Names.Windows empty. This also " +
 				"partially settles the OS-matrix DISCREPANCY the inventory §2.13 carries (CLAUDE.md says " +
 				"Windows+macOS; docs.x.ai also lists Linux): macOS is now confirmed, Windows and Linux are " +
 				"still second-hand.",
@@ -4695,7 +5179,7 @@ var registry = map[string]Capability{
 		Routability: RouteStatusNativeExempt,
 		// `~/.kiro/crew/hooks.json` exists but is `{"hooks": []}` with no
 		// documented command contract — nothing to register into.
-		Hook: HookSpec{Mechanism: HookNone},
+		Hook: HookSpec{Mechanism: HookNone, Bindings: hookBindingsKiroCrew},
 		// Crew DOES have an MCP surface: `~/.kiro/crew/mcp.json`, standard
 		// `mcpServers` shape (the grounding box's copy even carries three
 		// disabled observer entries a human added by hand). It is nil here
@@ -4792,7 +5276,7 @@ var registry = map[string]Capability{
 		// a fabricated route.
 		Proxy:       nil,
 		Routability: RouteStatusProbeRequired,
-		Hook:        HookSpec{Mechanism: HookNone},
+		Hook:        HookSpec{Mechanism: HookNone, Note: hookNoteZed},
 		// No {"mcpServers":{…}}-shaped (or any other known-format) MCP
 		// config surface has been grounded for Zed's own settings.json.
 		MCP:    nil,
@@ -4805,16 +5289,99 @@ var registry = map[string]Capability{
 		// resolve as unknown rather than a fabricated price.
 		TokenTier: TokenTier{Best: "sqlite", Gap: "no pricing entry for zed.dev/gpt-5.6-luna", SynthesizedTimestamps: true},
 		// The thread re-reads in full (every user/agent message, tool
-		// call + outcome) — a genuinely re-readable transcript. No
+		// call + outcome) — a genuinely re-readable transcript. No PTY
 		// Launch/Attach/Resume/Binary: Zed IS the editor, and its
 		// built-in agent has no separate `observer zed` CLI/TUI process
-		// to start — this is capture-only, the same shape as junie and
-		// poolside.
+		// to start. The editor itself is a detached GUI launch row (GUI
+		// below, D-177), the same shape as cursor-ide / kiro-ide.
 		Handoff: HandoffCapability{Transcript: TranscriptFull, Inject: []InjectKind{InjectFile}},
 		// Sandbox filesystem-isolation row (B9). Honest zero: the agent is built
-		// into the Zed editor, which observer never spawns, so there is no launch
-		// to wrap in a filesystem boundary.
-		Sandbox: SandboxSpec{Note: "not sandbox-launchable: the agent is built into the Zed editor itself, which observer does not spawn"},
+		// into the Zed editor, which is only ever launched DETACHED (the GUI row
+		// below, no PTY), so there is no terminal launch to wrap in a filesystem
+		// boundary.
+		Sandbox: SandboxSpec{Note: "not sandbox-launchable: the agent is built into the Zed editor itself, which observer only launches as a detached GUI app"},
+		// GUI launch row (D-177, operator-approved 2026-10-03; T-037c).
+		// Grounded 2026-10-04 from the vendor's own install sources, NOT a
+		// live install (Zed is not installed on the grounding box):
+		//   - zed.dev/docs/installation: `brew install --cask zed`,
+		//     `curl -f https://zed.dev/install.sh | sh`,
+		//     `winget install -e --id ZedIndustries.Zed`.
+		//   - formulae.brew.sh/api/cask/zed.json (1.22.0): app "Zed.app",
+		//     binary Zed.app/Contents/MacOS/cli linked as `zed`.
+		//   - zed.dev/install.sh linux(): unpacks to ~/.local/zed.app, links
+		//     ~/.local/zed.app/bin/zed to ~/.local/bin/zed, and the .desktop
+		//     entry's Exec= is that same bin/zed (the vendor's own GUI launch
+		//     command). Script needs curl (the pipe) and tar.
+		//   - crates/zed/resources/windows/zed.iss: DefaultDirName =
+		//     {autopf}\{#AppName} with PrivilegesRequired=lowest, so a
+		//     per-user install lands in %LOCALAPPDATA%\Programs\Zed and an
+		//     elevated one in %ProgramFiles%\Zed; Zed.exe at the root, the
+		//     CLI as bin\zed.exe (script/bundle-windows.ps1 moves cli.exe to
+		//     bin\zed.exe; AppName "Zed" for the stable channel), and the
+		//     default-on addtopath task puts {app}\bin on the user PATH.
+		//   - winget-pkgs ZedIndustries.Zed 1.22.0 installer manifest: inno,
+		//     Scope machine, DefaultInstallLocation %ProgramFiles%\Zed.
+		//   - crates/zed/src/main.rs Args.paths_or_urls: the app takes
+		//     paths positionally, so a project dir is an argv.
+		GUI: &GUILaunchSpec{
+			ID:      "zed-ide",
+			Label:   "Zed",
+			Surface: "ide",
+			Binary: BinaryResolveSpec{
+				// Windows: the REAL app Zed.exe, never the bin\zed.exe CLI.
+				// Unix: bin/zed under the install.sh layout, which is the
+				// command the vendor's .desktop entry runs.
+				Names: BinaryNames{
+					Unix:    []string{"zed"},
+					Windows: []string{"Zed.exe"},
+				},
+				ProbeDirs: []ProbeDir{
+					// install.sh layout (Linux). Harmless on macOS, where
+					// install.sh puts the app in /Applications instead and the
+					// DarwinApp bundle probe resolves it.
+					{OS: ProbeUnix, Rel: ".local/zed.app/bin"},
+					// Per-user (non-elevated) install from the download page.
+					{OS: ProbeWindows, Rel: "AppData/Local/Programs/Zed"},
+					// Elevated install, which is what winget's machine scope
+					// does (manifest DefaultInstallLocation).
+					{OS: ProbeWindows, Rel: "Zed", EnvRoot: "ProgramFiles"},
+				},
+				Installs: []InstallHint{
+					{OS: "windows", Channel: "winget", Argv: []string{"winget", "install", "--id", "ZedIndustries.Zed", "-e", "--source", "winget"}, Display: "winget install --id ZedIndustries.Zed -e --source winget"},
+					{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "--cask", "zed"}, Display: "brew install --cask zed"},
+					{OS: "linux", Channel: "script", Argv: []string{"bash", "-lc", "curl -f https://zed.dev/install.sh | sh"}, Display: "curl -f https://zed.dev/install.sh | sh", Requires: []string{"curl", "tar"}},
+				},
+			},
+			// PATH walk disabled: the installer's default-on addtopath task
+			// puts {app}\bin on PATH, and its zed.exe (the CLI) matches the
+			// Zed.exe spelling case-insensitively, so a PATH hit would launch
+			// the CLI instead of the app (the qoder-work precedent). Every
+			// grounded vendor layout is a probe dir above, and macOS resolves
+			// through the DarwinApp bundle.
+			ProbeOnly:      true,
+			DarwinApp:      "Zed",
+			ProjectDirArgv: true,
+			Wrap: WrapSpec{
+				Kind: WrapNone,
+				Reason: "no environment knob: Zed reads provider API KEYS from the environment " +
+					"(ANTHROPIC_API_KEY, OPENAI_API_KEY) but a provider base URL only from " +
+					"language_models.<provider>.api_url in its own settings.json " +
+					"(zed.dev/docs/ai/use-api-access), which Observer never writes, and the captured " +
+					"native agent runs on zed.dev's hosted provider (registry row: probe_required). " +
+					"Launch yes, wrap no.",
+			},
+			// Only the native agent: the Claude-ACP-in-Zed path did not persist
+			// a usable local store on the grounding host (docs/zed-adapter.md),
+			// so no ACP agent is claimed as hosted here.
+			Hosts:    []string{"zed"},
+			Grounded: true,
+			Note: "Grounded 2026-10-04 from vendor install sources, not a live install: Windows " +
+				"%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe (per-user) or %ProgramFiles%\\Zed\\Zed.exe (elevated, " +
+				"winget machine scope) from zed.iss + the winget manifest; macOS bundle \"Zed.app\" from the " +
+				"Homebrew cask `zed`; Linux ~/.local/zed.app/bin/zed from zed.dev/install.sh. Third-party " +
+				"Linux packages (Flathub, distro repos) are not probed: Zed's own docs say they often rename " +
+				"the binary to zedit or zeditor, so no single spelling is grounded.",
+		},
 	},
 }
 
@@ -4848,6 +5415,39 @@ func Tools() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// DefaultLaneUpstreams is the lane id -> grounded host root table of every
+// registry row's built-in proxy lane (ProxyRoute.Lane.DefaultUpstream, and
+// the lanes its covered ProviderOverrides address). The daemon layers it
+// UNDER [proxy.agent_upstreams] (and the proxy prefers a same-id
+// [proxy.upstreams] lane over both), so configuration always wins.
+func DefaultLaneUpstreams() map[string]string {
+	out := map[string]string{}
+	for _, c := range registry {
+		if c.Proxy == nil {
+			continue
+		}
+		if c.Proxy.Lane != nil && c.Proxy.Lane.DefaultUpstream != "" {
+			out[c.Proxy.Lane.ID] = c.Proxy.Lane.DefaultUpstream
+		}
+		for _, o := range c.Proxy.ProviderOverrides {
+			if o.Covered() && o.Lane != nil && o.Lane.DefaultUpstream != "" {
+				out[o.Lane.ID] = o.Lane.DefaultUpstream
+			}
+		}
+	}
+	return out
+}
+
+// ProviderOverridesFor returns the built-in provider table of tool's proxy
+// route (nil when the tool has none). The slice is a copy.
+func ProviderOverridesFor(tool string) []ProviderOverride {
+	c, ok := registry[tool]
+	if !ok || c.Proxy == nil || len(c.Proxy.ProviderOverrides) == 0 {
+		return nil
+	}
+	return append([]ProviderOverride(nil), c.Proxy.ProviderOverrides...)
 }
 
 // For returns the registered Capability for a tool. ok is false when the

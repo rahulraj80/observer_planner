@@ -66,7 +66,7 @@ func makeFeaturesSidecarWriter(cfg config.Config, version string, logger *slog.L
 			return
 		}
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
-			logger.Warn("node.features: could not write the tools.disallow sidecar — bare launchers may not see the live disallow list", "path", path, "err", err)
+			logger.Warn("node.features: could not write the tools.disallow sidecar - bare launchers may not see the live disallow list", "path", path, "err", err)
 			return
 		}
 	}
@@ -89,7 +89,24 @@ func featuresSidecarPathForDB(dbPath string) string {
 // when tool is on the org disallow list. Fail-open on every other outcome
 // (absent/malformed/expired sidecar, empty tool, empty path). tool is an
 // integration-registry Capability.Tool name (e.g. "codex", "claude-code").
-func refuseIfToolDisallowed(sidecarPath, tool string, stderr io.Writer) error {
+//
+// A disallowed tool still launches under a verified org tool access grant for
+// exactly that tool (request-grants G8): the grant is read from the node's
+// own re-verified grant cache in dbPath, one use is counted per launch, and
+// the launch says so on stderr. Without one, the refusal names the request
+// path. The grant is consulted only for a disallowed tool.
+func refuseIfToolDisallowed(sidecarPath, dbPath, tool string, stderr io.Writer) error {
+	return refuseIfToolDisallowedMode(sidecarPath, dbPath, tool, stderr, true)
+}
+
+// refuseIfToolDisallowedMode is the gate with the use-counting choice made
+// explicit (review M3-10): claim=true counts one use and is called ONLY by the
+// process that starts the tool binary itself (the bare path of `observer
+// <tool>`, or the inner launcher a dashboard / attach PTY runs), so a launch
+// counts exactly once; claim=false is the same verified answer without a
+// count, for a gate in front of a process that will claim (the pre-attach
+// check, the dashboard's CreateFresh).
+func refuseIfToolDisallowedMode(sidecarPath, dbPath, tool string, stderr io.Writer, claim bool) error {
 	if sidecarPath == "" || tool == "" {
 		return nil
 	}
@@ -97,10 +114,24 @@ func refuseIfToolDisallowed(sidecarPath, tool string, stderr io.Writer) error {
 	if !f.Disallowed(tool) {
 		return nil
 	}
+	if dbPath != "" {
+		read := peekToolGrant
+		if claim {
+			read = claimToolGrant
+		}
+		if c := read(hookOrgGrantOpener(dbPath), 3*time.Second, tool); c.OK {
+			if stderr != nil && claim {
+				fmt.Fprintf(stderr, "observer: your organization disallows %q; launching it under org grant #%d%s.\n",
+					tool, c.Hit.GrantID, grantWindowWords(c.Hit.ExpiresAtNs, c.Hit.UsesLeft))
+			}
+			return nil
+		}
+	}
 	if stderr != nil {
 		fmt.Fprintf(stderr,
-			"observer: refusing to launch %q — your organization has disallowed this tool fleet-wide (node.features tools.disallow). Contact your administrator to lift the restriction.\n",
-			tool)
+			"observer: refusing to launch %q: your organization has disallowed this tool (node.features tools.disallow). "+
+				"Request access: `observer request tool %s \"<reason>\"`, or the Requests page on the Observer dashboard.\n",
+			tool, tool)
 	}
 	return fmt.Errorf("observer: %q is disallowed by org policy (node.features tools.disallow)", tool)
 }
@@ -108,13 +139,22 @@ func refuseIfToolDisallowed(sidecarPath, tool string, stderr io.Writer) error {
 // refuseIfToolDisallowedCfg is refuseIfToolDisallowed for a caller that already
 // has a resolved config.Config (the claude/codex launchers).
 func refuseIfToolDisallowedCfg(cfg config.Config, tool string, stderr io.Writer) error {
-	return refuseIfToolDisallowed(config.ResolveFeaturesSidecarPath(cfg, ""), tool, stderr)
+	return refuseIfToolDisallowed(config.ResolveFeaturesSidecarPath(cfg, ""), cfg.Observer.DBPath, tool, stderr)
+}
+
+// refuseIfToolDisallowedPeekCfg is the no-count gate for a launcher that may
+// hand the launch to the daemon (attach): it refuses a disallowed tool with no
+// covering grant, and otherwise counts nothing, because the process that
+// finally starts the tool claims the use (refuseIfToolDisallowedCfg on the
+// bare path, or the daemon-spawned inner launcher).
+func refuseIfToolDisallowedPeekCfg(cfg config.Config, tool string, stderr io.Writer) error {
+	return refuseIfToolDisallowedMode(config.ResolveFeaturesSidecarPath(cfg, ""), cfg.Observer.DBPath, tool, stderr, false)
 }
 
 // refuseIfToolDisallowedDB is refuseIfToolDisallowed for a caller that only has
 // a DB path (the shared env launcher).
 func refuseIfToolDisallowedDB(dbPath, tool string, stderr io.Writer) error {
-	return refuseIfToolDisallowed(featuresSidecarPathForDB(dbPath), tool, stderr)
+	return refuseIfToolDisallowed(featuresSidecarPathForDB(dbPath), dbPath, tool, stderr)
 }
 
 // featuresDisallowSet loads the current disallow set from the sidecar resolved

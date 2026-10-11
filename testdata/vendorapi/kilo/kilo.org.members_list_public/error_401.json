@@ -1,0 +1,12 @@
+{
+  "error": {
+    "message": "UNAUTHORIZED",
+    "code": -32001,
+    "data": {
+      "code": "UNAUTHORIZED",
+      "httpStatus": 401,
+      "path": "organizations.members.listPublic",
+      "zodError": null
+    }
+  }
+}

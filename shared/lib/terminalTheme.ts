@@ -10,6 +10,12 @@
 
 export type TerminalThemeName = "dark" | "light";
 /** "app" follows the app theme; "dark" / "light" pin one. */
+// Both themes keep the program's own colors: ANSI 0-15 map through a
+// hue-preserving palette per theme, 256-color and truecolor pass through as
+// emitted, and only the light theme adds a lightness-only contrast floor
+// (TERMINAL_MIN_CONTRAST). The child's env must ALSO advertise color, or
+// auto-detecting programs print monochrome before any of this applies; the
+// daemon owns that (cmd/observer/terminal_color_env.go).
 export type TerminalThemePref = "app" | TerminalThemeName;
 
 export type TerminalColors = {
@@ -94,6 +100,29 @@ const LIGHT: TerminalColors = {
 export const TERMINAL_THEMES: Record<TerminalThemeName, TerminalColors> = {
   dark: DARK,
   light: LIGHT,
+};
+
+// The 16-color palettes above only govern ANSI 0-15. Programs that know their
+// own colors (Claude Code, delta, bat, every 256-color or truecolor TUI) emit
+// SGR 38;5 / 38;2 escapes, which xterm.js renders verbatim, and those apps
+// almost always assume a DARK terminal: white or pale text, and default-fg text
+// on dark-tinted diff rows. On the light canvas that output vanishes (measured:
+// rgb(255,255,255) on #fbfbfd is about 1:1, and a dark diff row painted with the
+// light theme's dark default fg is also about 1:1).
+//
+// xterm.js's minimumContrastRatio is the safeguard: per cell, it nudges the
+// FOREGROUND's lightness against that cell's actual background until the ratio
+// is met. Darkening scales r/g/b by the same factor, so the hue is kept (pale
+// purple becomes a readable purple, never grey); an already-legible color is
+// left exactly as emitted. Box-drawing / powerline glyphs are exempt inside
+// xterm.
+//
+// Dark is 1 (off): the #0b0b0f canvas is the background every CLI already
+// assumes, so its output needs no correction and is passed through untouched.
+// Light is 4.5 (WCAG AA, also VS Code's terminal default).
+export const TERMINAL_MIN_CONTRAST: Record<TerminalThemeName, number> = {
+  dark: 1,
+  light: 4.5,
 };
 
 /** resolveTerminalTheme picks the concrete theme for a preference. */

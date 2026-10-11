@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -23,6 +25,19 @@ import (
 // no DB, just the managed tree + meta.json. Removal is guarded through
 // workspace.ValidateManagedWorkspace so it can only ever delete strictly under
 // the daemon's own managed root.
+
+// defaultWorkspacesDir resolves the managed-workspaces root: the explicit
+// [terminal.sandbox].workspaces_dir when set, else <observerDir>/workspaces.
+// The one owner of that default, shared by the sandbox runtime and the
+// `observer workspaces` CLI (no symlink resolution here; callers canonicalize
+// when they need to). It lives here, not in terminal_sandbox.go, so a build
+// without terminals.sandbox keeps the same default.
+func defaultWorkspacesDir(cfg config.TerminalSandboxConfig, observerDir string) string {
+	if d := strings.TrimSpace(cfg.WorkspacesDir); d != "" {
+		return d
+	}
+	return filepath.Join(observerDir, "workspaces")
+}
 
 // newWorkspacesCmd builds the `observer workspaces` command group.
 func newWorkspacesCmd() *cobra.Command {

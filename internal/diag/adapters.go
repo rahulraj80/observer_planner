@@ -7,11 +7,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/marmutapp/superbased-observer/internal/termcore"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	adapterdefaults "github.com/marmutapp/superbased-observer/internal/adapter/defaults"
+	"github.com/marmutapp/superbased-observer/internal/components"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/termsvc"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve/host"
 )
@@ -89,16 +92,19 @@ func checkAdapters(cfg config.Config) Check {
 		status = StatusWarn
 		details = append(details, "launchable but NOT watched (in [terminal.launch].allowed_tools, "+
 			"missing from an explicit [observer.watch].enabled_adapters): "+strings.Join(unwatched, ", ")+
-			" — add them to enabled_adapters or delete the key to watch the default set")
+			" - add them to enabled_adapters or delete the key to watch the default set")
 	}
 
-	details = append(details, "run `observer doctor <tool>` for a per-adapter capture check")
+	details = append(details, "run "+remedy.Quote(remedy.Of(remedy.DoctorTool, ""))+" for a per-adapter capture check")
 
 	msg := strconv.Itoa(len(detected)) + " adapter(s) with local data, " + strconv.Itoa(len(idle)) + " idle"
 	if len(detected) == 0 {
 		msg = "no adapter data directories detected yet"
 	}
-	return Check{Name: "adapters", Status: status, Message: msg, Details: details}
+	return Check{
+		Name: "adapters", Status: status, Message: msg, Details: details,
+		Remediations: []remedy.Remediation{remedy.Of(remedy.DoctorTool, "")},
+	}
 }
 
 // CheckAdapter runs a focused, per-adapter capture-health check (the
@@ -117,6 +123,14 @@ func CheckAdapter(tool string, cfg config.Config) (Check, bool) {
 		}
 	}
 	if found == nil {
+		// A registry row whose adapter this binary was built without (an
+		// edition or custom build that compiled it out, T-726): say so,
+		// instead of the lifecycle fallback reporting "active - no adapter"
+		// for a tool a full build captures. Dispatch is on the binary's own
+		// omission record, never a tool name.
+		if c, ok := compiledOutAdapterCheck(tool); ok {
+			return c, true
+		}
 		// Not an adapter — but it may still be a PRODUCT Observer
 		// categorises under the harness lifecycle policy with no registry
 		// row of its own (a retag identity like roo-code, a renamed alias,
@@ -140,7 +154,7 @@ func CheckAdapter(tool string, cfg config.Config) (Check, bool) {
 	}
 
 	if enabled := enabledSet(cfg); enabled != nil && !enabled[tool] {
-		note(StatusWarn, "disabled in [observer.watch] enabled_adapters — the watcher will skip it (add \""+tool+"\" to re-enable)")
+		note(StatusWarn, "disabled in [observer.watch] enabled_adapters - the watcher will skip it (add \""+tool+"\" to re-enable)")
 	}
 
 	ic, _ := integration.For(tool)
@@ -169,7 +183,7 @@ func CheckAdapter(tool string, cfg config.Config) (Check, bool) {
 			if hint == "" {
 				hint = "(no canonical path on this OS)"
 			}
-			note(StatusWarn, "no watch path found ("+hint+") — is "+tool+" installed, and has it created a session yet?")
+			note(StatusWarn, "no watch path found ("+hint+") - is "+tool+" installed, and has it created a session yet?")
 		}
 	}
 
@@ -184,28 +198,28 @@ func CheckAdapter(tool string, cfg config.Config) (Check, bool) {
 		if dialable(addr) {
 			note(StatusOK, "observer proxy reachable at "+addr)
 		} else {
-			note(StatusWarn, "observer proxy NOT reachable at "+addr+" — start `observer start` for proxy-level api_turn capture")
+			note(StatusWarn, "observer proxy NOT reachable at "+addr+" - start `observer start` for proxy-level api_turn capture")
 		}
 
 		switch {
 		case ri.Note != "":
-			note(StatusOK, ri.Note+" — launch with `"+ri.Launcher+"`")
+			note(StatusOK, ri.Note+" - launch with `"+ri.Launcher+"`")
 		case ri.EnvVar != "":
 			v := strings.TrimSpace(os.Getenv(ri.EnvVar))
 			switch {
 			case v == "":
-				note(StatusWarn, ri.EnvVar+" not set — launch via `"+ri.Launcher+"` (or export "+ri.EnvVar+"=http://127.0.0.1:"+portStr+ri.Suffix+") for proxy capture")
+				note(StatusWarn, ri.EnvVar+" not set - launch via `"+ri.Launcher+"` (or export "+ri.EnvVar+"=http://127.0.0.1:"+portStr+ri.Suffix+") for proxy capture")
 			case strings.Contains(v, "127.0.0.1:"+portStr) || strings.Contains(v, "localhost:"+portStr):
 				note(StatusOK, ri.EnvVar+" points at the observer proxy ("+v+")")
 			default:
-				note(StatusWarn, ri.EnvVar+"="+v+" is NOT the observer proxy — proxy-level api_turns won't be captured for "+tool)
+				note(StatusWarn, ri.EnvVar+"="+v+" is NOT the observer proxy - proxy-level api_turns won't be captured for "+tool)
 			}
 		}
 
 		// OpenAI-compatible routable tools can be diverted by an
 		// Azure-direct provider that ignores the base-URL env var.
 		if ri.Suffix == "/v1" && azureProviderConfigured() {
-			note(StatusWarn, "Azure provider detected (AZURE_* env) — Azure-direct calls may bypass "+ri.EnvVar+"; route the provider base URL through the observer proxy for api_turn capture")
+			note(StatusWarn, "Azure provider detected (AZURE_* env) - Azure-direct calls may bypass "+ri.EnvVar+"; route the provider base URL through the observer proxy for api_turn capture")
 		}
 	} else {
 		note(StatusOK, "captured via the watcher/hooks (no proxy launcher needed for this adapter)")
@@ -261,7 +275,7 @@ func CheckAdapter(tool string, cfg config.Config) (Check, bool) {
 
 	msg := tool + " capture path looks good"
 	if worst != StatusOK {
-		msg = tool + " — see notes below"
+		msg = tool + " - see notes below"
 	}
 	return Check{Name: tool, Status: worst, Message: msg, Details: details}, true
 }
@@ -280,12 +294,37 @@ func lifecycleNote(l integration.Lifecycle, note string) (Status, string) {
 		line = "lifecycle: " + strings.ToUpper(l.String())
 	}
 	if note = strings.TrimSpace(note); note != "" {
-		line += " — " + note
+		line += " - " + note
 	}
 	if l.Advertised() {
 		return StatusOK, line
 	}
 	return StatusWarn, line
+}
+
+// omittedComponents is the seam over components.Omitted (the running
+// binary's own record of what it was built without); tests swap it.
+var omittedComponents = components.Omitted
+
+// compiledOutAdapterCheck answers `observer doctor <tool>` for an adapter
+// this binary was built without: an OK check that says "not in this build"
+// and names the builds that include it, the same vocabulary every other
+// compiled-out surface uses. ok is false when the adapter is not recorded
+// as omitted, leaving the caller's other fallbacks untouched.
+func compiledOutAdapterCheck(tool string) (Check, bool) {
+	id := "adapter." + tool
+	for _, o := range omittedComponents() {
+		if o != id {
+			continue
+		}
+		return Check{
+			Name:    tool,
+			Status:  StatusOK,
+			Message: tool + " is not in this build (adapter compiled out)",
+			Details: []string{"this binary was built without " + id + ", so it does not capture " + tool + "; " + components.BuildsHaving(id)},
+		}, true
+	}
+	return Check{}, false
 }
 
 // productLifecycleCheck answers `observer doctor <id>` for a PRODUCT that has
@@ -311,7 +350,7 @@ func productLifecycleCheck(id string) (Check, bool) {
 	return Check{
 		Name:    id,
 		Status:  status,
-		Message: id + " is " + lifecycle.String() + " — " + serviced,
+		Message: id + " is " + lifecycle.String() + " - " + serviced,
 		Details: []string{line},
 	}, true
 }
@@ -333,7 +372,7 @@ func launchResolutionNote(tool string, r toolresolve.Resolution) (Status, string
 		}
 		msg := "launcher binary found off PATH: " + r.Bin
 		if hygiene != "" {
-			msg += " — " + hygiene
+			msg += " - " + hygiene
 		}
 		return StatusWarn, msg
 
@@ -343,10 +382,10 @@ func launchResolutionNote(tool string, r toolresolve.Resolution) (Status, string
 			shims = append(shims, s.Path)
 		}
 		return StatusWarn, "launcher binary shadowed by a Windows interop shim on PATH (" + strings.Join(shims, ", ") +
-			") — using the native binary at " + r.Bin + " instead"
+			") - using the native binary at " + r.Bin + " instead"
 
 	case toolresolve.VerdictForeignOnly:
-		msg := "installed on Windows, not in WSL — only a Windows interop install was found"
+		msg := "installed on Windows, not in WSL - only a Windows interop install was found"
 		if fc := firstForeignCandidatePath(r.Considered); fc != "" {
 			msg += " (" + fc + ")"
 		}
@@ -355,7 +394,7 @@ func launchResolutionNote(tool string, r toolresolve.Resolution) (Status, string
 		return StatusWarn, msg
 
 	case toolresolve.VerdictNotFound:
-		return StatusWarn, "launcher binary not found — install: " + firstInstallDisplay(r.Installs)
+		return StatusWarn, "launcher binary not found - install: " + firstInstallDisplay(r.Installs)
 
 	default:
 		return StatusWarn, tool + " launcher resolution: " + string(r.Verdict)
@@ -397,7 +436,7 @@ func tokenTierSummary(t integration.TokenTier) string {
 	if t.Gap == "" {
 		return "best tier=" + best + " (no known gap)"
 	}
-	return "best tier=" + best + " — known gap: " + t.Gap
+	return "best tier=" + best + " - known gap: " + t.Gap
 }
 
 // vocabularySummary renders an adapter's native tool VOCABULARY coverage
@@ -418,7 +457,7 @@ func vocabularySummary(v integration.Vocabulary) string {
 	if v.InTaxonomy {
 		s := "in taxonomy (native tool names classified via internal/tooltax)"
 		if v.Note != "" {
-			s += " — " + v.Note
+			s += " - " + v.Note
 		}
 		return s
 	}
@@ -598,7 +637,7 @@ func AllowedToolsNotWatched(cfg config.Config) []string {
 			continue
 		}
 		seen[tool] = true
-		if tool == termsvc.ShellTool {
+		if tool == termcore.ShellTool {
 			// The plain-shell pseudo-tool has no adapter and is never
 			// watched by construction; reporting it would be noise.
 			continue

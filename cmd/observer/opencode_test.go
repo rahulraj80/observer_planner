@@ -72,3 +72,23 @@ func countKey(env []string, key string) int {
 	}
 	return n
 }
+
+// TestPrepareOpencodeZenRoute pins the OpenCode Zen route: the built-in
+// "opencode" provider is pointed at the proxy's opencode-zen lane, and a
+// caller's own OPENCODE_CONFIG_CONTENT is never overwritten.
+func TestPrepareOpencodeZenRoute(t *testing.T) {
+	env, routed := prepareOpencodeZenRoute([]string{"PATH=/bin"}, "http://127.0.0.1:8820/")
+	if !routed {
+		t.Fatal("want routed")
+	}
+	got := envValue(env, "OPENCODE_CONFIG_CONTENT")
+	want := `{"provider":{"opencode":{"options":{"baseURL":"http://127.0.0.1:8820/up/opencode-zen/v1"}}}}`
+	if got != want {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %s, want %s", got, want)
+	}
+	mine := `{"provider":{"openrouter":{}}}`
+	env, routed = prepareOpencodeZenRoute([]string{"OPENCODE_CONFIG_CONTENT=" + mine}, "http://127.0.0.1:8820")
+	if routed || envValue(env, "OPENCODE_CONFIG_CONTENT") != mine {
+		t.Fatalf("caller config overwritten: routed=%v env=%v", routed, env)
+	}
+}

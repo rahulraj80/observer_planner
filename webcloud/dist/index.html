@@ -12,18 +12,32 @@
     <meta name="theme-color" content="#f4f5f9" media="(prefers-color-scheme: light)" />
     <title>SuperBased Cloud</title>
     <script>
-      // Pre-paint: stamp data-theme on <html> before any CSS evaluates so there is no
-      // flash of the wrong palette. Mirrors src/theme.ts initTheme (key sb_theme,
-      // dark default, ?theme= override), which still runs at boot and persists.
+      // theme-prepaint:begin webcloud: generated from shared/lib/theme.ts THEME_APPS by themePrepaintScript; do not edit by hand.
+      // Pre-paint: stamp data-theme on <html> before any CSS evaluates, so there is no
+      // flash of the wrong palette before the bundle applies the same preference.
       (function () {
+        var key = "sb_theme";
+        var modes = ["light","dark"];
+        var fallback = "dark";
         try {
+          var m = null;
           var q = new URLSearchParams(window.location.search).get("theme");
-          var t = q === "light" || q === "dark" ? q : localStorage.getItem("sb_theme") === "light" ? "light" : "dark";
-          document.documentElement.setAttribute("data-theme", t);
+          if (q !== "system" && modes.indexOf(q) >= 0) m = q;
+          if (m === null) {
+            try {
+              var s = localStorage.getItem(key);
+              m = modes.indexOf(s) >= 0 ? s : fallback;
+            } catch (_) {
+              m = fallback;
+            }
+          }
+          var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.setAttribute("data-theme", m === "system" ? (dark ? "dark" : "light") : m);
         } catch (_) {
           document.documentElement.setAttribute("data-theme", "dark");
         }
       })();
+      // theme-prepaint:end
       // Pre-paint: stamp the density preference (comfortable / compact) the
       // same way, so a compact viewer never sees a comfortable first paint.
       // Mirrors shared/lib/density.ts (key sb_density); anything unknown leaves the
@@ -39,8 +53,8 @@
         }
       })();
     </script>
-    <script type="module" crossorigin src="/portal/assets/index-DuIb9bgB.js"></script>
-    <link rel="stylesheet" crossorigin href="/portal/assets/index-CEhtrZ-1.css">
+    <script type="module" crossorigin src="/portal/assets/index-ziBifRpQ.js"></script>
+    <link rel="stylesheet" crossorigin href="/portal/assets/index-CM0e5qux.css">
   </head>
   <body>
     <!-- Pre-mount boot screen: renders from index.html before any JS or

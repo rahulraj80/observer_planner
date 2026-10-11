@@ -59,7 +59,7 @@ func (s *Store) SetSessionSurface(ctx context.Context, sf models.SessionSurface)
 		return false, errors.New("store.SetSessionSurface: SessionID is required")
 	}
 	if sf.Surface != "" && !models.KnownSurface(sf.Surface) {
-		return false, fmt.Errorf("store.SetSessionSurface: unknown surface kind %q (session %s) — resolve vendor tokens through the adapter's table", sf.Surface, sf.SessionID)
+		return false, fmt.Errorf("store.SetSessionSurface: unknown surface kind %q (session %s) - resolve vendor tokens through the adapter's table", sf.Surface, sf.SessionID)
 	}
 	if sf.Surface == "" && sf.SurfaceHost == "" {
 		return false, nil

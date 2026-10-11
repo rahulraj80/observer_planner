@@ -517,7 +517,7 @@ func (s *server) handleFencedWrite(fc *frameConn, sess Session, payload []byte, 
 			if _, werr := sess.Write(payload); werr == nil {
 				// The reclaimed lease delivered this very chunk; tell the client
 				// its keystrokes are landing again (re-notifiable per transition).
-				_ = fc.sendError(CodeWriterReclaimed, "You're back in control of this terminal — keep typing.")
+				_ = fc.sendError(CodeWriterReclaimed, "You're back in control of this terminal - keep typing.")
 				return
 			}
 		}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package main
 
 import (
@@ -17,7 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/remoteauth"
 	"github.com/marmutapp/superbased-observer/internal/remotecfg"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -37,7 +39,7 @@ func remoteSecretPath(cfg config.Config) string {
 // non-loopback bind fails closed (plan §4.6). This wires the §4.6 predicate now
 // so Phase 2 (exposure) satisfies it simply by minting the secret + setting an
 // explicit bind; no non-loopback listener is opened here.
-func buildRemoteController(cfg config.Config, database *sql.DB) dashboard.RemoteController {
+func buildRemoteController(cfg config.Config, database *sql.DB) dashapi.RemoteController {
 	if !cfg.Remote.Enabled {
 		return nil
 	}
@@ -67,7 +69,7 @@ func buildRemoteController(cfg config.Config, database *sql.DB) dashboard.Remote
 	if b, rerr := os.ReadFile(standingPath); rerr == nil {
 		standingHash = strings.TrimSpace(string(b))
 	}
-	return dashboard.NewRemoteController(dashboard.RemoteOptions{
+	return newRemoteController(dashapi.RemoteOptions{
 		HashedSecret:                hash,
 		AllowedHosts:                hosts,
 		RateLimitPerMin:             cfg.Remote.RateLimitPerMin,
@@ -135,23 +137,8 @@ func remoteSessionPersister(database *sql.DB) remoteauth.SessionPersister {
 	return store.NewRemoteSessionPersister(database)
 }
 
-// remoteAuditSink adapts the dashboard's RemoteAuditRecord onto the node-local
-// remote_audit store seam (plan §4.8). Best-effort: an audit-write failure must
-// never break a request, so errors are swallowed. Metadata only.
-func remoteAuditSink(database *sql.DB) func(dashboard.RemoteAuditRecord) {
-	if database == nil {
-		return nil
-	}
-	st := store.New(database)
-	return func(rec dashboard.RemoteAuditRecord) {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = st.InsertRemoteAudit(ctx, store.RemoteAuditEvent{
-			Kind: rec.Kind, SessionID: rec.SessionID, Principal: rec.Principal,
-			RemoteAddr: rec.RemoteAddr, Route: rec.Route, Decision: rec.Decision, Detail: rec.Detail,
-		})
-	}
-}
+// remoteAuditSink lives in the core file remote_core.go (the remote_audit
+// table is core: every Local + confirm route audits through it).
 
 // newRemoteCmd wires `observer remote`. Phase 2 ships the tailnet-HTTPS view
 // tier: `enable`/`disable`/`rotate` provision the pairing secret + [remote]
@@ -254,6 +241,10 @@ func newRemoteApproveExecuteCmd() *cobra.Command {
 			if strings.TrimSpace(device) == "" || strings.TrimSpace(handle) == "" {
 				return fmt.Errorf("both --device (paired-device fingerprint) and --handle (terminal handle) are required")
 			}
+			if note := dashboardNotInBuildNote(); note != "" {
+				// The approval endpoint is a dashboard route (MP-L1M, D-514).
+				return errors.New("remote approve-execute needs the dashboard: " + note)
+			}
 			base := "http://" + strings.TrimSpace(addr)
 			token, cookie, err := fetchRemoteConfirmToken(cmd.Context(), base)
 			if err != nil {
@@ -341,3 +332,7 @@ func postApproveExecute(ctx context.Context, base, token string, cookie *http.Co
 	}
 	return body.Capability, body.Confirm, nil
 }
+
+// isStandingCredential recognises a standing terminal-control credential by
+// its shape (remoteauth.IsStandingSecret); remote_omit.go answers false.
+func isStandingCredential(cred string) bool { return remoteauth.IsStandingSecret(cred) }

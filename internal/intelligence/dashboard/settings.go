@@ -21,7 +21,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/configschema"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
-	"github.com/marmutapp/superbased-observer/internal/routing"
 )
 
 // handleConfig serves GET /api/config — the full live config struct
@@ -48,6 +47,21 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redacted, secretsPresent := redactSecrets(cfg)
+	// A managed node's hidden Settings subsections are concealed here too
+	// (Sol A3-01): this composite read is shared by every subsection, so the
+	// guard cannot refuse it whole; the values are withheld per schema leaf
+	// instead and the ids named, never silently absent.
+	var configOut any = redacted
+	var withheld []string
+	if hidden := s.hiddenSettingsSet(r.Context()); len(hidden) > 0 {
+		cut, ids, err := withholdHiddenSettings(redacted, hidden)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		configOut, withheld = cut, ids
+		secretsPresent = withholdHiddenSecretKeys(secretsPresent, hidden)
+	}
 	// Optimistic-concurrency base for PUT /api/config/keys (plan §2.4): the
 	// hash of the file bytes as they are NOW. A hand-edit, a CLI write or a
 	// concurrent dashboard save all change it, so a stale form gets a 409
@@ -57,9 +71,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{
+	resp := map[string]any{
 		"config_path": s.opts.ConfigPath,
-		"config":      redacted,
+		"config":      configOut,
 		"config_etag": etag,
 		// The sensitive-tier (T1) keys need the same confirm-token
 		// double-submit the remote arm verbs use; minted (or reused) here so
@@ -87,7 +101,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"advisor", "cachetrack", "observability", "secrets", "profiles", "mcp",
 			"org", "otel", "guard", "routing", "process", "browser", "terminal", "tasks",
 		},
-	})
+	}
+	if len(withheld) > 0 {
+		// The subsections whose values were withheld above, so a reader can
+		// say "managed by your organization" rather than show empty fields.
+		resp["withheld_settings"] = withheld
+	}
+	writeJSON(w, resp)
 }
 
 // handleConfigPricing serves PUT /api/config/pricing — accepts the
@@ -95,17 +115,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 // Reloads the cost engine in-place so Cost / Analysis / Session-detail
 // surfaces pick up the new rates without a restart.
 //
-// Save flow:
+// Save flow (T-572: the ONE config save pipeline, commitConfigEdit):
 //  1. Resolve config path (errors if not configured)
-//  2. Load current config from disk
+//  2. Load current config from disk under the config write locks
 //  3. Replace cfg.Intelligence.Pricing.Models with the request body
-//  4. Copy current config.toml → config.toml.bak (Option A — comments
-//     lost on save, .bak preserves the prior version)
-//  5. Marshal full struct to TOML, atomic temp-file rename
-//  6. cost.Engine.Reload(cfg.Intelligence) — atomic.Pointer swap
+//  4. Validate, then dry run (`?dry_run=1`) or write (.bak + atomic rename),
+//     read back, audit
+//  5. cost.Engine.Reload(cfg.Intelligence), an atomic.Pointer swap
 //
-// On any error before step 4, no files are touched. On error during 4–5,
-// the .bak preserves the user's prior file.
+// On any error before the write, no files are touched; the .bak preserves
+// the user's prior file.
 func (s *Server) handleConfigPricing(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		s.writeEffectivePricing(r.Context(), w)
@@ -116,7 +135,7 @@ func (s *Server) handleConfigPricing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.opts.ConfigPath == "" {
-		http.Error(w, "config path not configured — server has no file to save to", http.StatusConflict)
+		http.Error(w, "config path not configured - server has no file to save to", http.StatusConflict)
 		return
 	}
 
@@ -136,49 +155,40 @@ func (s *Server) handleConfigPricing(w http.ResponseWriter, r *http.Request) {
 		req.Models = map[string]config.ModelPricing{}
 	}
 
-	// Same serialization as the section-save path (Fix 1): pricing does the
-	// same load→patch→write against the shared file, so it must take the same
-	// lock or a concurrent section save could clobber the pricing write (or
-	// vice-versa). See Server.configWriteMu.
-	s.configWriteMu.Lock()
-	defer s.configWriteMu.Unlock()
-
-	cfg, err := config.Load(config.LoadOptions{GlobalPath: s.opts.ConfigPath})
-	if err != nil {
-		writeErr(w, fmt.Errorf("load current config: %w", err))
-		return
-	}
-	cfg.Intelligence.Pricing.Models = req.Models
-
-	if err := writeConfigToml(s.opts.ConfigPath, cfg); err != nil {
-		writeErr(w, err)
-		return
-	}
-
-	if s.opts.CostEngine != nil {
-		s.opts.CostEngine.Reload(cfg.Intelligence)
-	}
-	s.notifyConfigSaved()
-
-	resp := map[string]any{
-		"saved":       true,
-		"config_path": s.opts.ConfigPath,
-		"backup_path": s.opts.ConfigPath + ".bak",
-		"models":      cfg.Intelligence.Pricing.Models,
-	}
-	// Advisory problems found while rebuilding the table — a malformed
-	// [intelligence.pricing.dated] row that was SKIPPED, or a dated
-	// timeline whose newest entry no longer matches the flat rate the
-	// operator just saved (a half-landed rate change: history would be
-	// right but today's costs wrong). Pricing never fails closed on
-	// these, so the save still succeeded; surfacing them is how the
-	// operator finds out their override was ignored.
-	if s.opts.CostEngine != nil {
-		if warn := s.opts.CostEngine.PricingWarnings(); len(warn) > 0 {
-			resp["warnings"] = warn
-		}
-	}
-	writeJSON(w, resp)
+	// The ONE save pipeline (T-572): the same lock domain as every section
+	// save, `?dry_run=1` previews the masked diff and writes nothing,
+	// `?base_etag=` refuses a file changed since that preview, and the write
+	// is validated, read back and audited like every section save.
+	s.commitConfigEdit(w, r, configEdit{
+		section: "intelligence.pricing.models",
+		apply: func(cfg *config.Config) {
+			cfg.Intelligence.Pricing.Models = req.Models
+		},
+		// Metadata only: the row count, never a model's rate.
+		auditAction: "config_pricing",
+		auditDetail: fmt.Sprintf("models=%d", len(req.Models)),
+		extra: func(cfg config.Config) map[string]any {
+			return map[string]any{"models": cfg.Intelligence.Pricing.Models}
+		},
+		afterWrite: func(cfg config.Config) map[string]any {
+			out := map[string]any{}
+			if s.opts.CostEngine == nil {
+				return out
+			}
+			s.opts.CostEngine.Reload(cfg.Intelligence)
+			// Advisory problems found while rebuilding the table: a
+			// malformed [intelligence.pricing.dated] row that was SKIPPED,
+			// or a dated timeline whose newest entry no longer matches the
+			// flat rate the operator just saved (a half-landed rate change:
+			// history would be right but today's costs wrong). Pricing never
+			// fails closed on these, so the save still succeeded; surfacing
+			// them is how the operator finds out their override was ignored.
+			if warn := s.opts.CostEngine.PricingWarnings(); len(warn) > 0 {
+				out["warnings"] = warn
+			}
+			return out
+		},
+	})
 }
 
 // notifyConfigSaved invokes the daemon's config-saved hook (P2.5 hot
@@ -339,31 +349,31 @@ func (s *Server) handleConfigPricingDefaults(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// handleConfigSection serves PUT /api/config/section/<name> — the
-// generic save path for every config section other than pricing
-// (which has its own hot-reload-aware endpoint). Slice 2 of the
-// Settings page wires this for: observer, watcher, freshness,
-// retention, hooks, proxy, compression, intelligence.
+// handleConfigSection serves PUT /api/config/section/<name>: the
+// whole-section save path for every config section other than pricing
+// (which has its own hot-reload-aware endpoint). The section body is decoded
+// onto a copy of the loaded config (applySectionUpdate), the T2 credential
+// guard and config.Validate run, and then the save goes through the ONE
+// config.toml save pipeline the keys route uses (config_commit.go, T-432):
+// secret posture, the sensitive-tier confirm token, the dry run, the write,
+// read-back verification, live seams, restart classification and audit.
 //
-// Save flow mirrors handleConfigPricing:
-//  1. Resolve config path; require non-empty.
-//  2. Load current config.
-//  3. Replace the named section's fields with the request body.
-//  4. writeConfigToml — backs up to .bak then atomic rename.
-//  5. Response sets restart_required=true so the UI surfaces the
-//     "Restart daemon" banner. Pricing's hot-reload doesn't apply
-//     because the affected consumers (proxy listener, watcher
-//     subscriptions, hook registrations, retention prune cycle, etc.)
-//     bind config at startup. Exception: "profiles" reports
-//     restart_required=false — the OnConfigSaved hook hot-reloads the
-//     proxy's profile router for new sessions (P2.5).
+// Query parameters (both optional, so an older client keeps working):
+//
+//	dry_run=1          run every check and answer the masked diff of the
+//	                   bytes the save would write; nothing is written
+//	base_etag=<etag>   refuse with 409 config_changed when config.toml
+//	                   changed since the preview the user approved
+//
+// restart_required is derived per CHANGED KEY from the schema's restart
+// classes (plan section 3.1 / P0-8), never a per-section heuristic.
 func (s *Server) handleConfigSection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "PUT only", http.StatusMethodNotAllowed)
 		return
 	}
 	if s.opts.ConfigPath == "" {
-		http.Error(w, "config path not configured — server has no file to save to", http.StatusConflict)
+		http.Error(w, "config path not configured - server has no file to save to", http.StatusConflict)
 		return
 	}
 
@@ -373,6 +383,9 @@ func (s *Server) handleConfigSection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "section name required (e.g. /api/config/section/observer)", http.StatusBadRequest)
 		return
 	}
+	q := r.URL.Query()
+	dryRun := q.Get("dry_run") == "1" || q.Get("dry_run") == "true"
+	baseEtag := strings.TrimSpace(q.Get("base_etag"))
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
@@ -380,26 +393,32 @@ func (s *Server) handleConfigSection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serialize the whole load→patch→validate→write critical section against
-	// every other config-file writer (Fix 1): a concurrent PUT to a DIFFERENT
-	// section must not lose this one's change. See Server.configWriteMu.
+	// One config-write lock domain, established order (remoteManageMu
+	// OUTER, configWriteMu INNER), the same as the keys route: a concurrent
+	// save to a DIFFERENT section must not lose this one's change.
+	remoteManageMu.Lock()
+	defer remoteManageMu.Unlock()
 	s.configWriteMu.Lock()
 	defer s.configWriteMu.Unlock()
 
+	current, err := configEtag(s.opts.ConfigPath)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if baseEtag != "" && baseEtag != current {
+		writeConfigChanged(w, current, nil)
+		return
+	}
 	cfg, err := loadConfigForDashboard(s.opts.ConfigPath)
 	if err != nil {
 		writeErr(w, fmt.Errorf("load current config: %w", err))
 		return
 	}
 
-	// Deep snapshot of the pre-update config so restart_required can be
-	// derived per CHANGED KEY from the schema's restart classes (plan §3.1 /
-	// P0-8) instead of a per-section heuristic. The per-field rules that
-	// used to live here — terminal.attach.enabled binds the socket at start
-	// while route_proxy / default_on are read per launch; only [cloud]'s
-	// auto_sync schedule binds at start while base_url / auto_enrich /
-	// workos_client_id are read by each `observer cloud` invocation — are
-	// now rows in internal/configschema/annotations.go.
+	// Deep snapshot of the pre-update config so the changed keys (and from
+	// them the restart classes, the confirm requirement and the secret
+	// warnings) are derived per CHANGED KEY.
 	prev := cloneConfig(cfg)
 
 	// Snapshot the T2 credentials before the update so the guard below can
@@ -412,62 +431,41 @@ func (s *Server) handleConfigSection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// T2 credential guard (plan §4.3 / P0-1). Two failure modes it closes,
-	// in the one place every caller-supplied section body lands:
+	// T2 credential guard (plan section 4.3 / P0-1). Two failure modes it
+	// closes, in the one place every caller-supplied section body lands:
 	//   1. A write attempt on a credential is refused with 403 naming the
-	//      file — credentials are file-only, by design.
-	//   2. A round-trip clobber. GET /api/config now returns sentinels, and
-	//      several callers read a whole section and PUT it back verbatim
-	//      (Routing.tsx enableAdvise, Settings.tsx); without this, that
-	//      would overwrite a real API key with "__redacted__". An incoming
-	//      sentinel restores the on-disk value instead.
+	//      file; credentials are file-only, by design.
+	//   2. A round-trip clobber. GET /api/config returns sentinels, and
+	//      several callers read a whole section and PUT it back verbatim;
+	//      without this, that would overwrite a real API key with
+	//      "__redacted__". An incoming sentinel restores the on-disk value.
 	if err := reconcileSecrets(&cfg, &prevSecrets, s.opts.ConfigPath); err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
-	// Validate-before-write: run the SAME semantic check config.Load runs at
+	// Validate-before-write: the SAME semantic check config.Load runs at
 	// daemon start, so a section save can never persist a config the next
-	// start would reject (the bricked-restart class — e.g. a garbage
-	// [dashboard].addr). cfg came from a successful loadConfigForDashboard, so
-	// it was already valid; this only catches invalidity introduced by THIS
-	// PUT body. Generic on purpose — closes the gap for every section, not
-	// just the one that surfaced it.
+	// start would reject (the bricked-restart class).
 	if err := config.Validate(cfg); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err := writeConfigToml(s.opts.ConfigPath, cfg); err != nil {
-		writeErr(w, err)
-		return
-	}
-	s.notifyConfigSaved()
-
-	// Profiles hot-reload (P2.5): the config-saved hook re-points the
-	// proxy's profile router, so NEW sessions pick the change up with
-	// no restart. MCP (P4.10) is the other no-banner section: each AI
-	// session spawns a fresh `observer serve` subprocess that runs
-	// config.Load itself, so saves bind on the next MCP spawn with no
-	// daemon restart — the banner would lie for both.
-	//
-	// Restart honesty (plan §3.1 / P0-8): classify every key this save
-	// actually CHANGED by its schema restart class. The per-section
-	// heuristic that used to live here (`name != "profiles" && name !=
-	// "mcp"` plus hand-coded terminal and cloud exceptions) is retired: at
-	// 500 keys a heuristic cannot stay true, the table can.
+	_, statErr := os.Stat(s.opts.ConfigPath)
 	changed := configschema.ChangedLeaves(&prev, &cfg)
-	classes := classifyChanged(changed, nil)
-	writeJSON(w, map[string]any{
-		"saved":                 true,
-		"section":               name,
-		"config_path":           s.opts.ConfigPath,
-		"backup_path":           s.opts.ConfigPath + ".bak",
-		"restart_required":      len(classes.restart) > 0,
-		"changed_keys":          orEmptyStrings(changed),
-		"restart_required_keys": orEmptyStrings(classes.restart),
-		"applied_live_keys":     orEmptyStrings(classes.live),
-		"next_spawn_keys":       orEmptyStrings(classes.nextSpawn),
+	s.commitConfigSave(w, r, configSave{
+		prev:           prev,
+		cfg:            cfg,
+		changed:        changed,
+		patches:        sectionFilePatches(name, prev, cfg, statErr == nil),
+		etag:           current,
+		needsConfirm:   changedNeedsConfirm(changed),
+		secretWarnings: secretWarningsFor(changedLeafValues(&cfg, changed)),
+		dryRun:         dryRun,
+		auditAction:    "config_section",
+		auditDetail:    "section=" + name + " keys=" + strings.Join(changed, ","),
+		extra:          map[string]any{"section": name},
 	})
 }
 
@@ -1075,10 +1073,9 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 		if !slices.Contains([]string{"off", "advise", "enforce"}, sec.Mode) {
 			return fmt.Errorf("routing mode: %q not one of [off advise enforce]", sec.Mode)
 		}
-		policies := []string{"custom"}
-		for _, t := range routing.Templates() {
-			policies = append(policies, t.Name)
-		}
+		// The template names come from routingpolicy.go (proxy.routing);
+		// a build without it (routingpolicy_omit.go) knows only "custom".
+		policies := append([]string{"custom"}, routingPolicyTemplateNames()...)
 		if !slices.Contains(policies, sec.Policy) {
 			return fmt.Errorf("routing policy: %q not one of %v", sec.Policy, policies)
 		}
@@ -1097,11 +1094,7 @@ func applySectionUpdate(cfg *config.Config, name string, body []byte, configPath
 		next.RateLimitWindow = sec.RateLimitWindow
 		next.Calibration = sec.Calibration
 		if sec.RulesTOML != nil {
-			rules, problems := parseRoutingRulesTOML(*sec.RulesTOML)
-			if len(problems) == 0 {
-				_, gateProblems := gateRoutingRules(next, rules)
-				problems = gateProblems
-			}
+			rules, problems := checkRoutingRulesTOML(next, *sec.RulesTOML)
 			if len(problems) > 0 {
 				return fmt.Errorf("routing rules refused (file untouched): %s", strings.Join(problems, "; "))
 			}
@@ -1176,7 +1169,7 @@ func (s *Server) handleConfigBackup(w http.ResponseWriter, r *http.Request) {
 		}
 		content, ok := redactSecretsInTOMLText(string(body), &bakCfg)
 		if !ok {
-			resp["content_withheld"] = "the backup contains a credential that could not be safely masked for display — open " + bakPath + " directly"
+			resp["content_withheld"] = "the backup contains a credential that could not be safely masked for display - open " + bakPath + " directly"
 			writeJSON(w, resp)
 			return
 		}
@@ -1190,7 +1183,7 @@ func (s *Server) handleConfigBackup(w http.ResponseWriter, r *http.Request) {
 		defer s.configWriteMu.Unlock()
 		bak, err := os.ReadFile(bakPath)
 		if errors.Is(err, os.ErrNotExist) {
-			http.Error(w, "no backup exists yet — backups are created on the first dashboard save", http.StatusNotFound)
+			http.Error(w, "no backup exists yet - backups are created on the first dashboard save", http.StatusNotFound)
 			return
 		}
 		if err != nil {
@@ -1300,7 +1293,7 @@ func (s *Server) handleAntigravityBridge(w http.ResponseWriter, r *http.Request)
 // Returns the first existing path, or "" when none.
 func findAntigravityBridge() string {
 	if env := strings.TrimSpace(os.Getenv("OBSERVER_ANTIGRAVITY_BRIDGE")); env != "" {
-		if _, err := os.Stat(env); err == nil {
+		if _, err := os.Stat(env); err == nil { //nolint:gosec // G703: the operator's own OBSERVER_ANTIGRAVITY_BRIDGE override, stat only
 			return env
 		}
 	}
@@ -1364,7 +1357,7 @@ func (s *Server) handleAdminRestart(w http.ResponseWriter, r *http.Request) {
 	// native-Windows daemon, or a standalone read-only surface) — report it
 	// honestly rather than os.Exit into a process nothing will revive.
 	if s.opts.RestartFunc == nil {
-		http.Error(w, `{"error":"restart from the dashboard isn't available in this process mode — relaunch the daemon manually"}`, http.StatusNotImplemented)
+		http.Error(w, `{"error":"restart from the dashboard isn't available in this process mode - relaunch the daemon manually"}`, http.StatusNotImplemented)
 		return
 	}
 	// The hook preflights the config; a refusal (config wouldn't come back)
@@ -1374,7 +1367,7 @@ func (s *Server) handleAdminRestart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	s.opts.Logger.Info("admin restart scheduled — graceful shutdown + re-exec")
+	s.opts.Logger.Info("admin restart scheduled - graceful shutdown + re-exec")
 	writeJSON(w, map[string]any{"restart_scheduled": true, "delay_ms": 300})
 }
 
@@ -1458,30 +1451,31 @@ func (s *Server) handleBackfillStatus(w http.ResponseWriter, r *http.Request) {
 		{"pi-message-id", "--pi-message-id", "actions.message_id from pi message ids"},
 		{"claudecode-user-prompts", "--claudecode-user-prompts", "user_prompt action rows for Claude Code text user lines"},
 		{"claudecode-api-errors", "--claudecode-api-errors", "api_error action rows for Claude Code system/api_error JSONL records (content-policy blocks, rate limits, invalid-request errors)"},
-		{"cowork-rescan", "--cowork-rescan", "Fast cowork-only rescan — walks Cowork audit.jsonl tree only. Use after adding 'cowork' to enabled_adapters mid-flight, or when --all would be too slow"},
+		{"cowork-rescan", "--cowork-rescan", "Fast cowork-only rescan - walks Cowork audit.jsonl tree only. Use after adding 'cowork' to enabled_adapters mid-flight, or when --all would be too slow"},
 		{"cowork-project-root", "--cowork-project-root", "Re-attribute Cowork sessions whose project_id was wrongly set to observer's own repo (pre-v1.4.54 Windows-path bug). Walks each local_<id>/audit.jsonl + sidecar, recomputes project root via crossmount translation, updates sessions + actions on mismatch"},
-		{"codex-rescan", "--codex-rescan", "Fast codex-only rescan — re-walks every codex rollout JSONL from offset 0 to pick up v1.4.53 adapter additions: token_usage.web_search_requests + ActionRateLimit rows from token_count.rate_limits + codex.reasoning rows from response_item.reasoning. Idempotent via (source_file, source_event_id) UNIQUE"},
+		{"codex-rescan", "--codex-rescan", "Fast codex-only rescan - re-walks every codex rollout JSONL from offset 0 to pick up v1.4.53 adapter additions: token_usage.web_search_requests + ActionRateLimit rows from token_count.rate_limits + codex.reasoning rows from response_item.reasoning. Idempotent via (source_file, source_event_id) UNIQUE"},
 		{"antigravity", "--antigravity-rescan", "Re-walk Antigravity .pb / state.vscdb files and re-ingest via the adapter: local decrypt first, fall back to language_server gRPC when [observer.antigravity] network_recovery = \"local\" is set"},
 		{"antigravity-project-root", "--antigravity-project-root", "Re-attribute antigravity sessions / actions to the correct project + refresh session.model and session.started_at from the state.vscdb index entry. Also lifts per-turn token_usage rows + the actual model name (e.g. claude-sonnet-4-5) into the DB via the language_server's GetCascadeTrajectory endpoint (best-effort, requires the conversation be loaded by a running language_server)"},
 		{"gemini-cli", "--gemini-cli-rescan", "Re-walk Gemini CLI session JSON / JSONL under ~/.gemini/tmp/<hash>/chats/. gemini-cli has no surgical column backfills; this is its only retroactive path"},
 		{"copilot-cli", "--copilot-cli-rescan", "Re-walk GitHub Copilot CLI session data: events.jsonl under ~/.copilot/session-state AND process-*.log under ~/.copilot/logs (cross-mount aware). Run after enabling `copilot --log-level debug` to retrofit Tier-1 accurate input/cache/reasoning tokens onto historical sessions"},
-		{"hermes-rescan", "--hermes-rescan", "Fast rescan of the Hermes Agent tree only — re-walks every state.db under ~/.hermes (cross-mount aware) from messages.id=0. Useful for importing sessions that predate the `observer init --hermes` plugin install. Idempotent"},
-		{"clinecli-rescan", "--clinecli-rescan", "Fast rescan of the Cline CLI tree only — re-walks sessions.db + each session's messages.json, re-emitting session/prompt/tool/metrics rows. Useful for importing sessions that pre-date adapter install. Idempotent"},
+		{"hermes-rescan", "--hermes-rescan", "Fast rescan of the Hermes Agent tree only - re-walks every state.db under ~/.hermes (cross-mount aware) from messages.id=0. Useful for importing sessions that predate the `observer init --hermes` plugin install. Idempotent"},
+		{"clinecli-rescan", "--clinecli-rescan", "Fast rescan of the Cline CLI tree only - re-walks sessions.db + each session's messages.json, re-emitting session/prompt/tool/metrics rows. Useful for importing sessions that pre-date adapter install. Idempotent"},
 		{"cache-rescan", "--cache-rescan", "Re-walk claude-code transcripts through the Tier-2 cache observation engine to populate historical cache_segments / cache_entries / cache_events. Use after enabling [cachetrack] on a daemon with historical traffic, or after upgrading past a cachetrack fix. Proxy-observed turns are skipped (no double-write); idempotent"},
-		{"zed-rescan", "--zed-rescan", "Fast rescan of the Zed native-agent tree only — re-walks every threads.db under the configured Zed watch roots from watermark 0, forcing every thread to re-emit regardless of its stored updated_at cursor. threads.db is a watermark store, so a thread that predates the daemon first observing its file is never re-read until its NEXT turn — this is the only retroactive path for pre-existing Zed conversations. Idempotent via (source_file, source_event_id) UNIQUE"},
+		{"zed-rescan", "--zed-rescan", "Fast rescan of the Zed native-agent tree only - re-walks every threads.db under the configured Zed watch roots from watermark 0, forcing every thread to re-emit regardless of its stored updated_at cursor. threads.db is a watermark store, so a thread that predates the daemon first observing its file is never re-read until its NEXT turn - this is the only retroactive path for pre-existing Zed conversations. Idempotent via (source_file, source_event_id) UNIQUE"},
 		{"crush-rescan", "--crush-rescan", "Re-walk every Crush crush.db, then correct the crush token rows already stored: each crush.db holding token rows is re-parsed and the rows of the sessions it observed are made equal to the fixed parser (changed rows updated in place and re-sent to the org; rows the parser no longer emits deleted as a correction). Needed because the token upsert never lowers a count: a multi-step session stored before 2026-09-27 keeps its last-step context snapshot until this runs. Crush rows only; idempotent"},
+		{"qwen-code-rescan", "--qwen-code-rescan", "Re-walk every Qwen Code chat transcript, then correct the qwen-code token rows already stored: each transcript holding token rows is re-parsed and the rows of the sessions it observed are made equal to the fixed parser (changed rows updated in place and re-sent to the org). Needed because the token upsert never lowers a count: a turn served through Qwen's OpenAI-compatible generator stored its thoughts both inside output and as reasoning until this runs. Qwen Code rows only; idempotent"},
 		{"openclaw-project-root", "--openclaw-project-root", "Re-attribute openclaw action / session rows to the correct project when sessions.json workspaceDir previously collapsed to the [openclaw] placeholder or a foreign-OS path"},
 		{"openclaw-session-id", "--openclaw-session-id", "Collapse historical openclaw split sessions where sessions.json used the raw sessionId but JSONL / task_runs used the alias session key"},
 		{"codex-project-root", "--codex-project-root", "Re-attribute codex action / token / session rows to the correct project when their cwd was a Windows-style path that previously misresolved to observer's own repo"},
 		{"claudecode-project-root", "--claudecode-project-root", "Re-attribute claude-code action / token / session rows to the correct project when their cwd was a Windows-style path that previously misresolved to observer's own repo"},
-		{"cursor-user-prompts", "--cursor-user-prompts", "Insert user_prompt action rows for Cursor sessions by walking agent-transcripts JSONL — fills the gap for sessions before the beforeSubmitPrompt hook was installed"},
+		{"cursor-user-prompts", "--cursor-user-prompts", "Insert user_prompt action rows for Cursor sessions by walking agent-transcripts JSONL - fills the gap for sessions before the beforeSubmitPrompt hook was installed"},
 		{"cursor-subagents", "--cursor-subagents", "Walk Cursor agent-transcripts/<session>/subagents/*.jsonl and ingest as sidechain rows under the parent session (IsSidechain=true)"},
 	}
 	for _, m := range fileWalk {
 		out = append(out, modeStatus{
 			Mode: m.mode, Flag: m.flag, Description: m.description,
 			Candidates:     -1,
-			CandidatesNote: "file scan needed — candidates are discovered as the run walks source files",
+			CandidatesNote: "file scan needed - candidates are discovered as the run walks source files",
 		})
 	}
 
@@ -1500,9 +1494,30 @@ func (s *Server) handleBackfillStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, modeStatus{
 			Mode: "tasks", Flag: "--tasks",
-			Description:    "Re-derive task_items / task_transitions (session-level task/todo/plan tracking, docs/task-tracking.md) from todo_update / post_tool_batch action rows already in the DB. No adapter re-parse, no source-file walk. Idempotent — safe to re-run after enabling [tasks].enabled on a daemon with historical traffic.",
+			Description:    "Re-derive task_items / task_transitions (session-level task/todo/plan tracking, docs/task-tracking.md) from todo_update / post_tool_batch action rows already in the DB. No adapter re-parse, no source-file walk. Idempotent - safe to re-run after enabling [tasks].enabled on a daemon with historical traffic.",
 			Candidates:     n,
-			CandidatesNote: "todo_update actions rows only — post_tool_batch candidates aren't cheaply countable without the same raw_tool_input scan the backfill itself does",
+			CandidatesNote: "todo_update actions rows only - post_tool_batch candidates aren't cheaply countable without the same raw_tool_input scan the backfill itself does",
+		})
+	}
+
+	// --loc (docs/loc-tracking.md) counts AI-authored lines for historical
+	// edit_file / write_file actions from the raw_tool_input each row already
+	// holds - a DB re-read like --tasks, never a file walk - and is NOT part
+	// of --all. The candidate count is the edits that have no file_changes
+	// row yet; a re-run at the same classifier version rewrites nothing.
+	{
+		var n int64
+		if err := s.opts.DB.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM actions a WHERE a.action_type IN ('edit_file', 'write_file')
+			   AND NOT EXISTS (SELECT 1 FROM file_changes f WHERE f.action_id = a.id)`).Scan(&n); err != nil {
+			s.opts.Logger.Warn("backfill status query", "mode", "loc", "err", err)
+			n = -1
+		}
+		out = append(out, modeStatus{
+			Mode: "loc", Flag: "--loc",
+			Description:    "Count lines of code (added / modified / deleted, comments and blanks separated) for every historical edit_file / write_file action, from the tool input the row already holds (docs/loc-tracking.md). Writes counts and path hashes only, never content. Idempotent; not part of --all.",
+			Candidates:     n,
+			CandidatesNote: "edit_file / write_file actions without line counts yet",
 		})
 	}
 
@@ -1522,9 +1537,9 @@ func (s *Server) handleBackfillStatus(w http.ResponseWriter, r *http.Request) {
 		out = append(out, modeStatus{
 			Mode:           "scan-" + c.Tool,
 			Flag:           "scan --force --adapter " + c.Tool,
-			Description:    "Generic re-walk of every " + c.Tool + " session file via the adapter — imports sessions that pre-date the adapter (or an enabled_adapters fix). Idempotent; scoped to this adapter only",
+			Description:    "Generic re-walk of every " + c.Tool + " session file via the adapter - imports sessions that pre-date the adapter (or an enabled_adapters fix). Idempotent; scoped to this adapter only",
 			Candidates:     -1,
-			CandidatesNote: "file scan needed — candidates are discovered as the run walks source files",
+			CandidatesNote: "file scan needed - candidates are discovered as the run walks source files",
 		})
 	}
 
@@ -1547,10 +1562,7 @@ func loadConfigForDashboard(path string) (config.Config, error) {
 	return config.Load(config.LoadOptions{GlobalPath: path})
 }
 
-// writeConfigToml delegates to config.WriteToml — THE shared config
-// write owner (.bak + atomic temp-rename), also used by the `observer
-// profile assign` CLI. Kept as a local name so the handler call sites
-// read naturally.
-func writeConfigToml(path string, cfg config.Config) error {
-	return config.WriteToml(path, cfg)
-}
+// The writeConfigToml helper is gone (T-572): its four callers (pricing,
+// process enable-capture, profile assignments, the sandbox editor) now save
+// through commitConfigEdit (config_commit.go), which owns the dry run, the
+// base_etag conflict check, the read-back and the audit row.

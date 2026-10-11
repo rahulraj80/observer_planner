@@ -1,0 +1,37 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "events": "VerifiedOfficial",
+    "events[]": "VerifiedOfficial",
+    "events[].description": "VerifiedOfficial",
+    "events[].eventId": "VerifiedOfficial",
+    "events[].eventTime": "VerifiedOfficial",
+    "events[].user": "VerifiedOfficial",
+    "events[].user.email": "VerifiedOfficial",
+    "events[].user.familyName": "VerifiedOfficial",
+    "events[].user.givenName": "VerifiedOfficial",
+    "events[].user.userId": "VerifiedOfficial",
+    "nextPageToken": "VerifiedOfficial"
+  },
+  "fixture_sha256": "81a0b36069908abd7825fb7e10459db7671e4136bebf99d15edf6186a9a395ce",
+  "http": {
+    "method": "GET",
+    "path": "/audit/teams/{teamId}/events",
+    "query": {
+      "pageSize": "100",
+      "orderBy": "TIME_ASCENDING",
+      "eventTimeFrom": "2025-01-15T00:00:00Z",
+      "eventTimeTo": "2025-01-16T00:00:00Z"
+    },
+    "status": 200
+  },
+  "notes": "The documented GET /audit/teams/{teamId}/events response example, verbatim (its nextPageToken equals the event id in the example). The reference gives no action type, only a free-form description.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "xAI Management API reference (audit.md, billing.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b0ec3ad3bec4d19d346800315f6ccb5708906b0ef51f910c482154fd929a7873",
+  "source_url": "https://docs.x.ai/developers/rest-api-reference/management/audit.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "xai.mgmt.audit_events"
+}

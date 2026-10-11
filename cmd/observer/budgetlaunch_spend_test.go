@@ -224,10 +224,10 @@ func TestSubjectCapReachesTheTwoDirectVendorChokepoints(t *testing.T) {
 				t.Fatalf("nodeInterventionBudget: %v", err)
 			}
 			if d.Stop != tc.wantStop {
-				t.Fatalf("stop = %v (rule %q, %q), want %v — %s", d.Stop, d.RuleID, d.Reason, tc.wantStop, tc.why)
+				t.Fatalf("stop = %v (rule %q, %q), want %v - %s", d.Stop, d.RuleID, d.Reason, tc.wantStop, tc.why)
 			}
 			if tc.wantStop && d.RuleID != tc.wantRule {
-				t.Fatalf("rule = %q, want %q — %s", d.RuleID, tc.wantRule, tc.why)
+				t.Fatalf("rule = %q, want %q - %s", d.RuleID, tc.wantRule, tc.why)
 			}
 		})
 	}
@@ -263,12 +263,12 @@ func TestModelCapCannotRefuseALaunch(t *testing.T) {
 				budgetLaunchEvidence{Route: budgetLaunchRouteObserverProxy, ProxyURL: "http://127.0.0.1:8820"})
 			if tc.wantErr {
 				if !errors.Is(err, errBudgetLaunchDenied) {
-					t.Fatalf("launch admitted: %v — %s", err, tc.why)
+					t.Fatalf("launch admitted: %v - %s", err, tc.why)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("launch refused: %v — %s", err, tc.why)
+				t.Fatalf("launch refused: %v - %s", err, tc.why)
 			}
 		})
 	}

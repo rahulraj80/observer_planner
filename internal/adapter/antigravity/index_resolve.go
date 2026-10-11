@@ -107,7 +107,7 @@ func FetchStructuredTrajectory(ctx context.Context, conversationID, projectRoot,
 		}
 		return ParseStructuredTrajectory(raw, conversationID, projectRoot, "", sourceFile, scrubber), nil
 	}
-	servers, err := discoverLanguageServers()
+	servers, err := discoverLanguageServers(ctx)
 	if err != nil {
 		return StructuredEnrichment{}, fmt.Errorf("antigravity.FetchStructuredTrajectory: discover: %w", err)
 	}
@@ -157,7 +157,7 @@ func FetchMarkdownTrajectory(ctx context.Context, conversationID string, timeout
 	if isWSL() {
 		return invokeBridgeFromWSL(ctx, conversationID, timeout)
 	}
-	servers, err := discoverLanguageServers()
+	servers, err := discoverLanguageServers(ctx)
 	if err != nil {
 		return "", fmt.Errorf("antigravity.FetchMarkdownTrajectory: discover: %w", err)
 	}

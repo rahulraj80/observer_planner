@@ -916,7 +916,7 @@ func (r *policyStateReporter) report(ctx context.Context) {
 			r.latched.Store(true)
 			r.latchGen1.Store(true)
 			r.latchDepth.Store(int32(len(policystate.OptionalPoints)))
-			r.logger.Info("policystate: server rejected the gen2 snapshot but accepted the gen1 projection — older server, dropping gen2 fields for this daemon lifetime")
+			r.logger.Info("policystate: server rejected the gen2 snapshot but accepted the gen1 projection - older server, dropping gen2 fields for this daemon lifetime")
 			return
 		}
 	}
@@ -932,7 +932,7 @@ func (r *policyStateReporter) report(ctx context.Context) {
 		r.latchGen1.Store(true)
 		r.latchDepth.Store(int32(depth))
 		dropped := policystate.OptionalPoints[depth:]
-		r.logger.Info("policystate: server rejected the full snapshot but accepted a narrower one — older server, dropping the newest optional points for this daemon lifetime",
+		r.logger.Info("policystate: server rejected the full snapshot but accepted a narrower one - older server, dropping the newest optional points for this daemon lifetime",
 			"dropped_points", dropped, "sent_rows", len(candidate), "full_rows", len(rows))
 		return
 	}
@@ -1046,10 +1046,15 @@ func (r *policyStateReporter) post(ctx context.Context, rows []orgcontract.Polic
 		return postOK
 	case errors.Is(perr, orgclient.ErrPolicyAckUnsupported):
 		r.unsupported.Store(true)
-		r.logger.Info("policystate: policy-ack endpoint unsupported (pre-P0-6 server) — latching off for daemon lifetime")
+		r.logger.Info("policystate: policy-ack endpoint unsupported (pre-P0-6 server) - latching off for daemon lifetime")
 		return postFailed
 	case errors.Is(perr, orgclient.ErrPolicyAckRejected):
 		return postRejected
+	case errors.Is(perr, orgclient.ErrNotEnrolled):
+		// T-718: an unenrolled node has no organization to report to. That is
+		// a steady state, not a failure, so it is not a WARN every 5 minutes.
+		r.logger.Debug("policystate: not enrolled, nothing posted")
+		return postFailed
 	default:
 		r.logger.Warn("policystate: post failed", "err", perr)
 		return postFailed

@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { EyeOff, Lock, PowerOff, type LucideIcon } from "lucide-react";
 import { apiReason, fetchJSON } from "@/lib/api";
+import { DashboardInstallRecord } from "@/components/DashboardInstallRecord";
 import type {
   GUILaunchable,
+  UnlaunchableTool,
   GUILaunchResponse,
   GUIRun,
   LaunchableTool,
@@ -30,20 +33,47 @@ import {
   installGuidanceFor,
   launchBlockedFor,
   launchBlockedReason,
+  installRuntimeAdvisory,
+  installRuntimeParts,
+  launchRuntimeParts,
+  launchRuntimeRemedy,
   pickerLegend,
   preflightErrorCopy,
   preflightStripCopy,
-  toolNotAllowedReason,
   type PreflightState,
 } from "@/lib/toolInstall";
+import { installPrereqRemedyFor } from "@/lib/installPrereq";
+import { RuntimeRemedy } from "@/components/RuntimeRemedy";
 import {
   guiLaunchDisabledReason,
   guiLaunchErrorMessage,
   isGUISelection,
-  wrapSummary,
 } from "@/lib/guiLaunch";
+import { guiAvailabilityName, guiLaunchSummary, guiLaunchedToast } from "@/lib/guiLaunchCopy";
+import {
+  buildToolPickerItems,
+  preferredDefaultTool,
+  type PickerStatus,
+  type ToolPickerItem,
+} from "@/lib/toolPicker";
+import { toolMeta } from "@/lib/tools";
+import {
+  TERMINALS_FOLDERS_HASH,
+  TERMINALS_LAUNCH_POLICY_HASH,
+  TERMINALS_REMOTE_SYSTEMS_HASH,
+} from "@/lib/nodePageTabs";
 import { pushToast } from "@/components/Toast";
-import { ComboChip, type ComboOption, Modal, Tooltip, TooltipSpan } from "@/components/primitives";
+import {
+  Button,
+  ComboChip,
+  type ComboOption,
+  Icon,
+  Modal,
+  Pill,
+  ToolDot,
+  Tooltip,
+  TooltipSpan,
+} from "@/components/primitives";
 
 // Sentinel <select> value for the "type a path by hand" escape hatch. A NUL
 // byte can never be a real project root, so it can't collide with one. The NUL
@@ -78,6 +108,66 @@ const SANDBOX_SOURCE_LABELS: Record<string, string> = {
   "clone-remote": "Clone a remote URL",
   worktree: "Worktree",
 };
+
+// STATUS_ICONS gives each picker status badge its glyph, so a status pill
+// never reads like the neighbouring kind pill (CLI / IDE / Desktop). One row
+// per status (CLAUDE.md #5); the words come from toolPicker.STATUS_LABELS.
+const STATUS_ICONS: Record<PickerStatus, LucideIcon> = {
+  not_allowed: Lock,
+  not_captured: EyeOff,
+  shell_off: PowerOff,
+};
+
+// PickerStatusPill is a picker row's muted status badge (Not allowed to
+// launch / Not captured / Turned off), or nothing.
+function PickerStatusPill({ item }: { item: ToolPickerItem }) {
+  if (!item.status || !item.statusLabel) return null;
+  return (
+    <Pill case="none" icon={STATUS_ICONS[item.status]} className="!font-medium !text-fg-3">
+      {item.statusLabel}
+    </Pill>
+  );
+}
+
+// PickerOptionLabel is a picker row's primary line: the human name, then the
+// surface kind as a small badge, then (from the sm breakpoint up, where the
+// row is wide enough) the status badge. Below sm the status moves to the
+// secondary line (pickerOptionDetail) so a phone-width row never truncates
+// the name to make room for it.
+function PickerOptionLabel({ item }: { item: ToolPickerItem }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="min-w-0 truncate font-medium">{item.name}</span>
+      <Pill case="none" className="shrink-0">
+        {item.kindLabel}
+      </Pill>
+      {item.status && (
+        <span className="ml-auto hidden shrink-0 sm:inline-flex">
+          <PickerStatusPill item={item} />
+        </span>
+      )}
+    </span>
+  );
+}
+
+// pickerOptionDetail is a picker row's secondary line (ComboOption.detail):
+// the status badge below sm, then any host list. ComboChip truncates it while
+// the row is idle and shows it in full while the row is hovered/focused, so
+// the long "Agents: ..." list never needs a tooltip over the list. Returns
+// undefined when there is nothing to say (single-line row).
+function pickerOptionDetail(item: ToolPickerItem) {
+  if (!item.status && !item.detail) return undefined;
+  return (
+    <>
+      {item.status && (
+        <span className="mr-1 sm:hidden">
+          <PickerStatusPill item={item} />
+        </span>
+      )}
+      {item.detail}
+    </>
+  );
+}
 
 // sandboxDisabledReason computes the "Run in sandbox" checkbox's disabled
 // copy, honoring the honest-copy convention (CLAUDE.md): every disabled
@@ -114,6 +204,14 @@ function sandboxDisabledReason(
     return "Sandbox status unknown - this daemon may not support sandboxed terminals, or the probe request failed.";
   }
   if (!probe.available) {
+    // D-514: a build without terminals.sandbox cannot be switched on from
+    // Terminals -> Settings, so the copy must name the build, not the switch.
+    // "not_in_build" is the verdict the omit stub reports once it is updated
+    // (change list for cmd/observer/terminal_sandbox_omit.go); until then the
+    // stub's reason text is the signal.
+    if (probe.verdict === "not_in_build" || /not in this build/i.test(probe.reason ?? "")) {
+      return `Sandbox isolation is not in this build - ${probe.reason || "the terminal sandbox component is not compiled in"}. Settings -> Components lists the builds that include it.`;
+    }
     if (probe.verdict === "disabled_by_config") {
       return "Sandbox isolation is turned off. Enable it in Terminals -> Settings -> Sandbox isolation and save; it takes effect immediately.";
     }
@@ -132,6 +230,13 @@ function sandboxDisabledReason(
   return null;
 }
 
+// Deep links into the Terminals Settings cards this dialog points at
+// (T-488 / T-489): the dashboard controls that replaced the old
+// "edit config.toml and restart" instructions.
+const TERMINALS_LAUNCH_POLICY_HASH_PATH = `/terminals${TERMINALS_LAUNCH_POLICY_HASH}`;
+const TERMINALS_FOLDERS_HASH_PATH = `/terminals${TERMINALS_FOLDERS_HASH}`;
+const TERMINALS_REMOTE_SYSTEMS_HASH_PATH = `/terminals${TERMINALS_REMOTE_SYSTEMS_HASH}`;
+
 // sshSystemDisabledReason computes the System picker's disabled copy,
 // following the same honest-disabled-control convention as
 // sandboxDisabledReason above: name the exact blocker and where its switch
@@ -141,10 +246,10 @@ function sandboxDisabledReason(
 // null when the picker should be enabled (at least one profile, feature on).
 function sshSystemDisabledReason(enabled: boolean, profileCount: number): string | null {
   if (!enabled) {
-    return "SSH remote-system terminals are off. Set [terminal.ssh].enabled = true in ~/.observer/config.toml and restart the daemon.";
+    return "SSH remote-system terminals are off. Turn them on in Terminals > Settings > Remote systems (applies to the next launch, no restart).";
   }
   if (profileCount === 0) {
-    return "No remote systems configured yet. Add a [[terminal.ssh.profiles]] block (name, host, user, key_path) to ~/.observer/config.toml and restart the daemon. See docs/ssh-terminals.md.";
+    return "No remote systems yet. Add one in Terminals > Settings > Remote systems (applies to the next launch, no restart).";
   }
   return null;
 }
@@ -282,6 +387,9 @@ export function NewTerminalDialog({
   const [guiLaunchables, setGuiLaunchables] = useState<GUILaunchable[]>([]);
   // Live/recently-exited GUI runs this daemon has spawned, same source.
   const [guiRuns, setGuiRuns] = useState<GUIRun[]>([]);
+  // Advertised products the picker lists but cannot start (T-494), same
+  // source; empty on an older daemon.
+  const [unlaunchable, setUnlaunchable] = useState<UnlaunchableTool[]>([]);
   // SSH remote-system profiles (GET /api/terminal/ssh). `sshProbed` is
   // distinct from `sshEnabled`: it tracks whether the route answered at all,
   // so a genuinely old daemon (no /api/terminal/ssh route — 404) still hides
@@ -378,6 +486,7 @@ export function NewTerminalDialog({
         setToolInfo(d.launchable_tool_info ?? []);
         setGuiLaunchables(guiRows);
         setGuiRuns(d.gui_runs ?? []);
+        setUnlaunchable(d.unlaunchable_tools ?? []);
         setToolsError(null);
         setTool((current) => {
           if (current === SHELL_TOOL && d.shell_enabled) return current;
@@ -388,7 +497,9 @@ export function NewTerminalDialog({
           if (current && (list.includes(current) || guiRows.some((r) => r.id === current))) {
             return current;
           }
-          return list[0] ?? "";
+          // The first tool the launch allow-list accepts, so Start is usable
+          // out of the box; else the first listed tool (pre-picker default).
+          return preferredDefaultTool(list, d.launchable_tool_info ?? []);
         });
         setAllowedRoots(d.allowed_project_roots ?? []);
         setShellEnabled(d.shell_enabled ?? false);
@@ -530,6 +641,23 @@ export function NewTerminalDialog({
   // Remote page's privileged POSTs, then opens the returned handle in the dock
   // like any launch (labelled "<tool> install"). The server owns the argv — the
   // request carries only the tool name.
+  // currentDraft is the exact launch draft the dock restores when a guided
+  // install / uninstall terminal exits, so the dialog reopens where it was
+  // with a fresh availability check.
+  function currentDraft(): NewTerminalDraft {
+    return {
+      tool,
+      rootSel,
+      customRoot,
+      modelSel,
+      sandboxOn,
+      workspaceSource,
+      workspaceRemote,
+      workspaceBranch,
+      ...(gui ? { kind: "gui" as const } : {}),
+    };
+  }
+
   async function installTool() {
     if (!tool || installBusy) return;
     setInstallBusy(true);
@@ -550,17 +678,7 @@ export function NewTerminalDialog({
           body: JSON.stringify({ tool }),
         },
       );
-      onLaunched(r.handle, `${tool} install`, false, {
-        tool,
-        rootSel,
-        customRoot,
-        modelSel,
-        sandboxOn,
-        workspaceSource,
-        workspaceRemote,
-        workspaceBranch,
-        ...(gui ? { kind: "gui" as const } : {}),
-      });
+      onLaunched(r.handle, `${tool} install`, false, currentDraft());
     } catch (e) {
       // DI-05: never the raw `api <status> <path>: <body>` string. Each of this
       // route's statuses names one specific, fixable blocker — see
@@ -618,7 +736,9 @@ export function NewTerminalDialog({
   const verdict = preflight?.verdict ?? "";
   // The availability strip's fully-resolved copy — one owner for the headline
   // sentence, the notes (rendered for EVERY verdict now), and the tone.
-  const strip = useMemo(() => preflightStripCopy(tool, preflight), [tool, preflight]);
+  // A GUI row is named by its label ("Zed"), never its launch id (T-333).
+  const availabilityName = useMemo(() => guiAvailabilityName(tool, guiLaunchables), [tool, guiLaunchables]);
+  const strip = useMemo(() => preflightStripCopy(availabilityName, preflight), [availabilityName, preflight]);
   // Notes beyond the visible cap, revealed by the "+N more" expander (DI-17:
   // the old hard slice(0,4) dropped the rest without saying so).
   const [notesExpanded, setNotesExpanded] = useState(false);
@@ -639,6 +759,42 @@ export function NewTerminalDialog({
   const pickerLegendText = useMemo(() => pickerLegend(toolAnnotations), [toolAnnotations]);
   const selectedAnnotation = toolAnnotationFor.get(tool) ?? null;
 
+  // The Tool picker's rows (toolPicker.ts owns grouping, order and status
+  // vocabulary) and their ComboChip rendering. Each annotation is its own
+  // field — name, kind badge, status badge, host list — instead of one long
+  // native <option> string, so nothing can render wider than the dialog.
+  const pickerItems = useMemo(
+    () =>
+      buildToolPickerItems({
+        tools,
+        toolInfo,
+        gui: guiLaunchables,
+        shellEnabled,
+        shellTool: SHELL_TOOL,
+        labelFor: (id) => toolMeta(id).label,
+        unlaunchable,
+      }),
+    [tools, toolInfo, guiLaunchables, shellEnabled, unlaunchable],
+  );
+  const pickerItemFor = useMemo(
+    () => new Map(pickerItems.map((i) => [i.value, i])),
+    [pickerItems],
+  );
+  const toolOptions = useMemo<ComboOption[]>(
+    () =>
+      pickerItems.map((i) => ({
+        value: i.value,
+        label: <PickerOptionLabel item={i} />,
+        searchable: i.searchable,
+        leading: <ToolDot tool={i.dotKey} />,
+        groupLabel: i.group,
+        disabled: i.disabled,
+        detail: pickerOptionDetail(i),
+      })),
+    [pickerItems],
+  );
+  const toolLabelId = useId();
+
   // gui is THE ONE derived predicate every GUI-specific branch below reads
   // (plan §2.4 / guiLaunch.ts's isGUISelection doc comment): install +
   // launch only — no resume, no continue, no attach, no model picker, no
@@ -648,6 +804,11 @@ export function NewTerminalDialog({
     [guiLaunchables, tool],
   );
   const gui = isGUISelection(tool, guiLaunchables);
+  // The routing verdict for the SELECTED GUI row: the preflight's dry-run of
+  // the launcher's own wrap decision, used only once it answers for this very
+  // tool (a stale reply for the previous selection must never phrase this
+  // row's routing).
+  const guiRoutingVerdict = preflight && preflight.tool === tool ? preflight : null;
   // The Shell pseudo-tool is gated by its own [terminal.launch].allow_shell
   // opt-in and is never a member of launchable_tool_info, so the AI-tool
   // allow-list must not be applied to it (absence would otherwise read as
@@ -671,13 +832,14 @@ export function NewTerminalDialog({
     preflightState,
     verdict,
     selectedToolAllowed,
+    launchRuntimeRemedy(preflight && preflight.tool === tool ? preflight : null) !== null,
   );
 
   const noAllowList = allowedRoots.length === 0;
   // Honest reason placed on every disabled option so hovering explains the block.
   const blockedTitle = noAllowList
-    ? "No project roots are allow-listed - add one in [terminal.launch].allowed_project_roots (Terminals page → launch policy)"
-    : "Not in [terminal.launch].allowed_project_roots - add it in the Terminals page → launch policy";
+    ? "No project folders are allow-listed - add one in Terminals > Settings > Folder Selection"
+    : "Not in the project folder allow-list - add it in Terminals > Settings > Folder Selection";
 
   // The searchable folder-selector's option list (ComboChip): the agent's
   // default directory, then every permitted root, then every blocked known
@@ -840,12 +1002,11 @@ export function NewTerminalDialog({
               : {}),
           }),
         });
-        pushToast(
-          `Launched ${r.label} (pid ${r.pid}) — ${
-            r.wrap_applied ? "routing wrap applied" : `no wrap: ${r.wrap_note}`
-          }`,
-          "success",
-        );
+        // wrap_note is NOT shown: it is the launch planner's engineering
+        // explanation, not user copy. "routed through the SuperBased proxy"
+        // comes only from the launch's own structured verdict
+        // (routing_reaches_app; wrap_applied on an older daemon).
+        pushToast(guiLaunchedToast(r), "success");
         onClose();
       } catch (e) {
         setErr(guiLaunchErrorMessage(e));
@@ -946,15 +1107,18 @@ export function NewTerminalDialog({
                     preflight,
                     preflightErr,
                     selectedToolAllowed,
-                  ) ?? `${tool} can't be launched from here right now`
+                    availabilityName,
+                  ) ?? `${availabilityName} can't be launched from here right now`
                 : sandboxBlocksStart
                   ? sandboxRemoteURLMissing
                     ? "Enter a remote URL to clone into the sandbox, or choose a different workspace"
                     : "The selected workspace source isn't available - choose a different one"
                   : null;
+            // The shared Button: disabled renders the opaque bg-bg-3 look in
+            // both themes, not a faded accent fill (T-339).
             const startBtn = (
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 disabled={
                   busy ||
                   (sshMode
@@ -967,14 +1131,13 @@ export function NewTerminalDialog({
                     : !tool || remoteBlocked || launchBlockedByVerdict || sandboxBlocksStart)
                 }
                 onClick={submit}
-                className="rounded-2 bg-accent px-3 py-1.5 text-small font-medium text-accent-on disabled:opacity-50"
               >
                 {busy
                   ? "Starting…"
                   : gui && selectedGUIRow
                     ? `Launch ${selectedGUIRow.label}`
                     : "Start"}
-              </button>
+              </Button>
             );
             // The tip only shows while the button is disabled (blocked), and a
             // disabled <button> swallows pointer events - TooltipSpan gives it a
@@ -989,10 +1152,16 @@ export function NewTerminalDialog({
       }
     >
       <p className="mb-3 text-[11px] leading-relaxed text-fg-3">
-        Start a fresh agent in the embedded terminal. The operator must enable
-        this in <code className="font-mono">[terminal.launch]</code> and
-        allow-list the tool and project root - otherwise the launch is
-        refused.
+        Start a fresh agent in the embedded terminal. Fresh launch, the allowed
+        tools and the allowed project folders are set in the{" "}
+        <Link
+          to={TERMINALS_LAUNCH_POLICY_HASH_PATH}
+          onClick={onClose}
+          className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
+        >
+          launch policy
+        </Link>
+        ; a launch outside them is refused. Changes apply to the next launch.
       </p>
 
       {remoteBlocked && (
@@ -1003,7 +1172,7 @@ export function NewTerminalDialog({
 
       {resumedAfterInstall && (
         <div className="mb-3 rounded-2 border border-ok/40 bg-ok/10 px-2 py-1.5 text-[11px] text-ok">
-          Installer terminal finished. Your adapter, project, model, and sandbox choices were preserved;
+          The install or uninstall terminal finished. Your adapter, project, model, and sandbox choices were preserved;
           the availability check below has been refreshed.
         </div>
       )}
@@ -1018,10 +1187,10 @@ export function NewTerminalDialog({
           <ul className="space-y-0.5">
             {guiRuns.map((r) => (
               <li key={r.run_id} className="flex items-center justify-between gap-2">
-                <span className="truncate">
-                  {r.label}
-                  {r.notes && r.notes.length > 0 ? ` — ${r.notes.join("; ")}` : ""}
-                </span>
+                {/* r.notes (launch-composition advisories such as "pid and
+                    exit code belong to the explorer.exe launcher stub") are
+                    engineering caveats, not user copy - not rendered. */}
+                <span className="truncate">{r.label}</span>
                 <span className="shrink-0 font-mono">
                   {r.exited ? `exited (${r.exit_code})` : `pid ${r.pid}`}
                 </span>
@@ -1051,8 +1220,9 @@ export function NewTerminalDialog({
               This machine (local)
             </option>
             {/* Systems come from [[terminal.ssh.profiles]] in the operator's
-                own config. This picker SELECTS among them; it can never add
-                one — that is the feature's core safety property. */}
+                own config, edited on the owner-local Remote systems card
+                (T-488). This picker SELECTS among them; it can never add
+                one, which is the feature's core safety property. */}
             {sshProfiles.map((p) => (
               <option key={p.name} value={p.name} title={p.target}>
                 {p.label} - {p.target}
@@ -1061,7 +1231,14 @@ export function NewTerminalDialog({
           </select>
           {sshSystemReason && (
             <p className="mb-3 mt-1 text-[10.5px] leading-relaxed text-fg-3">
-              {sshSystemReason}
+              {sshSystemReason}{" "}
+              <Link
+                to={TERMINALS_REMOTE_SYSTEMS_HASH_PATH}
+                onClick={onClose}
+                className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
+              >
+                Open Remote systems
+              </Link>
             </p>
           )}
           {!sshSystemReason && <div className="mb-3" />}
@@ -1089,117 +1266,126 @@ export function NewTerminalDialog({
         </div>
       )}
 
-      <label className="mb-1 block text-[11px] font-medium text-fg-2">
+      <label
+        id={toolLabelId}
+        htmlFor="new-terminal-tool"
+        className="mb-1 block text-[11px] font-medium text-fg-2"
+      >
         Tool
       </label>
-      <select
-        disabled={sshMode}
-        title={sshMode ? SSH_NA_MSG : undefined}
-        value={tool}
-        onChange={(e) => {
-          setTool(e.target.value);
-        }}
-        className="mb-3 w-full rounded-2 border bg-bg-0 px-2 py-1.5 text-[12px] text-fg-1"
-      >
-        {tools.length === 0 && (
-          <option value="">
-            {toolsError
-              ? "couldn't load the launchable tools"
-              : "no launchable tools"}
-          </option>
-        )}
-        {/* Native <option> — title= stays (a React tooltip can't render inside
-            the browser-owned select popup), the same convention as the Shell
-            option below and the project-root list above. The annotation comes
-            from the SERVER's two allow-lists (DI-06), so this branches on the
-            reported capability, never on the tool's name.
-            Every AI-tool option stays SELECTABLE — unlike Shell below, whose
-            disabled state is correct because there is nothing to preflight or
-            install behind it. Disabling a non-allow-listed tool here would
-            make the guided install unreachable on precisely the fresh install
-            that needs it: allowed_tools defaults to EMPTY (deny-all) while
-            POST /api/terminal/install is ungated by it on purpose (DI-21). The
-            allow-list blocks START instead (launchBlockedFor). */}
-        {toolAnnotations.map((a) => (
-          <option key={a.tool} value={a.tool} title={a.title ?? undefined}>
-            {a.tool}
-            {a.labelSuffix}
-          </option>
-        ))}
-        {/* IDE / desktop-app rows (T2.3, plan §2.4). A visually separated
-            group, not a merge into the AI-tool list above: these carry
-            install + launch only (no resume/continue/attach/model/sandbox
-            — see the `gui` predicate below). `adapter === ""` is a HOST row
-            (an editor with no adapter of its own, e.g. vscode) — it shows
-            which AI-tool adapters run inside it (`hosts`) instead of a
-            watched pill, since a host has no capture of its own to watch. */}
-        {guiLaunchables.length > 0 && (
-          <optgroup label="IDE / desktop app">
-            {guiLaunchables.map((r) => {
-              const badge = r.surface === "ide" ? "IDE" : "Desktop";
-              const isHost = r.adapter === "";
-              const notAllowedSuffix = !r.allowed ? " · not allow-listed" : "";
-              const notWatchedSuffix =
-                !isHost && r.allowed && !r.watched ? " · not watched" : "";
-              const hostsSuffix =
-                isHost && r.hosts.length > 0 ? ` · hosts: ${r.hosts.join(", ")}` : "";
-              const title = !r.allowed
-                ? toolNotAllowedReason(r.id)
-                : !isHost && !r.watched
-                  ? TOOL_NOT_WATCHED_MSG
-                  : r.note || undefined;
+      {/* Searchable picker (shared ComboChip): type-to-search, arrows, Enter;
+          Escape closes only the popover, never this dialog. The popover is as
+          wide as the field, so it can never spill past the dialog or the
+          window the way the old native <select> option list did.
+          Every AI-tool and GUI row stays SELECTABLE even when the launch
+          allow-list refuses it — the guided install must stay reachable on
+          precisely the fresh install that needs it: allowed_tools defaults to
+          EMPTY (deny-all) while POST /api/terminal/install is ungated by it on
+          purpose (DI-21). The allow-list blocks START instead
+          (launchBlockedFor). Only Shell can be disabled: it has its own
+          [terminal.launch].allow_shell opt-in and nothing to install. */}
+      <div className="mb-3">
+        <ComboChip
+          id="new-terminal-tool"
+          labelledBy={toolLabelId}
+          value={tool}
+          onChange={setTool}
+          options={toolOptions}
+          label="Tool"
+          hideTriggerLabel
+          fullWidth
+          disabled={sshMode}
+          triggerTooltip={null}
+          placeholder="Search tools, IDEs and apps…"
+          emptyHint="No tool matches. Clear the search to see every launchable tool."
+          buttonValueRender={(sel) => {
+            const item = sel ? pickerItemFor.get(sel.value) : undefined;
+            if (!item) {
               return (
-                <option key={r.id} value={r.id} title={title}>
-                  {r.label} [{badge}]
-                  {notAllowedSuffix}
-                  {notWatchedSuffix}
-                  {hostsSuffix}
-                </option>
+                <span className="min-w-0 flex-1 truncate text-left text-fg-3">
+                  {toolsError
+                    ? "Couldn't load the launchable tools"
+                    : tools.length === 0 && guiLaunchables.length === 0
+                      ? "No launchable tools"
+                      : "Choose a tool"}
+                </span>
               );
-            })}
-          </optgroup>
+            }
+            return (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+                <ToolDot tool={item.dotKey} />
+                <span className="min-w-0 truncate font-semibold text-fg-0">{item.name}</span>
+                <Pill case="none" className="shrink-0">
+                  {item.kindLabel}
+                </Pill>
+              </span>
+            );
+          }}
+        />
+        {sshMode && (
+          <p className="mt-1 text-[10.5px] leading-relaxed text-fg-3">
+            Not used for a remote system - the SSH shell opens on that host.
+          </p>
         )}
-        {/* Native <option> - title= stays (React tooltip can't render inside
-            the browser-owned select popup). Shell is a reserved pseudo-tool,
-            never a member of `tools` (the capability registry) - gated by
-            its own SEPARATE [terminal.launch].allow_shell opt-in instead of
-            the AI-tool allow-list. */}
-        <option
-          value={SHELL_TOOL}
-          disabled={!shellEnabled}
-          title={
-            shellEnabled
-              ? "Start a plain shell ($SHELL, or bash/sh as a fallback) - no AI tool involved."
-              : "Not enabled - turn on [terminal.launch].allow_shell in Terminals → launch policy"
-          }
-        >
-          Shell {shellEnabled ? "" : "(disabled)"}
-        </option>
-      </select>
+      </div>
 
       {/* DI-05: the picker's source route failed. Say so instead of letting
           the empty dropdown imply the daemon has no launchable tools. */}
       {toolsError && (
         <p className="-mt-2 mb-3 rounded-2 border border-danger/30 bg-danger/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-danger">
-          Couldn't load the launchable tools: {toolsError} — the tool list,
+          Couldn't load the launchable tools: {toolsError} - the tool list,
           project-root allow-list and Shell option are all unknown until this
           request succeeds. Reopen this dialog to retry.
         </p>
       )}
 
+      {/* The selected tool is refused by the launch allow-list. A calm inline
+          note under the picker (not a hover tooltip a native <option> may
+          never show) says what that means and where the switch lives. It is
+          what disables Start (launchBlockedFor); the availability strip and
+          its Install button below stay fully live — installing is not
+          launching (DI-21). One block for AI tools AND GUI rows: both read
+          the same [terminal.launch].allowed_tools list (selectedToolAllowed). */}
+      {!sshMode && tool && tool !== SHELL_TOOL && !selectedToolAllowed && (
+        <div
+          role="note"
+          className="-mt-1 mb-3 flex gap-2 rounded-2 border border-line-2 bg-bg-2 px-2.5 py-2 text-[11px] leading-relaxed text-fg-2"
+        >
+          <Icon icon={Lock} size={12} className="mt-[3px] shrink-0 text-fg-3" />
+          <div className="min-w-0">
+            <p>
+              <span className="font-medium text-fg-1">
+                {pickerItemFor.get(tool)?.name ?? tool}
+              </span>{" "}
+              isn't allowed to launch from here yet. Allow it in the launch
+              policy to enable Start (no restart needed). You can still install
+              it from this dialog.
+            </p>
+            {/* SPA navigation (Link, not a bare <a>) so the Terminals page's
+                hash effect can select the Settings tab and scroll to the card.
+                The dialog closes on the way out — leaving a modal floating over
+                the page the operator was just sent to read would defeat it. */}
+            <Link
+              to={TERMINALS_LAUNCH_POLICY_HASH_PATH}
+              onClick={onClose}
+              className="mt-1.5 inline-flex items-center rounded-2 border border-line-2 bg-bg-1 px-2 py-0.5 text-[11px] font-medium text-fg-1 hover:bg-bg-3"
+            >
+              Open launch policy
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* DI-06: the two independent allow-lists behind the picker, made
-          visible up front instead of learned from a post-Start 403. The
-          per-option title carries the specific reason; this line carries the
-          counts and the fix. */}
-      {!sshMode && pickerLegendText && (
+          visible up front instead of learned from a post-Start 403. Counts
+          and the fix; each row's own status badge carries the specifics.
+          Hidden while the not-allowed note above is showing, so the dialog
+          never stacks two launch-policy links. */}
+      {!sshMode && pickerLegendText && selectedToolAllowed && (
         <p className="-mt-2 mb-3 text-[10.5px] leading-relaxed text-fg-3">
           {pickerLegendText}{" "}
-          {/* SPA navigation (Link, not a bare <a>) so the Terminals page's
-              hash effect can select the Settings tab and scroll to the card.
-              The dialog closes on the way out — leaving a modal floating over
-              the page the operator was just sent to read would defeat it. */}
           <Link
-            to="/terminals#launch-policy"
+            to={TERMINALS_LAUNCH_POLICY_HASH_PATH}
             onClick={onClose}
             className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
           >
@@ -1209,46 +1395,19 @@ export function NewTerminalDialog({
         </p>
       )}
 
-      {/* The selected tool's own caveat, spelled out rather than left to a
-          hover on a native <option> the browser may never show. The disallowed
-          case is what disables Start (see launchBlockedFor) — the availability
-          strip and its Install button below stay fully live. */}
-      {!sshMode && selectedAnnotation && !selectedAnnotation.allowed && (
-        <p className="-mt-2 mb-3 rounded-2 border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-warn">
-          {toolNotAllowedReason(tool)}{" "}
-          <Link
-            to="/terminals#launch-policy"
-            onClick={onClose}
-            className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
-          >
-            Open the launch policy
-          </Link>
-          .
-        </p>
-      )}
       {!sshMode && selectedAnnotation && selectedAnnotation.allowed && !selectedAnnotation.watched && (
         <p className="-mt-2 mb-3 text-[10.5px] leading-relaxed text-fg-3">
           {tool} is {TOOL_NOT_WATCHED_MSG}. It will launch normally.
         </p>
       )}
 
-      {/* The selected GUI row's own gating caveat — mirrors the AI-tool
-          blocks above (selectedAnnotation is always null for a GUI id, so
-          those never fire here) using the SAME allow-list/preflight copy
-          via guiLaunchDisabledReason, so a "not allowed" or "not
-          installed" GUI row reads exactly like its terminal counterpart. */}
-      {!sshMode && gui && selectedGUIRow && guiLaunchDisabledReason(selectedGUIRow, preflight, selectedGUIRow.allowed) && (
+      {/* The selected GUI row's remaining gating caveat (not grounded / not
+          installed) — the allow-list case is the calm note above, so this
+          only fires for an ALLOWED row, using the SAME copy as its terminal
+          counterpart via guiLaunchDisabledReason. */}
+      {!sshMode && gui && selectedGUIRow && selectedGUIRow.allowed && guiLaunchDisabledReason(selectedGUIRow, preflight, selectedGUIRow.allowed) && (
         <p className="-mt-2 mb-3 rounded-2 border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-warn">
-          {guiLaunchDisabledReason(selectedGUIRow, preflight, selectedGUIRow.allowed)}{" "}
-          {!selectedGUIRow.allowed && (
-            <Link
-              to="/terminals#launch-policy"
-              onClick={onClose}
-              className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
-            >
-              Open the launch policy
-            </Link>
-          )}
+          {guiLaunchDisabledReason(selectedGUIRow, preflight, selectedGUIRow.allowed)}
         </p>
       )}
       {!sshMode && gui && selectedGUIRow && selectedGUIRow.allowed && selectedGUIRow.adapter !== "" && !selectedGUIRow.watched && (
@@ -1323,14 +1482,17 @@ export function NewTerminalDialog({
               {noAllowList && projects.length > 0 && (
                 <p className="mt-1 text-[10.5px] leading-relaxed text-fg-3">
                   No project roots are allow-listed, so only the agent's
-                  default directory can launch — that's the SuperBased
+                  default directory can launch - that's the SuperBased
                   daemon's own working directory (where{" "}
-                  <code className="font-mono">observer start</code> ran).
-                  Add roots under{" "}
-                  <code className="font-mono">
-                    [terminal.launch].allowed_project_roots
-                  </code>{" "}
-                  on the Terminals page (launch policy) to enable them.
+                  <code className="font-mono">observer start</code> ran).{" "}
+                  <Link
+                    to={TERMINALS_FOLDERS_HASH_PATH}
+                    onClick={onClose}
+                    className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
+                  >
+                    Add a folder in Folder Selection
+                  </Link>{" "}
+                  to enable them.
                 </p>
               )}
               {rootSel === CUSTOM_ROOT ? (
@@ -1351,16 +1513,17 @@ export function NewTerminalDialog({
               ) : null}
               <div className="mb-3" />
             </>
-          ) : (
-            <p className="mb-3 rounded-2 border border-border/60 bg-bg-0 px-2 py-1.5 text-[11px] leading-relaxed text-fg-3">
-              Launched without a project directory — this app takes none.
+          ) : null}
+          {/* ONE calm line derived from structured fields only (guiLaunchCopy):
+              the row's project_dir_argv / wrap_kind and the preflight's
+              routing verdict (routing_reaches_app + routing_reason, the
+              launcher's own wrap decision dry-run). Never the registry's
+              free-text `note` / `wrap_reason`, and never a routing claim the
+              daemon has not confirmed for this machine. */}
+          {selectedGUIRow && guiLaunchSummary(selectedGUIRow, guiRoutingVerdict) && (
+            <p className="mb-3 text-[11px] leading-relaxed text-fg-3">
+              {guiLaunchSummary(selectedGUIRow, guiRoutingVerdict)}
             </p>
-          )}
-          {selectedGUIRow && (
-            <div className="mb-3 rounded-2 border border-line-2 bg-bg-2 px-2 py-1.5 text-[11px] leading-relaxed text-fg-3">
-              <div>{wrapSummary(selectedGUIRow)}</div>
-              {selectedGUIRow.note && <div className="mt-1">{selectedGUIRow.note}</div>}
-            </div>
           )}
         </>
       ) : (
@@ -1387,10 +1550,15 @@ export function NewTerminalDialog({
         <p className="mt-1 text-[10.5px] leading-relaxed text-fg-3">
           No project roots are allow-listed, so only the agent's default
           directory can launch - that's the SuperBased daemon's own working
-          directory (where <code className="font-mono">observer start</code> ran).
-          Add roots under{" "}
-          <code className="font-mono">[terminal.launch].allowed_project_roots</code>{" "}
-          on the Terminals page (launch policy) to enable them.
+          directory (where <code className="font-mono">observer start</code> ran).{" "}
+          <Link
+            to={TERMINALS_FOLDERS_HASH_PATH}
+            onClick={onClose}
+            className="underline decoration-dotted underline-offset-2 hover:text-fg-1"
+          >
+            Add a folder in Folder Selection
+          </Link>{" "}
+          to enable them.
         </p>
       )}
       {rootSel === CUSTOM_ROOT ? (
@@ -1531,7 +1699,7 @@ export function NewTerminalDialog({
           <div className="mb-3 space-y-2">
             {preflightState === "error" && (
               <div className="rounded-2 border border-danger/30 bg-danger/10 px-2 py-1.5 text-[11px] leading-relaxed text-danger">
-                {preflightErrorCopy(tool, preflightErr)}
+                {preflightErrorCopy(availabilityName, preflightErr)}
               </div>
             )}
 
@@ -1544,6 +1712,12 @@ export function NewTerminalDialog({
                 }
               >
                 <div>{strip.headline}</div>
+                {/* An installed tool on a too-old runtime: the headline is
+                    the short sentence; the path, the fix command (copyable,
+                    on its own) and the note follow in parts. */}
+                {!strip.offerInstall && launchRuntimeParts(preflight) && (
+                  <RuntimeRemedy parts={launchRuntimeParts(preflight)!} showSummary={false} />
+                )}
 
                 {/* All notes, each on its own line. Capped for height, with an
                     honest "+N more" expander — never a silent truncation. */}
@@ -1566,7 +1740,7 @@ export function NewTerminalDialog({
                   </button>
                 )}
 
-                {strip.blocking && preflight && (
+                {strip.offerInstall && preflight && (
                   <>
                     {preflight.install_command && (
                       <>
@@ -1583,15 +1757,46 @@ export function NewTerminalDialog({
                         {installGuidanceFor(preflight)}
                       </div>
                     )}
+                    {/* The vendor installer's grounded prerequisites (unzip,
+                        bzip2, ...) are missing: the server withholds
+                        can_install and names the fix, so the script is never
+                        started just to fail. Observer never runs sudo. */}
+                    {installPrereqRemedyFor(preflight) && (
+                      <div
+                        className="mt-1.5 rounded-2 border border-warn/40 bg-warn/10 px-2 py-1 text-warn"
+                        data-testid="install-prereq-remedy"
+                      >
+                        {installPrereqRemedyFor(preflight)}
+                      </div>
+                    )}
+                    {/* The npm package would run on a host runtime older than
+                        the vendor's floor: the server withholds can_install
+                        and refuses the install; say why and how to fix it. */}
+                    {installRuntimeParts(preflight) && (
+                      <div
+                        className="mt-1.5 rounded-2 border border-warn/40 bg-warn/10 px-2 py-1 text-warn"
+                        data-testid="install-runtime-remedy"
+                      >
+                        <RuntimeRemedy parts={installRuntimeParts(preflight)!} />
+                      </div>
+                    )}
+                    {/* T-396: the host runtime is above the vendor's floor but
+                        outside its declared range. Said, never blocking. */}
+                    {installRuntimeAdvisory(preflight) && (
+                      <div className="mt-1.5 text-fg-3" data-testid="install-runtime-advisory">
+                        {installRuntimeAdvisory(preflight)}
+                      </div>
+                    )}
                     {preflight.can_install && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="primary"
+                        size="sm"
                         disabled={installBusy}
                         onClick={installTool}
-                        className="mt-2 rounded-2 bg-accent px-3 py-1 text-caption font-medium text-accent-on disabled:opacity-50"
+                        className="mt-2"
                       >
                         {installBusy ? "Starting install…" : "Install in terminal"}
-                      </button>
+                      </Button>
                     )}
                   </>
                 )}
@@ -1610,6 +1815,23 @@ export function NewTerminalDialog({
             </button>
           </div>
         )}
+
+      {/* The tool's guided-install record from THIS dashboard (node-local
+          tool_installs): "Installed from this dashboard on <date>" with the
+          Uninstall (only when the server says this install can be reversed
+          by a defined command) or the honest guidance + Forget for a vendor
+          script. Rendered independently of the strip above, which hides on a
+          plain "ok" verdict - exactly the state after a successful install. */}
+      {!sshMode && tool && tool !== SHELL_TOOL && preflight?.dashboard_install && (
+        <div className="mb-3">
+          <DashboardInstallRecord
+            record={preflight.dashboard_install}
+            onUninstallStarted={(r) => onLaunched(r.handle, `${tool} uninstall`, false, currentDraft())}
+            onChanged={() => setRecheckNonce((n) => n + 1)}
+            onOpenTerminal={(h) => onLaunched(h, `${tool} install`, false, currentDraft())}
+          />
+        </div>
+      )}
 
       {err && (
         <div className="mb-3 rounded-2 border border-danger/30 bg-danger/10 px-2 py-1.5 text-[11px] text-danger">

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_ui_dashboard
+
 package main
 
 import (
@@ -13,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -71,7 +74,7 @@ func newDashboardCmd() *cobra.Command {
 			// projects-page-roi-and-commit-alignment-plan-2026-09-21.md
 			// §4 W3) — same wiring as `observer start`.
 			projectsJudgeGrade, projectsJudgeGradeReason := projectsDashboardOptions(&cfg)
-			server, err := dashboard.New(dashboard.Options{
+			server, err := dashboard.New(dashapi.Options{
 				ProcessArchive: processArchive,
 				Governance:     ngov.Effective,
 				DB:             database,
@@ -103,13 +106,21 @@ func newDashboardCmd() *cobra.Command {
 				// Cloud account seam (cloudaccount_wire.go): local sign-in probe +
 				// `observer cloud login|logout` subprocess runner behind the Settings
 				// → Cloud Intelligence Sign-in button. Spawns the CLI; links nothing new.
-				CloudAccount:   newCloudAccountSeams(resolvedConfigPath),
-				ArenaAdmission: arenaBudgetAdmissionSeam(resolvedConfigPath),
-				GuardEnabled:   cfg.Guard.Enabled,
-				GuardMode:      cfg.Guard.Mode,
-				GuardStrict:    cfg.Guard.Strict,
-				ToolCatalog:    toolCatalog(),
-				Version:        version,
+				CloudAccount:     newCloudAccountSeams(resolvedConfigPath),
+				ArenaAdmission:   arenaBudgetAdmissionSeam(resolvedConfigPath),
+				GuardEnabled:     cfg.Guard.Enabled,
+				GuardMode:        cfg.Guard.Mode,
+				GuardStrict:      cfg.Guard.Strict,
+				GuardHookFailure: guardHookFailureSeam(configPath),
+				GuardToolGates:   guardToolGatesSeam(configPath, surfaces.sandboxProber),
+				ToolCatalog:      toolCatalog(),
+				// Connected tools hooks probe: the daemon's own
+				// auto-registration options (T-376).
+				HookRegistryOptions: hookProbeOptionsSeam(configPath),
+				// Connected tools per-tool "Run checks" (T-421 item 3): the
+				// same report builder `observer doctor <tool>` prints.
+				ToolDoctor: dashboardToolDoctor(configPath),
+				Version:    version,
 				// Session handoff (docs/session-handoff.md P2): the shared
 				// handoffsvc runner behind /api/session/<id>/handoff*.
 				BuildHandoff: handoffRunner(cfg, database),
@@ -136,9 +147,28 @@ func newDashboardCmd() *cobra.Command {
 				ToolPreflight:    toolPreflightSeam(resolvedConfigPath, allowToolInstallSeam(resolvedConfigPath)),
 				AllowToolInstall: allowToolInstallSeam(resolvedConfigPath),
 				ToolInstallHint:  toolInstallHintSeam(),
+				// Refuse a guided install whose grounded prerequisites
+				// (unzip, bzip2, ...) are missing, with the fix.
+				ToolInstallBlocked: toolInstallBlockedSeam(),
+				// The record of guided installs this dashboard ran + the
+				// matching uninstall (tool_installs, agent migration 149).
+				ToolInstalls: surfaces.toolInstalls,
 				// Command wrapping (backlog item 7): the one shim / start-up-file
 				// applier, behind the Settings -> Terminal card.
 				ShellWrap: newShellWrapService(resolvedConfigPath, dashResolveEnv),
+				// Windows-home init (T-421 item 4), WSL only.
+				WindowsHomes: newWindowsHomeService(resolvedConfigPath, cfg.Proxy.Port),
+				// Settings > Enrolment management; no push loop runs in this
+				// process, so an enrolment's outcome says a daemon start is needed.
+				EnrolManager: enrolManagerFor(resolvedConfigPath, false, ngov),
+				// Settings > Components and the route guard (modular packaging
+				// P1, lane MP-DASH): the same service `observer start` wires.
+				Components:         dashboardComponents(resolvedConfigPath, database),
+				ComponentArtifacts: dashboardComponentArtifacts(resolvedConfigPath), // artifact_states (T-707)
+				BinaryInstall:      dashboardBinaryInstall,                          // binary_install (U12)
+				// Settings > Cloud Intelligence (org plane): `observer intel` behind
+				// the consent screen; the same functions the CLI runs.
+				OrgIntel: newOrgIntelDashboard(resolvedConfigPath, nil),
 				// Re-pricing stored costs (PRICE-REPRICE-1): the one plan/apply/
 				// revert service `observer reprice` also uses, behind the Settings card.
 				Reprice: newRepriceService(cmd.Context(), cfg, database, slog.Default(), ngov.Effective),
@@ -185,9 +215,8 @@ func newDashboardCmd() *cobra.Command {
 			// `--addr 0.0.0.0:8080` refuses with a clear message rather than
 			// exposing an unauthenticated surface. No RemoteController is wired
 			// in this path (pre-Phase-2), so pass nil.
-			if err := dashboard.CheckRemoteBind(listen, remoteCtrl); err != nil {
-				return err
-			}
+			// D-514 / D-516: never refuse; bind loopback and say why once.
+			listen = feasibleDashboardAddr(listen, remoteCtrl, cmd.ErrOrStderr())
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 			// Same default-off, loopback-only profiling knob as `observer
@@ -195,7 +224,7 @@ func newDashboardCmd() *cobra.Command {
 			// against a copy of the DB without touching a live daemon.
 			maybeServePprof(ctx, os.Getenv(pprofEnvVar), cmd.OutOrStdout(), cmd.ErrOrStderr())
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"dashboard listening on http://%s — ctrl-c to stop\n", listen)
+				"dashboard listening on http://%s - ctrl-c to stop\n", listen)
 			// Phase 2 (plan §4.4): when [remote] is armed in tailscale mode,
 			// also serve the dedicated loopback tailnet-serve backend (auth for
 			// every request) alongside the owner-trusted direct listener. Errors
@@ -223,28 +252,4 @@ func newDashboardCmd() *cobra.Command {
 	cmd.Flags().IntVar(&port, "port", 8080, "Port to listen on (ignored if --addr is set)")
 	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (e.g. 127.0.0.1:8080)")
 	return cmd
-}
-
-// resolveDashboardAddr applies the durable dashboard listen-address precedence
-// (issue #8): an explicit flag override wins, then the OBSERVER_DASHBOARD_ADDR
-// environment variable, then [dashboard].addr from config, then the caller's
-// built-in default. flagVal must be non-empty ONLY when the caller's address
-// flag was actually set (checked via cobra's Flags().Changed) — an unset flag
-// must fall through to the env/config layers rather than mask them. A
-// MALFORMED env value is IGNORED (falls through to config/default), matching
-// config.Load's silent-drop of the same env var, so a bad env value can never
-// produce a garbage bind addr or shadow a valid config value. The resolved
-// address is still subject to dashboard.CheckRemoteBind, so a non-loopback
-// value does not bypass the remote-exposure guard.
-func resolveDashboardAddr(flagVal, configAddr, defaultAddr string) string {
-	if v := strings.TrimSpace(flagVal); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(os.Getenv("OBSERVER_DASHBOARD_ADDR")); v != "" && config.ValidateDashboardAddr(v) == nil {
-		return v
-	}
-	if v := strings.TrimSpace(configAddr); v != "" {
-		return v
-	}
-	return defaultAddr
 }

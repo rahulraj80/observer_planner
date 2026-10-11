@@ -171,6 +171,7 @@ func detectSessionBalloon(f *Facts, t Thresholds) []Suggestion {
 			}
 		}
 		out = append(out, Suggestion{
+			// no-bare-usd:allow (advisor prose; masked on every surface under the token display)
 			DedupKey: "session_balloon|" + s.ID,
 			Detector: "session_balloon",
 			Category: CategoryCost,
@@ -179,7 +180,7 @@ func detectSessionBalloon(f *Facts, t Thresholds) []Suggestion {
 			Severity: SeverityAdvice,
 			Title:    fmt.Sprintf("Session ballooned to %dK-token turns", maxWin/1000),
 			Nudge: fmt.Sprintf(
-				"This session crossed a %dK-token prompt window at turn %d of %d and kept carrying that history every turn after. The %d post-balloon turns cost $%.2f; the same work in a fresh session (one ~20K re-onboard, then turns at your early-session rate of $%.4f) would have cost about $%.2f — roughly $%.2f avoidable. Rule of thumb: /clear or a new session when you switch subtasks.",
+				"This session crossed a %dK-token prompt window at turn %d of %d and kept carrying that history every turn after. The %d post-balloon turns cost $%.2f; the same work in a fresh session (one ~20K re-onboard, then turns at your early-session rate of $%.4f) would have cost about $%.2f - roughly $%.2f avoidable. Rule of thumb: /clear or a new session when you switch subtasks.",
 				threshold/1000, idx+1, len(s.Rows), len(after), actual, baseline, counterfactual, saving,
 			),
 			SavingsUSD: round2(saving),

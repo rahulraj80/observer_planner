@@ -87,7 +87,7 @@ func TestExecuteTierCSP(t *testing.T) {
 func TestCSPCoversEmbeddedInlineScripts(t *testing.T) {
 	idx := webapp.IndexHTML()
 	if len(idx) == 0 {
-		t.Skip("embedded index.html unavailable (broken embed) — nothing to cover")
+		t.Skip("embedded index.html unavailable (broken embed) - nothing to cover")
 	}
 	hashes := inlineScriptHashes(idx)
 	// The current build ships exactly one inline block (theme pre-paint). Guard

@@ -1,13 +1,14 @@
 package proxyroute
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/marmutapp/superbased-observer/internal/cfgfmt"
+	"github.com/marmutapp/superbased-observer/internal/credfile"
 )
 
 // openAICompatProxyURL is the OpenAI-compatible base URL the probe-route
@@ -31,99 +32,78 @@ func resolveKimiCodeConfigPath(homeDir string) string {
 // RegisterKimiCode points kimi-code's OpenAI-compatible provider at the
 // observer proxy by ADDITIVELY writing `base_url` under [providers.openai]
 // in ~/.kimi-code/config.toml. kimi-code carries NO base_url key today, so
-// the common path is a pure add — it NEVER touches the provider's api_key,
+// the common path is a pure add: it NEVER touches the provider's api_key,
 // the [models.*] blocks, [thinking], or any other key.
 //
 // Guard semantics:
-//   - config file absent   → ConfigMissing (benign skip; kimi-code not set up)
-//   - no [providers.openai] → Error (nothing to route)
-//   - base_url absent       → add it (Added)
-//   - base_url already a loopback/observer URL → AlreadySet (idempotent; a
+//   - config file absent   -> ConfigMissing (benign skip; kimi-code not set up)
+//   - no [providers.openai] -> Error (nothing to route)
+//   - base_url absent       -> add it (Added)
+//   - base_url already a loopback/observer URL -> AlreadySet (idempotent; a
 //     different local port is left untouched, not clobbered)
-//   - base_url points elsewhere → Error (refuse to overwrite a foreign URL)
+//   - base_url points elsewhere -> Error (refuse to overwrite a foreign URL)
 //
-// Backs the file up to config.toml.bak before the (additive) write, mirroring
-// the codex + hermes writers' .bak discipline, then writes via temp+rename.
+// config.toml holds the provider's api_key, so the write follows the
+// probe-writer credential-file discipline (probe_write.go, T-657): one line
+// added through cfgfmt, no re-serialization, no backup copy, mode kept, a
+// symlinked or inline-table layout refused, and no error quotes the file.
 func (r *Registrar) RegisterKimiCode() RegistrationResult {
+	return r.note(r.writeKimiCode(), openAICompatProxyURL(r.opts.ProxyPort))
+}
+
+// writeKimiCode is RegisterKimiCode without the provenance record.
+func (r *Registrar) writeKimiCode() RegistrationResult {
+	const what = "proxyroute.kimicode"
 	path := resolveKimiCodeConfigPath(r.opts.HomeDir)
 	want := openAICompatProxyURL(r.opts.ProxyPort)
 	res := RegistrationResult{Tool: "kimi-code", ConfigPath: path, BaseURL: want, DryRun: r.opts.DryRun}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			res.ConfigMissing = true
-			return res
-		}
-		res.Error = fmt.Errorf("proxyroute.kimicode: read: %w", err)
-		return res
-	}
-	root := map[string]any{}
-	if len(raw) > 0 {
-		if err := toml.Unmarshal(raw, &root); err != nil {
-			res.Error = fmt.Errorf("proxyroute.kimicode: parse %s: %w", path, err)
-			return res
-		}
-	}
-
-	providers, _ := root["providers"].(map[string]any)
-	if providers == nil {
-		res.Error = fmt.Errorf("proxyroute.kimicode: %s has no [providers.openai] to route", path)
-		return res
-	}
-	openai, _ := providers["openai"].(map[string]any)
-	if openai == nil {
-		res.Error = fmt.Errorf("proxyroute.kimicode: %s has no [providers.openai] to route", path)
-		return res
-	}
-
-	if prior, _ := openai["base_url"].(string); strings.TrimSpace(prior) != "" {
-		res.PriorBaseURL = prior
-		switch {
-		case prior == want:
-			res.AlreadySet = true
-			res.BaseURL = prior
-			return res
-		case IsObserverBaseURL(prior):
-			// Another local observer install (maybe a different port).
-			// Leave it — don't clobber a working loopback route.
-			res.AlreadySet = true
-			res.BaseURL = prior
-			return res
-		default:
-			res.Error = fmt.Errorf(
-				"proxyroute.kimicode: [providers.openai].base_url already set to %q; refusing to overwrite a non-observer URL", prior,
-			)
-			return res
-		}
-	}
-
-	if r.opts.DryRun {
-		res.Added = true
-		return res
-	}
-	if err := os.WriteFile(path+".bak", raw, 0o600); err != nil {
-		res.Error = fmt.Errorf("proxyroute.kimicode: backup: %w", err)
-		return res
-	}
-	openai["base_url"] = want
-	providers["openai"] = openai
-	root["providers"] = providers
-
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(root); err != nil {
-		res.Error = fmt.Errorf("proxyroute.kimicode: encode: %w", err)
-		return res
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
-		res.Error = fmt.Errorf("proxyroute.kimicode: write: %w", err)
-		return res
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		res.Error = fmt.Errorf("proxyroute.kimicode: rename: %w", err)
-		return res
-	}
-	res.Added = true
+	res.AlreadySet, res.Added, res.Error = r.addProbeBaseURL(what, cfgfmt.FormatTOML, path, kimiBaseURLPath, want, &res)
 	return res
+}
+
+// addProbeBaseURL is the shared add-only writer for kimi-code and crush: it
+// adds base_url under providers.openai when absent. It sets
+// res.ConfigMissing / res.BaseURL / res.PriorBaseURL as it decides and
+// returns (alreadySet, added, err).
+func (r *Registrar) addProbeBaseURL(what string, f cfgfmt.Format, path string, key cfgfmt.Path, want string, res *RegistrationResult) (bool, bool, error) {
+	raw, err := readOwnedRouteFile(what, path)
+	if errors.Is(err, errRouteFileMissing) {
+		res.ConfigMissing = true
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	doc, err := parseOwnedRouteFile(what, f, path, raw)
+	if err != nil {
+		return false, false, err
+	}
+	table := key[:len(key)-1]
+	if _, ok := getTable(doc, table); !ok {
+		return false, false, credfile.SafeErrorf("%s: %s has no %s to route", what, path, table)
+	}
+	prior, present, err := routeStringAt(what, path, doc, key)
+	if err != nil {
+		return false, false, err
+	}
+	if present && prior != "" {
+		if prior == want || IsObserverBaseURL(prior) {
+			// This proxy, or another local observer install (maybe a
+			// different port): leave a working loopback route alone. The
+			// value is Observer's own loopback URL, never a credential.
+			res.PriorBaseURL, res.BaseURL = prior, prior
+			return true, false, nil
+		}
+		return false, false, foreignRouteError(what, path, key)
+	}
+	if r.opts.DryRun {
+		return false, true, nil
+	}
+	if err := doc.Set(key, want); err != nil {
+		return false, false, routeEditError(what, path, key, err)
+	}
+	if err := commitRouteDoc(what, path, doc); err != nil {
+		return false, false, err
+	}
+	return false, true, nil
 }

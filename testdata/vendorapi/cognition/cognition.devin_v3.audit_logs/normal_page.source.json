@@ -1,0 +1,39 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "end_cursor": "VerifiedOfficial",
+    "has_next_page": "VerifiedOfficial",
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].action": "VerifiedOfficial",
+    "items[].audit_log_id": "VerifiedOfficial",
+    "items[].created_at": "Inferred",
+    "items[].data": "VerifiedOfficial",
+    "items[].org_id": "VerifiedOfficial",
+    "items[].service_user_id": "VerifiedOfficial",
+    "items[].service_user_name": "VerifiedOfficial",
+    "items[].user_email": "VerifiedOfficial",
+    "items[].user_id": "VerifiedOfficial"
+  },
+  "fixture_sha256": "b2cdcb3d12c34ae48a86ca472f781b044b2ef6fc472e77def9a54b6b292a17f1",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/audit-logs",
+    "query": {
+      "order": "asc",
+      "first": "200",
+      "time_after": "1791187200",
+      "time_before": "1791273600"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from PaginatedResponse[AuditLogResponse] / AuditLogResponse; actions from the AuditLogAction enum. data is an open object (additionalProperties) and is left empty: its members are not documented. created_at is an integer in the schema; Unix seconds is Inferred.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.audit_logs"
+}

@@ -32,6 +32,13 @@ const (
 // first item's `path:`) and mistaking a group id for a page id.
 var navItemRe = regexp.MustCompile(`\{\s*id:\s*"([a-z0-9-]+)"[^{}]*path:\s*"`)
 
+// namedNavItemRe matches a nav item declared on its own as a typed constant
+// (`const costNavItem: NavItem = { id: "cost", get label() {...}, path: ...}`)
+// and referenced from NAV_GROUPS by name: its getters contain braces, so
+// navItemRe's [^{}]* cannot span it. The `: NavItem` annotation is what makes
+// it an item, never a group.
+var namedNavItemRe = regexp.MustCompile(`const\s+\w+\s*:\s*NavItem\s*=\s*\{\s*id:\s*"([a-z0-9-]+)"`)
+
 // settingsIDRe matches the `id: "x",` line of a SectionDef inside the
 // SECTIONS array literal.
 var settingsIDRe = regexp.MustCompile(`^\s*id:\s*"([a-z0-9-]+)",\s*$`)
@@ -39,8 +46,10 @@ var settingsIDRe = regexp.MustCompile(`^\s*id:\s*"([a-z0-9-]+)",\s*$`)
 func TestNavSectionIDsMatchNavTS(t *testing.T) {
 	raw := readSPASource(t, navSourceRel)
 	var got []string
-	for _, m := range navItemRe.FindAllStringSubmatch(raw, -1) {
-		got = append(got, m[1])
+	for _, re := range []*regexp.Regexp{navItemRe, namedNavItemRe} {
+		for _, m := range re.FindAllStringSubmatch(raw, -1) {
+			got = append(got, m[1])
+		}
 	}
 	if len(got) == 0 {
 		t.Fatalf("parsed no nav item ids out of %s — the SPA file's shape changed and this test's regex needs updating BEFORE the vocabulary can be trusted", navSourceRel)
@@ -115,6 +124,32 @@ func assertSameSet(t *testing.T, name string, have, want []string, source string
 	for _, id := range have {
 		if !wantSet[id] {
 			t.Errorf("%s contains %q, which %s no longer declares. Remove it from internal/policyfam/nodegov/vocab.go — a stale id lets an admin publish a directive no node can ever apply.", name, id, source)
+		}
+	}
+}
+
+// TestIndividualUnhideableSettingsAreKnownAndConditional pins T-379: every
+// individual-only floor id is a known Settings section, is NOT in the static
+// floor (an org body naming it stays valid for managed nodes), and is exempt
+// only when the node is not managed.
+func TestIndividualUnhideableSettingsAreKnownAndConditional(t *testing.T) {
+	if len(IndividualUnhideableSettingsSectionIDs) == 0 {
+		t.Fatal("the individual floor is empty")
+	}
+	for _, id := range IndividualUnhideableSettingsSectionIDs {
+		if !IsSettingsSection(id) {
+			t.Errorf("%q is not a Settings section", id)
+		}
+		if IsUnhideableSettingsSection(id) {
+			t.Errorf("%q is in the static floor; it must stay hideable on managed nodes", id)
+		}
+		if !IsUnhideableSettingsSectionOn(id, false) || IsUnhideableSettingsSectionOn(id, true) {
+			t.Errorf("%q: individual exempt=%v, managed exempt=%v", id, IsUnhideableSettingsSectionOn(id, false), IsUnhideableSettingsSectionOn(id, true))
+		}
+	}
+	for _, id := range UnhideableSettingsSectionIDs {
+		if !IsUnhideableSettingsSectionOn(id, true) || !IsUnhideableSettingsSectionOn(id, false) {
+			t.Errorf("static floor id %q must be exempt on every node", id)
 		}
 	}
 }

@@ -175,7 +175,7 @@ func (r Report) Print(w io.Writer) {
 		if f.Passed() {
 			verdict = "PASS"
 		}
-		fmt.Fprintf(w, "[%s] fixture %s — %s\n", verdict, f.Fixture, f.Purpose)
+		fmt.Fprintf(w, "[%s] fixture %s - %s\n", verdict, f.Fixture, f.Purpose)
 		for _, s := range f.Steps {
 			line := fmt.Sprintf("    %-6s %-24s", s.Status, s.Step)
 			if s.Detail != "" {
@@ -191,10 +191,10 @@ func (r Report) Print(w io.Writer) {
 		fmt.Fprintf(w, "audit: NOT recorded (%s)\n", r.AuditDetail)
 	}
 	if r.Passed() {
-		fmt.Fprintln(w, "result: PASS — every fixture completed the full pipeline")
+		fmt.Fprintln(w, "result: PASS - every fixture completed the full pipeline")
 		return
 	}
-	fmt.Fprintln(w, "result: FAIL — at least one fixture did not complete the pipeline")
+	fmt.Fprintln(w, "result: FAIL - at least one fixture did not complete the pipeline")
 }
 
 // AuditEventType is the security_audit_events event_type this lane writes.
@@ -204,7 +204,7 @@ const AuditEventType = "prove_run"
 // It is deliberately distinct from any worker error: the fix is to set the
 // prove-lane variable, never to reach for the production worker's key.
 var ErrNoProveCredential = errors.New(
-	"prove: no prove-lane Foundry credential supplied — set SBCI_PROVE_FOUNDRY_API_KEY " +
+	"prove: no prove-lane Foundry credential supplied - set SBCI_PROVE_FOUNDRY_API_KEY " +
 		"(this lane NEVER reads SBCI_FOUNDRY_API_KEY: the production worker's credential-absence boundary is untouched)",
 )
 
@@ -223,13 +223,13 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		return Report{}, ErrNoProveCredential
 	}
 	if strings.TrimSpace(opts.RouteID) == "" {
-		return Report{}, errors.New("prove: no route selected — set SBCI_PROVE_ROUTE (or --route) to the non-production route id to prove against")
+		return Report{}, errors.New("prove: no route selected - set SBCI_PROVE_ROUTE (or --route) to the non-production route id to prove against")
 	}
 	if opts.Control == nil {
 		return Report{}, errors.New("prove: no control-plane reader configured")
 	}
 	if opts.Attestor == nil {
-		return Report{}, errors.New("prove: no attestor configured — an unattested provider call is never allowed (fail closed)")
+		return Report{}, errors.New("prove: no attestor configured - an unattested provider call is never allowed (fail closed)")
 	}
 	if opts.Provider == nil {
 		return Report{}, errors.New("prove: no Foundry provider configured")
@@ -337,7 +337,7 @@ func runFixture(ctx context.Context, opts Options, f Fixture, now func() time.Ti
 	// may keep sharing the provider_attestations cache (see doc.go).
 	if route.Environment != store.RouteEnvironmentNonProduction {
 		fx.fail(StepRoute,
-			"route %q has route_registry.environment=%q — the proving lane accepts only %q. "+
+			"route %q has route_registry.environment=%q - the proving lane accepts only %q. "+
 				"Provision a separate non-production route and classify it; the lane never proves against a route the worker serves",
 			route.RouteID, route.Environment, store.RouteEnvironmentNonProduction)
 		return fx.report, fx.dialect
@@ -384,7 +384,7 @@ func runFixture(ctx context.Context, opts Options, f Fixture, now func() time.Ti
 	res, err := opts.Provider.Complete(ctx, jobs.BuildLunaRequest(route, opts.FoundryAPIKey, prompt))
 	if err != nil {
 		if errors.Is(err, foundry.ErrPersistenceViolation) {
-			fx.fail(StepProvider, "PERSISTENCE VIOLATION — the endpoint indicated it stored the prompt/completion despite store:false")
+			fx.fail(StepProvider, "PERSISTENCE VIOLATION - the endpoint indicated it stored the prompt/completion despite store:false")
 		} else {
 			fx.fail(StepProvider, "provider error: %v", err)
 		}

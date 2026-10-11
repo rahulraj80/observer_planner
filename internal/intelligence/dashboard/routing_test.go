@@ -1,13 +1,18 @@
+//go:build !sbo_omit_proxy_routing
+
 package dashboard
 
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -235,5 +240,93 @@ func TestAPIRoutingSimulate(t *testing.T) {
 	s.Handler().ServeHTTP(getRec, req)
 	if getRec.Code != 405 {
 		t.Errorf("GET simulate = %d, want 405", getRec.Code)
+	}
+}
+
+// TestAPIRoutingHonoursToolAndProjectFilters (T-521): the global Tool and
+// Project filters narrow the decision feed, savings, shadow grading and the
+// health board, exactly like the Model filter. One row per (endpoint, scope).
+func TestAPIRoutingHonoursToolAndProjectFilters(t *testing.T) {
+	t.Parallel()
+	s, root := newTestServer(t)
+	st := store.New(s.opts.DB)
+	ctx := context.Background()
+	other := t.TempDir()
+	now := time.Now().UTC().Add(-10 * time.Minute)
+	// sA (newTestServer): claude-code under root. sX: codex under other.
+	if _, err := st.Ingest(ctx, []models.ToolEvent{{
+		SourceFile: "f", SourceEventID: "x1", SessionID: "sX", ProjectRoot: other, Timestamp: now,
+		Tool: models.ToolCodex, ActionType: models.ActionReadFile, Target: "x.go", Success: true,
+	}}, nil, store.IngestOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InsertRouterDecisions(ctx, []store.RouterDecisionRow{
+		{
+			SessionID: "sA", Timestamp: now, Mode: "advise", Channel: "B",
+			OriginalModel: "claude-opus-4-8", SelectedModel: "claude-haiku-4-5",
+			TurnKind: "read_only", PolicyName: "value", PolicyHash: "h",
+			ReasonCodes: []string{"overpowered_read"}, EstSavingsUSD: 0.4, EstimateVersion: "p1-v1",
+		},
+		{
+			SessionID: "sX", Timestamp: now, Mode: "advise", Channel: "B",
+			OriginalModel: "gpt-5.1", SelectedModel: "gpt-5.1-mini",
+			TurnKind: "read_only", PolicyName: "value", PolicyHash: "h",
+			ReasonCodes: []string{"overpowered_read"}, EstSavingsUSD: 0.1, EstimateVersion: "p1-v1",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, turn := range []models.APITurn{
+		{SessionID: "sA", Provider: models.ProviderAnthropic, Model: "claude-opus-4-8", InputTokens: 10, OutputTokens: 1, Timestamp: now},
+		{SessionID: "sX", Provider: models.ProviderOpenAI, Model: "gpt-5.1", InputTokens: 10, OutputTokens: 1, Timestamp: now},
+	} {
+		if _, err := st.InsertAPITurn(ctx, turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scopes := []struct {
+		name, q   string
+		decisions int
+		wouldHave float64
+		healthMdl string // the one model the health board may list ("" = both)
+	}{
+		{"all", "", 2, 0.5, ""},
+		{"tool claude-code", "&tool=claude-code", 1, 0.4, "claude-opus-4-8"},
+		{"tool codex", "&tool=codex", 1, 0.1, "gpt-5.1"},
+		{"project other", "&project=" + url.QueryEscape(other), 1, 0.1, "gpt-5.1"},
+		{"project root + tool codex", "&project=" + url.QueryEscape(root) + "&tool=codex", 0, 0, "none"},
+	}
+	for _, sc := range scopes {
+		dec := getRoutingJSON(t, s, "/api/routing/decisions?days=7"+sc.q)
+		if got := len(dec["decisions"].([]any)); got != sc.decisions {
+			t.Errorf("%s: decisions = %d, want %d", sc.name, got, sc.decisions)
+		}
+		sav := getRoutingJSON(t, s, "/api/routing/savings?days=7"+sc.q)
+		if got := sav["would_have_usd"].(float64); math.Abs(got-sc.wouldHave) > 1e-9 {
+			t.Errorf("%s: would_have_usd = %v, want %v", sc.name, got, sc.wouldHave)
+		}
+		sh := getRoutingJSON(t, s, "/api/routing/shadow?days=7"+sc.q)
+		if got := int(sh["advise_decisions"].(float64)); got != sc.decisions {
+			t.Errorf("%s: shadow graded %d decisions, want %d", sc.name, got, sc.decisions)
+		}
+		h := getRoutingJSON(t, s, "/api/routing/health?x=1"+sc.q)
+		var names []string
+		for _, m := range h["models"].([]any) {
+			names = append(names, m.(map[string]any)["model"].(string))
+		}
+		switch sc.healthMdl {
+		case "":
+			if len(names) < 2 {
+				t.Errorf("%s: health models = %v, want both", sc.name, names)
+			}
+		case "none":
+			if len(names) != 0 {
+				t.Errorf("%s: health models = %v, want none", sc.name, names)
+			}
+		default:
+			if len(names) != 1 || names[0] != sc.healthMdl {
+				t.Errorf("%s: health models = %v, want [%s]", sc.name, names, sc.healthMdl)
+			}
+		}
 	}
 }

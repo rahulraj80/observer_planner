@@ -1,0 +1,31 @@
+{
+  "teamMemberSpend": [
+    {
+      "userId": "user_PDSPmvukpYgZEDXsoNirw3CFhy",
+      "spendCents": 2450.125487,
+      "overallSpendCents": 2450.125487,
+      "fastPremiumRequests": 1250,
+      "name": "Alex",
+      "email": "developer@company.com",
+      "role": "member",
+      "hardLimitOverrideDollars": 100,
+      "monthlyLimitDollars": 200,
+      "effectivePerUserLimitDollars": 100
+    },
+    {
+      "userId": "user_kljUvI0ASZORvSEXf9hV0ydcso",
+      "spendCents": 1875.500123,
+      "overallSpendCents": 3200.750456,
+      "fastPremiumRequests": 980,
+      "name": "Sam",
+      "email": "admin@company.com",
+      "role": "owner",
+      "hardLimitOverrideDollars": 0,
+      "monthlyLimitDollars": null,
+      "effectivePerUserLimitDollars": 50
+    }
+  ],
+  "subscriptionCycleStart": 1708992000000,
+  "totalMembers": 15,
+  "totalPages": 1
+}

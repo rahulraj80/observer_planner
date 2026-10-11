@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs/poll"
+	"github.com/marmutapp/superbased-observer/internal/bootid"
 )
 
 const exitPollInterval = 20 * time.Millisecond
@@ -51,7 +51,7 @@ func Inspect(ctx context.Context, pid int) (Identity, error) {
 		return Identity{}, inspectExecutableError(pid, err)
 	}
 	id := Identity{
-		BootID:     poll.PlatformBootID(),
+		BootID:     bootid.Get(),
 		PID:        pid,
 		StartTicks: startTicks,
 		UID:        uid,

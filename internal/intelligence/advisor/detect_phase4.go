@@ -48,11 +48,12 @@ func detectCrossSessionStaleReads(f *Facts, _ Thresholds) []Suggestion {
 		return nil
 	}
 	return []Suggestion{{
+		// no-bare-usd:allow (advisor prose; masked on every surface under the token display)
 		DedupKey: "wasteful_stale_reads|window", Detector: "wasteful_stale_reads",
 		Category: CategoryCost, Scope: ScopeGlobal, Severity: SeverityAdvice,
 		Title: fmt.Sprintf("%d avoidable re-reads across %d sessions", wasteful, sessions),
 		Nudge: fmt.Sprintf(
-			"%d file re-reads happened while the prior copy was still warm in cache (the scoring engine excludes compaction-forced ones). The MCP freshness tools (check_file_freshness, get_file) exist precisely for this — roughly $%.2f of repeat reading.",
+			"%d file re-reads happened while the prior copy was still warm in cache (the scoring engine excludes compaction-forced ones). The MCP freshness tools (check_file_freshness, get_file) exist precisely for this - roughly $%.2f of repeat reading.",
 			wasteful, c,
 		),
 		SavingsUSD: round2(c), Confidence: 0.6,
@@ -92,7 +93,7 @@ func detectQualityRegression(f *Facts, _ Thresholds) []Suggestion {
 		Category: CategoryQuality, Scope: ScopeGlobal, Severity: SeverityWarning,
 		Title: fmt.Sprintf("Session quality slid from %.2f to %.2f", early, late),
 		Nudge: fmt.Sprintf(
-			"Average session quality dropped from %.2f to %.2f across this window (rising redundancy/error share). Worth checking what changed — model, effort level, or project phase.",
+			"Average session quality dropped from %.2f to %.2f across this window (rising redundancy/error share). Worth checking what changed - model, effort level, or project phase.",
 			early, late,
 		),
 		SavingsMin: 30, Confidence: 0.5,
@@ -119,7 +120,7 @@ func detectWebSearchSpend(f *Facts, _ Thresholds) []Suggestion {
 		Category: CategoryCost, Scope: ScopeGlobal, Severity: SeverityInfo,
 		Title: fmt.Sprintf("%d server-side web searches ($%.2f)", n, usd),
 		Nudge: fmt.Sprintf(
-			"%d web searches ran at the $0.01 flat fee this window ($%.2f). Recurring identical lookups are cacheable — the FTS5 index (search_past_outputs) already holds prior results.",
+			"%d web searches ran at the $0.01 flat fee this window ($%.2f). Recurring identical lookups are cacheable - the FTS5 index (search_past_outputs) already holds prior results.",
 			n, usd,
 		),
 		SavingsUSD: round2(usd * 0.5), Confidence: 0.5,

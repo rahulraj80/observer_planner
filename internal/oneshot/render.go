@@ -119,7 +119,7 @@ func renderEmpty(t Table, opts RenderOptions) string {
 // left, "one-shot · no daemon" right-aligned to the table's overall width
 // (or to a minimum width when the table itself is narrower).
 func writeTitle(b *strings.Builder, t Table, opts RenderOptions) {
-	left := "SuperBased — observed agent spend, " + t.WindowLabel
+	left := "SuperBased - observed agent spend, " + t.WindowLabel
 	const right = "one-shot · no daemon"
 
 	width := tableWidth(t)
@@ -280,11 +280,11 @@ func writeFooter(b *strings.Builder, t Table, opts RenderOptions) {
 	}
 
 	if tier == "proxy" {
-		b.WriteString("reliability: proxy-tier — wire-accurate per-turn tokens captured live via the\n")
+		b.WriteString("reliability: proxy-tier - wire-accurate per-turn tokens captured live via the\n")
 		b.WriteString("  proxy (~ = the tool's own counts are rounded/self-reported). dollars are\n")
 		b.WriteString("  " + PriceBasis + ".\n")
 	} else {
-		b.WriteString("reliability: log-tier — parsed from each tool's own local session files (~ = the tool's\n")
+		b.WriteString("reliability: log-tier - parsed from each tool's own local session files (~ = the tool's\n")
 		b.WriteString("  own counts are rounded/self-reported). dollars are " + PriceBasis + ".\n")
 		b.WriteString("per-turn wire-accurate tokens (net input, 5m/1h cache splits, reasoning) need the proxy:\n")
 		b.WriteString("  observer start\n")
@@ -419,6 +419,7 @@ func formatUSD(v float64) string {
 	if frac < 0 {
 		frac = -frac
 	}
+	// no-bare-usd:allow (one-shot report on a machine with no observer state, so dollars)
 	return "$" + commaInt(whole) + "." + padZero(frac)
 }
 

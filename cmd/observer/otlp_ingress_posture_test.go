@@ -10,10 +10,11 @@ import (
 
 // TestOTLPIngressPostureCheck is the NODE-OTLP-1 doctor-WARN pin: the one
 // posture that must be reported is an OPENED receiver bound non-loopback,
-// because the node has no receiver-token option and that flag also turns off
-// the Host-header guard. Every other combination is OK — including
-// allow_non_loopback set while the receiver is never opened at all, which is
-// inert config, not a live exposure.
+// because that flag exposes the port and turns off the Host-header guard.
+// Since T-475 the node requires the receiver token on that bind, so the WARN
+// must say a token is required and where it lives. Every other combination is
+// OK, including allow_non_loopback set while the receiver is never opened at
+// all, which is inert config, not a live exposure.
 func TestOTLPIngressPostureCheck(t *testing.T) {
 	cfgWith := func(otelEnabled, obsEnabled, allowNonLoopback bool) config.Config {
 		var c config.Config
@@ -47,12 +48,14 @@ func TestOTLPIngressPostureCheck(t *testing.T) {
 				t.Errorf("name = %q, want otlp.ingress", got.Name)
 			}
 			if tc.want == diag.StatusWarn {
-				// The WARN must SAY that nothing authenticates the listener —
-				// a warning that only says "non-loopback" leaves the operator
-				// guessing whether a token is protecting it.
+				// The WARN must SAY how the listener is authenticated: a
+				// warning that only says "non-loopback" leaves the operator
+				// guessing whether a token protects it and where it lives.
 				joined := strings.Join(append([]string{got.Message}, got.Details...), "\n")
-				if !strings.Contains(joined, "no token") && !strings.Contains(joined, "NO authentication") {
-					t.Errorf("warn text never says the listener is unauthenticated:\n%s", joined)
+				for _, want := range []string{"receiver token required", "X-Observer-Edge-Token", "otlp-ingest-token"} {
+					if !strings.Contains(joined, want) {
+						t.Errorf("warn text missing %q:\n%s", want, joined)
+					}
 				}
 			}
 		})

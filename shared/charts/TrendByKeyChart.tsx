@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { ChartTooltip } from "./ChartTooltip";
 import { ChartLegend } from "./ChartLegend";
-import { fmtUSD } from "../lib/format";
+import { dollarsShown, fmtCompact, fmtUSD } from "../lib/format";
 import type { Granularity } from "../lib/granularity";
 import type { AnalysisTrendPoint } from "../lib/types";
 import { bucketTooltipLabel, categoryAxis, CHART_AXIS, CHART_GRID, type GridPoint } from "./common";
@@ -52,6 +52,16 @@ const LEGEND_LABEL_BY_MODE: Partial<Record<ColorMode, (name: string) => ReactNod
   model: modelLegendLabel,
 };
 
+// The stacked quantity: spend normally, the token volume behind it in the
+// org's token-usage view (format.ts cost affordances). Read at render time,
+// after the display mode is set.
+type Metric = { value: (p: AnalysisTrendPoint) => number; fmt: (n: number) => string };
+function trendMetric(): Metric {
+  return dollarsShown()
+    ? { value: (p) => p.cost_usd || 0, fmt: (n) => fmtUSD(n) }
+    : { value: (p) => p.total_tokens || 0, fmt: (n) => fmtCompact(n) };
+}
+
 export const TrendByKeyChart = memo(function TrendByKeyChart({
   data,
   colorMode = "model",
@@ -69,8 +79,10 @@ export const TrendByKeyChart = memo(function TrendByKeyChart({
   /** The response `grid` (every bucket of the window) for zero-fill. */
   grid?: readonly GridPoint[];
 }) {
+  const metric = trendMetric();
   const { rows, keys, colorFor } = useMemo(
-    () => flatten(data, topN, colorMode, grid),
+    () => flatten(data, topN, colorMode, metric.value, grid),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the metric only changes with the boot-time display mode
     [data, topN, colorMode, grid],
   );
 
@@ -85,13 +97,13 @@ export const TrendByKeyChart = memo(function TrendByKeyChart({
         />
         <CartesianGrid {...CHART_GRID} />
         <XAxis {...CHART_AXIS} {...categoryAxis(rows, granularity)} />
-        <YAxis {...CHART_AXIS} tickFormatter={(v) => fmtUSD(Number(v))} />
+        <YAxis {...CHART_AXIS} tickFormatter={(v) => metric.fmt(Number(v))} />
         <Tooltip
           content={
             <ChartTooltip
               labelKey="bucket"
               labelFormatter={bucketTooltipLabel(granularity)}
-              formatItem={(name, value) => `${name}: ${fmtUSD(value)}`}
+              formatItem={(name, value) => `${name}: ${metric.fmt(value)}`}
             />
           }
           cursor={{ fill: "var(--bg-4)", opacity: 0.4 }}
@@ -116,11 +128,12 @@ function flatten(
   data: AnalysisTrendPoint[],
   topN: number,
   mode: ColorMode,
+  valueOf: (p: AnalysisTrendPoint) => number,
   grid?: readonly GridPoint[],
 ) {
   const total: Record<string, number> = {};
   for (const p of data) {
-    total[p.key] = (total[p.key] ?? 0) + (p.cost_usd || 0);
+    total[p.key] = (total[p.key] ?? 0) + valueOf(p);
   }
   const ranked = Object.entries(total)
     .sort((a, b) => b[1] - a[1])
@@ -135,7 +148,7 @@ function flatten(
   for (const p of data) {
     const row = byBucket.get(p.bucket) ?? { bucket: p.bucket, t: p.t ?? 0 };
     const key = collapse(p.key);
-    row[key] = (Number(row[key]) || 0) + (p.cost_usd || 0);
+    row[key] = (Number(row[key]) || 0) + valueOf(p);
     byBucket.set(p.bucket, row);
   }
   const rows = [...byBucket.values()].sort((a, b) =>

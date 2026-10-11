@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -80,7 +82,7 @@ func TestDenyAuditDistinguishesMissingFromRejectedCookie(t *testing.T) {
 				t.Errorf("audit detail = %q, want it to contain %q", last.Detail, tc.want)
 			}
 			if strings.Contains(last.Detail, tc.notWant) {
-				t.Errorf("audit detail = %q must NOT contain %q — the two cases have opposite fixes",
+				t.Errorf("audit detail = %q must NOT contain %q - the two cases have opposite fixes",
 					last.Detail, tc.notWant)
 			}
 			// The required capability must survive alongside the new reason;

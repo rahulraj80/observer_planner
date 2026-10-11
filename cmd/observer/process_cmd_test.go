@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -42,7 +44,7 @@ func TestRenderProcessTree(t *testing.T) {
 	out := b.String()
 
 	for _, want := range []string{
-		"session sess-1 — 3 process runs",
+		"session sess-1 - 3 process runs",
 		"claude (pid 100) · bridge/high · exit 0 (12.3s)",
 		"bash (pid 200) · inherited/high",
 		"↳ npm test (turn 4)", // the spawning command surfaces on the tree

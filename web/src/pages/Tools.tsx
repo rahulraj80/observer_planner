@@ -39,12 +39,13 @@ import { navIcon } from "@/lib/nav";
 import { MetricIcon } from "@/components/MetricIcon";
 
 export function ToolsPage() {
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   // Chart bucket: the shared granularity rule + the viewer's `gran=`.
   const gran = useGranularity();
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
 
   // The KPI row's query carries its filters in the PATH, not in useApi's
   // `params`. That is deliberate and load-bearing.
@@ -79,13 +80,13 @@ export function ToolsPage() {
   const tools = useApi<ToolsResponse>(toolsPath);
   const breakdown = useApi<ToolsBreakdownResponse>(
     "/api/tools/breakdown",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const ts = useApi<ActionsTimeseries>(
     "/api/timeseries/actions",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   const tsGran = asGranularity(ts.data?.bucket ?? gran.expected);
 

@@ -1,0 +1,50 @@
+{
+  "events": [
+    {
+      "event_id": "c2d4e6f8-1a3b-4c5d-8e9f-0a1b2c3d4e5f",
+      "timestamp": "2026-09-14T09:02:11.000Z",
+      "team_id": "",
+      "ip_address": "203.0.113.42",
+      "user_email": "admin@company.com",
+      "event_type": "organization_group",
+      "application_type": "cursor",
+      "event_data": {
+        "action": "create",
+        "organization_group_id": "grp_7Hq2mKp9vRt4xLw1",
+        "organization_group_name": "Platform Engineering"
+      }
+    },
+    {
+      "event_id": "8a1f0f0e-0d1b-4c7e-9b3a-2f6e1c9d4a55",
+      "timestamp": "2026-09-14T18:30:45.123Z",
+      "team_id": "12345",
+      "ip_address": "203.0.113.42",
+      "user_email": "alice@company.com",
+      "event_type": "add_user",
+      "application_type": "cursor",
+      "event_data": {
+        "user_email": "bob@company.com",
+        "role": "member",
+        "source": "domain_join",
+        "team_id": "12345",
+        "invited_by_email": "",
+        "invited_by_user_id": "0",
+        "invite_id": ""
+      }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "pageSize": 100,
+    "totalCount": 2,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  },
+  "params": {
+    "organizationId": "org_abc123",
+    "startDate": 1757232131000,
+    "endDate": 1757836931000,
+    "eventTypes": "organization_group,add_user"
+  }
+}

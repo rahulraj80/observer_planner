@@ -9,6 +9,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/govern"
+	"github.com/marmutapp/superbased-observer/internal/grantverify"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 )
 
@@ -24,8 +26,11 @@ import (
 //
 // internal/diag deliberately depends on neither internal/store nor
 // internal/orgclient (the "keep diag standalone" discipline set by
-// checkOrgEnrolment), so both rows are read with one raw SELECT each and the
-// key-material row's path suffix is duplicated as a literal below.
+// checkOrgEnrolment), so the rows are read with one raw SELECT each and the
+// key-material row's path suffix is duplicated as a literal below. The
+// VERIFICATION is not duplicated: it is internal/grantverify.Verify, the pure
+// verifier the daemon also calls (Sol A3-03 class: a second, stricter copy
+// here reported every managed token-rail grant as altered).
 
 // grantIntegrity is doctor's tri-state, mirroring govern.GrantIntegrity. It
 // is a local copy for the same reason the SQL is local: diag does not import
@@ -43,6 +48,19 @@ const (
 // path convention, duplicated rather than imported to keep diag standalone
 // (the api/policystate.go policyStateDirectiveClasses precedent).
 const orgKeyMaterialSuffix = "#policy-key-material"
+
+// decodeInitialComponentSet reads the nullable initial_components_json
+// column through the same codec store uses (orgcontract
+// DecodeStoredInitialComponents; diag stays standalone of internal/store):
+// NULL is no set, a corrupt value is an empty set, which then fails
+// verification loudly rather than passing as "none". A kept set comes back
+// with the earlier grant document that signed it (MODPKG-17 (1)).
+func decodeInitialComponentSet(v sql.NullString) (*orgcontract.InitialComponentSet, *orgcontract.StoredGrantDocument) {
+	if !v.Valid {
+		return nil, nil
+	}
+	return orgcontract.DecodeStoredInitialComponents(v.String)
+}
 
 // checkStoredGrantIntegrity re-verifies the node's stored grant against the
 // org distribution public key recorded at enrolment.
@@ -77,14 +95,27 @@ func checkStoredGrantIntegrity(ctx context.Context, database *sql.DB) (grantInte
 		return grantIntegrityUnchecked, "grant re-verification: could not read the grant row (" + err.Error() + ")"
 	}
 
+	// The enrolment's tenancy decides which unsigned consent mode the
+	// verifier admits; an absent row or column is the individual default.
+	var tenancy string
+	_ = database.QueryRowContext(ctx, `SELECT tenancy FROM org_enrolment WHERE id = 1`).Scan(&tenancy) //nolint:errcheck // absent = individual, the strict reading
+
 	pub, ok := loadOrgKeyMaterial(ctx, database, orgServerURL)
 	if !ok {
 		return grantIntegrityUnchecked,
-			"grant re-verification: NOT CHECKED — this machine holds no organisation signing key material " +
+			"grant re-verification: NOT CHECKED - this machine holds no organization signing key material " +
 				"(a pre-2026-09-13 enrolment, or a server that delivered no policy key). Re-enrol to record it."
 	}
 
+	// The signed initial component set (agent migration 159) is part of the
+	// enrolment grant's signing message; an absent column (an older
+	// database) or NULL means the grant carried none.
+	var initialJSON sql.NullString
+	_ = database.QueryRowContext(ctx, `SELECT initial_components_json FROM org_enrolment_grant ORDER BY generation DESC LIMIT 1`).Scan(&initialJSON) //nolint:errcheck // absent = none
+	initialSet, initialProof := decodeInitialComponentSet(initialJSON)
 	doc := orgcontract.StoredGrantDocument{
+		InitialComponents:     initialSet,
+		InitialProof:          initialProof,
 		OrgID:                 orgID,
 		OrgServerURL:          orgServerURL,
 		KeyPinSHA256:          keyPin,
@@ -96,14 +127,31 @@ func checkStoredGrantIntegrity(ctx context.Context, database *sql.DB) (grantInte
 		Signature:             signature,
 		ReplacementGeneration: replacementGeneration,
 	}
-	switch verr := orgcontract.VerifyStoredGrant(doc, pub); {
-	case verr == nil:
-		return grantIntegrityValid, "grant re-verification: signature verifies against the organisation key recorded at enrolment"
-	case errors.Is(verr, orgcontract.ErrStoredGrantUncheckable):
-		return grantIntegrityUnchecked, "grant re-verification: NOT CHECKED — no usable organisation key material"
+	switch verdict, evidence := grantverify.Verify(doc, tenancy, pub); verdict {
+	case govern.GrantIntegrityValid:
+		return grantIntegrityValid, "grant re-verification: signature verifies against the organization key recorded at enrolment; " +
+			consentEvidenceDetail(evidence, consentMode, consentActor)
+	case govern.GrantIntegrityUnchecked:
+		return grantIntegrityUnchecked, "grant re-verification: NOT CHECKED, no usable organization key material"
 	default:
 		return grantIntegrityInvalid,
-			"grant re-verification: FAILED — the stored grant is not the document this organisation signed (" + verr.Error() + ")"
+			"grant re-verification: FAILED, the stored grant is not the document this organization signed"
+	}
+}
+
+// consentEvidenceDetail says which recorded consent fields the verifying
+// signature covers (govern.ConsentEvidence), in the grant report's words.
+func consentEvidenceDetail(ev govern.ConsentEvidence, mode, actor string) string {
+	if mode == "" && actor == "" {
+		return "no consent fields are recorded"
+	}
+	switch ev {
+	case govern.ConsentEvidenceModeAndActor:
+		return "consent mode and actor are signed by the organization"
+	case govern.ConsentEvidenceMode:
+		return "consent mode is signed; the actor was recorded on this machine, not signed by the organization"
+	default:
+		return "no consent fields are signed (the mode follows from the enrolment type); the actor was recorded on this machine, not signed by the organization"
 	}
 }
 

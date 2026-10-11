@@ -241,11 +241,25 @@ func directiveClasses() []directiveClass {
 			// carries only notice copy. The notice IS a surface change, so
 			// the base class of the family is never "absent".
 			present: func(nodegov.PolicySpec) bool { return true },
+			// Authorized by dashboard.visibility OR by managed-class consent
+			// (backlog item 4). A managed developer consented to the org
+			// deciding what this machine shows, and the managed default table
+			// already applies on that consent alone (visibility.go); a managed
+			// grant (govern.EnterpriseAuthoritySet) never carried
+			// dashboard.visibility, so without this the org could neither
+			// expose a defaulted page nor hide another one on its own managed
+			// fleet. The individual plane is unchanged: there the token is
+			// still the only key.
+			authorized: func(in resolveInput) bool {
+				return in.authority[AuthorityDashboardVisibility] || ManagedConsent(in.grant.ConsentMode)
+			},
 			apply: func(e *Effective, s nodegov.PolicySpec) {
 				e.HiddenSections = append(e.HiddenSections, s.HiddenSections...)
 				e.ReadOnlySections = append(e.ReadOnlySections, s.ReadOnlySections...)
 				e.HiddenSettings = append(e.HiddenSettings, s.HiddenSettings...)
 				e.ReadOnlySettings = append(e.ReadOnlySettings, s.ReadOnlySettings...)
+				e.VisibleSections = append(e.VisibleSections, s.VisibleSections...)
+				e.VisibleSettings = append(e.VisibleSettings, s.VisibleSettings...)
 			},
 			dropReason: notPreauthorized,
 		},
@@ -365,6 +379,12 @@ func (e *Effective) normalize(grant *Grant) {
 	if e.ReadOnlySettings == nil {
 		e.ReadOnlySettings = []string{}
 	}
+	if e.VisibleSections == nil {
+		e.VisibleSections = []string{}
+	}
+	if e.VisibleSettings == nil {
+		e.VisibleSettings = []string{}
+	}
 	if grant != nil {
 		known, unknown := splitAuthority(grant.Authority)
 		e.Authority = known
@@ -446,6 +466,8 @@ func (e Effective) contentHash() string {
 		{"read_only", e.ReadOnlySections},
 		{"settings_hidden", e.HiddenSettings},
 		{"settings_read_only", e.ReadOnlySettings},
+		{"visible", e.VisibleSections},
+		{"settings_visible", e.VisibleSettings},
 	} {
 		for _, id := range pair.ids {
 			write(pair.label, id)

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -59,12 +61,6 @@ type adminFakeSpawner struct{}
 func (adminFakeSpawner) Spawn(termsession.Spec) (termsession.PTY, error) {
 	return newAdminFakePTY(), nil
 }
-
-// allowAllLaunchPolicy admits any handle — the launch-policy leg of §4.δ (the
-// run was policy-checked at spawn; here we isolate the revoke behaviour).
-type allowAllLaunchPolicy struct{}
-
-func (allowAllLaunchPolicy) Allowed(string) bool { return true }
 
 // realManagerAdapter delegates dashboard.LaunchManager to a REAL
 // termsession.Manager, running the SAME §4.δ authorize → mgr.AcquireWriterRemote
@@ -286,7 +282,7 @@ func (h *adminRevokeHarness) pairAndAcquireWithGrant(t *testing.T) (*websocket.C
 		t.Fatal("adapter captured no remote lease")
 	}
 	if got := h.adapter.lastLease().Holder(); got != fp {
-		t.Fatalf("lease holder %q != device fingerprint %q — the unified fingerprint is broken", got, fp)
+		t.Fatalf("lease holder %q != device fingerprint %q - the unified fingerprint is broken", got, fp)
 	}
 	return c, raw, fp, grantFrame
 }
@@ -296,31 +292,6 @@ func trimHTTP(url string) string {
 		return url[4:]
 	}
 	return url
-}
-
-// readControlFrame reads through geometry/binary frames until the requested
-// control message arrives. It returns the decoded wire frame for field-level
-// assertions (notably the writer-lease generation contract).
-func readControlFrame(t *testing.T, c *websocket.Conn, want string) wsControl {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		typ, data, err := c.Read(ctx)
-		cancel()
-		if err != nil {
-			t.Fatalf("read %s control frame: %v", want, err)
-		}
-		if typ != websocket.MessageText {
-			continue
-		}
-		var ctrl wsControl
-		if json.Unmarshal(data, &ctrl) == nil && ctrl.T == want {
-			return ctrl
-		}
-	}
-	t.Fatalf("timed out waiting for %s control frame", want)
-	return wsControl{}
 }
 
 // assertLeaseDeadAndFenced proves the captured lease was revoked through the
@@ -335,7 +306,7 @@ func (h *adminRevokeHarness) assertLeaseDeadAndFenced(t *testing.T) {
 		t.Fatal("remote writer lease was NOT revoked by the admin transition")
 	}
 	if _, err := l.Write([]byte("stale")); err == nil {
-		t.Fatal("a stale remote Write reached the PTY after revocation — the generation fence failed")
+		t.Fatal("a stale remote Write reached the PTY after revocation - the generation fence failed")
 	}
 }
 
@@ -353,7 +324,7 @@ func assertSocketClosed(t *testing.T, c *websocket.Conn) {
 			return // socket closed / read errored — the bridge tore it down
 		}
 	}
-	t.Fatal("remote websocket stayed OPEN after an admin/device-invalidation kill — it must be closed")
+	t.Fatal("remote websocket stayed OPEN after an admin/device-invalidation kill - it must be closed")
 }
 
 // assertSocketStillOpen proves the socket survives (any lease takeover only
@@ -396,7 +367,7 @@ func assertSocketStillOpen(t *testing.T, c *websocket.Conn, wantBy string) {
 		return // an output frame arrived — the socket is alive
 	}
 	if websocket.CloseStatus(err) != -1 {
-		t.Fatalf("socket was CLOSED on a lease takeover (close status %v) — a takeover must only DEMOTE", websocket.CloseStatus(err))
+		t.Fatalf("socket was CLOSED on a lease takeover (close status %v) - a takeover must only DEMOTE", websocket.CloseStatus(err))
 	}
 	if ctx.Err() == nil {
 		t.Fatalf("unexpected read error on a demoted socket (not a timeout, not a close): %v", err)

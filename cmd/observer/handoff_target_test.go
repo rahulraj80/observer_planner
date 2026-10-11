@@ -3,11 +3,11 @@ package main
 import (
 	"testing"
 
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 func TestResolveTargetModelViaTier(t *testing.T) {
-	table := routing.NewTierResolver().Table()
+	table := routingcore.NewTierResolver().Table()
 	tests := []struct {
 		name        string
 		sourceModel string

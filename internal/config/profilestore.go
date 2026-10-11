@@ -155,7 +155,7 @@ func (ps ProfileStore) ResolveCompression(master CompressionConfig, name string)
 // and errors. Display source for the Settings profile editor.
 func (ps ProfileStore) Read(name string) ([]byte, error) {
 	if name == "" || name == DefaultProfileName {
-		return nil, fmt.Errorf("config: profile %q has no file — it is the master-config passthrough", DefaultProfileName)
+		return nil, fmt.Errorf("config: profile %q has no file - it is the master-config passthrough", DefaultProfileName)
 	}
 	if IsBuiltin(name) {
 		return readRecipe(name)
@@ -271,7 +271,7 @@ func (ps ProfileStore) Delete(name string) error {
 // before — TOML re-marshal has no comment model).
 func (ps ProfileStore) SetKey(name, dotted, value string) error {
 	if IsBuiltin(name) {
-		return fmt.Errorf("config: %q is built-in and immutable — create a copy first: observer profile create my-%s --from %s", name, name, name)
+		return fmt.Errorf("config: %q is built-in and immutable - create a copy first: observer profile create my-%s --from %s", name, name, name)
 	}
 	if err := ps.Validate(name); err != nil {
 		return err

@@ -47,7 +47,7 @@ func newOpenInterpreterCmd() *cobra.Command {
 		Short:   "Launch Open Interpreter; with --continue-from, seed a handover as its positional prompt",
 		Long: "Wraps Open Interpreter (binary `interpreter`), a rebadged OpenAI\n" +
 			"Codex CLI build under ~/.openinterpreter. This launcher is\n" +
-			"NON-PROXIED — unlike `observer codex` it injects NO base-URL\n" +
+			"NON-PROXIED - unlike `observer codex` it injects NO base-URL\n" +
 			"override, because the fork's proxy lane is unprobed. Token capture\n" +
 			"happens via observer's local open-interpreter adapter (the codex\n" +
 			"rollout parser retagged), not the proxy.\n\n" +

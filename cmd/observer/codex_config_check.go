@@ -438,7 +438,7 @@ func codexProviderBypassNotice(roots []string, profile string) string {
 			OpenAIBaseURL:   eff.openaiURL,
 		})
 		if posture.Bypasses() {
-			return "observer codex: note — " + proxyroute.CodexBypassExplanation(posture, eff.provider) +
+			return "observer codex: note - " + proxyroute.CodexBypassExplanation(posture, eff.provider) +
 				" (" + filepath.Join(root, "config.toml") + "). Run `observer doctor codex` for details."
 		}
 	}
@@ -501,7 +501,7 @@ func codexNoProxyRouteConflict(codexHomeRootsList []string, proxyURL, profile st
 	}
 	joined := strings.Join(offenders, ", ")
 	return fmt.Errorf(
-		"observer codex: refusing to launch under --no-proxy-route — %s still routes codex to the observer proxy (%s), either via the top-level openai_base_url key or via model_provider=%q + [model_providers.%s].base_url, and codex 0.130+ reads that file, so it would KEEP routing through the proxy and capture turns you asked not to capture. This was written by `observer codex --write-config` or `observer init` (or hand-edited); remove that routing from %s (or restore its config.toml.bak.* backup) and re-run.",
+		"observer codex: refusing to launch under --no-proxy-route - %s still routes codex to the observer proxy (%s), either via the top-level openai_base_url key or via model_provider=%q + [model_providers.%s].base_url, and codex 0.130+ reads that file, so it would KEEP routing through the proxy and capture turns you asked not to capture. This was written by `observer codex --write-config` or `observer init` (or hand-edited); remove that routing from %s (or restore its config.toml.bak.* backup) and re-run.",
 		joined, primaryAcceptedURL(acceptedProxyBaseURLs(proxyURL)),
 		proxyroute.ProviderName, proxyroute.ProviderName, joined,
 	)

@@ -67,6 +67,14 @@ const (
 type parseState struct {
 	depth  int
 	budget *int
+	// cur and curPos name the unit sequence (cwdtrack.go) and the step
+	// position the unit being processed occupies, so a Command can later
+	// ask which working directories it may run in. A nested payload's
+	// sequence starts from its wrapper's position; curPos -1 means
+	// "anywhere in cur" (a command substitution). nil outside parseDepth
+	// (ParseArgv): such a unit keeps the event's own working directory.
+	cur    *unitSeq
+	curPos int
 }
 
 // newParseState starts a fresh top-level parse.
@@ -77,7 +85,7 @@ func newParseState() parseState {
 
 // deeper returns the state one unwrap level down, sharing the budget.
 func (s parseState) deeper() parseState {
-	return parseState{depth: s.depth + 1, budget: s.budget}
+	return parseState{depth: s.depth + 1, budget: s.budget, cur: s.cur, curPos: s.curPos}
 }
 
 // afford charges n nested units against the shared budget, reporting
@@ -126,6 +134,15 @@ type Command struct {
 	// Raw is the unit's text, reconstructed by joining its words —
 	// original quoting is not preserved (lexer strips it).
 	Raw string
+	// ArgvLiterals runs parallel to Argv: for each word, the byte
+	// offsets of the '$', '%' and '`' characters the lexer read from a
+	// single-quoted or escaped region, i.e. literal text the shell
+	// does not expand (`rm -rf '$x'` names a directory called $x).
+	// The quoting itself is gone from Argv; this is the part of it the
+	// destructive rules need (Sol A2-04). nil, or a length that differs
+	// from Argv (ParseArgv, a synthetic unit), means unknown: every such
+	// character is then treated as a possible expansion.
+	ArgvLiterals [][]int
 	// Dialect the unit was parsed under (payload units inherit the
 	// dialect of their wrapper, e.g. `powershell -Command` payloads
 	// are DialectPowerShell).
@@ -182,6 +199,41 @@ type Command struct {
 	// verdict so an operator can tell a depth limit from an
 	// unparsable wrapper.
 	Unanalyzed string
+
+	// seq and seqPos place the unit in its command line's step sequence
+	// (cwdtrack.go): the directory changes and link creations that run
+	// before it decide where its relative operands point (pass-2 review
+	// M2-01: `cd ~ && rm -rf ./*`). nil for a unit built outside
+	// parseDepth, which keeps the event's own working directory.
+	seq    *unitSeq
+	seqPos int
+	// chdir lists the directories stripped wrappers run this unit in
+	// (`env -C DIR`, `sudo -D DIR`), outermost first; nil when none.
+	chdir []operand
+	// scriptBlock records that a PowerShell script-block argument of this
+	// unit was parsed into nested units (psblock.go). A block runs in the
+	// caller's runspace, so cwdtrack.go treats such a unit like an
+	// evaluator.
+	scriptBlock bool
+	// argvQuotedBraces runs parallel to Argv like ArgvLiterals: the
+	// offsets of the braces the lexer read from a quoted or escaped
+	// region (ptoken.qbr). psblock.go reads it so a brace inside a string
+	// literal never opens or closes a script block (T-525, D-338). nil, or
+	// a length that differs from Argv, means none are known to be quoted.
+	argvQuotedBraces [][]int
+	// inScriptBlock records that the unit was parsed directly from the
+	// body of a PowerShell script block (psblock.go), where `$_` is the
+	// pipeline item the block is handed rather than a variable of the
+	// line (R-101's pipeline-item row).
+	inScriptBlock bool
+	// defIn names every PowerShell function this unit sits in the body of
+	// (innermost first, canonical names); nil outside any definition.
+	defIn []string
+	// uncalledDef is the function whose definition this unit sits in and
+	// which nothing in the command line calls, so the unit only runs if a
+	// later command calls it: every verdict a rule draws from the unit is
+	// capped at ASK (engine.go, D-338). "" when the unit can run.
+	uncalledDef string
 }
 
 // Args returns the unit's argument tokens — everything after the
@@ -278,13 +330,26 @@ func setOf(items ...string) map[string]bool {
 // PowerShell dialect parameter VALUES are intentionally kept ("-Path
 // C:\x" — the value IS the target of interest).
 func (c *Command) Positionals() []string {
+	idx := c.positionalIndexes()
+	if idx == nil {
+		return nil
+	}
+	out := make([]string, len(idx))
+	for k, i := range idx {
+		out[k] = c.Argv[i]
+	}
+	return out
+}
+
+// positionalIndexes is Positionals as Argv indexes.
+func (c *Command) positionalIndexes() []int {
 	vf := valueFlags[c.Base]
-	var out []string
+	var out []int
 	rest := false
 	for i := 1; i < len(c.Argv); i++ {
 		t := c.Argv[i]
 		if rest {
-			out = append(out, t)
+			out = append(out, i)
 			continue
 		}
 		if t == "--" {
@@ -299,7 +364,33 @@ func (c *Command) Positionals() []string {
 			}
 			continue
 		}
-		out = append(out, t)
+		out = append(out, i)
+	}
+	return out
+}
+
+// operand is one positional word with its literal-character offsets
+// (Command.ArgvLiterals; nil when unknown).
+type operand struct {
+	text string
+	lit  []int
+	// item marks the bare pipeline variable of a script block (`$_`,
+	// `$PSItem`) as an operand of a unit inside that block (psblock.go).
+	item bool
+}
+
+// positionalOperands is Positionals with each word's literal offsets.
+func (c *Command) positionalOperands() []operand {
+	idx := c.positionalIndexes()
+	known := len(c.ArgvLiterals) == len(c.Argv)
+	out := make([]operand, 0, len(idx))
+	for _, i := range idx {
+		op := operand{text: c.Argv[i]}
+		if known {
+			op.lit = c.ArgvLiterals[i]
+		}
+		op.item = c.inScriptBlock && isPipelineItem(op.text, op.lit)
+		out = append(out, op)
 	}
 	return out
 }
@@ -351,7 +442,7 @@ func ParseCommand(raw string, dialect Dialect) []Command {
 	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
-	return parseDepth(raw, dialect, newParseState())
+	return settleDefinitions(parseDepth(raw, dialect, newParseState()))
 }
 
 // ParseArgv parses a pre-split argument vector (boundaries that
@@ -383,16 +474,30 @@ func ParseArgv(argv []string, dialect Dialect) []Command {
 	for _, sub := range subs {
 		out = append(out, parseDepth(sub, dialect, st.deeper())...)
 	}
-	return out
+	return settleDefinitions(out)
 }
 
 // unit is one separator-delimited command segment as produced by the
 // lexers, before wrapper stripping and unwrapping.
 type unit struct {
-	words     []string
+	words []string
+	// lits and qbr run parallel to words (ptoken.lit, ptoken.qbr).
+	lits      [][]int
+	qbr       [][]int
 	redirects []string
 	heredoc   string
 	pipeline  bool
+	// sep is the list operator in front of the unit (`;` or start of
+	// line, `&&`, `||`, `|`); opens and closes count the subshell
+	// parentheses between the previous unit and this one. cwdtrack.go
+	// reads them to decide which earlier directory changes this unit
+	// can see.
+	sep           seqSep
+	opens, closes int
+	// hadSub records that a command substitution was stripped out of
+	// this unit's text (stripSubstitutions leaves subMarker in its
+	// place), so a directory change or link it named cannot be resolved.
+	hadSub bool
 }
 
 // parseDepth lexes raw under the dialect's rules and processes each
@@ -442,9 +547,21 @@ type unit struct {
 // The dialects can still differ in WHICH rule fires (R-155 where the
 // substitution is seen below the cap, R-157 where it is only reached at
 // it); the DECISION no longer does.
+//
+// TWO POWERSHELL ESCAPE FACTS, AND ONLY TWO (T-534). The strip above
+// stays dialect-agnostic on purpose (a backtick span is still a
+// substitution under PowerShell, so the line cmd /c ... sh -c
+// echo`crontab -e` keeps its fail-closed DENY even though PowerShell would read those
+// backticks as escapes), with two PowerShell-only readings that can only
+// ADD analysis or remove a brace's code reading (stripSubstitutionsFor,
+// psEscape): an escaped brace ("`{", "`}") is a literal brace, copied
+// through so the lexer marks it quoted and never opens a block on it
+// (`Write-Output `{ rm -r ~ `}` is text, like its quoted twin); and a
+// backslash does not escape a dollar, so `"C:\x\$(crontab -e)"` has its
+// subexpression stripped and analysed as PowerShell runs it.
 func parseDepth(raw string, dialect Dialect, st parseState) []Command {
 	orig := raw
-	raw, subs := stripSubstitutions(raw)
+	raw, subs := stripSubstitutionsFor(raw, true, dialect == DialectPowerShell)
 	atLimit := st.depth >= maxUnwrapDepth && len(subs) > 0
 	if atLimit {
 		subs = nil
@@ -452,22 +569,31 @@ func parseDepth(raw string, dialect Dialect, st parseState) []Command {
 	var units []unit
 	switch dialect {
 	case DialectPowerShell:
-		units = buildUnits(lexLine(raw, psLexSpec), nil)
+		units = buildUnits(lexLine(blankPSDefinitionParams(raw), psLexSpec), nil)
 	case DialectCmd:
 		units = buildUnits(lexLine(raw, cmdLexSpec), nil)
 	default:
 		clean, bodies := extractHeredocs(raw)
 		units = buildUnits(lexLine(clean, posixLexSpec), bodies)
 	}
+	seq := &unitSeq{parent: st.cur, parentPos: st.curPos, dialect: dialect}
 	var out []Command
 	for _, u := range units {
-		processUnit(u, dialect, st, &out)
+		ust := st
+		ust.cur, ust.curPos = seq, len(seq.steps)
+		before := len(out)
+		processUnit(u, dialect, ust, &out)
+		seq.add(u, out[before:])
 	}
 	if atLimit {
 		markSubstitutionLimit(orig, dialect, st, &out)
 	}
+	// A substitution runs in a subshell at an unknown point of this
+	// line, so it may see any working directory the line passes through.
+	sst := st.deeper()
+	sst.cur, sst.curPos = seq, -1
 	for _, sub := range subs {
-		out = append(out, parseDepth(sub, dialect, st.deeper())...)
+		out = append(out, parseDepth(sub, dialect, sst)...)
 	}
 	return out
 }
@@ -514,10 +640,11 @@ func markSubstitutionLimit(raw string, dialect Dialect, st parseState, out *[]Co
 // processUnit turns one lexed unit into a Command (plus any nested
 // Commands its payloads unwrap into) and appends them to out.
 func processUnit(u unit, dialect Dialect, st parseState, out *[]Command) {
-	words := stripAssignments(u.words)
+	words := stripLeadingKeywords(u.words, dialect)
 	if len(words) == 0 {
 		return
 	}
+	chdir := wrapperChdir(words, dialect)
 	stripped, wrappers, sudo := stripWrappers(words, dialect)
 	if len(stripped) == 0 {
 		// A bare wrapper ("sudo" with nothing after it) — keep the
@@ -525,21 +652,74 @@ func processUnit(u unit, dialect Dialect, st parseState, out *[]Command) {
 		stripped, wrappers, sudo = words, nil, false
 	}
 	raw := strings.Join(u.words, " ")
+	// stripAssignments and stripWrappers only drop leading words, so the
+	// argv is a suffix of the unit's words and its literal offsets are
+	// the same suffix of u.lits.
+	var argvLits, argvQB [][]int
+	if len(u.lits) == len(u.words) && len(stripped) <= len(u.lits) {
+		argvLits = u.lits[len(u.lits)-len(stripped):]
+	}
+	if len(u.qbr) == len(u.words) && len(stripped) <= len(u.qbr) {
+		argvQB = u.qbr[len(u.qbr)-len(stripped):]
+	}
 	cmd := Command{
-		Base:            canonicalBase(stripped[0], dialect),
-		Argv:            stripped,
-		Raw:             raw,
-		Dialect:         dialect,
-		Depth:           st.depth,
-		Sudo:            sudo,
-		Wrappers:        wrappers,
-		Pipeline:        u.pipeline,
-		RedirectTargets: u.redirects,
-		Heredoc:         u.heredoc,
+		Base:             canonicalBase(stripped[0], dialect),
+		Argv:             stripped,
+		ArgvLiterals:     argvLits,
+		argvQuotedBraces: argvQB,
+		Raw:              raw,
+		Dialect:          dialect,
+		Depth:            st.depth,
+		Sudo:             sudo,
+		Wrappers:         wrappers,
+		Pipeline:         u.pipeline,
+		RedirectTargets:  u.redirects,
+		Heredoc:          u.heredoc,
+		seq:              st.cur,
+		seqPos:           st.curPos,
+		chdir:            chdir,
 	}
 	nested := analyzeNested(&cmd, st)
+	// PowerShell script blocks passed as arguments are code too
+	// (psblock.go, T-388); additive to whatever analyzeNested unwrapped.
+	nested = append(nested, unwrapScriptBlocks(&cmd, st)...)
 	*out = append(*out, cmd)
 	*out = append(*out, nested...)
+}
+
+// leadingKeywords are the reserved words that may stand in COMMAND
+// position in front of the command they introduce, per dialect. Before
+// this table a unit beginning with one of them took the keyword as its
+// Base, so `{ rm -rf /; }`, `if x; then rm -rf /; fi`, `while x; do rm
+// -rf /; done` and `! rm -rf /` matched no rule at all (found while
+// building the pass-2 M2-01 corpus). Only words that are followed by a
+// COMMAND are listed: `for`, `case`, `select` and `function` introduce a
+// name or a word list, and terminators (`fi`, `done`, `esac`, `}`) end a
+// unit without starting one, so neither kind is stripped. The cmd dialect
+// is absent on purpose: its `if` and `for` take conditions and variables
+// before the command, and its parenthesised blocks already split into
+// units at the lexer.
+var leadingKeywords = map[Dialect]map[string]bool{
+	DialectPosix: setOf("{", "!", "if", "then", "elif", "else", "while", "until", "do"),
+	DialectPowerShell: setOf("{", "if", "elseif", "else", "while", "do", "until", "try",
+		"finally", "begin", "process", "end"),
+}
+
+// stripLeadingKeywords drops leading environment assignments and
+// leading reserved words (leadingKeywords) until the unit's real command
+// word is first, in any order (`if FOO=1 rm ...`, `! { rm ...`).
+func stripLeadingKeywords(words []string, dialect Dialect) []string {
+	kw := leadingKeywords[dialect]
+	if dialect == "" {
+		kw = leadingKeywords[DialectPosix]
+	}
+	for {
+		words = stripAssignments(words)
+		if len(words) == 0 || !kw[strings.ToLower(words[0])] {
+			return words
+		}
+		words = words[1:]
+	}
 }
 
 // stripAssignments drops leading VAR=value environment assignments
@@ -713,22 +893,43 @@ var posixShellBases = map[string]bool{
 
 // interpreterSpec describes an interpreter whose one-liner payload is
 // extracted opaquely (never parsed as shell — gap F1: we expose the
-// payload to regex rules, we do not pretend to understand it).
+// payload, we do not pretend to understand it). Since T-317 the
+// inline-script operand extractor (inlinescript.go) reads the same
+// table, so this is the ONE owner of "how does this interpreter take
+// a program on its command line".
 type interpreterSpec struct {
+	// flags are the exact one-liner flags whose value (the next token,
+	// or the "--flag=VALUE" embedded form) is program text.
 	flags []string
+	// cluster lists the short-flag letters that may END a combined
+	// cluster and still take the next token as the program
+	// (`perl -lne`, `ruby -ne`, `python -Ic`).
+	cluster string
+	// sub is a subcommand whose first operand is program text
+	// (`deno eval CODE`).
+	sub string
+	// stdin reports the interpreter runs a program read from standard
+	// input (`python3 - <<EOF`, `echo CODE | node`).
+	stdin bool
 	kind  string
 }
 
-// interpreters maps interpreter bases to their one-liner flags.
+// interpreters maps interpreter bases to their one-liner flags. A
+// versioned base (python3.12, php8.2) resolves through
+// interpreterFor.
 var interpreters = map[string]interpreterSpec{
-	"python":  {flags: []string{"-c"}, kind: "python"},
-	"python2": {flags: []string{"-c"}, kind: "python"},
-	"python3": {flags: []string{"-c"}, kind: "python"},
-	"py":      {flags: []string{"-c"}, kind: "python"},
-	"node":    {flags: []string{"-e", "--eval", "-p", "--print"}, kind: "node"},
-	"nodejs":  {flags: []string{"-e", "--eval", "-p", "--print"}, kind: "node"},
-	"perl":    {flags: []string{"-e", "-E"}, kind: "perl"},
-	"ruby":    {flags: []string{"-e"}, kind: "ruby"},
+	"python":    {flags: []string{"-c"}, cluster: "c", stdin: true, kind: "python"},
+	"python2":   {flags: []string{"-c"}, cluster: "c", stdin: true, kind: "python"},
+	"python3":   {flags: []string{"-c"}, cluster: "c", stdin: true, kind: "python"},
+	"py":        {flags: []string{"-c"}, cluster: "c", stdin: true, kind: "python"},
+	"node":      {flags: []string{"-e", "--eval", "-p", "--print"}, stdin: true, kind: "node"},
+	"nodejs":    {flags: []string{"-e", "--eval", "-p", "--print"}, stdin: true, kind: "node"},
+	"perl":      {flags: []string{"-e", "-E"}, cluster: "eE", stdin: true, kind: "perl"},
+	"ruby":      {flags: []string{"-e"}, cluster: "e", stdin: true, kind: "ruby"},
+	"php":       {flags: []string{"-r"}, stdin: true, kind: "php"},
+	"deno":      {sub: "eval", kind: "deno"},
+	"bun":       {flags: []string{"-e", "--eval", "-p", "--print"}, kind: "bun"},
+	"osascript": {flags: []string{"-e"}, stdin: true, kind: "applescript"},
 }
 
 // analyzeNested inspects a freshly-built Command for nested code:
@@ -781,9 +982,9 @@ func analyzeNested(cmd *Command, st parseState) []Command {
 		}
 		return unwrapPayload(cmd, payload, DialectCmd, "cmd", st)
 	default:
-		if spec, ok := interpreters[cmd.Base]; ok {
-			if p, found := cmd.FlagValue(spec.flags...); found {
-				cmd.Payload, cmd.PayloadKind = p, spec.kind
+		if spec, ok := interpreterFor(cmd.Base); ok {
+			if code := inlineCode(cmd, spec); len(code) > 0 {
+				cmd.Payload, cmd.PayloadKind = strings.Join(code, "\n"), spec.kind
 			}
 		}
 		return nil
@@ -1005,6 +1206,16 @@ func heredocIndex(w string) (int, bool) {
 type ptoken struct {
 	text string
 	op   bool
+	// lit lists the byte offsets in text of the '$', '%' and '`'
+	// characters read from a single-quoted or escaped region (literal,
+	// not an expansion). Command.ArgvLiterals carries it.
+	lit []int
+	// qbr lists the byte offsets in text of the '{' and '}' characters
+	// read from a quoted (single or double) or escaped region: string
+	// text, never a script-block delimiter (psblock.go, T-525). It is a
+	// separate list from lit because a double-quoted '$' still expands
+	// while a double-quoted brace is plain text.
+	qbr []int
 }
 
 // lexSpec parametrizes lexLine per dialect.
@@ -1034,10 +1245,12 @@ var (
 
 // lexLine tokenizes one command line under the dialect spec into
 // words and operator tokens. Operators emitted: ";" (unit separator —
-// also used for newlines, "&", "&&", "||" and unquoted parens), "|"
-// (pipe), ">" (output redirect whose target is the next word), ">fd"
-// (fd-duplication redirect, no target word), "<" (input redirect,
-// target dropped by buildUnits).
+// also used for newlines and "&"), "&&" and "||" (unit separators that
+// carry their list semantics), "(" and ")" (unquoted parens, unit
+// separators), "|" (pipe), ">" (output redirect whose target is the
+// next word), ">fd" (fd-duplication redirect, no target word), "<"
+// (input redirect, target dropped by buildUnits), and the zero-width
+// opSubMark.
 func lexLine(s string, spec lexSpec) []ptoken {
 	lx := &lexer{src: s, spec: spec}
 	lx.run()
@@ -1055,6 +1268,11 @@ type lexer struct {
 	inD   bool
 	digit bool // current word is all digits so far (fd-prefix detection)
 	i     int
+	// lits collects the current word's literal-character offsets
+	// (ptoken.lit).
+	lits []int
+	// qbr collects the current word's quoted-brace offsets (ptoken.qbr).
+	qbr []int
 }
 
 // flush emits the current word (if any) as a token, honoring the
@@ -1064,22 +1282,61 @@ func (lx *lexer) flush() {
 		return
 	}
 	w := lx.cur.String()
+	lits, qbr := lx.lits, lx.qbr
 	lx.cur.Reset()
+	lx.lits, lx.qbr = nil, nil
 	lx.has = false
 	lx.digit = false
 	if lx.spec.stopParse && w == "--%" {
 		// Everything after --% is literal words.
-		for _, f := range strings.Fields(lx.src[lx.i:]) {
+		rest := lx.src[lx.i:]
+		if strings.IndexByte(rest, subMarker) >= 0 {
+			lx.toks = append(lx.toks, ptoken{text: opSubMark, op: true})
+			rest = strings.ReplaceAll(rest, string(rune(subMarker)), "")
+		}
+		for _, f := range strings.Fields(rest) {
 			lx.toks = append(lx.toks, ptoken{text: f})
 		}
 		lx.i = len(lx.src)
 		return
 	}
-	lx.toks = append(lx.toks, ptoken{text: w})
+	lx.toks = append(lx.toks, ptoken{text: w, lit: lits, qbr: qbr})
 }
 
-// write appends one byte to the current word.
+// opSubMark is the zero-width operator token the lexer emits for a
+// subMarker byte. It does NOT flush the current word: buildUnits only
+// sets the current unit's hadSub flag.
+const opSubMark = "\x01sub"
+
+// writeLit appends one byte read from a single-quoted or escaped region,
+// recording an expansion-capable character as literal (ptoken.lit).
+func (lx *lexer) writeLit(c byte) {
+	if c == subMarker {
+		lx.toks = append(lx.toks, ptoken{text: opSubMark, op: true})
+		return
+	}
+	if c == '$' || c == '%' || c == '`' {
+		lx.lits = append(lx.lits, lx.cur.Len())
+	}
+	lx.writeQuoted(c)
+}
+
+// writeQuoted appends one byte read from any quoted or escaped region,
+// recording a brace as string text (ptoken.qbr).
+func (lx *lexer) writeQuoted(c byte) {
+	if c == '{' || c == '}' {
+		lx.qbr = append(lx.qbr, lx.cur.Len())
+	}
+	lx.write(c)
+}
+
+// write appends one byte to the current word (a subMarker becomes the
+// zero-width opSubMark token instead, see writeLit).
 func (lx *lexer) write(c byte) {
+	if c == subMarker {
+		lx.toks = append(lx.toks, ptoken{text: opSubMark, op: true})
+		return
+	}
 	if lx.cur.Len() == 0 {
 		lx.digit = c >= '0' && c <= '9'
 	} else if lx.digit {
@@ -1105,7 +1362,7 @@ func (lx *lexer) run() {
 			if c == '\'' {
 				lx.inS = false
 			} else {
-				lx.write(c)
+				lx.writeLit(c)
 			}
 			lx.i++
 		case lx.inD:
@@ -1118,7 +1375,7 @@ func (lx *lexer) run() {
 			lx.i++
 		case spec.escape != 0 && c == spec.escape:
 			if lx.i+1 < len(s) {
-				lx.write(s[lx.i+1])
+				lx.writeLit(s[lx.i+1])
 				lx.i += 2
 			} else {
 				lx.i++
@@ -1133,7 +1390,7 @@ func (lx *lexer) run() {
 			lx.scanAmp()
 		case c == '|':
 			if lx.i+1 < len(s) && s[lx.i+1] == '|' {
-				lx.op(";")
+				lx.op("||")
 				lx.i += 2
 			} else {
 				lx.op("|")
@@ -1147,14 +1404,16 @@ func (lx *lexer) run() {
 		case c == '(' && lx.cur.Len() == 0:
 			// A subshell/group opener at word start acts as a unit
 			// separator; inside a word ("$(...)"), it is literal
-			// and handled by extractSubstitutions.
-			lx.op(";")
+			// and handled by extractSubstitutions. It is its own
+			// operator so cwdtrack.go can scope a POSIX subshell's
+			// directory changes; buildUnits treats it as a separator.
+			lx.op("(")
 			lx.i++
 		case c == ')' && !strings.Contains(lx.cur.String(), "("):
 			// A closer is a separator unless it closes a
 			// substitution opened within the current word
 			// ("$(pwd)") — then it is literal.
-			lx.op(";")
+			lx.op(")")
 			lx.i++
 		default:
 			lx.write(c)
@@ -1175,12 +1434,12 @@ func (lx *lexer) scanDouble(c byte) {
 	if spec.escape != 0 && c == spec.escape && lx.i+1 < len(s) {
 		n := s[lx.i+1]
 		if spec.dquoteEscapeSet == "" || strings.IndexByte(spec.dquoteEscapeSet, n) >= 0 {
-			lx.write(n)
+			lx.writeLit(n)
 			lx.i += 2
 			return
 		}
 	}
-	lx.write(c)
+	lx.writeQuoted(c)
 	lx.i++
 }
 
@@ -1192,7 +1451,7 @@ func (lx *lexer) scanAmp() {
 	s := lx.src
 	switch {
 	case lx.i+1 < len(s) && s[lx.i+1] == '&':
-		lx.op(";")
+		lx.op("&&")
 		lx.i += 2
 	case lx.i+1 < len(s) && s[lx.i+1] == '>':
 		lx.i += 2
@@ -1211,6 +1470,7 @@ func (lx *lexer) scanRedirect() {
 	if lx.digit && lx.cur.Len() > 0 {
 		// "2>"-style fd prefix: the digits are not a word.
 		lx.cur.Reset()
+		lx.lits, lx.qbr = nil, nil
 		lx.has = false
 		lx.digit = false
 	}
@@ -1237,10 +1497,15 @@ func buildUnits(toks []ptoken, bodies []string) []unit {
 	pipeNext := false
 	redirNext := false
 	dropNext := false
+	// The list operator and parens seen since the last emitted unit
+	// belong to the NEXT unit; a flush that emits nothing keeps them.
+	nextSep, nextOpens, nextCloses := sepSeq, 0, 0
 	flush := func() {
 		if len(cur.words) > 0 || cur.heredoc != "" || len(cur.redirects) > 0 {
 			cur.pipeline = cur.pipeline || pipeNext
+			cur.sep, cur.opens, cur.closes = nextSep, nextOpens, nextCloses
 			units = append(units, cur)
+			nextSep, nextOpens, nextCloses = sepSeq, 0, 0
 		}
 		cur = unit{}
 		redirNext, dropNext = false, false
@@ -1248,13 +1513,25 @@ func buildUnits(toks []ptoken, bodies []string) []unit {
 	for _, t := range toks {
 		if t.op {
 			switch t.text {
-			case ";":
+			case opSubMark:
+				cur.hadSub = true
+			case ";", "&&", "||":
 				flush()
 				pipeNext = false
+				nextSep = listSep(t.text)
+			case "(":
+				flush()
+				pipeNext = false
+				nextOpens++
+			case ")":
+				flush()
+				pipeNext = false
+				nextCloses++
 			case "|":
 				cur.pipeline = true
 				flush()
 				pipeNext = true
+				nextSep = sepPipe
 			case ">":
 				redirNext = true
 			case ">fd":
@@ -1266,7 +1543,12 @@ func buildUnits(toks []ptoken, bodies []string) []unit {
 		}
 		if n, ok := heredocIndex(t.text); ok {
 			if n < len(bodies) {
-				cur.heredoc += bodies[n]
+				body := bodies[n]
+				if strings.IndexByte(body, subMarker) >= 0 {
+					cur.hadSub = true
+					body = strings.ReplaceAll(body, string(rune(subMarker)), "")
+				}
+				cur.heredoc += body
 			}
 			continue
 		}
@@ -1278,6 +1560,8 @@ func buildUnits(toks []ptoken, bodies []string) []unit {
 			dropNext = false // input-redirect source: dropped (no rule consumes it)
 		default:
 			cur.words = append(cur.words, t.text)
+			cur.lits = append(cur.lits, t.lit)
+			cur.qbr = append(cur.qbr, t.qbr)
 		}
 	}
 	flush()
@@ -1292,6 +1576,31 @@ func buildUnits(toks []ptoken, bodies []string) []unit {
 // the substituted-away value itself is statically unknowable, so the
 // cleaned line simply omits it.
 func stripSubstitutions(s string) (string, []string) {
+	return stripSubstitutionsMarked(s, false)
+}
+
+// subMarker is the byte stripSubstitutionsMarked leaves where a
+// substitution was. The lexer never writes it into a word: it becomes a
+// zero-width token that sets unit.hadSub, so every rule sees exactly the
+// words it saw before the marker existed. A 0x01 byte in the input is
+// read the same way (no real command line carries one). It is not NUL,
+// which extractHeredocs already uses for its own marker words.
+const subMarker = '\x01'
+
+// stripSubstitutionsMarked is stripSubstitutions, optionally leaving
+// subMarker in place of each removed substitution so the lexer can tell
+// which unit lost one.
+func stripSubstitutionsMarked(s string, mark bool) (string, []string) {
+	return stripSubstitutionsFor(s, mark, false)
+}
+
+// stripSubstitutionsFor is stripSubstitutionsMarked with the two
+// PowerShell escape facts parseDepth documents when psEscape is set
+// (T-534): a backtick before a brace escapes it (both bytes copied
+// through, never a span delimiter), and a backslash before a dollar is an
+// ordinary character (the dollar is read next, so a `$( )` after it is
+// stripped). Every other byte is read exactly as without psEscape.
+func stripSubstitutionsFor(s string, mark, psEscape bool) (string, []string) {
 	if !strings.ContainsAny(s, "`$") {
 		return s, nil
 	}
@@ -1312,7 +1621,10 @@ func stripSubstitutions(s string) (string, []string) {
 			inS = true
 			out.WriteByte(c)
 			i++
-		case c == '\\':
+		case psEscape && c == '\\' && i+1 < len(s) && s[i+1] == '$':
+			out.WriteByte(c)
+			i++
+		case c == '\\' || (psEscape && c == '`' && i+1 < len(s) && (s[i+1] == '{' || s[i+1] == '}')):
 			out.WriteByte(c)
 			if i+1 < len(s) {
 				out.WriteByte(s[i+1])
@@ -1328,6 +1640,9 @@ func stripSubstitutions(s string) (string, []string) {
 				continue
 			}
 			subs = append(subs, s[i+1:i+1+j])
+			if mark {
+				out.WriteByte(subMarker)
+			}
 			i = i + 1 + j + 1
 		case c == '$' && i+1 < len(s) && s[i+1] == '(':
 			depth := 1
@@ -1347,6 +1662,9 @@ func stripSubstitutions(s string) (string, []string) {
 				continue
 			}
 			subs = append(subs, s[i+2:j-1])
+			if mark {
+				out.WriteByte(subMarker)
+			}
 			i = j
 		default:
 			out.WriteByte(c)

@@ -1,15 +1,13 @@
-// Package emit is the self-observability gateway CLIENT: it turns a
-// run.DecisionRun into a credential-authenticated OTLP/HTTP span exported to the
-// org gateway.
+// Package emit is the neutral self-observability sink contract: the Sink
+// interface every decision-run producer writes to, and Nop, the real no-op
+// Sink (never a nil interface) used whenever no exporter is configured or
+// compiled in.
 //
-// The endpoint is EXACTLY emit.Config.Endpoint — emit has NO OTEL_* env
-// overrides. New validates the scheme first (only http/https; plaintext http
-// only when Insecure), then builds a full explicit-scheme URL so the exporter's
-// WithEndpointURL makes the scheme authoritative and an OTEL_..._INSECURE env
-// var cannot downgrade the credential-bearing path (R5-B1). The sink's HTTP
-// client refuses redirects (so the credential is never resent to a redirect
-// target) and applies any Config.TLSConfig.
-//
-// New returns a real no-op Sink (never a nil interface) on an empty endpoint or
-// an empty resolved credential. It never imports internal/obs.
+// It is core (modular packaging ruling D-436): it imports only the neutral
+// run model and the standard library, never the OpenTelemetry SDK, the
+// internal/exporter/otel package or internal/obs. The concrete
+// credential-authenticated OTLP/HTTP sink lives in the otelsink subpackage,
+// owned by the export.otel component, so a build without export.otel keeps
+// every producer compiling against Sink and emits through Nop. Pinned by
+// imports_test.go.
 package emit

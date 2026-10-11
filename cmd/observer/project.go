@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/projectroi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/taskflow"
@@ -79,7 +79,7 @@ func newProjectCmd() *cobra.Command {
 			}
 			engine := acquireProcessCostEngine(cmd.Context(), cfg, database, slog.Default())
 
-			detail, err := dashboard.ComposeProjectDetail(cmd.Context(), st, dashboard.ProjectDetailInput{
+			detail, err := dashapi.ComposeProjectDetail(cmd.Context(), st, dashapi.ProjectDetailInput{
 				ProjectID: projectID, Days: days, Since: since, Until: until,
 				LinkWindow: linkWindow, CostEngine: engine, Taskflow: taskOpts,
 			})
@@ -106,7 +106,7 @@ func newProjectCmd() *cobra.Command {
 // resolveProjectArg resolves the `observer project <id|root>` positional
 // argument to a project id. An argument that parses as a positive int64
 // is used as-is (its existence is checked downstream by
-// dashboard.ComposeProjectDetail, which errors on an unknown id); any
+// dashapi.ComposeProjectDetail, which errors on an unknown id); any
 // other argument is treated as a project root path — made absolute and
 // cleaned the same way a shell would resolve it — and looked up via
 // store.ProjectIDForRoot, the SAME root-to-id resolver the loc-tracking
@@ -132,22 +132,22 @@ func resolveProjectArg(ctx context.Context, st *store.Store, arg string) (int64,
 	return id, nil
 }
 
-// printProjectDetail renders the dashboard.ProjectDetail summary as
+// printProjectDetail renders the dashapi.ProjectDetail summary as
 // plain text tables — the same fields the /projects page's OverviewTab/
 // SpendTab render, in the same units, with every ROI tile's formula and
 // caveat printed verbatim (plan §2 R10: no metric renders without its
 // formula, and nothing here invents a judgement word the tile itself
 // doesn't carry).
 //
-// It ranges directly over dashboard.ProjectDetail's exported slice
+// It ranges directly over dashapi.ProjectDetail's exported slice
 // fields (Spend.ByTool, Spend.ByModel, Spend.ByDay, Spend.BySession)
 // rather than through a shared named-parameter helper: their element
 // types are declared in internal/intelligence/dashboard as unexported
 // structs with exported fields (apiProjectCostBucketRow etc.) — a value
 // of that type is fully usable from here (field access, ranging), it
 // just cannot be named in a signature, so each block is written inline.
-func printProjectDetail(w io.Writer, d dashboard.ProjectDetail) {
-	fmt.Fprintf(w, "Project %d — %s\n", d.Project.ID, d.Project.RootPath)
+func printProjectDetail(w io.Writer, d dashapi.ProjectDetail) {
+	fmt.Fprintf(w, "Project %d - %s\n", d.Project.ID, d.Project.RootPath)
 	if d.Project.Name != "" {
 		fmt.Fprintf(w, "  name: %s\n", d.Project.Name)
 	}

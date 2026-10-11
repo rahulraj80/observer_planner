@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/archive"
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -63,8 +64,36 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 		}
 		sort.Slice(files, func(i, j int) bool { return files[i].Modified > files[j].Modified })
 		resp["backups"] = files
+		resp["reclaim_leftovers"] = reclaimLeftovers(s.opts.DBPath)
 	}
 	writeJSON(w, resp)
+}
+
+// reclaimLeftovers lists the original databases `observer archive reclaim`
+// renamed aside next to dbPath (T-493), matched by the same pure rule the
+// `observer archive reclaim-cleanup` command uses. A directory listing plus
+// one stat per entry: no database access. Never nil, so the JSON is [].
+func reclaimLeftovers(dbPath string) []archive.ReclaimLeftover {
+	out := []archive.ReclaimLeftover{}
+	entries, err := os.ReadDir(filepath.Dir(dbPath))
+	if err != nil {
+		return out
+	}
+	var files []archive.LeftoverFile
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, archive.LeftoverFile{Name: e.Name(), Bytes: info.Size()})
+	}
+	if l, _ := archive.MatchLeftovers(filepath.Base(dbPath), files); l != nil {
+		out = l
+	}
+	return out
 }
 
 // handleStorageVacuum serves POST /api/storage/vacuum — spawns

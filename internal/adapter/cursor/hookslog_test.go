@@ -307,20 +307,28 @@ func TestMatchesHooksLog(t *testing.T) {
 }
 
 func TestHookProjectRoot(t *testing.T) {
+	local := conversationClass{}
+	cloud := classifyConversation("bc-0a0b0c0d-1111-5222-8333-444455556666", false)
 	cases := []struct {
-		event, roots, want string
+		event, roots string
+		class        conversationClass
+		want         string
 	}{
-		{EventBeforeReadFile, `["/repo"]`, "/repo"},
-		{EventSubagentStart, `[]`, SyntheticProjectRoot},
-		{EventStop, `[]`, SyntheticProjectRoot},
-		{EventBeforeSubmitPrompt, ``, SyntheticProjectRoot},
-		{EventSessionStart, `[]`, ""},
-		{EventSessionEnd, `[]`, ""},
-		{EventSessionEnd, `["/repo"]`, "/repo"},
+		{EventBeforeReadFile, `["/repo"]`, local, "/repo"},
+		{EventSubagentStart, `[]`, local, SyntheticProjectRoot},
+		{EventStop, `[]`, local, SyntheticProjectRoot},
+		{EventBeforeSubmitPrompt, ``, local, SyntheticProjectRoot},
+		{EventSessionStart, `[]`, local, ""},
+		{EventSessionEnd, `[]`, local, ""},
+		{EventSessionEnd, `["/repo"]`, local, "/repo"},
+		// A Cloud Agent has no folder to flip: its lifecycle bootstraps.
+		{EventSessionStart, `[]`, cloud, SyntheticProjectRoot},
+		{EventSessionEnd, `[]`, cloud, SyntheticProjectRoot},
+		{EventSessionStart, `["/repo"]`, cloud, "/repo"},
 	}
 	for _, tc := range cases {
-		if got := hookProjectRoot(tc.event, []byte(tc.roots)); got != tc.want {
-			t.Errorf("hookProjectRoot(%s, %s) = %q, want %q", tc.event, tc.roots, got, tc.want)
+		if got := hookProjectRoot(tc.event, []byte(tc.roots), tc.class); got != tc.want {
+			t.Errorf("hookProjectRoot(%s, %s, %+v) = %q, want %q", tc.event, tc.roots, tc.class, got, tc.want)
 		}
 	}
 }

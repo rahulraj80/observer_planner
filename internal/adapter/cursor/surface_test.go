@@ -76,7 +76,7 @@ func TestSurfaceByLayout(t *testing.T) {
 				t.Errorf("surface = %q/%q, want %q/%q", sf.Surface, sf.SurfaceHost, tc.wantKind, tc.wantHost)
 			}
 			if !models.KnownSurface(sf.Surface) {
-				t.Errorf("surface kind %q is outside the models.Surface* vocabulary — the store refuses it", sf.Surface)
+				t.Errorf("surface kind %q is outside the models.Surface* vocabulary - the store refuses it", sf.Surface)
 			}
 		})
 	}
@@ -221,7 +221,7 @@ func TestParseTranscriptStampsCLIWhenStoreDBExists(t *testing.T) {
 	if len(after.SessionSurfaces) != 1 ||
 		after.SessionSurfaces[0].Surface != models.SurfaceCLI ||
 		after.SessionSurfaces[0].SurfaceHost != "cursor-agent" {
-		t.Fatalf("transcript WITH a store.db sibling stamped %+v, want one cli/cursor-agent — "+
+		t.Fatalf("transcript WITH a store.db sibling stamped %+v, want one cli/cursor-agent - "+
 			"the IDE stamp would win by parse order under first-wins-unless-empty", after.SessionSurfaces)
 	}
 }

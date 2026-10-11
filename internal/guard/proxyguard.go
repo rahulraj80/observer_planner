@@ -101,6 +101,14 @@ type ProxyRequestResult struct {
 	// Verdicts are the record-worthy results (egress + injection),
 	// ready for store.PersistGuardVerdicts.
 	Verdicts []ActionVerdict
+	// PromptPreSendSessionID / PromptPreSendDigest are the prompt lane's
+	// pre-send mark (PromptPreSendDigest, posthocprompt.go): when Digest is
+	// non-empty the caller records it (store.RecordPromptPreSend) so the
+	// post-hoc capture lane recognises this prompt when the watcher later
+	// ingests it. Set whether or not a verdict was produced (an
+	// allow-listed fixture still needs the mark).
+	PromptPreSendSessionID string
+	PromptPreSendDigest    string
 	// MaskedBody, when non-nil, is the rewritten outbound body
 	// ([REDACTED:type] markers in place of certain findings). The
 	// proxy MUST forward it instead of the original.
@@ -179,6 +187,15 @@ func (g *Guard) ScanProxyRequest(provider string, body []byte, sessionID string,
 // prompt block inside scanProxyRequest; returns the prompt outcome only
 // (PromptDeny/Deny/MaskedBody + the prompt verdict).
 func (g *Guard) ScanProxyPrompt(provider string, body []byte, sessionID string, now time.Time) ProxyRequestResult {
+	return g.ScanProxyPromptFor("", provider, body, sessionID, now)
+}
+
+// ScanProxyPromptFor is ScanProxyPrompt with the CLIENT tool the proxy
+// resolved for the request at its boundary (the pid bridge, else the
+// header signature table), stamped on the verdict (audit P9: proxy-lane
+// prompt rows used to persist with an empty tool, so reporting could not
+// say which tool the prompt was typed into). "" when unresolved.
+func (g *Guard) ScanProxyPromptFor(tool, provider string, body []byte, sessionID string, now time.Time) ProxyRequestResult {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -187,7 +204,7 @@ func (g *Guard) ScanProxyPrompt(provider string, body []byte, sessionID string, 
 		return res
 	}
 	parsed := parseProxyBody(provider, body, false)
-	g.scanPrompt(&res, provider, body, parsed, sessionID, now)
+	g.scanPrompt(&res, tool, provider, body, parsed, sessionID, now)
 	return res
 }
 
@@ -255,7 +272,7 @@ func (g *Guard) scanProxyRequest(provider string, body []byte, sessionID string,
 	// request still scans and masks/denies exactly as before.
 	egressBody := body
 	if withPrompt && g.cfg.Prompt.Enabled && g.cfg.Prompt.ProxyLane {
-		g.scanPrompt(&res, provider, body, parsed, sessionID, now)
+		g.scanPrompt(&res, "", provider, body, parsed, sessionID, now)
 		if res.Deny {
 			return res
 		}
@@ -343,7 +360,7 @@ func (g *Guard) scanEgress(es *engineSet, res *ProxyRequestResult, body []byte, 
 		Now:       now,
 	}
 	verdict, guardErr := g.evaluateWith(es, ev)
-	verdict, approved := g.applyApprovals(verdict, &ev)
+	verdict, appr := g.applyApprovals(verdict, &ev, OrgGrantLaneProxy)
 	if verdict.Decision < policy.DecisionFlag && guardErr == nil {
 		return // R-172 disabled or overridden to allow
 	}
@@ -360,9 +377,7 @@ func (g *Guard) scanEgress(es *engineSet, res *ProxyRequestResult, body []byte, 
 		GuardError: guardErr != nil,
 	}
 	g.stampOrgOverride(es, &av)
-	if approved {
-		av.DegradedFrom = "approved"
-	}
+	appr.stamp(&av)
 
 	em := ResolveEmission(verdict, proxyRequestCaps)
 	action := g.resolveEgressAction(em, anyCertain)
@@ -490,14 +505,42 @@ func promptDenyStatus(decision policy.Decision, degradedFrom string) int {
 // OWN dependent (hook imports guard, never the reverse — inverting
 // that to share four lines of message text would be the wrong trade).
 var proxyPromptBlockReasons = map[string]string{
-	"": ". Edit it out before sending — mode=\"block\" has no resend override.",
-	"unhashable": ". This finding type can't be fingerprinted for a resend override, so it blocks every time — " +
+	"": ". Edit it out before sending - mode=\"block\" has no resend override.",
+	"unhashable": ". This finding type can't be fingerprinted for a resend override, so it blocks every time - " +
 		"edit it out before sending.",
-	"no_session": ". No session id was available to track a resend, so this blocks unconditionally — " +
+	"no_session": ". No session id was available to track a resend, so this blocks unconditionally - " +
 		"edit it out before sending.",
 	"store_unwired": ". The reconsider-once store isn't available right now, so this blocks unconditionally " +
-		"(fail-closed) — edit it out before sending, or retry once observer is healthy.",
+		"(fail-closed) - edit it out before sending, or retry once observer is healthy.",
 	"unscanned": "",
+}
+
+// PromptOverrideHint is the ONE rendering of the override path for a
+// blocked prompt whose rule the organization marked `overridable` (Sol
+// A2-10). Such a deny is softened to an ask for action selection
+// (emissionDecision), so the seam re-enters or confirms, but a resend
+// alone evaluates to the same deny: the developer's way through is a
+// scoped approval (`observer guard prompt allow`, the guard_approvals
+// register applyApprovals honours for an overridable rule) followed by a
+// resend. It returns the sentence both house messages (hook lane
+// promptHouseMessage, proxy lane proxyPromptHouseMessage) append instead
+// of the hard-block suffix, or "" when pv is not an overridable deny (an
+// org-locked or local-only deny keeps the hard-block text).
+func PromptOverrideHint(pv PromptVerdict, sessionID string) string {
+	if pv.Outcome != PromptOutcomeBlocked || pv.Verdict.Decision != policy.DecisionDeny ||
+		!pv.Verdict.Overridable || pv.GuardError {
+		return ""
+	}
+	detector := proxyPromptRemediationDetector(pv.Detectors)
+	if detector == "" {
+		detector = "<detector>"
+	}
+	scope := "--project"
+	if sessionID != "" {
+		scope = "--session " + sessionID
+	}
+	return ". Your organization lets you override this rule: run `observer guard prompt allow " + detector + " " + scope +
+		"`, then send it again (this allows every detector in the same rule class, not just " + detector + ")."
 }
 
 // proxyPromptRemediationDetector mirrors
@@ -550,15 +593,22 @@ func proxyPromptHouseMessage(pv PromptVerdict, sessionID string) string {
 				// Inside reconsider_min_delay: most likely the client's own
 				// retry (Copilot CLI retried a 400 after 42 ms), but a fast
 				// human gets the same verdict — say what to do (F2).
-				return "observer: " + reason + ". That resend arrived too fast to count as your confirmation — wait a moment and send it again unchanged to confirm, or edit it out."
+				return "observer: " + reason + ". That resend arrived too fast to count as your confirmation - wait a moment and send it again unchanged to confirm, or edit it out."
 			}
 			return "observer: " + reason + ". Send it again unchanged to confirm, or edit it out. " +
 				"Run `observer guard prompt allow " + detector + " --session " + sid +
 				"` to stop asking (this allows every detector in the same rule class, not just " + detector + ")."
 		}
+		if hint := PromptOverrideHint(pv, sessionID); hint != "" {
+			return "observer: " + reason + hint
+		}
 		suffix, ok := proxyPromptBlockReasons[pv.DegradedFrom]
 		if !ok {
 			suffix = proxyPromptBlockReasons[""]
+		}
+		// Request-grants G4: the hook lane's request line, same position.
+		if hint := PromptRequestAccessHint(pv, sessionID); hint != "" {
+			return "observer: " + hint + " Reason: " + reason + suffix
 		}
 		return "observer: " + reason + suffix
 	case PromptOutcomeWarned:
@@ -617,7 +667,7 @@ func proxyPromptHouseMessage(pv PromptVerdict, sessionID string) string {
 // extractLatestUserPromptText decode; the fallback below covers Gemini
 // (never parsed by parseProxyBody) and any shape parseProxyBody's
 // stricter structs failed to decode.
-func (g *Guard) scanPrompt(res *ProxyRequestResult, provider string, body []byte, parsed proxyParsedBody, sessionID string, now time.Time) {
+func (g *Guard) scanPrompt(res *ProxyRequestResult, tool, provider string, body []byte, parsed proxyParsedBody, sessionID string, now time.Time) {
 	text, ok := parsed.latestUserText, parsed.latestUserTextOK
 	if !ok {
 		text, ok = extractLatestUserPromptText(provider, body)
@@ -627,11 +677,13 @@ func (g *Guard) scanPrompt(res *ProxyRequestResult, provider string, body []byte
 	}
 	secrets, pii, truncated := g.BuildPromptFindings(text)
 	if len(secrets) == 0 && len(pii) == 0 && !truncated {
+		g.markPromptPreSend(res, sessionID, text, false)
 		return
 	}
 
 	ev := policy.Event{
 		Kind:            policy.KindUserPrompt,
+		Tool:            tool,
 		Target:          provider,
 		SessionID:       sessionID,
 		Caps:            proxyPromptCaps,
@@ -641,6 +693,7 @@ func (g *Guard) scanPrompt(res *ProxyRequestResult, provider string, body []byte
 		Now:             now,
 	}
 	pv := g.EvaluatePrompt(ev)
+	g.markPromptPreSend(res, sessionID, text, pv.RecordWorthy())
 
 	// Genuine redact (contract §3.4/item 3): the proxy IS a
 	// modify-capability channel — it can rewrite the outbound body
@@ -648,6 +701,7 @@ func (g *Guard) scanPrompt(res *ProxyRequestResult, provider string, body []byte
 	// so far (none has redact wired; see promptguard.go's package doc
 	// comment). Only reachable for a secret-only finding set — see the
 	// doc comment above for why PII stays on the block path.
+	pv.Lane = "proxy"
 	if pv.RequestedMode == PromptModeRedact && len(pii) == 0 && len(secrets) > 0 {
 		if newBody, masked := g.redactPromptSecrets(provider, body); masked {
 			// F7 (phase-3b review): route through the SAME
@@ -659,7 +713,7 @@ func (g *Guard) scanPrompt(res *ProxyRequestResult, provider string, body []byte
 			// version left SuppressAlert at its zero value, so a
 			// redact-and-forward — which never blocks anything — was
 			// toasting a desktop alert on every occurrence).
-			av := g.ActionVerdictFromRedactedPrompt(pv, ActionInput{SessionID: sessionID, Target: provider, Timestamp: now})
+			av := g.ActionVerdictFromRedactedPrompt(pv, ActionInput{SessionID: sessionID, Tool: tool, Target: provider, Timestamp: now})
 			if !g.proxyAlreadySeen(sessionID, egressSignature(&av), now) {
 				res.Verdicts = append(res.Verdicts, av)
 			}
@@ -672,8 +726,14 @@ func (g *Guard) scanPrompt(res *ProxyRequestResult, provider string, body []byte
 		// forwarding the secret unmasked.
 	}
 
-	em := ResolveEmission(pv.Verdict, proxyPromptCaps)
-	av := g.ActionVerdictFromPrompt(pv, em, ActionInput{SessionID: sessionID, Target: provider, Timestamp: now})
+	// The one decision x capability table (promptaction.go): ask is a
+	// re-enter (the client renders the error, an identical resend
+	// confirms), deny blocks, and a flag cannot be shown in band at all
+	// (a forwarded request carries no message), so it is flagged and
+	// toasted.
+	pv = pv.WithAction(PromptSeamProxy, "proxy")
+	em := PromptEmission(pv)
+	av := g.ActionVerdictFromPrompt(pv, em, ActionInput{SessionID: sessionID, Tool: tool, Target: provider, Timestamp: now})
 
 	if em.Permission != "allow" {
 		reason := proxyPromptHouseMessage(pv, sessionID)
@@ -728,14 +788,38 @@ func (g *Guard) scanPrompt(res *ProxyRequestResult, provider string, body []byte
 // masked=false so the caller falls back to the tested ask-once/block
 // path instead of dropping content.
 func (g *Guard) redactPromptSecrets(provider string, body []byte) (newBody []byte, masked bool) {
-	maskable := func(f scrub.TypedFinding) bool {
-		return f.Certain && !g.promptAllowed(f.Value)
-	}
 	maskOne := func(s string) (string, bool) {
-		out, _ := scrub.MaskSecrets(s, maskable)
+		out, _ := scrub.MaskSecrets(s, g.promptMaskable)
 		return out, out != s
 	}
 	return spliceLatestUserPromptText(provider, body, maskOne)
+}
+
+// promptMaskable is the one masking predicate both redact lanes use: a
+// certain secret finding whose value is not on the [guard.prompt].allow
+// list.
+func (g *Guard) promptMaskable(f scrub.TypedFinding) bool {
+	return f.Certain && !g.promptAllowed(f.Value)
+}
+
+// RedactPromptText masks every maskable secret in a hook-lane prompt with
+// its [REDACTED:type] marker (scrub.MaskSecrets, the proxy lane's
+// primitive) and reports ok only when the masked text then rescans CLEAN
+// (no secret or PII finding left, no truncated scan). A prompt the masking
+// cannot fully cover (a PII finding, an uncertain secret, an oversize
+// body) is never offered as a redact, so the caller falls back to the
+// decision ladder's other actions instead of forwarding a half-masked
+// value.
+func (g *Guard) RedactPromptText(text string) (masked string, ok bool) {
+	masked, _ = scrub.MaskSecrets(text, g.promptMaskable)
+	if masked == text {
+		return "", false
+	}
+	secrets, pii, truncated := g.BuildPromptFindings(masked)
+	if len(secrets) > 0 || len(pii) > 0 || truncated {
+		return "", false
+	}
+	return masked, true
 }
 
 // spliceLatestUserPromptText rewrites JUST the latest user turn this
@@ -1206,7 +1290,9 @@ func (g *Guard) InspectProxyResponse(sessionID string, tools []ProxyToolUse, now
 		ev.Now = now
 		ev.Taint = g.taint.Snapshot(sessionID, 0, now)
 		verdict, guardErr := g.evaluateWith(es, ev)
-		verdict, approved := g.applyApprovals(verdict, &ev)
+		// Response inspection cannot block (proxyResponseCaps): an
+		// observe-only seam, so org grants never apply here (lane "").
+		verdict, appr := g.applyApprovals(verdict, &ev, "")
 		if verdict.Decision < policy.DecisionFlag && guardErr == nil {
 			continue
 		}
@@ -1224,9 +1310,7 @@ func (g *Guard) InspectProxyResponse(sessionID string, tools []ProxyToolUse, now
 			GuardError:  guardErr != nil,
 		}
 		g.stampOrgOverride(es, &av)
-		if approved {
-			av.DegradedFrom = "approved"
-		}
+		appr.stamp(&av)
 		// §6.2: the channel can't block — record what the verdict
 		// wanted via the degradation marker (emission seams only
 		// overwrite DegradedFrom when non-empty, preserving the
@@ -1380,4 +1464,18 @@ func compileEgressAllow(patterns []string) ([]*regexp.Regexp, []string) {
 		out = append(out, re)
 	}
 	return out, issues
+}
+
+// markPromptPreSend stamps the proxy prompt lane's pre-send mark onto res
+// (see ProxyRequestResult.PromptPreSendDigest). The proxy lane carries the
+// mark on the result rather than on its ActionVerdict so one record covers
+// every outcome, including the allowed one that produces no verdict.
+func (g *Guard) markPromptPreSend(res *ProxyRequestResult, sessionID, text string, recordWorthy bool) {
+	if sessionID == "" {
+		return
+	}
+	if d := PromptPreSendDigest(text, recordWorthy); d != "" {
+		res.PromptPreSendSessionID = sessionID
+		res.PromptPreSendDigest = d
+	}
 }

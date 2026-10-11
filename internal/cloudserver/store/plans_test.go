@@ -48,13 +48,13 @@ func TestPlanResolutionDefaultsToFree(t *testing.T) {
 		t.Fatalf("default plan = %s v%d, want %s v%d",
 			a.Plan.Name, a.Plan.Version, store.PlanFree, store.DefaultFreePlanVersion)
 	}
-	// Migration 0039 raised the free daily burst 5 -> 20 in the v2 row;
-	// the monthly ceiling and concurrency are unchanged.
-	if a.DailyCap != 20 || a.MonthlyCap != 100 || a.ConcurrencyCap != 2 {
-		t.Fatalf("free caps = %d/%d/%d, want 20/100/2", a.DailyCap, a.MonthlyCap, a.ConcurrencyCap)
+	// Migration 0041 (D-299) raised free to 100/day and 3000/month in the v3
+	// row and pinned it to the GPT-6 Luna route; concurrency is unchanged.
+	if a.DailyCap != 100 || a.MonthlyCap != 3000 || a.ConcurrencyCap != 2 {
+		t.Fatalf("free caps = %d/%d/%d, want 100/3000/2", a.DailyCap, a.MonthlyCap, a.ConcurrencyCap)
 	}
-	if a.Plan.RouteID != "" {
-		t.Fatalf("free plan route_id = %q, want empty (the feature default route)", a.Plan.RouteID)
+	if a.Plan.RouteID != gpt6LunaRoute {
+		t.Fatalf("free plan route_id = %q, want %q", a.Plan.RouteID, gpt6LunaRoute)
 	}
 	if a.BudgetPool != "free" {
 		t.Fatalf("free plan pool = %q, want %q", a.BudgetPool, "free")
@@ -65,23 +65,24 @@ func TestPlanResolutionDefaultsToFree(t *testing.T) {
 }
 
 // TestMidCycleUpgradeRaisesConsultedCapImmediately is the review-finding-12 fix
-// for usage_cycles' snapshotted cap: the 21st daily reservation is refused on
-// free (v2 cap 20), and after an upgrade — with the SAME daily counter still at
-// 20, mid-window — it succeeds against the plus_beta cap of 25.
+// for usage_cycles' snapshotted cap: the 101st daily reservation is refused on
+// free (v3 cap 100), and after an upgrade (with the SAME daily counter still
+// at 100, mid-window) it succeeds against the plus_beta cap of 500.
 //
-// It also pins that a purchase takes effect IMMEDIATELY. Plus v2 is strictly
-// more generous than free v2 on every axis (25/120/4 against 20/100/2), so the
-// cap comparison classifies it as an upgrade with no special case. If a future
-// plan revision ever set a paid cap BELOW the free one, that comparison would
-// read the purchase as a downgrade and defer it to the next cycle boundary -
-// this test is what would catch it.
+// It also pins that a purchase takes effect IMMEDIATELY. Plus v3 is strictly
+// more generous than free v3 on every axis (500/15000/4 against 100/3000/2),
+// so the cap comparison classifies it as an upgrade with no special case. If a
+// future plan revision ever set a paid cap BELOW the free one, that comparison
+// would read the purchase as a downgrade and defer it to the next cycle
+// boundary - this test is what would catch it.
 func TestMidCycleUpgradeRaisesConsultedCapImmediately(t *testing.T) {
 	s, pool := newStore(t)
 	ctx := context.Background()
 	acct := makeAccount(t, s)
 	now := midMonth()
 
-	for i := 0; i < 20; i++ {
+	const freeDaily, plusDaily = 100, 500
+	for i := 0; i < freeDaily; i++ {
 		if _, err := s.ReserveAllowance(ctx, acct, store.FeatureSessionEnrichment, now); err != nil {
 			t.Fatalf("reserve %d on free: %v", i+1, err)
 		}
@@ -97,7 +98,7 @@ func TestMidCycleUpgradeRaisesConsultedCapImmediately(t *testing.T) {
 		}
 	}
 	if _, err := s.ReserveAllowance(ctx, acct, store.FeatureSessionEnrichment, now); !errors.Is(err, store.ErrDailyLimit) {
-		t.Fatalf("21st reservation on free = %v, want ErrDailyLimit", err)
+		t.Fatalf("reservation %d on free = %v, want ErrDailyLimit", freeDaily+1, err)
 	}
 
 	res, err := s.AssignPlan(ctx, acct, store.PlanPlusBeta, store.LatestPlanVersion, time.Time{}, now)
@@ -111,17 +112,17 @@ func TestMidCycleUpgradeRaisesConsultedCapImmediately(t *testing.T) {
 		t.Fatalf("upgrade effective_from = %s, want no later than now (%s)", res.EffectiveFrom, now)
 	}
 
-	// Same day, same monthly window, counter still at 20 — the CAP moved.
+	// Same day, same monthly window, counter still at 100: the CAP moved.
 	if _, err := s.ReserveAllowance(ctx, acct, store.FeatureSessionEnrichment, now); err != nil {
-		t.Fatalf("21st reservation after upgrade: %v, want success", err)
+		t.Fatalf("reservation %d after upgrade: %v, want success", freeDaily+1, err)
 	}
 	snap, err := s.Usage(ctx, acct, store.FeatureSessionEnrichment, now)
 	if err != nil {
 		t.Fatalf("Usage: %v", err)
 	}
-	if snap.DailyUsed != 21 || snap.DailyCap != 25 {
-		t.Fatalf("after upgrade: daily %d/%d, want 21/25 (counter keeps counting, ceiling moves)",
-			snap.DailyUsed, snap.DailyCap)
+	if snap.DailyUsed != freeDaily+1 || snap.DailyCap != plusDaily {
+		t.Fatalf("after upgrade: daily %d/%d, want %d/%d (counter keeps counting, ceiling moves)",
+			snap.DailyUsed, snap.DailyCap, freeDaily+1, plusDaily)
 	}
 	// Ruling 2026-09-15 (W5 hosted contract): Plus is a real purchasable plan
 	// now, so the label was updated from the stale "entitlement simulation"
@@ -171,8 +172,8 @@ func TestDowngradeDefersToCycleEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAllowance at boundary: %v", err)
 	}
-	if a.Plan.Name != store.PlanFree || a.DailyCap != 20 {
-		t.Fatalf("at the boundary: plan %s cap %d, want free / 20", a.Plan.Name, a.DailyCap)
+	if a.Plan.Name != store.PlanFree || a.DailyCap != 100 {
+		t.Fatalf("at the boundary: plan %s cap %d, want free / 100", a.Plan.Name, a.DailyCap)
 	}
 	// A caller cannot backdate a downgrade past the boundary either.
 	acct2 := makeAccount(t, s)
@@ -466,10 +467,10 @@ func TestUsageSurfacesPlanLabel(t *testing.T) {
 	if snap.PlanLabel != "Plus" {
 		t.Fatalf("plus label = %q, want the exact 2026-09-15 copy \"Plus\"", snap.PlanLabel)
 	}
-	// Migration 0039's v2 row: the monthly cap is 120, the COGS ceiling for the
-	// more expensive pinned model (500 was v1's).
-	if snap.BudgetPool != "plus_beta" || snap.MonthlyCap != 120 || snap.ConcurrencyCap != 4 {
-		t.Fatalf("plus surface = pool %q, monthly %d, concurrency %d; want plus_beta/120/4",
+	// Migration 0041's v3 row (D-299): monthly 15000, 5x free's 3000 (v2 was
+	// 120 on the Sol route, v1 500).
+	if snap.BudgetPool != "plus_beta" || snap.MonthlyCap != 15000 || snap.ConcurrencyCap != 4 {
+		t.Fatalf("plus surface = pool %q, monthly %d, concurrency %d; want plus_beta/15000/4",
 			snap.BudgetPool, snap.MonthlyCap, snap.ConcurrencyCap)
 	}
 }
@@ -724,5 +725,42 @@ func TestAssignPlanChainStillPassesUnderTheExclusion(t *testing.T) {
 		if _, err := s.ResolveAllowance(ctx, acct, store.FeatureSessionEnrichment, at); err != nil {
 			t.Fatalf("ResolveAllowance at %s: %v", at, err)
 		}
+	}
+}
+
+// TestSeededEntitlementMatchesDefaultFreePlan pins reserve.go's contract that
+// the caps written into a new account's entitlements row equal the default
+// free plan's caps. The row is written with overrides_plan = false, so a drift
+// is invisible until an operator flips that flag - at which point the account
+// would silently fall back to the stale numbers (0041 moved free to
+// 100/3000/2; the seed constants must move with it).
+func TestSeededEntitlementMatchesDefaultFreePlan(t *testing.T) {
+	s, pool := newStore(t)
+	ctx := context.Background()
+	acct := makeAccount(t, s)
+
+	var daily, monthly, conc int
+	var overrides bool
+	if err := pool.QueryRow(ctx,
+		`SELECT daily_cap, monthly_cap, concurrency_cap, overrides_plan FROM entitlements
+		  WHERE account_id = $1::uuid AND feature = $2`, acct, store.FeatureSessionEnrichment).
+		Scan(&daily, &monthly, &conc, &overrides); err != nil {
+		t.Fatalf("read seeded entitlements row: %v", err)
+	}
+	var pDaily, pMonthly, pConc int
+	if err := pool.QueryRow(ctx,
+		`SELECT daily_cap, monthly_cap, concurrency_cap FROM plans WHERE name = $1 AND version = $2`,
+		store.PlanFree, store.DefaultFreePlanVersion).Scan(&pDaily, &pMonthly, &pConc); err != nil {
+		t.Fatalf("read default free plan: %v", err)
+	}
+	if overrides {
+		t.Fatal("the seeded entitlements row must not override the plan")
+	}
+	if daily != pDaily || monthly != pMonthly || conc != pConc {
+		t.Fatalf("seeded entitlement caps %d/%d/%d != free v%d plan caps %d/%d/%d",
+			daily, monthly, conc, store.DefaultFreePlanVersion, pDaily, pMonthly, pConc)
+	}
+	if daily != 100 || monthly != 3000 || conc != 2 {
+		t.Fatalf("seeded entitlement caps = %d/%d/%d, want 100/3000/2 (D-299)", daily, monthly, conc)
 	}
 }

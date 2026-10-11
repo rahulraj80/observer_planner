@@ -85,7 +85,7 @@ export const HourHeatmap = memo(function HourHeatmap({
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-fg-3">
         <span>
           {sel
-            ? `${pad(sel.hour)}:00–${pad((sel.hour + 1) % 24)}:00${
+            ? `${pad(sel.hour)}:00-${pad((sel.hour + 1) % 24)}:00${
                 timezone ? ` ${timezone}` : ""
               } · `
             : "Hover to inspect · "}

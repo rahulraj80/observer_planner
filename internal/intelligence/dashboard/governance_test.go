@@ -167,7 +167,7 @@ func TestGovernanceCannotHideItsOwnEvidence(t *testing.T) {
 		if rec.Code == http.StatusNotFound {
 			var refusal governanceRefusal
 			if err := json.Unmarshal(rec.Body.Bytes(), &refusal); err == nil && refusal.Error == "governance_hidden" {
-				t.Fatalf("%s was hidden by governance — a developer could not see what their organization configured", path)
+				t.Fatalf("%s was hidden by governance - a developer could not see what their organization configured", path)
 			}
 		}
 	}
@@ -181,24 +181,25 @@ func TestEveryDashboardRouteHasASection(t *testing.T) {
 	s := newRemoteTestServer(t, Options{})
 	_, capMap, sections := s.registerRoutes(nil)
 	if len(capMap) < 50 {
-		t.Fatalf("suspiciously few routes registered (%d) — the registry may not be wired", len(capMap))
+		t.Fatalf("suspiciously few routes registered (%d) - the registry may not be wired", len(capMap))
 	}
 	known := map[Section]bool{SectionNone: true}
 	for _, sec := range AllSections {
 		known[sec] = true
 	}
 	for pattern := range capMap {
-		sec, ok := sections[pattern]
+		reg, ok := sections[pattern]
 		if !ok {
-			t.Errorf("route %q has no section entry — every reg() must name a Section (or SectionNone)", pattern)
+			t.Errorf("route %q has no section entry - every reg() must name a Section (or SectionNone)", pattern)
 			continue
 		}
+		sec, _ := reg.Split()
 		if !known[sec] {
 			t.Errorf("route %q names section %q, which is not in the closed vocabulary", pattern, sec)
 		}
 	}
 	if len(sections) != len(capMap) {
-		t.Errorf("section map has %d entries, capability map has %d — the two registries have diverged", len(sections), len(capMap))
+		t.Errorf("section map has %d entries, capability map has %d - the two registries have diverged", len(sections), len(capMap))
 	}
 }
 
@@ -216,12 +217,12 @@ func TestDashboardSectionsMatchNodegovVocabulary(t *testing.T) {
 	}
 	for id := range policy {
 		if !dash[id] {
-			t.Errorf("nodegov knows nav section %q but internal/intelligence/dashboard does not — a published directive for it would enforce nothing", id)
+			t.Errorf("nodegov knows nav section %q but internal/intelligence/dashboard does not - a published directive for it would enforce nothing", id)
 		}
 	}
 	for id := range dash {
 		if !policy[id] {
-			t.Errorf("dashboard knows section %q but nodegov does not — no org could ever address it", id)
+			t.Errorf("dashboard knows section %q but nodegov does not - no org could ever address it", id)
 		}
 	}
 }
@@ -246,7 +247,7 @@ func TestGovernanceEndpointDormantWithoutProvider(t *testing.T) {
 		t.Fatalf("dormant posture carries directives: %+v", eff)
 	}
 	if eff.HiddenSections == nil {
-		t.Fatal("hidden_sections is null rather than [] — the SPA would have to null-check every list")
+		t.Fatal("hidden_sections is null rather than [] - the SPA would have to null-check every list")
 	}
 }
 
@@ -314,7 +315,7 @@ func TestGovernanceShareBlockIsObjectShaped(t *testing.T) {
 	}
 	for key, raw := range envelope.Share {
 		if len(raw) == 0 || raw[0] != '{' {
-			t.Errorf("share[%q] = %s — the SPA reads .source/.effective off this and would render undefined", key, raw)
+			t.Errorf("share[%q] = %s - the SPA reads .source/.effective off this and would render undefined", key, raw)
 		}
 	}
 
@@ -380,7 +381,7 @@ func TestGovernanceShareRaiseIsInertOnAnIndividualNode(t *testing.T) {
 	}
 	row := got.Share["cache_detail"]
 	if row.Effective != false || row.Source != govern.ShareSourceLocal {
-		t.Fatalf("individual node reported effective=%v source=%q, want false/you — raising is managed-only", row.Effective, row.Source)
+		t.Fatalf("individual node reported effective=%v source=%q, want false/you - raising is managed-only", row.Effective, row.Source)
 	}
 }
 
@@ -408,7 +409,7 @@ func TestGovernanceShareBlockAbsentWithoutDirectives(t *testing.T) {
 func TestShareLocalTableCoversNodegovVocabulary(t *testing.T) {
 	for _, k := range nodegov.ShareKeys {
 		if _, ok := shareLocalTable[k.Key]; !ok {
-			t.Errorf("share key %q is org-directable but shareLocalTable has no local counterpart — the Privacy page would mis-report it", k.Key)
+			t.Errorf("share key %q is org-directable but shareLocalTable has no local counterpart - the Privacy page would mis-report it", k.Key)
 		}
 	}
 	vocab := map[string]bool{}
@@ -417,7 +418,7 @@ func TestShareLocalTableCoversNodegovVocabulary(t *testing.T) {
 	}
 	for key := range shareLocalTable {
 		if !vocab[key] {
-			t.Errorf("shareLocalTable knows %q but no org can direct it — dead row", key)
+			t.Errorf("shareLocalTable knows %q but no org can direct it - dead row", key)
 		}
 	}
 }

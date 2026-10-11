@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -32,7 +33,7 @@ func newPredictCmd() *cobra.Command {
 		Short: "Estimate the next message's cost (low/mid/high) + 5h/weekly limit for a session",
 		Long: "Estimates what your NEXT message to a session will cost on its current\n" +
 			"model, as a low / typical / high band over the message's likely turn\n" +
-			"fan-out. Pure read-side math over token_usage — no proxy required for\n" +
+			"fan-out. Pure read-side math over token_usage - no proxy required for\n" +
 			"the cost estimate. The 5-hour / weekly subscription-window gauge needs\n" +
 			"the client routed through the observer proxy (those numbers live only\n" +
 			"in upstream response headers).",
@@ -51,7 +52,7 @@ func newPredictCmd() *cobra.Command {
 				return fmt.Errorf("load session %q: %w", sessionID, err)
 			}
 			if shape.Model == "" {
-				return fmt.Errorf("session %q has no model/token data — route the client through the proxy (observer init) to capture cost", sessionID)
+				return fmt.Errorf("session %q has no model/token data - route the client through the proxy (observer init) to capture cost", sessionID)
 			}
 
 			young := predictIntDefault(cfg.Predict.YoungSessionMessages, 3)
@@ -174,7 +175,15 @@ func predictProviderForTool(tool string) string {
 
 func printPredict(cmd *cobra.Command, sessionID string, shape store.PredictShape, est predict.EstimateResult, snap models.LimitSnapshot, snapOK bool, noSourceNote string) {
 	w := cmd.OutOrStdout()
-	fmt.Fprintf(w, "Next-message cost — session %s\n", sessionID)
+	// Under the token-usage developer cost display (T-204) the band reads in
+	// tokens only: the billed-token columns carry it, the COST column is left
+	// out.
+	tokens := costtext.Tokens(costModeFrom(cmd.Context()))
+	heading := "Next-message cost"
+	if tokens {
+		heading = "Next-message usage"
+	}
+	fmt.Fprintf(w, "%s - session %s\n", heading, sessionID)
 	fmt.Fprintf(w, "model %s · cached prefix %s tok · fan-out %s", shape.Model, fmtTokens(est.PrefixTokens), est.TurnsTier)
 	if est.TurnsTier == predict.TurnsObserved {
 		fmt.Fprintf(w, " (%d messages observed)", est.SampleMessages)
@@ -183,12 +192,19 @@ func printPredict(cmd *cobra.Command, sessionID string, shape store.PredictShape
 	fmt.Fprintln(w)
 
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "BAND\tCOST\tTURNS\tOUT/TURN\tBILLED TOK\tOF WHICH NEW")
-	predictBandRow(tw, "low (quick)", est.Low, est.PrefixTokens)
-	predictBandRow(tw, "mid (typical)", est.Mid, est.PrefixTokens)
-	predictBandRow(tw, "high (agentic)", est.High, est.PrefixTokens)
+	if tokens {
+		fmt.Fprintln(tw, "BAND\tTURNS\tOUT/TURN\tBILLED TOK\tOF WHICH NEW")
+	} else {
+		fmt.Fprintln(tw, "BAND\tCOST\tTURNS\tOUT/TURN\tBILLED TOK\tOF WHICH NEW")
+	}
+	predictBandRow(tw, "low (quick)", est.Low, est.PrefixTokens, tokens)
+	predictBandRow(tw, "mid (typical)", est.Mid, est.PrefixTokens, tokens)
+	predictBandRow(tw, "high (agentic)", est.High, est.PrefixTokens, tokens)
 	tw.Flush()
-	fmt.Fprintf(w, "\nbilled tok = turns × (cached prefix + fresh input + output) — the same dimensions the cost\n"+
+	if tokens {
+		fmt.Fprintln(w, "\n"+tokenViewNote)
+	}
+	fmt.Fprintf(w, "\nbilled tok = turns × (cached prefix + fresh input + output) - the same dimensions the cost\n"+
 		"charges for, so the cached prefix is counted once per turn. It is throughput, NOT context size,\n"+
 		"and it excludes cache-WRITE tokens (not modelled), so it is a lower bound.\n")
 
@@ -209,7 +225,7 @@ func printPredict(cmd *cobra.Command, sessionID string, shape store.PredictShape
 		return
 	}
 	if !snapOK {
-		fmt.Fprintln(w, "  unavailable — route this client through the observer proxy (observer init) to capture rate-limit windows.")
+		fmt.Fprintln(w, "  unavailable - route this client through the observer proxy (observer init) to capture rate-limit windows.")
 		return
 	}
 	if snap.Window5hUtil == nil && snap.Window7dUtil == nil {
@@ -234,10 +250,16 @@ func printPredict(cmd *cobra.Command, sessionID string, shape store.PredictShape
 // half — so the cached dominance stays visible instead of hiding inside
 // one opaque total. Cache-WRITE tokens are not modelled by the
 // estimator and so are not counted here either.
-func predictBandRow(tw *tabwriter.Writer, label string, b predict.Band, prefix int64) {
+func predictBandRow(tw *tabwriter.Writer, label string, b predict.Band, prefix int64, tokens bool) {
 	turns := max(0, b.Turns)
 	cached := int64(math.Round(turns * float64(max(0, prefix))))
 	fresh := int64(math.Round(turns * float64(max(0, b.FreshInput)+max(0, b.Output))))
+	if tokens {
+		fmt.Fprintf(tw, "%s\t%.1f\t%d\t%s\t%s\n",
+			label, b.Turns, b.Output, fmtTokens(cached+fresh), fmtTokens(fresh))
+		return
+	}
+	// no-bare-usd:allow (the dollar row; the token view returned above)
 	fmt.Fprintf(tw, "%s\t$%.2f\t%.1f\t%d\t%s\t%s\n",
 		label, b.MessageUSD, b.Turns, b.Output, fmtTokens(cached+fresh), fmtTokens(fresh))
 }

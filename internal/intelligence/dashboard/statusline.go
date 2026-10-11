@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/costtext"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 )
 
@@ -21,10 +23,28 @@ import (
 // convention documented in the statusline plan §4.1 ("omitted, not
 // $0.00").
 type StatuslineResponse struct {
-	TodayUSD              float64  `json:"today_usd"`
+	// TodayUSD / SessionUSD are null under the token-usage developer cost
+	// display (T-204): the raw tile JSON follows the display like the
+	// rendered tile, so a custom statusline reading it shows no dollars.
+	TodayUSD              *float64 `json:"today_usd"`
 	SessionUSD            *float64 `json:"session_usd"`
 	SessionCacheReadShare *float64 `json:"session_cache_read_share"`
 	GeneratedAt           string   `json:"generated_at"`
+	// CostDisplay is the node's resolved developer cost display ("usd" or
+	// "tokens"), the same answer GET /api/cost-display gives. Under "tokens"
+	// the statusline renders TodayTokens / SessionTokens instead of dollars.
+	CostDisplay string `json:"cost_display"`
+	// TodayTokens / SessionTokens are the token usage behind TodayUSD /
+	// SessionUSD (input + output + cache read + cache creation, the node
+	// dashboard's token figure). SessionTokens is null exactly when
+	// SessionUSD is.
+	TodayTokens   int64  `json:"today_tokens"`
+	SessionTokens *int64 `json:"session_tokens"`
+	// GrantsInForce / NextGrantExpiryNs are the org access grants this node
+	// would honour right now and when the nearest one ends (0 = none, or
+	// none ends). Omitted on a node with none (request-grants G6).
+	GrantsInForce     int   `json:"grants_in_force,omitempty"`
+	NextGrantExpiryNs int64 `json:"next_grant_expiry_ns,omitempty"`
 }
 
 // statuslineCacheEntry is one memoized StatuslineResponse plus the instant
@@ -100,8 +120,10 @@ func statuslineCachedOrCompute(ctx context.Context, s *Server, cacheKey statusli
 		return StatuslineResponse{}, err
 	}
 
+	todayUSD := today.CostUSD
 	resp := StatuslineResponse{
-		TodayUSD:    today.CostUSD,
+		TodayUSD:    &todayUSD,
+		TodayTokens: today.Tokens,
 		GeneratedAt: now.Format(time.RFC3339),
 	}
 
@@ -118,6 +140,8 @@ func statuslineCachedOrCompute(ctx context.Context, s *Server, cacheKey statusli
 		if session.RowCount > 0 {
 			usd := session.CostUSD
 			resp.SessionUSD = &usd
+			tok := session.Tokens
+			resp.SessionTokens = &tok
 			var share float64
 			if session.PromptTokens > 0 {
 				share = float64(session.CacheReadTokens) / float64(session.PromptTokens)
@@ -126,6 +150,20 @@ func statuslineCachedOrCompute(ctx context.Context, s *Server, cacheKey statusli
 		}
 		// session.RowCount == 0 (unknown/empty session_id) leaves both
 		// pointers nil → JSON null, per the honest-omission contract.
+	}
+
+	if s.opts.Requests != nil {
+		if view, ok, err := s.opts.Requests.AccessGrantsView(ctx); err == nil && ok {
+			for _, g := range view.Grants {
+				if !g.Honoured {
+					continue
+				}
+				resp.GrantsInForce++
+				if exp := g.Grant.ExpiresAtNs; exp > 0 && (resp.NextGrantExpiryNs == 0 || exp < resp.NextGrantExpiryNs) {
+					resp.NextGrantExpiryNs = exp
+				}
+			}
+		}
 	}
 
 	if statuslineTTL > 0 {
@@ -190,6 +228,12 @@ func (s *Server) handleStatuslineTile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// Resolved per request, outside the 2 s figure cache, so a display flip
+	// reaches the very next statusline tick.
+	resp.CostDisplay = s.statuslineCostDisplay(ctx)
+	if costtext.Tokens(resp.CostDisplay) {
+		resp.TodayUSD, resp.SessionUSD = nil, nil
+	}
 
 	writeJSON(w, resp)
 }
@@ -204,7 +248,11 @@ type statuslineTotals struct {
 	CostUSD         float64
 	CacheReadTokens int64
 	PromptTokens    int64 // input + cache_read + cache_creation, across matched rows
-	RowCount        int
+	// Tokens is input + output + cache_read + cache_creation, the node
+	// dashboard's token figure, so token mode reads the same number on the
+	// statusline and the dashboard.
+	Tokens   int64
+	RowCount int
 }
 
 // statuslineQueryRows sums the node's deduped spend substrate
@@ -242,7 +290,7 @@ func statuslineQueryRows(ctx context.Context, db *sql.DB, engine *cost.Engine, s
 	if sessionID != "" {
 		ids = []string{sessionID}
 	}
-	turns, err := loadSpendTurns(ctx, db, engine, since, time.Time{}, "", "", ids)
+	turns, err := dashapi.LoadSpendTurns(ctx, db, engine, since, time.Time{}, dashapi.SpendScope{}, ids)
 	if err != nil {
 		return totals, fmt.Errorf("dashboard.statuslineQueryRows: %w", err)
 	}
@@ -250,6 +298,7 @@ func statuslineQueryRows(ctx context.Context, db *sql.DB, engine *cost.Engine, s
 		totals.CostUSD += t.CostUSD
 		totals.CacheReadTokens += t.Bundle.CacheRead
 		totals.PromptTokens += t.Bundle.Input + t.Bundle.CacheRead + t.Bundle.CacheCreation
+		totals.Tokens += t.Bundle.Input + t.Bundle.Output + t.Bundle.CacheRead + t.Bundle.CacheCreation
 		totals.RowCount++
 	}
 	return totals, nil

@@ -1,7 +1,8 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
-	"errors"
 	"net/http"
 	"runtime"
 	"strings"
@@ -9,18 +10,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/remotecfg"
 	"github.com/marmutapp/superbased-observer/internal/tailnet"
 )
-
-// writeSetupSpawnErr maps a CreateSetup failure to an honest status: the setup
-// single-flight refusal is 409 (a privileged PTY of this kind is already
-// starting — POST-spam is bounded to one live setup op per kind); anything else
-// degrades to 500.
-func writeSetupSpawnErr(w http.ResponseWriter, err error) {
-	if errors.Is(err, ErrLaunchSetupInFlight) {
-		writeErrStatus(w, err, http.StatusConflict)
-		return
-	}
-	writeErr(w, err)
-}
 
 // remote_tailscale.go is the read-only tailnet detection + guidance surface
 // (dashboard-management-surface plan §D). It runs `tailscale status --json` via
@@ -101,7 +90,7 @@ func (s *Server) handleRemoteTailscaleServe(w http.ResponseWriter, r *http.Reque
 	}
 	backendAddr := cfg.Remote.TailscaleBackendAddr
 	if backendAddr == "" {
-		http.Error(w, `{"error":"arm remote access first — the tailscale serve target is the backend port minted at arm time"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"arm remote access first - the tailscale serve target is the backend port minted at arm time"}`, http.StatusBadRequest)
 		return
 	}
 	res := tailscaleServeRunner(r.Context(), remotecfg.BackendPortOnly(backendAddr))
@@ -145,7 +134,7 @@ func (s *Server) handleRemoteTailscaleOperatorGrant(w http.ResponseWriter, r *ht
 		return
 	}
 	if isRoot {
-		http.Error(w, `{"error":"the daemon already runs as root — tailscale serve needs no grant; click \"Set up serve for me\""}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"the daemon already runs as root - tailscale serve needs no grant; click \"Set up serve for me\""}`, http.StatusBadRequest)
 		return
 	}
 	argv := tailnet.OperatorGrantArgv(user)
@@ -228,11 +217,11 @@ func (s *Server) handleRemoteTailscaleInstall(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if runtime.GOOS != "linux" {
-		http.Error(w, `{"error":"the guided install runs the Linux install script — install Tailscale on the machine that owns your tailnet, or use the download link"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"the guided install runs the Linux install script - install Tailscale on the machine that owns your tailnet, or use the download link"}`, http.StatusBadRequest)
 		return
 	}
 	if tailnet.Detect(r.Context()).Present {
-		http.Error(w, `{"error":"tailscale is already installed — no install needed"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"tailscale is already installed - no install needed"}`, http.StatusBadRequest)
 		return
 	}
 	if s.opts.LaunchManager == nil {
@@ -247,7 +236,7 @@ func (s *Server) handleRemoteTailscaleInstall(w http.ResponseWriter, r *http.Req
 	// binary. The setup single-flight (Label below) closes the concurrent-POST
 	// race; this closes the slower "installed out-of-band" race.
 	if tailnet.Detect(r.Context()).Present {
-		http.Error(w, `{"error":"tailscale is already installed — no install needed"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"tailscale is already installed - no install needed"}`, http.StatusBadRequest)
 		return
 	}
 	argv := tailnet.InstallArgv()

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_org_update
+
 package main
 
 import (
@@ -6,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -15,12 +16,11 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/quiesce"
 	"github.com/marmutapp/superbased-observer/internal/store"
-	"github.com/marmutapp/superbased-observer/internal/termsession"
 	"github.com/marmutapp/superbased-observer/internal/update"
 )
 
@@ -41,23 +41,9 @@ import (
 //  4. the AUTO-APPLY loop, which is off unless [update].auto_apply resolves
 //     true.
 
-// updateGateOnce guards the process-wide drain gate.
-var (
-	updateGateOnce sync.Once
-	updateGate     *quiesce.Gate
-)
-
-// updateDrainGate returns the process's single admission gate.
-//
-// A package-level singleton rather than a field threaded through
-// buildProxy's frozen return arity: there is exactly one proxy and one
-// updater per process, and the alternative — a ninth return value on a
-// function whose signature is deliberately pinned — would be a worse
-// coupling than one accessor with a stated invariant.
-func updateDrainGate() *quiesce.Gate {
-	updateGateOnce.Do(func() { updateGate = quiesce.NewGate() })
-	return updateGate
-}
+// The process-wide drain gate (updateDrainGate) and waitForListener live in
+// update_core.go: the proxy takes the gate in every build, including one
+// without the org.update component (lane MP-GOV4, T-711).
 
 // updateRuntime is the daemon-side update machinery.
 type updateRuntime struct {
@@ -99,14 +85,18 @@ type updateRuntime struct {
 // newUpdateRuntime assembles the daemon-side updater. It returns nil when
 // [update].enabled is false, and every method is nil-safe, so the disabled
 // path is byte-identical to a daemon built before this feature existed.
-func newUpdateRuntime(cfg config.Config, configPath string, s *store.Store, org *orgclient.Client, mgr *termsession.Manager, logger *slog.Logger) *updateRuntime {
+func newUpdateRuntime(cfg config.Config, configPath string, s *store.Store, org *orgclient.Client, mgr terminalLiveCounter, logger *slog.Logger) *updateRuntime {
 	if !cfg.Update.Enabled || s == nil {
 		return nil
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &updateRuntime{
+	liveCount := func() int { return 0 } // no terminal stack: nothing live
+	if mgr != nil {
+		liveCount = mgr.LiveCount
+	}
+	u := &updateRuntime{
 		cfg: cfg, configPath: configPath, store: s, org: org, logger: logger,
 		quiescence: &quiesce.Quiescence{
 			Gate: updateDrainGate(),
@@ -115,11 +105,16 @@ func newUpdateRuntime(cfg config.Config, configPath string, s *store.Store, org 
 				// warned, unlike a backfill. That is the whole distinction
 				// the flag encodes.
 				Name:     "dashboard terminal sessions",
-				Count:    mgr.LiveCount,
+				Count:    liveCount,
 				Forcible: true,
 			}},
 		},
 	}
+	// Distro-aware from here on (plan 5.6.1): the manifest fetch negotiates
+	// the v2 route first and runs verify rules 10-12 against this node's own
+	// distro, ceiling and policy, read fresh on every fetch.
+	org.SetUpdateDistroSource(u.distroContext)
+	return u
 }
 
 // managedPosture resolves the §3.9 carve-out inputs.
@@ -133,10 +128,9 @@ func (u *updateRuntime) managedPosture() update.ManagedPosture {
 		return update.ManagedPosture{}
 	}
 	if u.org != nil {
-		share := u.org.ShareOptions()
-		return update.ManagedPosture{AdminManaged: share.AdminManaged, EnterpriseGranted: share.EnterpriseGranted}
+		return updateManagedPosture(u.org.ShareOptions())
 	}
-	return update.ManagedPosture{AdminManaged: u.cfg.OrgClient.Share.AdminManaged}
+	return updateManagedPosture(store.ShareOptions{AdminManaged: u.cfg.OrgClient.Share.AdminManaged})
 }
 
 // autoApply resolves the effective [update].auto_apply and why.
@@ -144,9 +138,40 @@ func (u *updateRuntime) autoApply() (bool, string) {
 	if u == nil {
 		return false, "off - [update].enabled is false on this node"
 	}
-	posture := u.managedPosture()
-	effective, explicit := u.cfg.Update.EffectiveAutoApply(update.AutoApplyDefault(posture))
+	return resolveUpdateAutoApply(u.cfg, u.managedPosture())
+}
+
+// updateManagedPosture is the ONE mapping from the node's resolved share
+// options to the §3.9 update posture (T-727). The daemon feeds it the org
+// client's live ShareOptions; `observer update status` feeds it
+// cliUpdateShareOptions, which resolves the same two inputs from a CLI
+// process. Neither caller may build a ManagedPosture of its own.
+func updateManagedPosture(share store.ShareOptions) update.ManagedPosture {
+	return update.ManagedPosture{AdminManaged: share.AdminManaged, EnterpriseGranted: share.EnterpriseGranted}
+}
+
+// resolveUpdateAutoApply is the ONE resolver of the effective
+// [update].auto_apply and the reason a surface prints (T-727): the daemon's
+// update loop, its dashboard / Fleet posture and `observer update status`
+// all call it, so they cannot disagree.
+func resolveUpdateAutoApply(cfg config.Config, posture update.ManagedPosture) (bool, string) {
+	effective, explicit := cfg.Update.EffectiveAutoApply(update.AutoApplyDefault(posture))
 	return effective, update.AutoApplyReason(explicit, effective, posture)
+}
+
+// cliUpdateShareOptions resolves, from a short-lived CLI process, the two
+// share inputs the daemon's org client hands the update runtime:
+// admin_managed from the node's config, and the enterprise-posture grant
+// from the live governance grant through enterpriseContentGranted, the same
+// EnterpriseContentInForce predicate lowerShareOptions sets on the daemon's
+// ShareOptions. Before T-727 the CLI read admin_managed alone and called a
+// managed-fleet node "BYO" while the daemon and the org Fleet row said on.
+// A nil store (database unreadable) resolves the grant to false.
+func cliUpdateShareOptions(ctx context.Context, cfg config.Config, st *store.Store, logger *slog.Logger) store.ShareOptions {
+	return store.ShareOptions{
+		AdminManaged:      cfg.OrgClient.Share.AdminManaged,
+		EnterpriseGranted: enterpriseContentGranted(ctx, cfg, st, logger),
+	}
 }
 
 // PublishPosture wires the static half of the org-bound posture row.
@@ -213,15 +238,15 @@ func (u *updateRuntime) ExtensionVersion() string {
 // at start, and the org client's in-memory record of a min-version refusal. It
 // makes no outbound request, which is what lets the plan's "no new background
 // fetch" hold for the banner.
-func (u *updateRuntime) UpdateStatus(ctx context.Context) (dashboard.UpdateStatusResult, error) {
+func (u *updateRuntime) UpdateStatus(ctx context.Context) (dashapi.UpdateStatusResult, error) {
 	if u == nil {
 		// [update].enabled = false. The zero value says the feature is off,
 		// which the card renders as such — never as "up to date".
-		return dashboard.UpdateStatusResult{}, nil
+		return dashapi.UpdateStatusResult{}, nil
 	}
 	st, err := u.store.LoadUpdateState(ctx)
 	if err != nil {
-		return dashboard.UpdateStatusResult{}, err
+		return dashapi.UpdateStatusResult{}, err
 	}
 	auto, why := u.autoApply()
 	det := u.installDetection()
@@ -229,7 +254,7 @@ func (u *updateRuntime) UpdateStatus(ctx context.Context) (dashboard.UpdateStatu
 	if channel == "" {
 		channel = strings.TrimSpace(string(st.Channel))
 	}
-	res := dashboard.UpdateStatusResult{
+	res := dashapi.UpdateStatusResult{
 		Enabled:            true,
 		Version:            version,
 		Channel:            channel,
@@ -248,7 +273,7 @@ func (u *updateRuntime) UpdateStatus(ctx context.Context) (dashboard.UpdateStatu
 	}
 	if u.org != nil {
 		if ref := u.org.AgentTooOld(); ref != nil {
-			res.OrgRefusal = &dashboard.UpdateOrgRefusal{
+			res.OrgRefusal = &dashapi.UpdateOrgRefusal{
 				Message:     ref.Message,
 				MinVersion:  ref.MinVersion,
 				YourVersion: ref.YourVersion,
@@ -366,14 +391,14 @@ func (u *updateRuntime) RecoverAtBoot(ctx context.Context) {
 	u.logger.Warn("update: settled an orphaned apply at boot", "state", settled, "detail", detail)
 }
 
-// ApplySeam is the dashboard.Options.UpdateApplyFunc value.
-func (u *updateRuntime) ApplySeam() func(context.Context, dashboard.UpdateApplyRequest) (dashboard.UpdateApplyResult, error) {
+// ApplySeam is the dashapi.Options.UpdateApplyFunc value.
+func (u *updateRuntime) ApplySeam() func(context.Context, dashapi.UpdateApplyRequest) (dashapi.UpdateApplyResult, error) {
 	if u == nil {
 		return nil
 	}
-	return func(ctx context.Context, req dashboard.UpdateApplyRequest) (dashboard.UpdateApplyResult, error) {
+	return func(ctx context.Context, req dashapi.UpdateApplyRequest) (dashapi.UpdateApplyResult, error) {
 		out, err := u.ApplyDetached(ctx, applyRequestFromDashboard(req))
-		return dashboard.UpdateApplyResult{
+		return dashapi.UpdateApplyResult{
 			State: string(out.State), Reason: string(out.Reason), ErrorClass: string(out.ErrorClass),
 			Detail: out.Detail, Steps: out.Steps, Applied: out.Applied,
 			RolledBack: out.RolledBack, Deferred: out.Deferred,
@@ -422,7 +447,7 @@ func (u *updateRuntime) ApplyDetached(ctx context.Context, req updateApplyReques
 		FromVersion: version, State: update.StateAvailable,
 		Detail: "accepted a dashboard-initiated " + verb + "; it runs off the request goroutine so the handshake owns its own budget",
 	})
-	go func() {
+	go func() { //nolint:gosec // G118: the detached apply owns its budget by design so the handshake survives the request
 		defer u.applying.Unlock()
 		out, err := u.applyLocked(context.WithoutCancel(context.Background()), req)
 		if err != nil {
@@ -438,19 +463,19 @@ func (u *updateRuntime) ApplyDetached(ctx context.Context, req updateApplyReques
 	}, nil
 }
 
-// StatusSeam is the dashboard.Options.UpdateStatusFunc value (W5).
+// StatusSeam is the dashapi.Options.UpdateStatusFunc value (W5).
 //
 // It returns a NON-NIL func even when the runtime is nil, so a daemon with
 // [update].enabled = false answers 200 with Enabled:false — the honest
 // disabled shape the card renders as "update management is off on this node",
 // rather than a 404 the frontend would read as "old daemon".
-func (u *updateRuntime) StatusSeam() func(context.Context) (dashboard.UpdateStatusResult, error) {
-	return func(ctx context.Context) (dashboard.UpdateStatusResult, error) {
+func (u *updateRuntime) StatusSeam() func(context.Context) (dashapi.UpdateStatusResult, error) {
+	return func(ctx context.Context) (dashapi.UpdateStatusResult, error) {
 		return u.UpdateStatus(ctx)
 	}
 }
 
-// ExtensionVersionSeam is the dashboard.Options.UpdateExtensionVersionFunc
+// ExtensionVersionSeam is the dashapi.Options.UpdateExtensionVersionFunc
 // value (W5, ruling R6). Nil when the feature is off, which makes the route
 // answer 501 and tells the extension to stop retrying for this session.
 func (u *updateRuntime) ExtensionVersionSeam() func(string) {
@@ -461,7 +486,7 @@ func (u *updateRuntime) ExtensionVersionSeam() func(string) {
 }
 
 // applyRequestFromDashboard maps the loopback wire onto the internal shape.
-func applyRequestFromDashboard(req dashboard.UpdateApplyRequest) updateApplyRequest {
+func applyRequestFromDashboard(req dashapi.UpdateApplyRequest) updateApplyRequest {
 	return updateApplyRequest{Version: req.Version, Force: req.Force, DryRun: req.DryRun, Rollback: req.Rollback}
 }
 
@@ -496,6 +521,9 @@ func (u *updateRuntime) applyLocked(ctx context.Context, req updateApplyRequest)
 	if err != nil {
 		return applyOutcome{}, err
 	}
+	dc := u.distroContext(ctx, man.Channel)
+	transition := man.Schema == update.SchemaV2 &&
+		update.NormalizeDistro(art.Distro) != update.NormalizeDistro(dc.Current)
 	win, err := update.ParseWindow(u.cfg.Update.Window)
 	if err != nil {
 		return applyOutcome{}, err
@@ -515,6 +543,7 @@ func (u *updateRuntime) applyLocked(ctx context.Context, req updateApplyRequest)
 		Download:              u.download,
 		VerifyVendorSignature: verifyVendorSignature,
 		Probe:                 probeBinaryVersion,
+		ProbeComponents:       probeBinaryComponentsDigest,
 		Supervise: func(sctx context.Context, exe, stateDir string, timeout time.Duration) (handshakeResult, error) {
 			// preflightRestart's instinct, kept and strengthened: the config
 			// is re-Loaded and re-Validated BEFORE the successor is spawned,
@@ -555,10 +584,16 @@ func (u *updateRuntime) applyLocked(ctx context.Context, req updateApplyRequest)
 		// and a declared equal version is what skips a multi-gigabyte
 		// VACUUM INTO on every apply.
 		TargetSchemaVersion: man.SchemaVersion,
-		AllowDowngrade:      u.cfg.Update.AllowDowngrade,
-		DrainTimeout:        durationOr(u.cfg.Update.DrainTimeout, quiesce.DefaultDrainTimeout),
-		HandshakeTimeout:    durationOr(u.cfg.Update.HandshakeTimeout, time.Minute),
-		MaxDownloadBytes:    u.cfg.Update.MaxDownloadBytes,
+		// Plan 6.2.2 / 5.6.1: the ceiling verdict and the distro facts the
+		// fetch recorded travel with the apply request.
+		CeilingInvalid:   !dc.UpdatesAllowed,
+		DistroTransition: transition,
+		DistroEpoch:      man.DistroEpoch,
+		DistroRefused:    applyDistroRefusal(dc, transition, art, man),
+		AllowDowngrade:   u.cfg.Update.AllowDowngrade,
+		DrainTimeout:     durationOr(u.cfg.Update.DrainTimeout, quiesce.DefaultDrainTimeout),
+		HandshakeTimeout: durationOr(u.cfg.Update.HandshakeTimeout, time.Minute),
+		MaxDownloadBytes: u.cfg.Update.MaxDownloadBytes,
 	}
 	out, err := runUpdateApply(ctx, deps, opts)
 	exiting := u.finishApply(out, opts.Manifest.Version)
@@ -756,14 +791,19 @@ func (u *updateRuntime) rollback(ctx context.Context) (applyOutcome, error) {
 }
 
 // resolveTarget picks the manifest and artifact for this apply.
-func (u *updateRuntime) resolveTarget(_ context.Context, row store.UpdateStateRow, wantVersion string) (update.Manifest, update.Artifact, error) {
+func (u *updateRuntime) resolveTarget(ctx context.Context, row store.UpdateStateRow, wantVersion string) (update.Manifest, update.Artifact, error) {
 	var man update.Manifest
 	if u.org != nil {
 		if st := u.org.UpdateStatus(); st.Version != "" {
+			schema := st.Schema
+			if schema == "" {
+				schema = update.SchemaV1
+			}
 			man = update.Manifest{
-				Schema: update.SchemaV1, Channel: st.Channel, ManifestVersion: st.ManifestVersion,
+				Schema: schema, Channel: st.Channel, ManifestVersion: st.ManifestVersion,
 				Version: st.Version, Notes: st.Notes, NotesURL: st.NotesURL, EOSAt: st.EOSAt,
-				Artifacts: []update.Artifact{st.Artifact},
+				DistroEpoch: st.DistroEpoch,
+				Artifacts:   []update.Artifact{st.Artifact},
 			}
 		}
 	}
@@ -781,7 +821,14 @@ func (u *updateRuntime) resolveTarget(_ context.Context, row store.UpdateStateRo
 		return update.Manifest{}, update.Artifact{}, fmt.Errorf(
 			"observer update: this node is eligible for %s, not %s; an update is served by the org, not chosen by the node", man.Version, v)
 	}
-	art, ok := update.SelectArtifact(man, "agent", runtime.GOOS, runtime.GOARCH)
+	// A v1 manifest carries only the full build; a v2 manifest is selected
+	// for the distro this node should run (verify rule 9 made the same
+	// choice when the document was accepted).
+	distro := update.DistroFull
+	if man.Schema == update.SchemaV2 {
+		distro = u.distroContext(ctx, man.Channel).Target
+	}
+	art, ok := update.SelectArtifactFor(man, "agent", distro, runtime.GOOS, runtime.GOARCH)
 	if !ok {
 		return update.Manifest{}, update.Artifact{}, fmt.Errorf(
 			"observer update: manifest %d builds nothing for %s/%s", man.ManifestVersion, runtime.GOOS, runtime.GOARCH)
@@ -919,7 +966,7 @@ var (
 // threading a variable between them, and so a second call can never produce
 // a SECOND drain gate or a second apply mutex, which would silently defeat
 // both.
-func updateRuntimeFor(cfg config.Config, configPath string, s *store.Store, org *orgclient.Client, mgr *termsession.Manager, logger *slog.Logger) *updateRuntime {
+func updateRuntimeFor(cfg config.Config, configPath string, s *store.Store, org *orgclient.Client, mgr terminalLiveCounter, logger *slog.Logger) *updateRuntime {
 	updateRuntimeOnce.Do(func() {
 		updateRuntimeInst = newUpdateRuntime(cfg, configPath, s, org, mgr, logger)
 	})
@@ -935,37 +982,6 @@ func updateRuntimeFor(cfg config.Config, configPath string, s *store.Store, org 
 // Returns nil when the feature is disabled or the daemon never reached the
 // wiring block; every method is nil-safe.
 func currentUpdateRuntime() *updateRuntime { return updateRuntimeInst }
-
-// waitForListener blocks until addr accepts a TCP connection or ctx ends.
-//
-// It is announceDashboardReady's dial loop without the banner: the update
-// handshake needs the same fact ("the listener is actually accepting"), and
-// deriving it from a successful dial rather than from "New() returned" is
-// what makes a bind failure visible to the watching parent instead of
-// reported as a healthy start.
-func waitForListener(ctx context.Context, addr string) {
-	if strings.TrimSpace(addr) == "" {
-		return
-	}
-	d := net.Dialer{Timeout: 500 * time.Millisecond}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		conn, err := d.DialContext(ctx, "tcp", addr)
-		if err == nil {
-			_ = conn.Close()
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
 
 // SetReleaseListeners wires the listener-release seam of §3.7 step 7.
 //

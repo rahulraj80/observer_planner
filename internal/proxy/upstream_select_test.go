@@ -69,8 +69,9 @@ func TestStripUpstreamPrefix(t *testing.T) {
 	}
 }
 
-// TestStripUpstreamPrefix_NoUpstreamsConfigured pins the fail-open default:
-// with no [proxy.upstreams], a /up/ path is left completely untouched.
+// TestStripUpstreamPrefix_NoUpstreamsConfigured: with no [proxy.upstreams], a
+// /up/ path resolves nothing and is left untouched; serve() then REFUSES it
+// instead of forwarding it to a fixed upstream (Sol A5-02).
 func TestStripUpstreamPrefix_NoUpstreamsConfigured(t *testing.T) {
 	p, _, cleanup := newTestProxy(t, http.NotFoundHandler(), http.NotFoundHandler())
 	defer cleanup()

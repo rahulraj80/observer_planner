@@ -114,6 +114,10 @@ type Thresholds struct {
 	// subjects is the org's to choose. An empty list is every node whose org
 	// authored none, and composes to the pre-feature thresholds exactly.
 	Subjects []SubjectCap
+
+	// Origins is the provenance of every ADOPTED org window ceiling, one row
+	// per (window, unit) (see Origin). Empty on a purely local composition.
+	Origins []Origin
 }
 
 // BudgetProtection carries managed hard-budget provenance per window and
@@ -223,6 +227,14 @@ type Capabilities struct {
 	// enforce.budget pins guard.budget.from_org through its node.governance
 	// body anyway (ruling R3).
 	RequireOrgBudget bool
+	// FailClosed is the organization's EXPLICIT opt-in ([guard.budget]
+	// fail_closed, pinnable restrictive-only) to the blocking outcome of
+	// RequireOrgBudget. Without it (the zero value, operator ruling D-502) a
+	// required-but-absent body FAILS OPEN on the node's own numbers: a
+	// requirement the node cannot currently satisfy for reasons outside the
+	// request (no pull yet after enrolment, org unreachable since start, a
+	// document that did not verify) must never stop the developer's session.
+	FailClosed bool
 	// HaveBody is false when no VERIFIED org body is in hand — not enrolled,
 	// the org published none, the fetch failed, or the signature did not
 	// verify. Compose then returns local unchanged and the posture says so;
@@ -461,8 +473,12 @@ var preCompositionRules = []preCompositionRule{
 		// authors no budgets could never make a request — and the unsigned
 		// 404 that used to be the only way to say "nothing applies" is
 		// exactly what this row still, correctly, refuses to trust.
+		//
+		// D-502: the block is the ORG's explicit opt-in (FailClosed). Without
+		// it this row does not match and the next row runs the node's own
+		// numbers, so a missing budget never stops a session by default.
 		name:  "org_budget_required",
-		when:  func(c Capabilities) bool { return c.RequireOrgBudget && !c.HaveBody },
+		when:  func(c Capabilities) bool { return c.RequireOrgBudget && c.FailClosed && !c.HaveBody },
 		apply: blockingCeiling,
 	},
 	{
@@ -500,6 +516,7 @@ func blockingCeiling(local Thresholds, posture Posture) (Thresholds, Posture) {
 	// block and has never carried either, and a future caller that passed a
 	// pre-filled Thresholds must not have it survive into a fail-closed state.
 	eff.Baseline, eff.Subjects = Baseline{}, nil
+	eff.Origins = nil
 	posture.OrgBaseline = orgcontract.BudgetBaselineAbsent
 	eff.Hard = true
 	eff.BudgetRequired = true
@@ -533,8 +550,9 @@ func localUnchanged(local Thresholds, posture Posture) (Thresholds, Posture) {
 //
 // The rule (§3.3c + ruling R2), in the order it is applied:
 //
-//  0. RequireOrgBudget (a MANAGED node holding enforce.budget) with no
-//     verified body ever applied -> a BLOCKING ceiling. The node refuses
+//  0. RequireOrgBudget (a MANAGED node holding enforce.budget) AND FailClosed
+//     (the org's explicit opt-in, D-502) with no verified body ever applied ->
+//     a BLOCKING ceiling. Without FailClosed the same state falls to row 1. The node refuses
 //     proxied requests until the org's budget reaches it, and the posture
 //     reports Coverage=budget_required beside the unchanged fetch_state.
 //     TWO states are deliberately NOT this one: a verified body that arrived
@@ -633,6 +651,10 @@ func Compose(local Thresholds, body orgcontract.BudgetPolicyBody, caps Capabilit
 	}
 
 	for _, entry := range capsOf(body) {
+		// An org budget-increase grant past its expiry drops back to the base
+		// cap here, offline, before anything reads the number (request-grants
+		// design §3.3).
+		entry = entry.RevertExpiredGrant(caps.Now)
 		// SUBJECT caps take the other path entirely: they do not touch the
 		// node's four window ceilings, they carry their own, and a node that
 		// folded a per-tool cap into the node-wide daily ceiling would enforce
@@ -667,6 +689,7 @@ func Compose(local Thresholds, body orgcontract.BudgetPolicyBody, caps Capabilit
 			continue
 		}
 		hardOf[w] = windowHard(local.Hard, entry.Enforcement, caps.OrgAuthoritative)
+		eff.Origins = append(eff.Origins, originsOf(w, entry, adopted)...)
 		eff.Protection.set(w, adopted,
 			caps.OrgAuthoritative && enforcementRank(entry.Enforcement) >= enforcementRank(orgcontract.BudgetPolicyEnforcementHard))
 		// The baseline rides with the ADOPTED cap, for the same reason the

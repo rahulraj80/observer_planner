@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/sshspec"
 )
 
 // valid is the baseline profile every hostile-input case mutates ONE field of,
@@ -91,7 +93,7 @@ func TestValidate_RejectsHostileInput(t *testing.T) {
 		},
 		{"host invalid ipv6", func(p *Profile) { p.Host = "not:an:ipv6:addr:at:all:x" }, "colon shape that is not an address"},
 		{"host empty", func(p *Profile) { p.Host = "" }, "no destination"},
-		{"host too long", func(p *Profile) { p.Host = strings.Repeat("a", maxHost+1) }, "unbounded argv token"},
+		{"host too long", func(p *Profile) { p.Host = strings.Repeat("a", sshspec.MaxHost+1) }, "unbounded argv token"},
 
 		// --- user: reaches the argv via -l -----------------------------------
 		{"user leading dash", func(p *Profile) { p.User = "-oProxyCommand=x" }, "flag injection through -l's operand"},
@@ -103,7 +105,7 @@ func TestValidate_RejectsHostileInput(t *testing.T) {
 		{"user with newline", func(p *Profile) { p.User = "ubuntu\nroot" }, "control character"},
 		{"user with NUL", func(p *Profile) { p.User = "ubuntu\x00" }, "NUL truncation"},
 		{"user with slash", func(p *Profile) { p.User = "../root" }, "outside the closed charset"},
-		{"user too long", func(p *Profile) { p.User = strings.Repeat("u", maxUser+1) }, "unbounded argv token"},
+		{"user too long", func(p *Profile) { p.User = strings.Repeat("u", sshspec.MaxUser+1) }, "unbounded argv token"},
 
 		// --- port: typed, so only bounds matter ------------------------------
 		{"port negative", func(p *Profile) { p.Port = -1 }, "out of range"},
@@ -141,7 +143,7 @@ func TestValidate_RejectsHostileInput(t *testing.T) {
 		{"name leading dash", func(p *Profile) { p.Name = "-demo" }, "leading separator"},
 		{"name with slash", func(p *Profile) { p.Name = "a/b" }, "path-shaped identifier"},
 		{"name with space", func(p *Profile) { p.Name = "a b" }, "outside the charset"},
-		{"name too long", func(p *Profile) { p.Name = strings.Repeat("a", maxName+1) }, "unbounded identifier"},
+		{"name too long", func(p *Profile) { p.Name = strings.Repeat("a", sshspec.MaxName+1) }, "unbounded identifier"},
 
 		// --- label: display-only, but must not garble the terminal ------------
 		{"label with escape", func(p *Profile) { p.Label = "demo\x1b[2J" }, "ANSI escape in dashboard copy"},

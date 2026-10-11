@@ -307,7 +307,7 @@ func TestApplyAgentRuntimeEnv(t *testing.T) {
 			t.Errorf("XDG_CONFIG_HOME = %q", envValue(got, "XDG_CONFIG_HOME"))
 		}
 		if envValue(got, "XDG_DATA_HOME") != "" {
-			t.Error("XDG_DATA_HOME was set — must stay on the share for capture")
+			t.Error("XDG_DATA_HOME was set - must stay on the share for capture")
 		}
 		// dirs are created so the agent's package manager can write into them.
 		for _, sub := range []string{"config", "cache", "state", "npm", "bun"} {

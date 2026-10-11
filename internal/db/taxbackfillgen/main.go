@@ -92,6 +92,7 @@ var knownActionTypes = map[string]bool{
 	models.ActionConfigChange:        true,
 	models.ActionWorktreeCreate:      true,
 	models.ActionWorktreeRemove:      true,
+	models.ActionTaskEvent:           true,
 	models.ActionRateLimit:           true,
 	models.ActionSubagentWait:        true,
 	models.ActionAgentMessage:        true,

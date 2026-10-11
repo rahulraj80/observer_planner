@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/tooltax"
+	"github.com/marmutapp/superbased-observer/internal/tooltax/conformast"
 )
 
 // adapterRootForEmitSiteScan / modelsRootForEmitSiteScan are relative to
@@ -242,15 +243,12 @@ func emitSiteLitFieldSelector(lit *ast.CompositeLit, field string) (string, bool
 func loadStringConstValues(t *testing.T, dir, prefix string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	files, err := conformast.NonTestFiles(dir)
 	if err != nil {
 		t.Fatalf("parse %s: %v", dir, err)
 	}
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
+	for _, pkg := range []map[string]*ast.File{files} {
+		for _, f := range pkg {
 			for _, d := range f.Decls {
 				gd, ok := d.(*ast.GenDecl)
 				if !ok || gd.Tok != token.CONST {

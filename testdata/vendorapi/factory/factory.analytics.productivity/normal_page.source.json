@@ -1,0 +1,43 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].by_extension": "VerifiedOfficial",
+    "data[].by_extension[]": "VerifiedOfficial",
+    "data[].by_extension[].count": "VerifiedOfficial",
+    "data[].by_extension[].extension": "VerifiedOfficial",
+    "data[].by_language": "VerifiedOfficial",
+    "data[].by_language[]": "VerifiedOfficial",
+    "data[].by_language[].count": "VerifiedOfficial",
+    "data[].by_language[].language": "VerifiedOfficial",
+    "data[].date": "VerifiedOfficial",
+    "data[].files_created": "VerifiedOfficial",
+    "data[].files_edited": "VerifiedOfficial",
+    "data[].git_commits": "VerifiedOfficial",
+    "data[].git_prs_created": "VerifiedOfficial",
+    "meta": "VerifiedOfficial",
+    "meta.end_date": "VerifiedOfficial",
+    "meta.org_id": "VerifiedOfficial",
+    "meta.start_date": "VerifiedOfficial"
+  },
+  "fixture_sha256": "6e44686ad415f82624c815eeb7a6278c0e667aa61263bb61e54b8d36c712db0f",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/analytics/productivity",
+    "query": {
+      "startDate": "2026-01-15",
+      "endDate": "2026-01-15"
+    },
+    "status": 200
+  },
+  "notes": "The documented /productivity response example, values verbatim; the elided org id shortened to a placeholder.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Factory Analytics API reference (analytics.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "fa4729614fa5faadaedb2e0514cc8d9969bb76f15924387dcadd77cea8f1ee4b",
+  "source_url": "https://docs.factory.com/api-reference/analytics.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.analytics.productivity"
+}

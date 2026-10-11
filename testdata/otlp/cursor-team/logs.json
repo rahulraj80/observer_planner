@@ -1,0 +1,87 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "cursor"}},
+          {"key": "cursor.team.id", "value": {"stringValue": "team-0001"}},
+          {"key": "cursor.user.id", "value": {"stringValue": "cu-0001"}},
+          {"key": "cursor.user.account_id", "value": {"stringValue": "ca-0001"}},
+          {"key": "cursor.user.email", "value": {"stringValue": "Dev.One@Corp.Example"}}
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "timeUnixNano": "1791273600000000000",
+              "attributes": [
+                {"key": "event.name", "value": {"stringValue": "cursor.api.request"}},
+                {"key": "cursor.event.id", "value": {"stringValue": "evt-0001"}},
+                {"key": "cursor.usage_event.id", "value": {"stringValue": "ue-0001"}},
+                {"key": "cursor.conversation.id", "value": {"stringValue": "conv-0001"}},
+                {"key": "cursor.model.name", "value": {"stringValue": "claude-4.5-sonnet"}},
+                {"key": "cursor.api.request.input_tokens", "value": {"intValue": "1200"}},
+                {"key": "cursor.api.request.output_tokens", "value": {"intValue": "340"}},
+                {"key": "cursor.api.request.cache_read_tokens", "value": {"intValue": "800"}},
+                {"key": "cursor.api.request.cache_creation_tokens", "value": {"intValue": "0"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "cursor"}},
+          {"key": "cursor.team.id", "value": {"stringValue": "team-0001"}},
+          {"key": "cursor.user.id", "value": {"stringValue": "cu-0002"}},
+          {"key": "cursor.user.email", "value": {"stringValue": "contractor@vendor.example"}}
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "timeUnixNano": "1791273660000000000",
+              "attributes": [
+                {"key": "event.name", "value": {"stringValue": "cursor.api.request"}},
+                {"key": "cursor.event.id", "value": {"stringValue": "evt-0002"}},
+                {"key": "cursor.conversation.id", "value": {"stringValue": "conv-0002"}},
+                {"key": "cursor.model.name", "value": {"stringValue": "gpt-5"}},
+                {"key": "cursor.api.request.input_tokens", "value": {"intValue": "500"}},
+                {"key": "cursor.api.request.output_tokens", "value": {"intValue": "60"}}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "cursor"}},
+          {"key": "cursor.team.id", "value": {"stringValue": "team-0001"}}
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "timeUnixNano": "1791273720000000000",
+              "attributes": [
+                {"key": "event.name", "value": {"stringValue": "cursor.api.request"}},
+                {"key": "cursor.event.id", "value": {"stringValue": "evt-0003"}},
+                {"key": "cursor.conversation.id", "value": {"stringValue": "conv-0003"}},
+                {"key": "cursor.model.name", "value": {"stringValue": "gpt-5"}},
+                {"key": "cursor.api.request.input_tokens", "value": {"intValue": "90"}},
+                {"key": "cursor.api.request.output_tokens", "value": {"intValue": "10"}}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

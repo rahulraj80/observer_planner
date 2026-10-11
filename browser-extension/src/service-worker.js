@@ -23,6 +23,25 @@ const P = (typeof globalThis !== "undefined" && globalThis.SBOParsers) || null;
 
 const HOST_NAME = "com.superbased.observer.browser";
 
+// Native-host protocol version handshake (modular packaging, lane MP-ART).
+// Every message to the host carries the protocol this extension speaks and
+// its manifest version, so `observer components artifacts` can say which
+// extension is connected and the host can refuse a protocol it does not
+// know with a reason instead of half-understanding it. The twin of this
+// constant is internal/browserhost.ProtocolCurrent; a Go test pins them.
+const SBO_PROTOCOL = 2;
+
+// handshake returns the protocol and version fields added to every message.
+function handshake() {
+  let version = "";
+  try {
+    version = (chrome.runtime.getManifest() || {}).version || "";
+  } catch {
+    version = "";
+  }
+  return { protocol: SBO_PROTOCOL, extension_version: version };
+}
+
 // Send one captured turn to the native host. We use a one-shot
 // sendNativeMessage per turn (rather than a long-lived port) so an idle
 // service-worker teardown never strands an open port. Best-effort: a missing
@@ -30,7 +49,7 @@ const HOST_NAME = "com.superbased.observer.browser";
 // error to the page.
 function relayToHost(payload) {
   try {
-    chrome.runtime.sendNativeMessage(HOST_NAME, payload, (resp) => {
+    chrome.runtime.sendNativeMessage(HOST_NAME, Object.assign({}, payload, handshake()), (resp) => {
       const err = chrome.runtime.lastError;
       if (err) {
         console.warn("[sbo] native host error:", err.message);
@@ -65,7 +84,7 @@ const POLICY_REFRESH_MINUTES = 5;
 // closed, the privacy contract). Never surfaces an error to any page.
 function fetchDaemonPolicy() {
   try {
-    chrome.runtime.sendNativeMessage(HOST_NAME, { type: "config" }, (resp) => {
+    chrome.runtime.sendNativeMessage(HOST_NAME, Object.assign({ type: "config" }, handshake()), (resp) => {
       const err = chrome.runtime.lastError;
       if (err) {
         console.warn("[sbo] daemon policy fetch error:", err.message);
@@ -77,7 +96,13 @@ function fetchDaemonPolicy() {
           typeof resp.granularity === "string" && resp.granularity
             ? resp.granularity
             : "usage_only",
-        enabled: resp.enabled !== false,
+        // A host that refuses this extension's protocol answers
+        // refused:true with a reason; capture stays off until the two
+        // releases agree again.
+        enabled: resp.enabled !== false && resp.refused !== true,
+        refused: resp.refused === true,
+        refused_reason:
+          resp.refused === true && typeof resp.reason === "string" ? resp.reason : "",
         sites:
           resp.sites && typeof resp.sites === "object" ? resp.sites : {},
         degraded: resp.degraded === true,
@@ -141,7 +166,7 @@ function deriveHealthBeaconFallback(health) {
   if (captures === 0 && empties > 0) {
     return {
       status: "degraded",
-      reason: `shape canary tripped ${empties}x with no successful capture — parser may be stale`,
+      reason: `shape canary tripped ${empties}x with no successful capture - parser may be stale`,
       priority: "normal",
     };
   }
@@ -177,6 +202,7 @@ function relayHealthBeacon(health) {
     captures: health.captures || 0,
     id_missing: health.id_missing || 0,
   };
+  Object.assign(beacon, handshake());
   try {
     chrome.runtime.sendNativeMessage(HOST_NAME, beacon, () => {
       const err = chrome.runtime.lastError;

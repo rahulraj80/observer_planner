@@ -599,6 +599,28 @@ var reasoningNullRefs = []struct{ table, column string }{
 	{"process_events", "action_id"},
 }
 
+// reasoningExcerptCountSQL / reasoningExcerptDeleteSQL count and delete the
+// FTS5 excerpts of a chunk of action ids (ph is a code-built `?` run).
+//
+// action_id is UNINDEXED in action_excerpts (001_initial.sql), so the old
+// `... FROM action_excerpts WHERE action_id IN (...)` planned as a full scan
+// of every stored excerpt once per 400-id chunk, in the dry run AND inside
+// the apply transaction (T-415, the FTSSTALL class). Both now resolve the
+// ids through the FTS5 shadow table action_excerpts_content (c0 is
+// action_id, indexed by migration 147): the count reads only that index
+// (one content row per FTS row, so the count is identical), and the delete
+// reaches the virtual table by rowid equality, the same shape as the
+// indexer's replace-delete. The ids are bound int64 values, as they were
+// before, so the set of rows matched is unchanged. Pinned by
+// TestReasoningExcerptSQLSeeksByC0.
+func reasoningExcerptCountSQL(ph string) string {
+	return `SELECT COUNT(*) FROM action_excerpts_content WHERE c0 IN (` + ph + `)`
+}
+
+func reasoningExcerptDeleteSQL(ph string) string {
+	return `DELETE FROM action_excerpts WHERE rowid IN (SELECT id FROM action_excerpts_content WHERE c0 IN (` + ph + `))`
+}
+
 // countReasoningDependents reports what the dependency protocol WOULD
 // touch, for the dry run. Read-only.
 func countReasoningDependents(ctx context.Context, db *sql.DB, ids []int64) (reasoningDependentCounts, error) {
@@ -607,8 +629,7 @@ func countReasoningDependents(ctx context.Context, db *sql.DB, ids []int64) (rea
 		args := int64Args(chunk)
 		ph := placeholders(len(chunk))
 		var n int
-		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM action_excerpts WHERE action_id IN (`+ph+`)`, args...).Scan(&n); err != nil {
+		if err := db.QueryRowContext(ctx, reasoningExcerptCountSQL(ph), args...).Scan(&n); err != nil {
 			return c, fmt.Errorf("backfill reasoning-converge: count action_excerpts: %w", err)
 		}
 		c.excerpts += n
@@ -667,7 +688,7 @@ func applyReasoningConvergence(ctx context.Context, db *sql.DB, carries []reason
 		ph := placeholders(len(chunk))
 
 		//nolint:gosec // G202: ph is a generated `?` placeholder run; ids bind via args.
-		r, err := tx.ExecContext(ctx, `DELETE FROM action_excerpts WHERE action_id IN (`+ph+`)`, args...)
+		r, err := tx.ExecContext(ctx, reasoningExcerptDeleteSQL(ph), args...)
 		if err != nil {
 			return c, fmt.Errorf("backfill reasoning-converge: delete action_excerpts: %w", err)
 		}
@@ -721,7 +742,7 @@ func writeReasoningConvergeReport(out io.Writer, res ReasoningConvergeBackfill) 
 	fmt.Fprintf(out, "reasoning-converge (%s): %d residue row(s) across %d session(s)\n",
 		mode, res.RowsExamined, res.SessionsExamined)
 	if res.RowsExamined == 0 {
-		fmt.Fprintf(out, "  nothing to converge — the B3 residue is clear.\n")
+		fmt.Fprintf(out, "  nothing to converge - the B3 residue is clear.\n")
 		return
 	}
 	verb := "would carry"
@@ -731,11 +752,11 @@ func writeReasoningConvergeReport(out io.Writer, res ReasoningConvergeBackfill) 
 	}
 	fmt.Fprintf(out, "  %s onto a successor: %d\n", verb, res.Carried)
 	fmt.Fprintf(out, "  already preserved on the successor: %d\n", res.AlreadyPreserved)
-	fmt.Fprintf(out, "  retained — successor's preceding_reasoning already holds different text: %d\n", res.RetainedOccupied)
-	fmt.Fprintf(out, "  retained — superseded by a later reasoning row (last-wins): %d\n", res.RetainedSuperseded)
-	fmt.Fprintf(out, "  retained — turn boundary reached before a successor: %d\n", res.RetainedTurnBoundary)
-	fmt.Fprintf(out, "  retained — no successor in the session: %d\n", res.RetainedNoSuccessor)
-	fmt.Fprintf(out, "  skipped — raw_tool_output diverges from target (never touched): %d\n", res.SkippedDivergent)
+	fmt.Fprintf(out, "  retained - successor's preceding_reasoning already holds different text: %d\n", res.RetainedOccupied)
+	fmt.Fprintf(out, "  retained - superseded by a later reasoning row (last-wins): %d\n", res.RetainedSuperseded)
+	fmt.Fprintf(out, "  retained - turn boundary reached before a successor: %d\n", res.RetainedTurnBoundary)
+	fmt.Fprintf(out, "  retained - no successor in the session: %d\n", res.RetainedNoSuccessor)
+	fmt.Fprintf(out, "  skipped - raw_tool_output diverges from target (never touched): %d\n", res.SkippedDivergent)
 	fmt.Fprintf(out, "  %s: %d action row(s), %d action_excerpts, %d failure_context, %d reference(s) NULLed\n",
 		delVerb, res.RowsDeleted, res.ExcerptsDeleted, res.FailureContextDeleted, res.ReferencesNulled)
 	if len(res.PerTool) > 0 {
@@ -749,7 +770,7 @@ func writeReasoningConvergeReport(out io.Writer, res ReasoningConvergeBackfill) 
 	if unresolved > 0 {
 		if res.DiscardUnresolved {
 			fmt.Fprintf(out,
-				"  NOTE: --reasoning-converge-discard-unresolved is set — %d unresolved row(s) carrying %d byte(s)\n"+
+				"  NOTE: --reasoning-converge-discard-unresolved is set - %d unresolved row(s) carrying %d byte(s)\n"+
 					"        of reasoning text that exists nowhere else are included in the delete above.\n",
 				unresolved, res.UnresolvedBytes)
 		} else {
@@ -761,10 +782,10 @@ func writeReasoningConvergeReport(out io.Writer, res ReasoningConvergeBackfill) 
 		}
 	}
 	if !res.Applied {
-		fmt.Fprintf(out, "  nothing written (dry run) — re-run with --apply:\n    observer backfill --reasoning-converge --apply\n")
+		fmt.Fprintf(out, "  nothing written (dry run) - re-run with --apply:\n    observer backfill --reasoning-converge --apply\n")
 	}
 	// Same honest caveat as --codex-fork-dedup: org push is append-only.
-	fmt.Fprintf(out, "  note: rows already pushed to an org server are NOT retracted — this cleans the local DB only.\n")
+	fmt.Fprintf(out, "  note: rows already pushed to an org server are NOT retracted - this cleans the local DB only.\n")
 }
 
 // placeholders renders n comma-separated SQL placeholders.

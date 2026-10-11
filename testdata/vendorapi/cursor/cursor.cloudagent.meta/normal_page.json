@@ -1,0 +1,8 @@
+{
+  "apiKeyName": "Production API Key",
+  "userId": 42,
+  "createdAt": "2026-04-13T18:30:00.000Z",
+  "userEmail": "developer@example.com",
+  "userFirstName": "Alex",
+  "userLastName": "Rivera"
+}

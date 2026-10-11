@@ -1,0 +1,39 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "result": "VerifiedOfficial",
+    "result.data": "VerifiedOfficial",
+    "result.data.effectiveGranularity": "VerifiedOfficial",
+    "result.data.rows": "VerifiedOfficial",
+    "result.data.rows[]": "VerifiedOfficial",
+    "result.data.rows[].cacheHitTokens": "VerifiedOfficial",
+    "result.data.rows[].cacheWriteTokens": "VerifiedOfficial",
+    "result.data.rows[].costMicrodollars": "VerifiedOfficial",
+    "result.data.rows[].datetime": "Inferred",
+    "result.data.rows[].dimensions": "VerifiedOfficial",
+    "result.data.rows[].dimensions.model": "Inferred",
+    "result.data.rows[].dimensions.user": "Inferred",
+    "result.data.rows[].errorCount": "VerifiedOfficial",
+    "result.data.rows[].inputTokens": "VerifiedOfficial",
+    "result.data.rows[].outputTokens": "VerifiedOfficial",
+    "result.data.rows[].requestCount": "VerifiedOfficial"
+  },
+  "fixture_sha256": "84eca0c6bba295d39b9926fb04abfc05d8bd88ab599e60d3fe4f49939fd6011a",
+  "http": {
+    "method": "GET",
+    "path": "/api/trpc/usageAnalytics.getTable",
+    "query": {
+      "input": "{\"startDate\":\"2026-10-06T00:00:00Z\",\"endDate\":\"2026-10-07T12:00:00Z\",\"granularity\":\"day\",\"costSource\":\"cost\",\"organizationId\":\"6f1e0c2a-3b4d-4e5f-8a9b-0c1d2e3f4a5b\",\"personalScope\":\"personal-only\",\"viewAs\":\"org-wide\",\"groupBy\":[\"user\",\"model\"],\"limit\":10000}"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the usageAnalytics_getTable 200 schema (tRPC envelope result.data, additionalProperties false); the schema gives no example. The dimensions map is typed but its keys are not named: the keys user and model (the groupBy values) and their value formats (a Kilo user id, a provider/model slug) are Inferred, as is the datetime format (RFC 3339 at UTC midnight). The table has no cursor.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Kilo Code API 1.0.0 (openapi.json), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "f0b9556c39ea4454732029afcc4c985077e96c173185b92c84708b640af51180",
+  "source_url": "https://app.kilo.ai/api/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "kilo.analytics.table"
+}

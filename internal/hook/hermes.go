@@ -52,19 +52,37 @@ func resolveHermesHome(opts HermesOptions) (string, error) {
 	if opts.HermesHome != "" {
 		return opts.HermesHome, nil
 	}
-	if env := strings.TrimSpace(os.Getenv("HERMES_HOME")); env != "" {
-		return env, nil
-	}
-	if runtime.GOOS == "windows" {
-		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
-			return filepath.Join(local, "hermes"), nil
-		}
+	if h := hermesHomeFrom(os.Getenv, "", runtime.GOOS); h != "" {
+		return h, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("hook.resolveHermesHome: %w", err)
 	}
 	return filepath.Join(home, ".hermes"), nil
+}
+
+// hermesHomeFrom is the one Hermes home ladder (HERMES_HOME env >
+// %LOCALAPPDATA%\hermes on Windows > <home>/.hermes), with the environment
+// and home injected; "" when nothing resolves. resolveHermesHome (the
+// installer) and Registry.InstalledOutOfBand (detection) both use it, so
+// detection looks exactly where the installer would write.
+func hermesHomeFrom(getenv func(string) string, home, goos string) string {
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+	if env := strings.TrimSpace(getenv("HERMES_HOME")); env != "" {
+		return env
+	}
+	if goos == "windows" {
+		if local := strings.TrimSpace(getenv("LOCALAPPDATA")); local != "" {
+			return filepath.Join(local, "hermes")
+		}
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".hermes")
 }
 
 // hermesPluginPath returns the full path to the
@@ -123,7 +141,7 @@ func UnregisterHermes(opts HermesOptions) (string, error) {
 		return "", err
 	}
 	if filepath.Base(pluginDir) != HermesPluginDirName {
-		return pluginDir, fmt.Errorf("hook.UnregisterHermes: refusing to remove %s — basename %q != %q", pluginDir, filepath.Base(pluginDir), HermesPluginDirName)
+		return pluginDir, fmt.Errorf("hook.UnregisterHermes: refusing to remove %s: basename %q != %q", pluginDir, filepath.Base(pluginDir), HermesPluginDirName)
 	}
 	if opts.DryRun {
 		return pluginDir, nil

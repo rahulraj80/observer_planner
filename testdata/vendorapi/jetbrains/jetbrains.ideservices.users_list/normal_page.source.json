@@ -1,0 +1,28 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "[]": "Inferred",
+    "[].createdBy": "VerifiedOfficial",
+    "[].createdDate": "VerifiedOfficial",
+    "[].email": "VerifiedOfficial",
+    "[].id": "VerifiedOfficial",
+    "[].isActive": "VerifiedOfficial",
+    "[].role": "VerifiedOfficial",
+    "[].username": "VerifiedOfficial"
+  },
+  "fixture_sha256": "34712b4265b830ae6ab4f69ad6b70490ce0f13a52965a837d4409dd4eb999e20",
+  "http": {
+    "method": "GET",
+    "path": "/api/v1/users",
+    "status": 200
+  },
+  "notes": "The reference documents GET /api/v1/users as the full user list but shows no list response. That the body is a JSON array of the user object (Inferred) is taken from the POST /api/v1/users response example, whose fields are VerifiedOfficial; the first member is that example verbatim, the second and third (USER role, an inactive user with no email, an offset date-time) are synthesized from its field table.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "JetBrains IDE Services User management via REST API (import-users-via-rest-api.html), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "5880507235c874a4a8cbdb5e86af144266b47c54616d7424e181e868e75e69e9",
+  "source_url": "https://www.jetbrains.com/help/ide-services/import-users-via-rest-api.html",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "jetbrains.ideservices.users_list"
+}

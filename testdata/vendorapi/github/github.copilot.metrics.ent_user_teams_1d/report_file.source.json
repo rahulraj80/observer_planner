@@ -1,0 +1,26 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "day": "VerifiedOfficial",
+    "enterprise_id": "VerifiedOfficial",
+    "slug": "VerifiedOfficial",
+    "team_id": "VerifiedOfficial",
+    "user_id": "VerifiedOfficial",
+    "user_login": "VerifiedOfficial"
+  },
+  "fixture_sha256": "e52dcb868ef83e0ae2bc0ac16b377b7c420c7567b2714ee304f3985cfd91de7e",
+  "http": {
+    "method": "GET",
+    "path": "/copilot-usage-report-1.ndjson",
+    "status": 200
+  },
+  "notes": "Step two of the two-step report: the NDJSON file a signed download link returns (one JSON object per line). Rows are the official \"Enterprise user-teams schema example\" from the Copilot usage-metrics example-schema page, re-serialized one per line. The download path is a synthesized example on the second host; it is fetched WITHOUT the GitHub Authorization header.",
+  "scenario": "report_file",
+  "sdk_or_spec_version_or_commit": "GitHub Docs article body (api/article/body), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "243ef3db5239c412004c6dedb618d959ff587e91475f11c0c25ecfdb9d45b1a4",
+  "source_url": "https://docs.github.com/en/copilot/reference/copilot-usage-metrics/example-schema",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.copilot.metrics.ent_user_teams_1d"
+}

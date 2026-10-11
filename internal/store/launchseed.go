@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // launchseed.go — SQL seams for the launch_seeds table (migration 086).
@@ -15,13 +15,13 @@ import (
 // Ownership (CLAUDE.md rule 4): a pending row is written by the launcher at
 // spawn and consumed (deleted) by the daemon sweep's atomic claim;
 // unconsumed rows past the match window are expired by the sweep. The
-// matching rule itself is pure — processobs.MatchLaunchSeeds — this file is
+// matching rule itself is pure - procmodel.MatchLaunchSeeds - this file is
 // I/O only.
 
 // InsertLaunchSeed records a launched child pid so the daemon sweep can bind
 // it to the session the watcher will ingest. Upsert on pid: a recycled pid
 // from an earlier, already-retracted launch must not collide.
-func (s *Store) InsertLaunchSeed(ctx context.Context, seed processobs.LaunchSeed) error {
+func (s *Store) InsertLaunchSeed(ctx context.Context, seed procmodel.LaunchSeed) error {
 	if seed.PID <= 0 {
 		return errors.New("store.InsertLaunchSeed: PID must be > 0")
 	}
@@ -52,7 +52,7 @@ func (s *Store) InsertLaunchSeed(ctx context.Context, seed processobs.LaunchSeed
 // PendingLaunchSeeds returns unconsumed seeds whose started_at falls inside
 // the match window (younger than maxAge). Older unconsumed seeds are the
 // expiry pass's job, never this query's concern.
-func (s *Store) PendingLaunchSeeds(ctx context.Context, maxAge time.Duration) ([]processobs.LaunchSeed, error) {
+func (s *Store) PendingLaunchSeeds(ctx context.Context, maxAge time.Duration) ([]procmodel.LaunchSeed, error) {
 	since := timestamp(time.Now().UTC().Add(-maxAge))
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pid, tool, cwd, started_at, run_id
@@ -63,9 +63,9 @@ func (s *Store) PendingLaunchSeeds(ctx context.Context, maxAge time.Duration) ([
 		return nil, fmt.Errorf("store.PendingLaunchSeeds: %w", err)
 	}
 	defer rows.Close()
-	var out []processobs.LaunchSeed
+	var out []procmodel.LaunchSeed
 	for rows.Next() {
-		var seed processobs.LaunchSeed
+		var seed procmodel.LaunchSeed
 		var started string
 		if err := rows.Scan(&seed.PID, &seed.Tool, &seed.CWD, &started, &seed.RunID); err != nil {
 			return nil, fmt.Errorf("store.PendingLaunchSeeds: scan: %w", err)
@@ -116,7 +116,7 @@ func (s *Store) ExpireStaleLaunchSeeds(ctx context.Context, olderThan time.Durat
 
 // LaunchSeedRunSessions resolves {run_id → session_id} for the pending seeds
 // that carry a run id (migration 091). It is the deterministic half of
-// processobs.MatchLaunchSeeds: the daemon minted the run id before spawning
+// procmodel.MatchLaunchSeeds: the daemon minted the run id before spawning
 // the launcher, so this join REPLACES the cwd/tool/time inference for every
 // dashboard-launched child.
 //
@@ -188,7 +188,7 @@ func (s *Store) LaunchSeedRunSessions(ctx context.Context, runIDs []string, minC
 // RecentSessionRefsForLaunchMatch loads the session candidates the launch-seed
 // matcher may pair against: sessions started within windowMinutes, projected
 // onto the same shape the cross-OS correlator uses.
-func (s *Store) RecentSessionRefsForLaunchMatch(ctx context.Context, windowMinutes int) ([]processobs.CrossOSSessionRef, error) {
+func (s *Store) RecentSessionRefsForLaunchMatch(ctx context.Context, windowMinutes int) ([]procmodel.CrossOSSessionRef, error) {
 	if windowMinutes <= 0 {
 		windowMinutes = 60
 	}
@@ -202,9 +202,9 @@ func (s *Store) RecentSessionRefsForLaunchMatch(ctx context.Context, windowMinut
 		return nil, fmt.Errorf("store.RecentSessionRefsForLaunchMatch: %w", err)
 	}
 	defer rows.Close()
-	var out []processobs.CrossOSSessionRef
+	var out []procmodel.CrossOSSessionRef
 	for rows.Next() {
-		var ref processobs.CrossOSSessionRef
+		var ref procmodel.CrossOSSessionRef
 		var started string
 		if err := rows.Scan(&ref.SessionID, &ref.Tool, &ref.ProjectRoot, &started); err != nil {
 			return nil, fmt.Errorf("store.RecentSessionRefsForLaunchMatch: scan: %w", err)

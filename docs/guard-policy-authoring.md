@@ -170,7 +170,7 @@ Inspect the merged result with `observer guard rules --effective`;
 load problems surface in `observer guard status` as `LOAD ISSUE`
 lines and via `observer guard lint`.
 
-## Targeting a bundle at a team
+## Targeting a bundle at a team or a member
 
 A published bundle carries an optional audience. With no audience it
 is **org-wide** - what every bundle published before targeting existed
@@ -217,6 +217,79 @@ Use the Guard tab's **Effective for a developer** preview to see
 exactly which authored bundles compose one developer's bundle and what
 the merged TOML says. It runs the delivery path's own resolver, so it
 cannot drift from what the node receives.
+
+### Targeting individual members
+
+The audience can also name individual developers: pick them in
+**Applies to > Members** (`observer-org policy publish --member <user id
+or email>`, or the assistant's `publish_guard_bundle` with `members`).
+Teams and members are a union - a developer on any named team OR named
+directly receives the bundle - and a member bundle composes exactly like
+a team bundle: that developer's node receives the org-wide bundle + every
+team bundle they belong to + every member bundle naming them,
+strictest-wins. The member is matched on the server against the enrolled
+identity (the verified bearer's user id); a node never names itself.
+
+- **The newest bundle naming a member supersedes older ones for that
+  member only**, the way the newest team bundle supersedes older ones
+  for that team. To take someone out of a member or team bundle, use
+  **Remove from audience** (below); the others it named keep theirs.
+- **Remove from audience.** On a targeted row of Policies > Guard >
+  Version history, **Remove from audience** lists the teams and members
+  that version still governs; tick the ones to take off and **Remove and
+  publish (audited)**. The server publishes ONE new version with no
+  rules addressed to exactly them, so the version only goes up, they stop
+  receiving the old bundle at their next poll, and their org-wide and
+  other bundles are untouched. It is refused when an entry is not in that
+  version's audience or a newer bundle already governs it (the history
+  marks those as "now governed by vN"), including when one was published
+  between your read and your click. The removal version itself reads
+  "No rules: removes this audience from older versions" and offers no
+  further removal. A deactivated member can still be
+  removed. Audited as a publish (`vN removed Members: Dana Kim from the
+  audience of vM`). The assistant's `remove_guard_bundle_audience` and
+  `observer-org policy remove-audience --version <n> --member <id|email>
+  --team <id|name>` do the same (CLI exit codes: 2 refused, 3 a newer
+  bundle governs that entry, 4 no such version). Every guard publish and
+  removal (dashboard, assistant, CLI) writes its audit row in the same transaction as the new
+  version (or, where the audit table is on a separate store, before it,
+  and refuses with "the audit row could not be written, so nothing was
+  published" if that fails), so a version never lands unaudited. An
+  org-wide bundle has no audience to remove from; publish a new org-wide
+  version instead.
+- **Only active members can be targeted.** An unknown or deactivated
+  user id is refused (`400 unknown_member`); the CLI and the assistant
+  resolve an email to its user id first.
+- **A composed body never lists who else a member bundle names.** Its
+  header comment says `Members (2) v7`, not user ids. The version
+  history and the preview show the names (`Members: Dana Kim, Sam
+  Ortiz`) to the admins who can read them.
+- **The composed header is need-to-know.** A developer's node is told
+  only what concerns that developer: the header names THEIR OWN teams and
+  counts the rest (`Teams: Apps (+1 other) v2`; a bundle that reaches them
+  through no team of theirs reads `Teams (2)`), and members are always a
+  count (`Members (2)`). The composed bundle's description is the org-wide
+  bundle's note only, never a team or member bundle's. The rendering is a
+  pure function of the stored bundle and the developer's team set, and
+  every roster change (dashboard team edits and SCIM Group provisioning
+  alike) advances the roster epoch inside the served version, so a node
+  never sees an equal version with different bytes. Own teams are named
+  by the display name the team had when the bundle was PUBLISHED (stored
+  on the bundle): renaming the team later does not change the delivered
+  body until the next publish, because a live name would strand nodes on
+  their old bundle. Bundles published before the snapshot existed keep
+  showing the team id until they are republished ("Edit as new
+  version"). The version history and the preview always show the
+  current name.
+- **Rolling the org server back** to a build older than member
+  targeting is unsafe once a member bundle exists: an older server reads
+  a members-only audience as org-wide and would deliver that escalation
+  to every developer on a team. Before a rollback run the current
+  server's `observer-org upgrade preflight --rollback-to <version>`; it
+  refuses while any member bundle is in force and names the escape
+  (publish replacement team or org-wide bundles, then retire the member
+  bundles with Remove from audience). See `teams-operations.md` "Rolling
+  the server back".
 
 ## Cookbook — worked recipes
 

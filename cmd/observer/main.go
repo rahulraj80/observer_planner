@@ -23,20 +23,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
-	"github.com/marmutapp/superbased-observer/internal/adapter/antigravity"
-	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
-	"github.com/marmutapp/superbased-observer/internal/adapter/clinecli"
-	"github.com/marmutapp/superbased-observer/internal/adapter/copilot"
-	"github.com/marmutapp/superbased-observer/internal/adapter/cowork"
-	"github.com/marmutapp/superbased-observer/internal/adapter/cursor"
 	adapterdefaults "github.com/marmutapp/superbased-observer/internal/adapter/defaults"
-	"github.com/marmutapp/superbased-observer/internal/adapter/hermes"
-	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/freshness"
 	"github.com/marmutapp/superbased-observer/internal/identity"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/watcher"
@@ -44,6 +36,12 @@ import (
 
 // version is stamped at build time via -ldflags="-X main.version=...".
 var version = "dev"
+
+// daemonHardExit ends the process from the `observer start` shutdown
+// watchdog when a stop overruns its bound (T-553, shutdown_wire.go). It lives
+// here because os.Exit belongs to main.go; it is a var so tests can observe
+// the forced exit instead of dying.
+var daemonHardExit = func(code int) { os.Exit(code) }
 
 func main() {
 	// Sandbox network helpers (SR27-SBX-1) run before cobra and before the
@@ -58,6 +56,9 @@ func main() {
 	// the way out. A no-op for every normal invocation.
 	endOOB := emitOOBLaunchHello()
 	root := newRootCmd()
+	// U3 (FIX-UPGRADE): a CLI process leaves the schema to the daemon that
+	// holds the database (migrationdefer.go).
+	installMigrationDeferral(root, os.Args[1:], os.Stderr)
 	executed, err := root.ExecuteC()
 	// Launcher commands deliberately silence Cobra because they render their
 	// own contextual failures. Restore only errors carrying a separately
@@ -134,7 +135,7 @@ func newRootCmd() *cobra.Command { return newRootCmdWith(defaultUsageDeps()) }
 func newRootCmdWith(deps usageDeps) *cobra.Command {
 	root := &cobra.Command{
 		Use:          invocationName(),
-		Short:        "SuperBased — unify AI coding tool activity",
+		Short:        "SuperBased - unify AI coding tool activity",
 		Long:         "Captures, normalizes, and analyzes tool call activity from AI coding assistants.\nSee README.md for a feature tour.",
 		Version:      version,
 		SilenceUsage: true,
@@ -156,35 +157,11 @@ func newRootCmdWith(deps usageDeps) *cobra.Command {
 	for _, c := range observerSubcommandsWith(deps) {
 		root.AddCommand(c)
 	}
-	root.AddCommand(newClaudeCmd())
-	root.AddCommand(newCodexCmd())
-	root.AddCommand(newOpencodeCmd())
-	root.AddCommand(newClineCLICmd())
-	root.AddCommand(newCopilotCLICmd())
-	root.AddCommand(newOpenclawCmd())
-	root.AddCommand(newGeminiCmd())
-	root.AddCommand(newPiCmd())
-	root.AddCommand(newHermesCmd())
-	root.AddCommand(newKiloCmd())
-	root.AddCommand(newCursorCmd())
-	root.AddCommand(newAntigravityCmd())
-	root.AddCommand(newQwenCmd())
-	root.AddCommand(newKiroCmd())
-	root.AddCommand(newKimiCmd())
-	root.AddCommand(newGrokCmd())
-	root.AddCommand(newQoderCmd())
-	root.AddCommand(newGooseCmd())
-	root.AddCommand(newCrushCmd())
-	root.AddCommand(newDevinCmd())
-	root.AddCommand(newDroidCmd())
-	root.AddCommand(newOpenInterpreterCmd())
-	root.AddCommand(newCommandCodeCmd())
-	root.AddCommand(newAiderCmd())
-	root.AddCommand(newMuseCmd())
-	root.AddCommand(newPrimeAgentCmd())
-	root.AddCommand(newZcodeCmd())
-	root.AddCommand(newVibeCmd())
-	root.AddCommand(newFreebuffCmd())
+	// Per-tool launcher verbs (`observer claude`, `observer gemini`, ...):
+	// one table, launchers.go.
+	for _, mk := range launcherCommands {
+		root.AddCommand(mk())
+	}
 	root.AddCommand(newIDECmd())
 	root.AddCommand(newShellWrapCmd())
 	root.AddCommand(newLOCCmd())
@@ -206,13 +183,32 @@ func newRootCmdWith(deps usageDeps) *cobra.Command {
 	root.AddCommand(newEnrollCmd())
 	root.AddCommand(newUnenrollCmd())
 	root.AddCommand(newOrgCmd())
+	root.AddCommand(newRequestCmd())
+	root.AddCommand(newRequestsCmd())
 	root.AddCommand(newObserverAliasCmd())
 	root.AddCommand(newPrivacyCmd())
 	root.AddCommand(newUpdateCmd())
 	root.AddCommand(newWorkspacesCmd())
 	root.AddCommand(newCloudCmd())
+	root.AddCommand(newIntelCmd())
 	root.AddCommand(newPricingCmd())
 	root.AddCommand(newRepriceCmd())
+	root.AddCommand(newAgentConfigCmd())
+	// Component catalog (components.go, modular packaging P0) plus the
+	// selection verbs status/select/add/remove/teardown/purge
+	// (components_manage.go, P1).
+	root.AddCommand(withComponentsManageVerbs(newComponentsCmd()))
+	// L2 gate on every verb an optional component owns (components_gate.go,
+	// modular packaging P1): an inactive component's verb refuses with its
+	// state and the fix, exit code 3. Inert with no [components] block.
+	gateComponentVerbs(root)
+	// The reporting commands render under the developer cost display (T-204,
+	// costdisplay_cli.go::costReportCommands).
+	installCostDisplay(root)
+	// Every command group refuses an unknown subcommand with exit 1 and a
+	// hint instead of printing help and exiting 0 (T-757, cmdgroups.go).
+	// Last, so it sees the finished tree.
+	guardCommandGroups(root)
 	return root
 }
 
@@ -286,7 +282,7 @@ func observerSubcommandsWith(deps usageDeps) []*cobra.Command {
 func newObserverAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "observer",
-		Short:      "Deprecated alias group — use the top-level subcommands instead.",
+		Short:      "Deprecated alias group - use the top-level subcommands instead.",
 		Hidden:     true,
 		Deprecated: "subcommands have been promoted to the root (e.g. `observer scan` instead of `observer observer scan`).",
 	}
@@ -305,23 +301,23 @@ func newScanCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "scan",
-		Short: "One-time backfill — parse all known session files",
+		Short: "One-time backfill - parse all known session files",
 		Long: `Walks every detected adapter's session files and ingests their
-events. Default mode resumes from the saved parse cursor — fast, but
+events. Default mode resumes from the saved parse cursor - fast, but
 won't recover anything the live watcher dropped silently. Pass --force
 to ignore the cursor and re-walk every file from offset 0; the
 (source_file, source_event_id) UNIQUE index keeps re-walks idempotent
 (rows already in the DB are no-ops, missing rows get inserted).
 
 ` + "`scan --force`" + ` is the recovery path when you notice gaps in the
-Actions tab — typically a watcher that fell behind because of fsnotify
+Actions tab - typically a watcher that fell behind because of fsnotify
 event drops or a daemon restart that lost in-flight state. The
 dashboard's "Run all" button on the Backfill tab calls this path
 first, then runs the surgical column-update backfills (--message-id,
 --cache-tier, etc.) on top.
 
 Pass ` + "`--adapter <name>`" + ` to scope the scan to a single adapter
-(e.g. ` + "`observer scan --force --adapter codex`" + `) — useful as
+(e.g. ` + "`observer scan --force --adapter codex`" + `) - useful as
 the per-invocation recovery path for the v1.4.51 misrouting bug
 class, where the upgrade-time cleanup re-parses Codex sessions that
 the pre-fix poller silently routed to claude-code. The flag
@@ -393,7 +389,7 @@ func newWatchCmd() *cobra.Command {
 			// still prunes (its FIRST iteration is the prune_on_startup pass,
 			// moved off the synchronous buildWatcher path). Fail-soft.
 			go retentionTickLoop(ctx, configPath)
-			fmt.Fprintln(cmd.OutOrStdout(), "watcher running — ctrl-c to stop")
+			fmt.Fprintln(cmd.OutOrStdout(), "watcher running - ctrl-c to stop")
 			if err := w.Watch(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				return err
 			}
@@ -434,14 +430,14 @@ func recognizesSessionFile() func(string) bool {
 // Adapters that do not implement the optional interface resolve to
 // byte-offset semantics — the behaviour every adapter had before it
 // existed.
-func cursorSemanticsFor() func(string) dashboard.CursorSemantics {
+func cursorSemanticsFor() func(string) dashapi.CursorSemantics {
 	adapters := adapterdefaults.Adapters()
-	return func(path string) dashboard.CursorSemantics {
+	return func(path string) dashapi.CursorSemantics {
 		sem := adapter.ResolveCursorSemantics(adapters, path)
-		return dashboard.CursorSemantics{
+		return dashapi.CursorSemantics{
 			Kind:            sem.Kind.String(),
 			LagMeaningful:   sem.Kind.LagMeaningful(),
-			ActionsExpected: sem.Kind.ActionsExpected(),
+			ActionsExpected: sem.ActionsExpected(),
 			Reason:          sem.Detail,
 		}
 	}
@@ -451,11 +447,11 @@ func cursorSemanticsFor() func(string) dashboard.CursorSemantics {
 // canonical watch paths for the dashboard's Connected-tools panel
 // (P4.1). Same injection seam as recognizesSessionFile — the
 // dashboard never imports adapter packages.
-func toolCatalog() []dashboard.ToolCatalogEntry {
+func toolCatalog() []dashapi.ToolCatalogEntry {
 	adapters := adapterdefaults.Adapters()
-	out := make([]dashboard.ToolCatalogEntry, 0, len(adapters))
+	out := make([]dashapi.ToolCatalogEntry, 0, len(adapters))
 	for _, a := range adapters {
-		out = append(out, dashboard.ToolCatalogEntry{Tool: a.Name(), WatchPaths: a.WatchPaths()})
+		out = append(out, dashapi.ToolCatalogEntry{Tool: a.Name(), WatchPaths: a.WatchPaths()})
 	}
 	return out
 }
@@ -550,103 +546,50 @@ func buildWatcherWithOverride(ctx context.Context, configPath, adapterFilter str
 	// BackfillTaskItems is idempotent, so a daemon restart mid-backfill
 	// just resumes covering the same ground harmlessly.
 	if cfg.Tasks.BackfillOnStart {
-		go func() {
-			res, err := st.BackfillTaskItems(context.Background(), 0)
-			if err != nil {
-				logger.Warn("tasks.backfill_on_start failed", "error", err)
-				return
-			}
-			logger.Info("tasks.backfill_on_start complete",
-				"actions_scanned", res.ActionsScanned, "transitions_written", res.TransitionsWritten)
-		}()
+		go runTaskBackfillOnStart(ctx, st.BackfillTaskItems, logger)
 	}
 	// Enterprise message-content capture (2026-08-28 ruling): the producer
 	// that feeds adapter-parsed conversation text into otel_content. Inert
 	// unless the node's own share posture ships raw content — see
 	// wireContentCapture / internal/store/messagecontent.go.
 	wireContentCapture(cfg, st)
+	// Component gate (modular packaging P1): an inactive adapter is never
+	// registered, so the watcher reads none of its files. Every adapter is
+	// active with no [components] block.
+	comps := componentSnapshotForConfig(cfg)
 	reg := adapter.NewRegistry()
+	var preparers []adapter.CaptureStartupPreparer
+	nativePredicates := map[string]func(string) bool{}
+	wireEnv := adapterWireEnv{ctx: ctx, cfg: cfg, st: st, logger: logger}
 	for _, a := range adapterdefaults.Adapters() {
-		// Wire per-adapter config into adapters that support it.
-		// Antigravity has the network_recovery opt-in for the
-		// gRPC fallback against the running language_server.
-		if ag, ok := a.(*antigravity.Adapter); ok {
-			ag.WithNetworkRecovery(cfg.Observer.Antigravity.NetworkRecovery)
-			// Startup nudge: CLI .pb files require the gRPC fallback
-			// to surface in the dashboard (the agy CLI doesn't ship
-			// the desktop oscrypt secret). Warn once on start so the
-			// operator notices the gap before opening the dashboard
-			// and finding an empty Antigravity section.
-			warnAntigravityCLIWithoutNetworkRecovery(logger, cfg.Observer.Antigravity.NetworkRecovery)
-			// Persistent decrypt+gRPC-failure tracker (Issue #4
-			// follow-up). Skips files we know are unrecoverable
-			// across CLI invocations — the in-memory cache from
-			// the v1.6.11 first pass only helped the long-running
-			// daemon. Scoped to adapter="antigravity" so a future
-			// adapter using the same store can't collide.
-			ag.WithUnrecoverableTracker(antigravityTrackerShim{st: st})
-			// DB-aware dedup reader for the plaintext-transcript
-			// augmentation path (Phase 1 of
-			// docs/plans/antigravity-token-coverage-design-2026-05-24.md).
-			// Closes the universal-duplication bug where later parse
-			// cycles re-emitted every transcript USER_INPUT after the
-			// originating agy.exe terminated — see the
-			// TargetCoverageReader docstring for the cross-cycle race.
-			ag.WithTargetCoverageReader(antigravityTargetCoverageShim{st: st})
-			// Optional shape-mismatch wire-bytes dump (Issue #5
-			// follow-up). Off by default — operator enables via
-			// [observer.antigravity] dump_shape_mismatches_dir in
-			// config.toml to capture proto payloads for offline
-			// path-mapping analysis.
-			ag.WithShapeMismatchDumpDir(cfg.Observer.Antigravity.DumpShapeMismatchesDir)
+		if !comps.AdapterActive(a.Name()) {
+			logger.Debug("components: adapter inactive, not watched", "tool", a.Name())
+			continue
 		}
-		// Cursor: defer transcript-derived events when the live hook
-		// has already captured the session (any row tagged
-		// SourceFile="cursor:hook" implies beforeSubmitPrompt fired,
-		// stop will follow with token + tool_use replay). The watcher
-		// path is then a fallback for cold-start ingestion / pre-
-		// install historical transcripts only.
-		if ca, ok := a.(*cursor.Adapter); ok {
-			ca.WithSessionHookChecker(func(ctx context.Context, sessionID string) (bool, error) {
-				return st.SessionHasSourceFileRows(ctx, sessionID, "cursor:hook")
-			})
-			wireCursorReplaySeams(ca, st)
+		// Per-adapter watcher wiring (antigravity, cursor, claude-code)
+		// lives in each adapter's own build-tagged wire_adapter_<pkg>.go,
+		// so a build without the adapter has no reference to its package
+		// (lane MP-L1D, T-598).
+		for _, wire := range adapterWirers {
+			wire(a, wireEnv)
 		}
-		// Cline CLI: same cross-path dedup gate. The adapter shipped
-		// the SessionHookChecker seam (mirroring cursor's) but the
-		// wiring was missed at install time — with cline hook commands
-		// registered, both paths emitted independently and the
-		// UNIQUE(source_file, source_event_id) key never caught the
-		// cross-path duplicates (the H1 hermes-audit shape).
-		if cl, ok := a.(*clinecli.Adapter); ok {
-			cl.WithSessionHookChecker(func(ctx context.Context, sessionID string) (bool, error) {
-				return st.SessionHasSourceFileRows(ctx, sessionID, "clinecli:hook")
-			})
+		// Hook/transcript cross-path dedup (the H1 hermes-audit shape):
+		// an adapter whose tool also reports through Observer's hook
+		// receiver binds the store's source-file probe to its own hook
+		// marker (adapter.HookDedupConfigurer; today cline-cli, which
+		// skips a hook-covered session wholesale, and hermes, which
+		// suppresses only the event classes its hook path also emits,
+		// observed live 2026-06-11 as a 2x token count). A capability,
+		// not a type assert, so the adapter's package can be compiled
+		// out (lane MP-ADP).
+		if hd, ok := a.(adapter.HookDedupConfigurer); ok {
+			hd.ConfigureHookDedup(st.SessionHasSourceFileRows)
 		}
-		// Hermes: partitioned cross-path dedup gate (the H1 audit
-		// finding, observed live 2026-06-11 as a 2× token count on a
-		// hook-covered session). Unlike cursor/clinecli the SQLite
-		// path is NOT skipped wholesale — it suppresses only the
-		// event classes the hook path also emits (tool_calls + token
-		// rows) and keeps the classes only SQLite can see
-		// (user_prompt / assistant text / system_prompt).
-		if hm, ok := a.(*hermes.Adapter); ok {
-			hm.WithSessionHookChecker(func(ctx context.Context, sessionID string) (bool, error) {
-				return st.SessionHasSourceFileRows(ctx, sessionID, "hermes:hook")
-			})
+		if pp, ok := a.(adapter.CaptureStartupPreparer); ok {
+			preparers = append(preparers, pp)
 		}
-		// Claude-code: stamp per-turn effort.level from the hook-
-		// captured claudecode_effort sidecar onto tool_use ToolEvents
-		// at parse time. The Claude Code JSONL itself never carries
-		// the user's effort dropdown selection; PreToolUse /
-		// PostToolUse hooks do (`effort.level`), and observer's hook
-		// handler upserts them into the sidecar. Joining at parse
-		// time (rather than on every dashboard read) keeps the hot
-		// query path unchanged.
-		if cc, ok := a.(*claudecode.Adapter); ok {
-			cc.WithEffortLookup(func(ctx context.Context, sessionID string) (map[string]string, error) {
-				return st.LoadClaudecodeEffortMap(ctx, sessionID)
-			})
+		if nc, ok := a.(adapter.NativeToolClassifier); ok {
+			nativePredicates[a.Name()] = nc.IsNativeTool
 		}
 		reg.Register(a)
 	}
@@ -668,7 +611,12 @@ func buildWatcherWithOverride(ctx context.Context, configPath, adapterFilter str
 	// automatic — but EnsureDebugEnabled logs INFO whenever it
 	// actually changes a file so the user sees what observer touched.
 	// Idempotent across restarts; silent steady state.
-	copilot.EnsureDebugEnabled(ctx, logger, crossmount.AllHomes())
+	// A vendor config write, so only for an ACTIVE adapter (the loop above
+	// collected preparers from active adapters only): Copilot Chat's debug
+	// log (adapter.CaptureStartupPreparer).
+	for _, pp := range preparers {
+		pp.PrepareCapture(ctx, logger, crossmount.AllHomes())
+	}
 	var classifier *freshness.Classifier
 	if cfg.Observer.Freshness.EnableContentHashing {
 		classifier = freshness.New(database, freshness.Options{
@@ -677,10 +625,7 @@ func buildWatcherWithOverride(ctx context.Context, configPath, adapterFilter str
 			FastPathStatOnly: cfg.Observer.Freshness.FastPathStatOnly,
 		})
 	}
-	var indexer *indexing.Indexer
-	if cfg.Compression.Indexing.Enabled {
-		indexer = indexing.New(database, cfg.Compression.Indexing.MaxExcerptBytes)
-	}
+	indexer := excerptIndexer(database, cfg.Compression.Indexing)
 	allow := cfg.Observer.Watch.EnabledAdapters
 	if adapterFilter != "" {
 		allow = []string{adapterFilter}
@@ -699,15 +644,14 @@ func buildWatcherWithOverride(ctx context.Context, configPath, adapterFilter str
 	}
 	w := watcher.New(st, reg, watcher.Options{
 		Logger: logger,
-		NativePredicate: map[string]func(string) bool{
-			"claude-code": claudecode.IsNativeTool,
-			"cowork":      cowork.IsNativeTool,
-		},
-		Allow:        allow,
-		PollInterval: time.Duration(cfg.Observer.Watch.PollIntervalSeconds) * time.Second,
-		Classifier:   classifier,
-		Indexer:      indexer,
-		MaxFileBytes: int64(cfg.Observer.Watch.MaxFileSizeMB) * 1024 * 1024,
+		// Each active adapter that classifies its own native tools
+		// (adapter.NativeToolClassifier: claude-code, cowork).
+		NativePredicate: nativePredicates,
+		Allow:           allow,
+		PollInterval:    time.Duration(cfg.Observer.Watch.PollIntervalSeconds) * time.Second,
+		Classifier:      classifier,
+		Indexer:         indexer,
+		MaxFileBytes:    int64(cfg.Observer.Watch.MaxFileSizeMB) * 1024 * 1024,
 	})
 
 	cleanup := func() { _ = database.Close() }
@@ -725,39 +669,6 @@ func buildWatcherWithOverride(ctx context.Context, configPath, adapterFilter str
 // the user can paste into config.toml. No-op when the allow-list is
 // empty (fresh installs get Default()'s full list applied at load
 // time) or when every default is already present.
-// warnAntigravityCLIWithoutNetworkRecovery scans every cross-mount
-// home for ~/.gemini/antigravity-cli/conversations/*.pb and emits one
-// startup WARN if any are found while network_recovery is off.
-// Idempotent + cheap (one Stat per home, one ReadDir on hits) — runs
-// once per daemon start. Best-effort: silent on permission errors.
-func warnAntigravityCLIWithoutNetworkRecovery(logger *slog.Logger, networkRecovery string) {
-	if strings.EqualFold(strings.TrimSpace(networkRecovery), "local") {
-		return
-	}
-	for _, h := range crossmount.AllHomes() {
-		dir := filepath.Join(h.Path, ".gemini", "antigravity-cli", "conversations")
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		n := 0
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".pb") {
-				n++
-			}
-		}
-		if n > 0 {
-			logger.Warn(
-				"antigravity-cli .pb files present but network_recovery is off — CLI conversations will not appear in the dashboard until you set [observer.antigravity] network_recovery = \"local\" in ~/.observer/config.toml",
-				"dir", dir,
-				"pb_count", n,
-				"network_recovery", networkRecovery,
-			)
-			return
-		}
-	}
-}
-
 // warnMissingDefaultsFromAllowList is Invariant #51's startup guard.
 // Config.Default() only seeds [observer.watch] enabled_adapters when
 // the key is ABSENT from config.toml — BurntSushi TOML decoding only
@@ -809,47 +720,6 @@ func warnMissingDefaultsFromAllowList(logger *slog.Logger, defaults []adapter.Ad
 // location covers >99% of installs and keeps the warning concise.
 func remediationConfigHint() string {
 	return "~/.observer/config.toml [observer.watch] enabled_adapters"
-}
-
-// antigravityTrackerShim adapts *store.Store to the
-// antigravity.UnrecoverableTracker interface, scoping every call to
-// adapter="antigravity". Defined here (not in internal/store) so the
-// adapter package stays store-free per the architecture quick
-// reference in CLAUDE.md. Issue #4 follow-up.
-type antigravityTrackerShim struct {
-	st *store.Store
-}
-
-func (s antigravityTrackerShim) Lookup(ctx context.Context, sourceFile string, size, mtimeUnix int64) (string, bool, error) {
-	entry, err := s.st.LookupUnrecoverable(ctx, "antigravity", sourceFile, size, mtimeUnix)
-	if err != nil {
-		return "", false, err
-	}
-	if entry == nil {
-		return "", false, nil
-	}
-	return entry.Reason, true, nil
-}
-
-func (s antigravityTrackerShim) Mark(ctx context.Context, sourceFile string, size, mtimeUnix int64, reason string) error {
-	return s.st.MarkUnrecoverable(ctx, "antigravity", sourceFile, size, mtimeUnix, reason)
-}
-
-func (s antigravityTrackerShim) Clear(ctx context.Context, sourceFile string) error {
-	return s.st.ClearUnrecoverable(ctx, "antigravity", sourceFile)
-}
-
-// antigravityTargetCoverageShim adapts *store.Store to the
-// antigravity.TargetCoverageReader interface. Lives here (not in
-// internal/store) for the same reason as antigravityTrackerShim —
-// the adapter package stays store-free per CLAUDE.md's architecture
-// quick reference.
-type antigravityTargetCoverageShim struct {
-	st *store.Store
-}
-
-func (s antigravityTargetCoverageShim) LoadActionTargets(ctx context.Context, sourceFile string) ([]string, []string, error) {
-	return s.st.LoadActionTargets(ctx, sourceFile)
 }
 
 func newLogger(level string) *slog.Logger {

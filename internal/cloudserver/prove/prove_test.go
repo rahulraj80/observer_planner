@@ -519,7 +519,7 @@ func TestProveFailsAtEachStep(t *testing.T) {
 			}
 
 			if got := fake.callCount(); got != c.wantProvider {
-				t.Fatalf("provider called %d times, want %d — a gate before dispatch must stop the call", got, c.wantProvider)
+				t.Fatalf("provider called %d times, want %d - a gate before dispatch must stop the call", got, c.wantProvider)
 			}
 		})
 	}
@@ -625,7 +625,7 @@ func TestProveOptionsCarryNoCredentialSource(t *testing.T) {
 	for i := 0; i < ot.NumField(); i++ {
 		f := ot.Field(i)
 		if f.Type.Implements(credType) || reflect.PointerTo(f.Type).Implements(credType) {
-			t.Fatalf("prove.Options.%s (%s) satisfies jobs.CredentialSource — the proving lane must take its "+
+			t.Fatalf("prove.Options.%s (%s) satisfies jobs.CredentialSource - the proving lane must take its "+
 				"credential as an explicit value, never through the worker's credential seam", f.Name, f.Type)
 		}
 	}
@@ -685,7 +685,7 @@ func TestProveIgnoresTheWorkerCredentialEnv(t *testing.T) {
 func TestProveWritesNoTenantState(t *testing.T) {
 	ct := reflect.TypeOf((*prove.ControlPlane)(nil)).Elem()
 	if ct.NumMethod() != 2 {
-		t.Fatalf("prove.ControlPlane grew to %d methods — the lane's store surface must stay two READS "+
+		t.Fatalf("prove.ControlPlane grew to %d methods - the lane's store surface must stay two READS "+
 			"(RouteByID, DialectVerified); anything else risks touching tenant state", ct.NumMethod())
 	}
 	for i := 0; i < ct.NumMethod(); i++ {
@@ -710,7 +710,7 @@ func TestProveRunIsNotAJobBySource(t *testing.T) {
 		src := readFile(t, file)
 		for _, bad := range forbidden {
 			if strings.Contains(src, bad) {
-				t.Fatalf("%s references %q — a proving run must never touch the queue, a reservation, "+
+				t.Fatalf("%s references %q - a proving run must never touch the queue, a reservation, "+
 					"evidence, or a result row", file, bad)
 			}
 		}
@@ -731,18 +731,18 @@ func TestProveNeverConsultsWorkerCredentialSource(t *testing.T) {
 		"AbsentCredentials": "the worker's absence boundary is not this package's business",
 		"StaticCredentials": "the lane must not construct a worker credential source",
 		"chooseCredentials": "the worker's credential chooser is not reachable from the lane",
-		"os.Getenv":         "the lane reads no environment at all — every input is an explicit parameter",
-		"os.LookupEnv":      "the lane reads no environment at all — every input is an explicit parameter",
+		"os.Getenv":         "the lane reads no environment at all - every input is an explicit parameter",
+		"os.LookupEnv":      "the lane reads no environment at all - every input is an explicit parameter",
 	}
 	for _, file := range packageGoFiles(t, ".") {
 		src := readFile(t, file)
 		for bad, why := range forbidden {
 			if strings.Contains(src, bad) {
-				t.Fatalf("%s contains %q — %s", file, bad, why)
+				t.Fatalf("%s contains %q - %s", file, bad, why)
 			}
 		}
 		if importsPackage(t, file, "os") {
-			t.Fatalf("%s imports \"os\" — the proving lane must not be able to read ANY environment variable; "+
+			t.Fatalf("%s imports \"os\" - the proving lane must not be able to read ANY environment variable; "+
 				"its credential is an explicit parameter", file)
 		}
 	}
@@ -753,14 +753,14 @@ func TestProveNeverConsultsWorkerCredentialSource(t *testing.T) {
 // and no SQL. Its store access is the two-method ControlPlane interface.
 func TestBoundaryImports(t *testing.T) {
 	forbidden := map[string]string{
-		"net/http":                "the lane owns no HTTP surface — the provider client does",
+		"net/http":                "the lane owns no HTTP surface - the provider client does",
 		"database/sql":            "SQL belongs in internal/cloudserver/store",
 		"github.com/jackc/pgx/v5": "pgx belongs in internal/cloudserver/store",
 	}
 	for _, file := range packageGoFiles(t, ".") {
 		for path, why := range forbidden {
 			if importsPackage(t, file, path) {
-				t.Errorf("%s imports %q — %s", file, path, why)
+				t.Errorf("%s imports %q - %s", file, path, why)
 			}
 		}
 	}
@@ -783,7 +783,7 @@ func packageGoFiles(t *testing.T, dir string) []string {
 		out = append(out, f)
 	}
 	if len(out) == 0 {
-		t.Fatal("no package files found — the source scan would be vacuous")
+		t.Fatal("no package files found - the source scan would be vacuous")
 	}
 	return out
 }

@@ -65,7 +65,7 @@ export function PromptGuardLine({ sessionId }: { sessionId: string }) {
         {lastOutcome}
       </VocabPill>
       <Link
-        to="/security"
+        to="/security?tab=prompt-guard"
         className="ml-auto text-[11px] text-accent underline decoration-dotted underline-offset-[3px] hover:decoration-accent"
       >
         View in Security →

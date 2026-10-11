@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
+	"github.com/marmutapp/superbased-observer/internal/codeintelapi"
 )
 
 // -----------------------------------------------------------------------------
 // search_symbols — project-wide full-text symbol search (Tier C).
 //
-// Wraps codeintel.Provider.Search (the FTS index over name / fqn /
+// Wraps codeintelapi.Provider.Search (the FTS index over name / fqn /
 // signature, camelCase + snake_case aware). Where get_symbols answers
 // "give me the body of X in file F", search_symbols answers "where is the
 // symbol that looks like Q across the project?" — discovery without
@@ -32,12 +32,12 @@ const (
 )
 
 type searchSymbolsTool struct {
-	cg codeintel.Provider
+	cg codeintelapi.Provider
 }
 
-func newSearchSymbolsTool(cg codeintel.Provider) Tool {
+func newSearchSymbolsTool(cg codeintelapi.Provider) Tool {
 	if cg == nil {
-		cg = codeintel.Unavailable()
+		cg = codeintelapi.Unavailable()
 	}
 	return &searchSymbolsTool{cg: cg}
 }
@@ -47,11 +47,12 @@ func (*searchSymbolsTool) Name() string { return "search_symbols" }
 func (*searchSymbolsTool) Description() string {
 	return "Project-wide symbol search over the code index (full-text on name / " +
 		"fully-qualified name / signature, camelCase + snake_case aware). Use to " +
-		"LOCATE a symbol when you don't know its file — far cheaper than `grep` " +
+		"LOCATE a symbol when you don't know its file - far cheaper than `grep` " +
 		"through the shell tool. Returns metadata only (name, kind, file, line); " +
 		"follow up with get_symbols for the bodies. Omit `project_root` to search " +
 		"every indexed project. When the index is missing/unavailable, `degraded` " +
-		"is set and results are empty — run `observer index` on the project."
+		"is set and results are empty; warning `codeintel_disabled` means the user " +
+		"has code intelligence turned off (tell them, do not retry)."
 }
 
 func (*searchSymbolsTool) InputSchema() map[string]any {
@@ -137,6 +138,13 @@ func (t *searchSymbolsTool) Invoke(ctx context.Context, raw json.RawMessage) (an
 	if !t.cg.Available() {
 		out.Degraded = true
 		out.Warnings = appendWarning(out.Warnings, WarningIndexUnavailable)
+		if codeintelapi.IsDisabled(t.cg) {
+			// D-307: off by choice. The fix is a user setting, not an
+			// index run, so say exactly that and skip the archive probe.
+			out.Warnings = appendWarning(out.Warnings, WarningCodeIntelDisabled)
+			out.Note = codeIntelDisabledNote
+			return out, nil
+		}
 		t.noteIfArchived(ctx, &out, project)
 		return out, nil
 	}

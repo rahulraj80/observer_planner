@@ -69,7 +69,7 @@ func configFileInspector(tool, homeDir string, gateways []string) (Verdict, stri
 // from the map, while still routing every tool of that kind to traffic
 // attestation honestly.
 func stubInspector(kind integration.RouteKind, why string) Inspector {
-	reason := fmt.Sprintf("config surface for RouteKind %q not yet readable (%s) — falls back to traffic attestation", kind, why)
+	reason := fmt.Sprintf("config surface for RouteKind %q not yet readable (%s) - falls back to traffic attestation", kind, why)
 	return func(_ string, _ string, _ []string) (Verdict, string, bool) {
 		return VerdictUnrouted, reason, false
 	}
@@ -85,7 +85,7 @@ func mapRouteState(s proxyroute.RouteState) (Verdict, string) {
 	case proxyroute.RouteOrgGateway:
 		return VerdictRoutedOrgGateway, "points at an authorized org AI Gateway endpoint"
 	case proxyroute.RouteDrifted:
-		return VerdictDrifted, "points at a non-loopback host matching no authorized gateway — possible bypass"
+		return VerdictDrifted, "points at a non-loopback host matching no authorized gateway - possible bypass"
 	case proxyroute.RouteAbsent:
 		return VerdictUnrouted, "no route configured (config or key missing)"
 	default:

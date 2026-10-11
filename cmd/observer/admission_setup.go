@@ -3,16 +3,20 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/dataauthority"
+	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 )
 
 // `observer obs admission setup` — the interactive admin wizard for the
@@ -109,7 +113,7 @@ func (p *setupPrompter) ask(question string, def bool) (bool, error) {
 		line, err := p.in.ReadString('\n')
 		answer := strings.ToLower(strings.TrimSpace(line))
 		if err != nil && answer == "" {
-			return false, fmt.Errorf("stdin closed — stopping; nothing was written")
+			return false, fmt.Errorf("stdin closed - stopping; nothing was written")
 		}
 		switch answer {
 		case "":
@@ -121,7 +125,7 @@ func (p *setupPrompter) ask(question string, def bool) (bool, error) {
 		default:
 			fmt.Fprintln(p.out, "  please answer y or n (enter for the default)")
 			if err != nil {
-				return false, fmt.Errorf("stdin closed — stopping; nothing was written")
+				return false, fmt.Errorf("stdin closed - stopping; nothing was written")
 			}
 		}
 	}
@@ -140,12 +144,40 @@ func (p *setupPrompter) prompt(question, def string) (string, error) {
 		if def != "" {
 			return def, nil
 		}
-		return "", fmt.Errorf("stdin closed — stopping; nothing was written")
+		return "", fmt.Errorf("stdin closed - stopping; nothing was written")
 	}
 	if answer == "" {
 		return def, nil
 	}
 	return answer, nil
+}
+
+// choose prints a numbered menu and reads a number until it is one of the
+// listed options (D-571: a known set is picked, never typed; an unknown
+// answer re-asks instead of silently changing nothing). Empty input takes
+// def (1-based). It returns the 0-based index.
+func (p *setupPrompter) choose(question string, options []string, def int) (int, error) {
+	for i, o := range options {
+		fmt.Fprintf(p.out, "  %d) %s\n", i+1, o)
+	}
+	for {
+		fmt.Fprintf(p.out, "  %s [%d] ", question, def)
+		line, err := p.in.ReadString('\n')
+		answer := strings.TrimSpace(line)
+		if answer == "" {
+			if err != nil && def == 0 {
+				return 0, fmt.Errorf("stdin closed - stopping; nothing was written")
+			}
+			return def - 1, nil
+		}
+		if n, convErr := strconv.Atoi(answer); convErr == nil && n >= 1 && n <= len(options) {
+			return n - 1, nil
+		}
+		fmt.Fprintf(p.out, "  please answer a number from 1 to %d (enter for %d)\n", len(options), def)
+		if err != nil {
+			return 0, fmt.Errorf("stdin closed - stopping; nothing was written")
+		}
+	}
 }
 
 // localModelServer is one reachable OpenAI-compatible local model server.
@@ -181,6 +213,59 @@ func probeLocalModelServers(ctx context.Context) []localModelServer {
 	return found
 }
 
+// judgeModelLister lists the models a LOCAL model server serves (its
+// OpenAI-compatible GET <base>/models). A package var so a test can stub it.
+// Only a loopback base is asked: the wizard never calls a remote endpoint
+// before the operator has opted into it.
+var judgeModelLister = listLocalJudgeModels
+
+func listLocalJudgeModels(base string) []string {
+	if !dataauthority.IsLoopbackJudgeEndpoint(base) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/models", nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := (&http.Client{Timeout: 1500 * time.Millisecond}).Do(req)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var body struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return nil
+	}
+	var out []string
+	for _, m := range body.Data {
+		if m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// hostedJudgeModels is the model list the hosted-judge menu searches, by
+// hosting choice (the menu's 1-based pick): the hosted provider (2) picks
+// from the models this build prices; an aggregator (3) and a private
+// endpoint (4) name models their own way, so they are typed.
+func hostedJudgeModels(pick string) []string {
+	if pick != "2" {
+		return nil
+	}
+	return cost.SnapshotModels()
+}
+
 // collectAdmissionChoices runs the interactive prompt sequence, returning the
 // resolved choices (or an error if stdin closed mid-flow). It performs no
 // writes — the caller applies + confirms + persists.
@@ -189,7 +274,7 @@ func collectAdmissionChoices(ctx context.Context, p *setupPrompter, cfg config.C
 
 	// 1. Preconditions.
 	if !cfg.Observability.Enabled {
-		yes, err := p.ask("[observability] is off — enable it now?", true)
+		yes, err := p.ask("[observability] is off - enable it now?", true)
 		if err != nil {
 			return ch, err
 		}
@@ -201,7 +286,7 @@ func collectAdmissionChoices(ctx context.Context, p *setupPrompter, cfg config.C
 	}
 
 	// 2. Judge hosting.
-	fmt.Fprintln(p.out, "\njudge hosting — where the LLM that adjudicates NL policy runs.")
+	fmt.Fprintln(p.out, "\njudge hosting - where the LLM that adjudicates NL policy runs.")
 	fmt.Fprintln(p.out, "  local (loopback) makes ZERO network calls; a remote judge receives a")
 	fmt.Fprintln(p.out, "  secret-redacted, size-capped prompt (never a raw secret).")
 	local := probeLocalModelServers(ctx)
@@ -218,15 +303,19 @@ func collectAdmissionChoices(ctx context.Context, p *setupPrompter, cfg config.C
 		}
 	}
 
-	// 3. Usage rules — starter templates.
-	fmt.Fprintln(p.out, "\nusage rules — adopt starter templates (edit later in config.toml):")
-	for _, tpl := range obsAdmissionStarterTemplates() {
-		fmt.Fprintf(p.out, "  • %s\n    %s\n", tpl.Title, tpl.Description)
-		yes, err := p.ask(fmt.Sprintf("adopt %q?", tpl.Key), tpl.Key == "on_scope")
-		if err != nil {
-			return ch, err
-		}
-		if !yes {
+	// 3. Usage rules: starter templates, picked from one checklist (D-571).
+	fmt.Fprintln(p.out, "\nusage rules - adopt starter templates (edit later in config.toml):")
+	tpls := obsAdmissionStarterTemplates()
+	rows := make([]pickRow, len(tpls))
+	for i, tpl := range tpls {
+		rows[i] = pickRow{Label: fmt.Sprintf("%s (%s)", tpl.Title, tpl.Key), Note: tpl.Description, On: tpl.Key == "on_scope"}
+	}
+	adopt, _, err := pickChecklist(p.in, p.out, rows, false)
+	if err != nil {
+		return ch, err
+	}
+	for i, tpl := range tpls {
+		if !adopt[i] {
 			continue
 		}
 		if tpl.NeedsPurpose {
@@ -235,7 +324,7 @@ func collectAdmissionChoices(ctx context.Context, p *setupPrompter, cfg config.C
 				return ch, err
 			}
 			if strings.TrimSpace(purpose) == "" {
-				fmt.Fprintln(p.out, "  skipped — a purpose is required for this rule.")
+				fmt.Fprintln(p.out, "  skipped - a purpose is required for this rule.")
 				continue
 			}
 			ch.Purpose = purpose
@@ -247,7 +336,7 @@ func collectAdmissionChoices(ctx context.Context, p *setupPrompter, cfg config.C
 			}
 			ch.DeniedTopics = splitCSV(topics)
 			if len(ch.DeniedTopics) == 0 {
-				fmt.Fprintln(p.out, "  skipped — at least one topic is required for this rule.")
+				fmt.Fprintln(p.out, "  skipped - at least one topic is required for this rule.")
 				continue
 			}
 		}
@@ -255,7 +344,7 @@ func collectAdmissionChoices(ctx context.Context, p *setupPrompter, cfg config.C
 	}
 
 	// 4. Mode — observe-first.
-	fmt.Fprintln(p.out, "\nmode — start in observe (records verdicts, blocks nothing); flip to")
+	fmt.Fprintln(p.out, "\nmode - start in observe (records verdicts, blocks nothing); flip to")
 	fmt.Fprintln(p.out, "  enforce only after a simulate/soak (`observer obs admission simulate`).")
 	enforce, err := p.ask("start in enforce mode instead of observe?", false)
 	if err != nil {
@@ -271,26 +360,46 @@ func collectAdmissionChoices(ctx context.Context, p *setupPrompter, cfg config.C
 // collectJudge gathers the judge base_url/model/api_key_env via a numbered
 // hosting menu.
 func collectJudge(p *setupPrompter, cfg config.Config, local []localModelServer, ch *admissionSetupChoices) error {
-	fmt.Fprintln(p.out, "  1) local model server (loopback — no egress, no key)")
-	fmt.Fprintln(p.out, "  2) hosted provider (OpenAI-compatible — opt-in egress, api_key_env)")
-	fmt.Fprintln(p.out, "  3) aggregator (OpenRouter — opt-in egress, api_key_env)")
-	fmt.Fprintln(p.out, "  4) private endpoint (your VPC — opt-in egress, api_key_env)")
-	pick, err := p.prompt("choose 1-4:", "1")
+	idx, err := p.choose("choose:", []string{
+		"local model server (loopback - no egress, no key)",
+		"hosted provider (OpenAI-compatible - opt-in egress, api_key_env)",
+		"aggregator (OpenRouter - opt-in egress, api_key_env)",
+		"private endpoint (your VPC - opt-in egress, api_key_env)",
+	}, 1)
 	if err != nil {
 		return err
 	}
+	pick := strconv.Itoa(idx + 1)
 	ch.SetJudge = true
-	switch strings.TrimSpace(pick) {
+	switch pick {
 	case "1":
-		def := "http://127.0.0.1:11434/v1"
+		base := "http://127.0.0.1:11434/v1"
 		if len(local) > 0 {
-			def = local[0].BaseURL
-		}
-		base, err := p.prompt("local base_url:", def)
-		if err != nil {
+			// Pick a detected server; typing a URL stays the last option.
+			opts := make([]string, 0, len(local)+1)
+			for _, s := range local {
+				opts = append(opts, s.Label+"  "+s.BaseURL)
+			}
+			opts = append(opts, "another URL (type it)")
+			i, err := p.choose("local server:", opts, 1)
+			if err != nil {
+				return err
+			}
+			if i < len(local) {
+				base = local[i].BaseURL
+			} else if base, err = p.prompt("local base_url:", base); err != nil {
+				return err
+			}
+		} else if base, err = p.prompt("local base_url (no local server detected):", base); err != nil {
 			return err
 		}
-		model, err := p.prompt("model (e.g. llama3.1:8b-instruct):", cfg.Observability.Admission.Judge.Model)
+		// D-571: the models the local server lists are picked; a model it
+		// does not list yet can still be typed.
+		models := judgeModelLister(base)
+		if len(models) == 0 {
+			fmt.Fprintln(p.out, "  the server listed no models; type one (e.g. llama3.1:8b-instruct)")
+		}
+		model, err := p.pickFromList("model:", models, cfg.Observability.Admission.Judge.Model, true)
 		if err != nil {
 			return err
 		}
@@ -302,20 +411,20 @@ func collectJudge(p *setupPrompter, cfg config.Config, local []localModelServer,
 		if err != nil {
 			return err
 		}
-		model, err := p.prompt("model:", "")
+		// D-571: a hosted provider's model is picked from the models this
+		// build prices (search by typing part of a name); an aggregator or a
+		// private endpoint names models its own way, so those are typed.
+		model, err := p.pickFromList("model:", hostedJudgeModels(pick), "", true)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(p.out, "  the API key is read from an ENV VAR at run time — name it here, never paste the key.")
+		fmt.Fprintln(p.out, "  the API key is read from an ENV VAR at run time - name it here, never paste the key.")
 		keyEnv, err := p.prompt("api_key_env (env var name):", keyEnvDef)
 		if err != nil {
 			return err
 		}
 		ch.JudgeBaseURL, ch.JudgeModel, ch.JudgeAPIKeyEnv = base, model, keyEnv
 		fmt.Fprintln(p.out, "  note: a remote judge receives a secret-redacted, size-capped prompt (opt-in egress).")
-	default:
-		fmt.Fprintln(p.out, "  unrecognised choice — leaving the judge unchanged.")
-		ch.SetJudge = false
 	}
 	return nil
 }
@@ -369,7 +478,7 @@ var errSetupAborted = errors.New("setup aborted")
 // runInteractiveAdmissionSetup drives the full interactive flow: collect →
 // apply → reachability probe → lint → one consent → write.
 func runInteractiveAdmissionSetup(ctx context.Context, out io.Writer, in io.Reader, cfg config.Config, configPath string) error {
-	fmt.Fprintln(out, "observer obs admission setup — interactive")
+	fmt.Fprintln(out, "observer obs admission setup - interactive")
 	fmt.Fprintln(out, "each section previews; nothing is written without a final yes.")
 	p := &setupPrompter{in: bufio.NewReader(in), out: out}
 
@@ -391,7 +500,7 @@ func runInteractiveAdmissionSetup(ctx context.Context, out io.Writer, in io.Read
 		case probe.OK:
 			fmt.Fprintf(out, "\njudge reachable: %s (%s) in %dms\n", probe.Hosting, probe.Model, probe.LatencyMS)
 		default:
-			fmt.Fprintf(out, "\njudge NOT reachable: %s (%s) — %s\n", probe.Hosting, probe.Model, probe.Err)
+			fmt.Fprintf(out, "\njudge NOT reachable: %s (%s) - %s\n", probe.Hosting, probe.Model, probe.Err)
 			fmt.Fprintln(out, "  (you can still save; fix the endpoint/key/model and re-run `admission status`)")
 		}
 	}
@@ -402,7 +511,7 @@ func runInteractiveAdmissionSetup(ctx context.Context, out io.Writer, in io.Read
 		fmt.Fprintf(out, "  lint: %s\n", is)
 	}
 	if fatal {
-		fmt.Fprintln(out, "policy has FATAL lint issues — not writing. Fix the above and re-run.")
+		fmt.Fprintln(out, "policy has FATAL lint issues - not writing. Fix the above and re-run.")
 		return nil
 	}
 

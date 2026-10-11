@@ -88,6 +88,7 @@ export type ConfigKeyPath =
   "proxy.force_chatgpt_http" |
   "proxy.prewarm_targets" |
   "proxy.upstreams" |
+  "proxy.agent_upstreams" |
   "proxy.auto_default_lane" |
   "proxy.org_route.mode" |
   "proxy.org_route.primary" |
@@ -331,6 +332,10 @@ export type ConfigKeyPath =
   "shell_wrap.tools" |
   "shell_wrap.shells" |
   "shell_wrap.shim_dir" |
+  "shell_wrap.windows.enabled" |
+  "shell_wrap.windows.tools" |
+  "shell_wrap.windows.shells" |
+  "shell_wrap.windows.shim_dir" |
   "archive.enabled" |
   "archive.path" |
   "archive.max_projects_per_pass" |
@@ -406,6 +411,7 @@ export type ConfigKeyPath =
   "guard.budget.monthly_tokens" |
   "guard.budget.hard" |
   "guard.budget.from_org" |
+  "guard.budget.fail_closed" |
   "guard.budget.max_document_age" |
   "guard.budget.window.util_5h_warn" |
   "guard.budget.window.util_5h_deny" |
@@ -554,7 +560,10 @@ export type ConfigKeyPath =
   "pricing.feed.auto" |
   "pricing.feed.url" |
   "pricing.feed.poll_interval_hours" |
-  "experiments";
+  "experiments" |
+  "components.distro" |
+  "components.add" |
+  "components.remove";
 
 export type ConfigSchemaKind = "bool" | "int" | "float" | "string" | "string_list" | "string_map" | "table";
 export type ConfigSchemaTier = "plain" | "sensitive" | "secret" | "owner_elsewhere";

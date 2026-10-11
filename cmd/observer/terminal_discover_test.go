@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -1267,7 +1269,7 @@ func TestTerminalDiscoverWiredToServiceLinksDefaultCwdLaunch(t *testing.T) {
 		t.Fatalf("tick 0 links = %d, want 0 (dwell)", n)
 	}
 	if n := d.tick(context.Background()); n != 1 {
-		t.Fatalf("tick 1 links = %d, want 1 — the default-cwd launch never correlated", n)
+		t.Fatalf("tick 1 links = %d, want 1 - the default-cwd launch never correlated", n)
 	}
 	if len(corr) != 1 || corr[0].sessionID != wantSession || corr[0].runID != res.RunID {
 		t.Fatalf("correlations = %+v, want one (%s → %s)", corr, res.RunID, wantSession)

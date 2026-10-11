@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // seedProcessRun persists one process_runs row (via the real PersistRuns
@@ -18,7 +18,7 @@ import (
 func seedProcessRun(t *testing.T, s *Store, key, sessionID string, pid int, started time.Time, exited bool) int64 {
 	t.Helper()
 	ctx := context.Background()
-	run := processobs.ProcessRun{
+	run := procmodel.ProcessRun{
 		ProcessKey:     key,
 		BootID:         "boot-1",
 		PID:            pid,
@@ -31,11 +31,11 @@ func seedProcessRun(t *testing.T, s *Store, key, sessionID string, pid int, star
 		ArgvArgc:       2,
 		StartedAt:      started,
 		LastSeenAt:     started,
-		Attribution: processobs.Attribution{
+		Attribution: procmodel.Attribution{
 			SessionID:  sessionID,
 			Tool:       "claude-code",
-			Source:     processobs.AttrBridge,
-			Confidence: processobs.ConfHigh,
+			Source:     procmodel.AttrBridge,
+			Confidence: procmodel.ConfHigh,
 		},
 	}
 	if exited {
@@ -49,7 +49,7 @@ func seedProcessRun(t *testing.T, s *Store, key, sessionID string, pid int, star
 		run.ReadBytes = 100
 		run.WriteBytes = 200
 	}
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{run}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{run}); err != nil {
 		t.Fatalf("seedProcessRun PersistRuns(%s): %v", key, err)
 	}
 	var id int64
@@ -111,7 +111,7 @@ func TestSelectSessionProcessRows_FieldsAndEventCount(t *testing.T) {
 	if child.CWD != "/home/dev/proj" || child.ArgvPreview != "node server.js" || child.ArgvArgc != 2 {
 		t.Errorf("child command fields = %+v", child)
 	}
-	if child.AttributionSource != string(processobs.AttrBridge) || child.AttributionConfidence != string(processobs.ConfHigh) {
+	if child.AttributionSource != string(procmodel.AttrBridge) || child.AttributionConfidence != string(procmodel.ConfHigh) {
 		t.Errorf("child attribution = %q/%q, want bridge/high", child.AttributionSource, child.AttributionConfidence)
 	}
 	if !child.Exited || child.EndedAt == "" {
@@ -190,25 +190,25 @@ func TestSelectSessionProcessRows_MetricsMessageIDAndSampleCap(t *testing.T) {
 	}
 
 	// 61 samples: one over the cap, so the wire keeps the last 60.
-	samples := make([]processobs.MetricSample, 0, 61)
+	samples := make([]procmodel.MetricSample, 0, 61)
 	for i := 0; i < 61; i++ {
-		samples = append(samples, processobs.MetricSample{
+		samples = append(samples, procmodel.MetricSample{
 			T: now.Add(time.Duration(i) * time.Second), CPUMs: int64(i), WorkingSet: int64(i) * 1024,
 		})
 	}
-	run := processobs.ProcessRun{
+	run := procmodel.ProcessRun{
 		ProcessKey: "proc-metrics", BootID: "boot-1", PID: 500, StartTimeTicks: 500000,
 		ExePath: "/usr/bin/node", ExeBasename: "node", ArgvPreview: "node x.js", ArgvArgc: 2,
 		StartedAt: now, LastSeenAt: now,
 		WorkingSetBytes: 5 << 20, ThreadCount: 12,
 		MetricSamples: samples,
-		Attribution: processobs.Attribution{
+		Attribution: procmodel.Attribution{
 			SessionID: sessionID, Tool: "claude-code",
-			Source: processobs.AttrBridge, Confidence: processobs.ConfHigh,
+			Source: procmodel.AttrBridge, Confidence: procmodel.ConfHigh,
 			ActionID: &actionID,
 		},
 	}
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{run}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{run}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestSelectSessionProcessRows_MetricsMessageIDAndSampleCap(t *testing.T) {
 		t.Errorf("MessageID = %q, want msg_abc123 (resolved via actions.message_id by action_id)", r.MessageID)
 	}
 
-	var kept []processobs.MetricSample
+	var kept []procmodel.MetricSample
 	if err := json.Unmarshal([]byte(r.MetricSamplesJSON), &kept); err != nil {
 		t.Fatalf("MetricSamplesJSON not a valid JSON array: %v (%q)", err, r.MetricSamplesJSON)
 	}

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -1334,7 +1336,7 @@ func TestCloudStatusReportsSignInPresenceWithoutNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sign-in (WorkOS):    not present — run `observer cloud login`") {
+	if !strings.Contains(out, "sign-in (WorkOS):    not present - run `observer cloud login`") {
 		t.Errorf("fresh node must say there is no sign-in and name the recovery:\n%s", out)
 	}
 
@@ -1347,7 +1349,7 @@ func TestCloudStatusReportsSignInPresenceWithoutNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "sign-in (WorkOS):    present — an expired API token is re-exchanged automatically") {
+	if !strings.Contains(out, "sign-in (WorkOS):    present - an expired API token is re-exchanged automatically") {
 		t.Errorf("a persisted sign-in must be reported as self-heal capable:\n%s", out)
 	}
 }

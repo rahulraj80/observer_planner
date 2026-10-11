@@ -1,0 +1,15 @@
+{
+  "total_count": 3,
+  "offset": 2,
+  "limit": 100,
+  "data": [
+    {
+      "userId": "usr_synth03",
+      "userName": "Bo Example",
+      "userEmail": "bo@example.com",
+      "role": "MEMBER",
+      "joinedAt": "2026-05-20T08:15:00Z"
+    }
+  ],
+  "status": null
+}

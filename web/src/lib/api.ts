@@ -7,6 +7,7 @@
 
 import { markRemoteAuthLost } from "@/lib/authLoss";
 import { getRemoteCSRF, isRemoteView, setRemoteCSRF } from "@/lib/remote";
+import { errorMachineSuffix } from "@/lib/remoteIdentity";
 import type {
   InstanceInfo,
   InstanceTestResult,
@@ -38,7 +39,10 @@ export class ApiError extends Error {
     // `409 {"error":"plan_changed","plan":{...}}`) parses this instead.
     public readonly body: string,
   ) {
-    super(`api ${status} ${path}: ${body.slice(0, 200)}`);
+    // T-425: on a remote machine's dashboard (opened through the instance
+    // switcher) every error names that machine, so it is never read as a
+    // fault on the machine the operator came from. Empty locally.
+    super(`api ${status} ${path}: ${body.slice(0, 200)}${errorMachineSuffix()}`);
   }
 }
 
@@ -93,6 +97,26 @@ function currentLocalConfirmToken(fallback: string): string {
     return value || fallback;
   }
   return fallback;
+}
+
+// localConfirmHeaders returns the JSON + owner-local confirm headers every
+// dashboard write carries (review M3-05: the server checks the double-submit
+// token, the two-click arm is UI state only). When this tab holds no confirm
+// cookie yet, the command-job list (GET /api/jobs, Local) mints one first.
+// fetchJSON re-reads the cookie right before sending, so a token rotated by a
+// sibling panel is still current.
+export async function localConfirmHeaders(): Promise<Record<string, string>> {
+  let token = currentLocalConfirmToken("");
+  if (!token) {
+    try {
+      const res = await fetch("/api/jobs?mode=confirm-mint", { headers: { Accept: "application/json" } });
+      const body = (await res.json().catch(() => null)) as { confirm_token?: string } | null;
+      token = currentLocalConfirmToken(body?.confirm_token ?? "");
+    } catch {
+      // The write then answers 403 with "reload the panel", which is honest.
+    }
+  }
+  return { "Content-Type": "application/json", "X-Observer-Confirm": token };
 }
 
 function isAuthEndpoint(path: string): boolean {
@@ -253,7 +277,7 @@ export interface TagDefinitionsResponse {
 }
 
 // fetchTagDefinitions returns the user's CUSTOM tag definitions. Standard tag
-// definitions live in the in-code taxonomy (web/src/lib/tagTaxonomy.ts), not
+// definitions live in the in-code taxonomy (shared/lib/tagTaxonomy.ts), not
 // here — this is only the glossary a user authored for their own tags.
 export function fetchTagDefinitions(
   signal?: AbortSignal,
@@ -362,11 +386,11 @@ export function fetchSessionLOC(
   });
 }
 
-// LOC_SUMMARY_PATH is the window rollup. `days` is the only window knob the
-// endpoint takes (no hours, no custom range) and `project` wants a NUMERIC
+// LOC_SUMMARY_PATH is the window rollup. The endpoint takes `days` or the
+// closed since/until range (windowRange, T-550); `project` wants a NUMERIC
 // project id, which the dashboard's project filter (a root path) cannot
-// supply - so callers scope by days and say so rather than passing a filter
-// the server would silently drop.
+// supply - so callers scope by window and say so rather than passing a
+// filter the server would silently drop.
 export const LOC_SUMMARY_PATH = "/api/loc/summary";
 
 // fetchLOCSummary returns the window rollup. `projectID` is optional and is

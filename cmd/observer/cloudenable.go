@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -56,7 +58,7 @@ func newCloudEnableCmd() *cobra.Command {
 
 			resolved := resolveCloudBaseURL(baseURL, cfg)
 			if resolved == "" {
-				return fmt.Errorf("no cloud base URL — pass --base-url, set %s, or set [cloud].base_url in config.toml (the grant binds the upload endpoint)", cloudBaseURLEnv)
+				return fmt.Errorf("no cloud base URL - pass --base-url, set %s, or set [cloud].base_url in config.toml (the grant binds the upload endpoint)", cloudBaseURLEnv)
 			}
 
 			level := store.CloudEnrichTitles
@@ -82,7 +84,7 @@ func newCloudEnableCmd() *cobra.Command {
 				evidenceSettings = prior.EvidenceSettings
 			}
 			if evidenceSettings != nil {
-				effective := evidenceSettings.ForLevel(level)
+				effective := store.CloudEvidenceSettingsForLevel(*evidenceSettings, level)
 				evidenceSettings = &effective
 			}
 			if evidenceSettings == nil {
@@ -108,7 +110,7 @@ func newCloudEnableCmd() *cobra.Command {
 						return err
 					}
 					if !accepted {
-						fmt.Fprintln(w, "Aborted — nothing changed.")
+						fmt.Fprintln(w, "Aborted - nothing changed.")
 						return nil
 					}
 				}
@@ -144,10 +146,11 @@ func newCloudEnableCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&evidenceSettingsJSON, "evidence-settings", "", "Versioned JSON evidence limits (also editable in dashboard Settings)")
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
+	// no-bare-usd:allow (not money: an environment variable name)
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Cloud base URL (else $"+cloudBaseURLEnv+", else [cloud].base_url)")
 	cmd.Flags().StringVar(&timezone, "timezone", "", "IANA timezone the day windows are defined in (default: this host's zone)")
 	cmd.Flags().BoolVar(&withExcerpts, "with-excerpts", false, "Also send short scrubbed excerpts of your task and final summary per session")
-	cmd.Flags().BoolVar(&noBackground, "no-background", false, "Do not enrich in the background — use `observer cloud consent` yourself per session")
+	cmd.Flags().BoolVar(&noBackground, "no-background", false, "Do not enrich in the background - use `observer cloud consent` yourself per session")
 	cmd.Flags().BoolVar(&yes, "yes", false, "Skip the interactive confirmation")
 	cmd.Flags().StringVar(&source, "source", "cli", "Who is recording this (cli, dashboard, ...)")
 	return cmd
@@ -204,7 +207,7 @@ func newCloudDisableCmd() *cobra.Command {
 					return cerr
 				}
 				if !ok {
-					fmt.Fprintln(w, "Aborted — nothing changed.")
+					fmt.Fprintln(w, "Aborted - nothing changed.")
 					return nil
 				}
 			}

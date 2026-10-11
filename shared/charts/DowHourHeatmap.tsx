@@ -1,5 +1,5 @@
-import { memo, useMemo, useState } from "react";
-import { fmtUSD } from "../lib/format";
+import { memo, useMemo, useState, type ReactElement } from "react";
+import { dollarsShown, fmtInt, fmtUSD } from "../lib/format";
 import type { AnalysisCostByDowHour } from "../lib/types";
 import { Tooltip } from "../primitives";
 import { ScaleLegend } from "./ScaleLegend";
@@ -12,19 +12,62 @@ import { ScaleLegend } from "./ScaleLegend";
 // Cells render with intensity = log(cost) / log(max) so a hot
 // hour-cluster (e.g. Tue/Wed 14:00–17:00) reads at-a-glance while
 // quieter cells stay visible rather than collapsing to bg.
-export const DowHourHeatmap = memo(function DowHourHeatmap({
+// The wire shape is a prop (`metric`): without one the cells are the node's
+// cost cells and the heat quantity is cost, or the turn count in the token
+// usage view (format.ts cost affordances; the cells carry no token split),
+// read at render time after the display mode is set. web2 passes its own
+// metric for the org's action-count cells.
+type Pos = { dow: number; hour: number };
+type CostCell = AnalysisCostByDowHour["cells"][number];
+
+/** HeatMetric reads one cell of shape C. */
+export type HeatMetric<C extends Pos> = {
+  value: (c: C) => number;
+  fmt: (n: number) => string;
+  /** An extra readout after the figure (e.g. the turn count), or null. */
+  suffix?: (c: C) => string | null;
+  caption: string;
+  scaleLabel: string;
+};
+
+const turns = (n: number) => `${n} turn${n === 1 ? "" : "s"}`;
+
+/** costHeatMetric is the default metric for the node's cost cells. */
+export function costHeatMetric(): HeatMetric<CostCell> {
+  return dollarsShown()
+    ? {
+        value: (c) => c.cost_usd,
+        fmt: (n) => fmtUSD(n),
+        suffix: (c) => (c.turn_count > 0 ? turns(c.turn_count) : null),
+        caption: "cost by hour of day × day of week",
+        scaleLabel: "Cost colour scale, log",
+      }
+    : {
+        value: (c) => c.turn_count,
+        fmt: (n) => `${fmtInt(n)} turn${n === 1 ? "" : "s"}`,
+        caption: "turns by hour of day × day of week",
+        scaleLabel: "Turn count colour scale, log",
+      };
+}
+
+type HeatmapProps<C extends Pos> = {
+  cells: readonly C[];
+  timezone?: string;
+};
+
+function DowHourHeatmapImpl<C extends Pos>({
   cells,
   timezone,
-}: {
-  cells: AnalysisCostByDowHour["cells"];
-  timezone?: string;
-}) {
+  metric: given,
+}: HeatmapProps<C> & { metric?: HeatMetric<C> }) {
   // peak is the real top cell (the legend's honest high end); max floors
   // it at 1 only as the log-scale divisor.
+  const metric = (given ?? costHeatMetric()) as unknown as HeatMetric<C>;
   const peak = useMemo(() => {
     let m = 0;
-    for (const c of cells) if (c.cost_usd > m) m = c.cost_usd;
+    for (const c of cells) if (metric.value(c) > m) m = metric.value(c);
     return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the metric only changes with the boot-time display mode
   }, [cells]);
   const max = Math.max(1, peak);
 
@@ -46,7 +89,7 @@ export const DowHourHeatmap = memo(function DowHourHeatmap({
   ];
 
   const lookup = useMemo(() => {
-    const m = new Map<number, (typeof cells)[number]>();
+    const m = new Map<number, C>();
     for (const c of cells) m.set(c.dow * 24 + c.hour, c);
     return m;
   }, [cells]);
@@ -67,6 +110,7 @@ export const DowHourHeatmap = memo(function DowHourHeatmap({
               dow={dow}
               lookup={lookup}
               max={max}
+              metric={metric}
               hovered={hovered}
               onHover={setHovered}
             />
@@ -92,14 +136,14 @@ export const DowHourHeatmap = memo(function DowHourHeatmap({
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10.5px] text-fg-3">
         <div className="flex items-center gap-2">
           <span className="font-mono uppercase tracking-[0.06em]">
-            cost by hour of day × day of week · {timezone ?? "UTC"}
+            {metric.caption} · {timezone ?? "UTC"}
           </span>
         </div>
         <ScaleLegend
           colorAt={cellColor}
-          low={fmtUSD(0)}
-          high={fmtUSD(peak)}
-          label="Cost colour scale, log"
+          low={metric.fmt(0)}
+          high={metric.fmt(peak)}
+          label={metric.scaleLabel}
         />
       </div>
 
@@ -113,17 +157,15 @@ export const DowHourHeatmap = memo(function DowHourHeatmap({
         {sel ? (
           <>
             <span className="font-mono text-fg-3">
-              From: {dayName(sel.dow)} {pad(sel.hour)}:00–{pad(sel.hour + 1)}:00{" "}
+              From: {dayName(sel.dow)} {pad(sel.hour)}:00-{pad(sel.hour + 1)}:00{" "}
               {timezone ?? "UTC"}
             </span>
             <span className="px-1 text-fg-4">·</span>
             <span className="font-semibold tabular-nums text-fg-0">
-              {fmtUSD(sel.cost_usd)}
+              {metric.fmt(metric.value(sel))}
             </span>
-            {sel.turn_count > 0 && (
-              <span className="ml-2 text-fg-3">
-                · {sel.turn_count} turn{sel.turn_count === 1 ? "" : "s"}
-              </span>
+            {metric.suffix?.(sel) && (
+              <span className="ml-2 text-fg-3">· {metric.suffix(sel)}</span>
             )}
           </>
         ) : (
@@ -132,20 +174,32 @@ export const DowHourHeatmap = memo(function DowHourHeatmap({
       </div>
     </div>
   );
-});
+}
 
-function Row({
+/**
+ * DowHourHeatmap draws the 7 x 24 day-of-week by hour grid. Without
+ * `metric` the cells are the node's cost cells; with one, any
+ * `{ dow, hour }` shape the metric reads.
+ */
+export const DowHourHeatmap = memo(DowHourHeatmapImpl) as unknown as {
+  (props: HeatmapProps<CostCell> & { metric?: HeatMetric<CostCell> }): ReactElement;
+  <C extends Pos>(props: HeatmapProps<C> & { metric: HeatMetric<C> }): ReactElement;
+};
+
+function Row<C extends Pos>({
   label,
   dow,
   lookup,
   max,
+  metric,
   hovered,
   onHover,
 }: {
   label: string;
   dow: number;
-  lookup: Map<number, { cost_usd: number; turn_count: number }>;
+  lookup: Map<number, C>;
   max: number;
+  metric: HeatMetric<C>;
   hovered: { dow: number; hour: number } | null;
   onHover: (h: { dow: number; hour: number } | null) => void;
 }) {
@@ -157,7 +211,7 @@ function Row({
       <div className="grid grid-cols-24 gap-px">
         {Array.from({ length: 24 }).map((_, hour) => {
           const cell = lookup.get(dow * 24 + hour);
-          const value = cell?.cost_usd ?? 0;
+          const value = cell ? metric.value(cell) : 0;
           // Log scale — linear scale washes out off-peak hours in a
           // window dominated by one heavy day. log1p keeps the tail
           // visible while still letting the peak stand out.
@@ -167,8 +221,8 @@ function Row({
           return (
             <Tooltip
               key={hour}
-              content={`${dayName(dow)} ${pad(hour)}:00 · ${fmtUSD(value)}${
-                cell?.turn_count ? ` · ${cell.turn_count} turns` : ""
+              content={`${dayName(dow)} ${pad(hour)}:00 · ${metric.fmt(value)}${
+                cell && metric.suffix?.(cell) ? ` · ${metric.suffix(cell)}` : ""
               }`}
             >
               <button

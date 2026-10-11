@@ -1,0 +1,3373 @@
+{
+ "group": "pi-prime",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/pi-prime-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "earendil.radius.analytics",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "member view, role-limited"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "undocumented",
+   "lookback_doc": "undocumented",
+   "per_user_doc": "per member",
+   "mechanism_doc": "UI + MCP \"analytics\" tools (\"What did we spend last week, by member and model?\"); requested vs physical model",
+   "read_write_doc": "UI + MCP read",
+   "class_doc": "Usage, Cost, Adoption",
+   "grain_doc": "unknown (UI); by member x model",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "requests",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "requests",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://radius.earendil.com/docs/models",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.api_keys",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "member (own), owner/admin (service accounts)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per owner",
+   "mechanism_doc": "UI API keys page (members create own; expiry 7 days to never; `RADIUS_API_KEY`); scopes and revocation not documented",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.billing",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "any member buys credit"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org",
+   "mechanism_doc": "UI Billing page: credit purchase, credit codes, top-up threshold, invoices after first purchase; no export documented",
+   "read_write_doc": "UI",
+   "class_doc": "Cost, BillingExport (invoices), Limits (balance, auto top-up)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/pricing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.budgets",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "moments to 1 h",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per member or pool",
+   "mechanism_doc": "UI + MCP \"budgets\" tools (\"Set a $200 monthly budget for the design group\"); per member and/or shared pool, org-wide or per group; periods 5h session, day, week, month (UTC resets); hard after the crossing request; error names the budget and reset time",
+   "read_write_doc": "UI + MCP",
+   "class_doc": "Limits, ctl:SpendLimitUser / Group / Org",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (op names undocumented)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitGroup",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitOrg",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.gateway",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "header_key",
+    "doc": "Radius login or RADIUS_API_KEY"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "provider terms",
+   "per_user_doc": "per member",
+   "mechanism_doc": "gateway https://radius.pi.dev (pi native message format; overrides PI_GATEWAY, PI_GATEWAY_API_KEY)",
+   "read_write_doc": "node only",
+   "class_doc": "Usage (per call, node/proxy side)",
+   "grain_doc": "PerCall",
+   "build": "catalog_only",
+   "build_doc": "node/proxy only",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/faq",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.groups",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "UI + MCP \"groups\" tools",
+   "read_write_doc": "UI + MCP",
+   "class_doc": "Groups (@owners, @admins built in + custom)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.mcp",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "Radius login; role-limited"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "MCP server https://radius.pi.dev/mcp (`~/.pi/agent/mcp.json`, auth provider radius); tools for org settings, members, groups, budgets, models, analytics, artifacts, web search; individual tool names not published except the named ops above",
+   "read_write_doc": "R/W",
+   "class_doc": "transport for all Radius admin areas",
+   "grain_doc": "n/a",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (tool list discoverable at runtime via MCP tools/list, not documented)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/extensions",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "earendil.radius.members",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "UI Members page (invite by email + role, links expire 7 days; remove; owners change roles) + MCP \"members\" tools",
+   "read_write_doc": "UI + MCP",
+   "class_doc": "Identity, Roles (owner, admin, member)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.models",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "owner/admin write, members view"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "moments, at most 1 h",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "ops models.list, models.upsert (fields incl. rewrite_rules; reuse id updates), models.delete via \"Radius API\" / MCP; availability all / selected groups / nobody; thinking cap",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, ctl:ModelAccess",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable by op name (transport MCP, full schema not public)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/models",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Radius API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.org",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "Radius login (owner for membership domain)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha, any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "org delete only by email",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "UI (Your organizations; Settings > Automatic membership) + MCP \"organization settings\" tools",
+   "read_write_doc": "UI + MCP (op names undocumented)",
+   "class_doc": "Projects (org = isolated container), Policy (automatic membership domain)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.privacy_terms",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "doc statement + per-model tags: Radius keeps no inputs/outputs after processing; OpenAI and Anthropic models 30-day provider retention; DeepSeek, Moonshot, xAI, Z.ai marked ZDR; no region guarantee; \"privacy\" listed as an admin capability, undescribed",
+   "read_write_doc": "UI",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RetentionPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/pricing",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.rewrite_rules",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "versioned",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "ops rewriteRules.test, publish (priority), revoke (409 if in use), updatePriority, list; JS module sandboxed (50 ms CPU, 1 s); up to 8 per model; built-ins compact_git_diff, compact_git_status, compact_grep",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy, ctl:ContentExclusion (redaction of secrets before the model; fail-closed)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable by op name",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ContentExclusion",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/rewrite-rules",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Radius API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.routing_rules",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "versioned",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "ops routingRules.test, publish, revoke (409 routing_rule_in_use); routing choice cache per org/user/session/model/conversation, 1 h",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (Virtual model routing)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable by op name",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/routing-rules",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "override: Radius API",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.service_accounts",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per account",
+   "mechanism_doc": "UI (owners/admins create keys for service accounts; can join groups and hold budgets)",
+   "read_write_doc": "UI",
+   "class_doc": "ServiceAccounts",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.two_step",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "UI",
+   "read_write_doc": "UI",
+   "class_doc": "Policy (two-step verification for org web pages; not Pi logins or keys)",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/organizations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "earendil.radius.web_search",
+   "vendor_group": "pi-prime",
+   "vendor": "earendil",
+   "plane": "earendil.radius",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "owner/admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "alpha"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "UI Web search page or ask Pi (MCP); off by default; free (Parallel standard terms) or paid ZDR",
+   "read_write_doc": "UI + MCP",
+   "class_doc": "ctl:FeatureToggle",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://radius.earendil.com/docs/extensions",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://radius.earendil.com/docs/pricing",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "pi.node.analytics_optin",
+   "vendor_group": "pi-prime",
+   "vendor": "pi",
+   "plane": "pi.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "pseudonymous",
+   "mechanism_doc": "`enableAnalytics` default false; endpoint undocumented",
+   "read_write_doc": "W only",
+   "class_doc": "Adoption / Telemetry (opt-in analytics sharing, experimental first-run)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "pi.node.install_telemetry",
+   "vendor_group": "pi-prime",
+   "vendor": "pi",
+   "plane": "pi.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "anonymous",
+   "mechanism_doc": "POST pi.dev/api/report-install; `enableInstallTelemetry` default true; PI_TELEMETRY, PI_OFFLINE",
+   "read_write_doc": "W only",
+   "class_doc": "Telemetry (anonymous install/update ping + provider attribution headers)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (vendor-internal)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "pi.node.json_mode",
+   "vendor_group": "pi-prime",
+   "vendor": "pi",
+   "plane": "pi.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "local stdout",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry (JSONL event stream `pi --mode json`, RPC, SDK)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "node only",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://pi.dev",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "pi.node.permission_system_extension",
+   "vendor_group": "pi-prime",
+   "vendor": "pi",
+   "plane": "pi.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": ""
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": ""
+   },
+   "rate": {
+    "documented": false,
+    "doc": ""
+   },
+   "tier": {
+    "doc": ""
+   },
+   "freshness_doc": "",
+   "lookback_doc": "",
+   "per_user_doc": "",
+   "mechanism_doc": "pi-permissions.jsonc (global and project): allow, deny, ask for tools, shell, MCP, skills; optional decision audit; needs the extension installed",
+   "read_write_doc": "W (file)",
+   "class_doc": "Policy",
+   "grain_doc": "",
+   "build": "buildable",
+   "build_doc": "",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://pi.dev/packages/pi-permission-system",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Added by the full v5 review (R-D-19), plan section 4.3.3.",
+   "derivation": {
+    "reach_rule": "review R-D-19",
+    "build_rule": "review R-D-19",
+    "source_rule": "review R-D-19",
+    "auth_rule": "review R-D-19"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "pi.node.settings",
+   "vendor_group": "pi-prime",
+   "vendor": "pi",
+   "plane": "pi.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "files: agent-directory settings (`~/.pi/agent/settings.json`) and project `.pi/settings.json` (project overrides); no system/managed path",
+   "read_write_doc": "file",
+   "class_doc": "Policy (node, user-writable): enabledModels, defaultTools (+/-), builtin:mcp toggle, images.blockImages, defaultProjectTrust",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "node only",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/settings.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "pi.node.share_gist",
+   "vendor_group": "pi-prime",
+   "vendor": "pi",
+   "plane": "pi.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user's GitHub"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "on demand",
+   "lookback_doc": "GitHub",
+   "per_user_doc": "user",
+   "mechanism_doc": "`/share` command",
+   "read_write_doc": "W",
+   "class_doc": "Content (user-initiated session export to a GitHub gist)",
+   "grain_doc": "PerSession",
+   "build": "catalog_only",
+   "build_doc": "node only",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://pi.dev",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.agent_analytics.events",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.agent_analytics",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none sent by client (pseudonymous installation id)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "best effort, no retry",
+   "lookback_doc": "undocumented",
+   "per_user_doc": "pseudonymous install, not user",
+   "mechanism_doc": "POST /api/v1/agent-analytics/events (batch {installation_id, events[{id,name,timestamp,properties}]}, max 20 events); GET /api/v1/agent-analytics/capabilities (schema_versions [1,2], revision 4, posthog_exception_events); forwarded to PostHog",
+   "read_write_doc": "W only",
+   "class_doc": "Adoption, Telemetry (product analytics)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (vendor-internal)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/PrimeIntellect-ai/prime-agent/tree/main/crates/pa-telemetry",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.agent_traces.upload_session",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.agent_traces",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer: PRIME_AGENT_TRACES_API_KEY, stored \"prime-agent-traces\" credential, PRIME_API_KEY, or the prime-inference credential; no team header"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "client: 3 retries, upload-all 5 req/60 s"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "on change (outbox skips unchanged)",
+   "lookback_doc": "undocumented",
+   "per_user_doc": "per uploader key",
+   "mechanism_doc": "PUT /api/v1/agent-traces/sessions/{session_id}, raw NDJSON (whole local session file each call, max 20 MiB), headers X-Trace-Id (root session), X-Parent-Session, X-Cwd, X-Agent-Version, X-Git-Repo, X-Git-Commit; response {session_id, trace_id, bytes_stored, key (R2 object key)}",
+   "read_write_doc": "W only (no read/list endpoint)",
+   "class_doc": "Sessions, Content, Commits (git repo + commit headers), Telemetry (vendor-side ingest)",
+   "grain_doc": "PerSession",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly for admin",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/crates/pa-core/src/agent_traces/upload.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.billing.run_usage",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "run lifetime",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET /api/v1/billing/runs/{run_id}/usage; training + inference {tokens, input_tokens, output_tokens, cost_usd}, pricing per Mtok",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost (RFT training runs only)",
+   "grain_doc": "PerRun",
+   "build": "buildable",
+   "build_doc": "Driverable (not agent usage)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "usd_micros",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/api-reference/billing/token-usage-and-cost-for-a-single-rft-run.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Not built (lane ENTAPI-L16D, T-713, decision): a per-run read keyed by an RFT training run id (GET /api/v1/billing/runs/{run_id}/usage). No billing endpoint enumerates the team's runs, so an org connection has no run id to ask for without a second, unreviewed read; the run's tokens are training and inference of a fine-tuning job, not coding-agent usage; and the totals are running values of a live run (no period, no member), so they fit no fact key. Prime Agent usage is captured on the node (internal/adapter/primeagent).",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.billing.wallet",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.billing",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Prime API key as Authorization: Bearer (OpenAPI securitySchemes HTTPBearer); the team wallet requires team membership"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "limit 1, offset 0: the driver reads the balance, not the billing rows"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "near live (rows updated as billed)",
+   "lookback_doc": "all rows (total_billings), sorted lastBilledAt desc",
+   "per_user_doc": "NO (wallet level; no user id on a row)",
+   "mechanism_doc": "GET /api/v1/billing/wallet?limit(<=100)&offset&teamId; WalletResponse {wallet_id, team_id, balance_usd, currency, total_billings, recent_billings[BillingEntry{id, created_at, updated_at, last_billed_at, amount_usd, currency, resource_type, resource_id, credits_covered_usd}], credit_grants[{id, category, qualifier, amount_usd, remaining_usd, label, expiresAt, revokedAt}], sandbox_credits_remaining_usd, credits_remaining_by_category}",
+   "read_write_doc": "R",
+   "class_doc": "Cost, Limits (balance, credit grants)",
+   "grain_doc": "Snapshot (team wallet); billing rows not landed",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "event",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "usd_micros",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16D, T-713) for Limits: driver internal/vendorapi/prime Wallet (GET /api/v1/billing/wallet with teamId from the connection parameter team_id, limit 1, offset 0). One point-in-time snapshot of the team wallet (class prime.wallet): balance (may be negative, an amount owed) and the remaining grant credits per documented category (sandboxes, training, inference) in micro-dollars, and total_billings. A balance, never a spend series. The billing rows are running per-resource accumulators with no member and are not landed (Cost stays buildable: an event-grain landing needs a decision on a row that is rewritten in place); grant labels are customer text and never land. Another currency or another team than the one asked is schema drift. Synthetic only, no vendor response observed. assumption_tested: the category keys are named only in prose (Inferred). secret_class never_returns_secret: the schema carries ids, amounts, dates and labels only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16D: driver internal/vendorapi/prime Wallet, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Prime Intellect OpenAPI securitySchemes HTTPBearer (type http, scheme bearer)"
+   },
+   "status": "synthetic, awaiting live validation",
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.primeintellect.ai",
+     "port": 443
+    }
+   ]
+  },
+  {
+   "id": "prime.compute.resources",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.compute",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "offset/limit or page"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "owner",
+   "mechanism_doc": "59 REST ops under /api/v1/{pods,disks,images,tunnel,evaluations,hosted-evaluations,training,availability}",
+   "read_write_doc": "R/W",
+   "class_doc": "(out of scope for agents) compute inventory: pods (+history, status, logs), disks, images, image builds, tunnels, evaluations, hosted evaluations, training runs and volumes, availability",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (not agent data)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/llms.txt",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation",
+   "reference_only": true
+  },
+  {
+   "id": "prime.inference.models",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer, Inference permission"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "\"set per model and shown in the catalog\" (no numbers)"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET https://api.pinference.ai/api/v1/models; dashboard catalog shows serving type (hosted vs gateway), pricing, per-model limits",
+   "read_write_doc": "R",
+   "class_doc": "Policy (catalog), RateLimits (per model, catalog)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (list); limits CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/inference/overview.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.inference.wire_usage",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.inference",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer, Inference; X-Prime-Team-ID bills team"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "per model"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per key",
+   "mechanism_doc": "OpenAI-compatible chat completions response (POST https://api.pinference.ai/api/v1/chat/completions); usage fields not described in docs",
+   "read_write_doc": "R (proxy/node only)",
+   "class_doc": "Usage",
+   "grain_doc": "PerCall",
+   "build": "catalog_only",
+   "build_doc": "node/proxy only",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/api-reference/inference-chat-completions.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.secrets.api",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.secrets",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "offset/limit"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "owner",
+   "mechanism_doc": "GET/POST /api/v1/secrets/, GET/PATCH/DELETE /api/v1/secrets/{id}?teamId",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials (environment secrets, not API keys)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.ssh_keys.api",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.ssh_keys",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "offset/limit"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "self",
+   "mechanism_doc": "GET/POST /api/v1/ssh_keys/, DELETE/PATCH /api/v1/ssh_keys/{key_id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials (SSH public keys for pods)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.teams.members",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.teams",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "API key as Authorization: Bearer (OpenAPI HTTPBearer); Teams Read, caller must be a team member"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "offset (default 0) + limit (default 100) with total_count and the echoed offset; vendormock offset family"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "team"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "GET /api/v1/teams/{team_id}/members?offset&limit; fields userId, userName, userEmail, role, joinedAt",
+   "read_write_doc": "R",
+   "class_doc": "Identity, Roles",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.primeintellect.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/api-reference/teams/list-team-members.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16C, T-710): driver internal/vendorapi/prime TeamMembers (GET /api/v1/teams/{team_id}/members, team from the connection parameter team_id validated before it becomes a path segment, offset + limit=100), conformance against the vendormock mock (offset paging family, loop rule vendorapi.OffsetLoop, an echoed offset that differs from the asked one is schema drift), landed as User/prime.team_member/v1 resources keyed prime.user = userId: email when present, role (TeamRoleEnum ADMIN / MEMBER), join time; userName as the display name. Authoritative for the team. Synthetic only, no vendor response observed. assumption_tested: synthesized from the schema (no example); the 401 body is Inferred. Secret class reviewed: identity and role fields only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16C: driver internal/vendorapi/prime TeamMembers, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Prime Intellect OpenAPI list_team_members security HTTPBearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.traces.api",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.traces",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer, Prime Traces permission; X-Prime-Team-ID for team traces"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "closed beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "undocumented",
+   "per_user_doc": "created_by filter",
+   "mechanism_doc": "host https://prime-traces.pintel.dev: GET /api/v1/traces (filters model_id, created_by, created_after/before, run_id...), GET /traces/{id}, /traces/{id}/nodes, /traces/{id}/calls, GET /episodes, /episodes/{id}, /episodes/{id}/traces, GET /runs, /runs/{id}, /runs/{id}/steps, /runs/{id}/search, POST /traces (upload, Idempotency-Key), DELETE /traces, DELETE /traces/{id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Content, Usage (training / eval / inference traces; NOT documented for prime-agent sessions)",
+   "grain_doc": "Event (trace), PerRun",
+   "build": "buildable",
+   "build_doc": "Driverable (beta)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://prime-traces.pintel.dev/openapi.json",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.primeintellect.ai/traces/overview.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.ui.api_keys",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "UI only: Settings > API Keys (app.primeintellect.ai/dashboard/tokens): generate, fine-grained permissions (named in docs: Inference, Teams Read, Prime Traces), expiry, Remove",
+   "read_write_doc": "UI",
+   "class_doc": "Credentials, ctl:CredentialLifecycle",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/api-reference/api-keys.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.ui.billing",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "login"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "wallet",
+   "mechanism_doc": "UI only: app.primeintellect.ai/dashboard/billing (Billing History, usage, balances, auto top-up, invoices to billing email); no CSV/export documented",
+   "read_write_doc": "UI",
+   "class_doc": "Usage, Cost, BillingExport, Limits",
+   "grain_doc": "Event / Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "BillingExport",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/inference/overview.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.primeintellect.ai/faq.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.ui.team_admin",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "login, team admin (assumed)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "UI only: create team, invite members, dedicated billing email; team profile page shows team id",
+   "read_write_doc": "UI",
+   "class_doc": "Identity, Groups, ctl:MemberProvision",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "GroupMembership",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/faq.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.user.slug",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.user",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "self",
+   "mechanism_doc": "PATCH /api/v1/user/slug",
+   "read_write_doc": "W",
+   "class_doc": "Identity (own username slug)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable (self only)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.user.teams",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.user",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer, Teams Read"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "offset/limit, total_count"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "self only",
+   "mechanism_doc": "GET /api/v1/user/teams?offset&limit (default 100)",
+   "read_write_doc": "R",
+   "class_doc": "Groups / Projects (team = billing container), Roles (caller role ADMIN or MEMBER)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.primeintellect.ai/api-reference/teams.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "prime.user.whoami",
+   "vendor_group": "pi-prime",
+   "vendor": "prime",
+   "plane": "prime.user",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer API key"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undocumented"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "self only",
+   "mechanism_doc": "GET https://api.primeintellect.ai/api/v1/user/whoami?teamId=",
+   "read_write_doc": "R",
+   "class_doc": "Identity, Credentials (calling key permission map `scope`), Limits (`account_limits`), RateLimits (`key_limits` sandbox/tunnel creation per hour)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RateLimits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RateLimitProject",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://api.primeintellect.ai/openapi.json",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.primeintellect.ai/api-reference/user/get-whoami.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "primeagent.node.settings",
+   "vendor_group": "pi-prime",
+   "vendor": "primeagent",
+   "plane": "primeagent.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "files: global `<agentDir>/settings.json`, project `.prime/agent/settings.json`; only two scopes (no system/managed scope); env opt-outs PI_OFFLINE, DO_NOT_TRACK, PRIME_AGENT_TELEMETRY",
+   "read_write_doc": "file",
+   "class_doc": "Policy (node, user-writable), ModelAccess (`allowedModels`, global scope only), MCP (`mcpServers.*.enabled_tools/disabled_tools`), `telemetry.enabled` (default true, AND across scopes), `agentTraces.enabled` (default OFF, opt-in), `factory.enabled`, `rlmMaxDepth`",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "node only",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/crates/pa-core/src/settings/types.rs",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/PrimeIntellect-ai/prime-agent/blob/main/crates/pa-core/src/settings/manager.rs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "primeagent.node.telemetry_mirror",
+   "vendor_group": "pi-prime",
+   "vendor": "primeagent",
+   "plane": "primeagent.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "local",
+   "per_user_doc": "install",
+   "mechanism_doc": "file `<agentDir>/telemetry.jsonl` (`telemetry.localMirror`, default on); installation id in `<agentDir>/telemetry.json`",
+   "read_write_doc": "file",
+   "class_doc": "Telemetry (local JSONL copy of every analytics batch)",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "node only",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/PrimeIntellect-ai/prime-agent/tree/main/crates/pa-telemetry",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

@@ -3,6 +3,8 @@ import { ChartShell, ErrorState, InlineLoading, Pill, Table, Tooltip } from "@/c
 import { DataTable } from "@/components/DataTable";
 import { StatusTile } from "./StatusTile";
 import { useApi } from "@/lib/useApi";
+import { markRestartPending } from "@/lib/restartPending";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import {
   approvedServerCount,
   approvedServerRows,
@@ -31,7 +33,8 @@ import {
 // (§12.7 coverage honesty) and the node-mcp-relay effective state (§12.8).
 // Everything is read from GET /api/mcp-access/status, the same derivation
 // `observer mcp status` prints; the wording lives in @/lib/mcpAccess (pure,
-// tested). Read-only: wrap / unwrap / connect stay CLI or org-dashboard acts.
+// tested). The Actions row runs the `observer mcp` verbs (wrap, unwrap, relay
+// on/off, doctor) as dashboard jobs; Connect opens the org dashboard.
 
 export function MCPAccessSection() {
   const api = useApi<MCPAccessResponse>("/api/mcp-access/status", { verify: 1 });
@@ -75,10 +78,103 @@ export function MCPAccessSection() {
         <div className="space-y-2">
           <div className="text-[11.5px] text-fg-2">{state.message}</div>
           <Notes notes={state.notes} />
+          <RelayActions
+            enabled={false}
+            wrapped={api.data?.available !== false && (api.data?.status.launch_specs ?? 0) > 0}
+            onChanged={() => api.reload()}
+          />
         </div>
       )}
-      {state.kind === "on" && <MCPAccessDetail view={state.view} notes={state.notes} />}
+      {state.kind === "on" && (
+        <>
+          <MCPAccessDetail view={state.view} notes={state.notes} />
+          <RelayActions enabled wrapped={state.view.status.launch_specs > 0} onChanged={() => api.reload()} />
+        </>
+      )}
     </ChartShell>
+  );
+}
+
+// RelayActions: the `observer mcp` / `mcp-relay` verbs as dashboard jobs
+// (backlog item 6). Each button runs the CLI command itself, so the journal,
+// the verbatim backups and the restore rules are the CLI's own. Every write
+// asks for a second click that says which files it touches; the relay's
+// listener binds or unbinds only when the daemon restarts, which the restart
+// banner then offers.
+function RelayActions({
+  enabled,
+  wrapped,
+  onChanged,
+}: {
+  enabled: boolean;
+  wrapped: boolean;
+  onChanged: () => void;
+}) {
+  const relayFlipped = () => {
+    markRestartPending("mcp_relay");
+    onChanged();
+  };
+  return (
+    <div className="mt-4 border-t border-line-1 pt-3">
+      <h3 className="mb-2 text-[12px] font-semibold text-fg-0">Actions</h3>
+      <div className="flex flex-wrap items-start gap-3">
+        {!enabled && (
+          <CommandJobButton
+            job="mcp-relay-enable"
+            variant="primary"
+            confirmLabel="Turn on and wrap?"
+            armedNote="Sets [mcp_relay].enabled = true and rewrites every installed AI client's MCP config through the relay. Each original is backed up first."
+            runningLabel="Turning on…"
+            doneText="Relay on. Restart the daemon to bind it."
+            onDone={relayFlipped}
+          >
+            Turn on the relay
+          </CommandJobButton>
+        )}
+        {enabled && (
+          <CommandJobButton
+            job="mcp-wrap"
+            confirmLabel="Wrap client configs?"
+            armedNote="Rewrites every installed AI client's MCP entries through the relay. Each original is backed up first; Restore puts it back."
+            runningLabel="Wrapping…"
+            doneText="Client configs wrapped."
+            onDone={onChanged}
+          >
+            Wrap client configs
+          </CommandJobButton>
+        )}
+        {(wrapped || enabled) && (
+          <CommandJobButton
+            job="mcp-unwrap"
+            confirmLabel="Restore originals?"
+            armedNote="Puts every wrapped client MCP config back from its backup. A file you edited since keeps your edits."
+            runningLabel="Restoring…"
+            doneText="Original configs restored."
+            onDone={onChanged}
+          >
+            Restore original configs
+          </CommandJobButton>
+        )}
+        {enabled && (
+          <CommandJobButton
+            job="mcp-relay-disable"
+            variant="danger"
+            confirmLabel="Turn off and restore?"
+            armedNote="Sets [mcp_relay].enabled = false and restores every client MCP config. MCP calls on this machine stop being mediated."
+            runningLabel="Turning off…"
+            doneText="Relay off. Restart the daemon to unbind it."
+            onDone={relayFlipped}
+          >
+            Turn off the relay
+          </CommandJobButton>
+        )}
+        {enabled && (
+          <CommandJobButton job="mcp-doctor" requireConfirm={false} runningLabel="Checking…" doneText="Doctor finished.">
+            Run doctor
+          </CommandJobButton>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -209,7 +305,7 @@ function MCPAccessDetail({ view, notes }: { view: MCPAccessView; notes: string[]
         <dd className="text-fg-1">
           {(s.projected_clients ?? []).length > 0
             ? `${(s.projected_clients ?? []).join(", ")} (${s.launch_specs} journaled entr${s.launch_specs === 1 ? "y" : "ies"})`
-            : "none verified on disk - run observer mcp wrap"}
+            : "none verified on disk - use the 'Wrap client configs' button below"}
         </dd>
         <dt className="text-fg-3">Grant</dt>
         <dd className="text-fg-1">

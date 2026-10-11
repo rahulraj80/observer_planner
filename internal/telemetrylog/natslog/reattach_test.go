@@ -39,9 +39,7 @@ func TestStaleDurableFetchIsReattachRequiredAndSubscribeByNameRecovers(t *testin
 
 		// The broker drops and re-creates the same-name durable (what a restart
 		// racing JetStream's store recovery does to a consumer).
-		if err := log.js.DeleteConsumer(t.Context(), log.opts.Stream, spec.Name); err != nil {
-			t.Fatal(err)
-		}
+		deleteConsumerSettled(t, log, spec.Name)
 		fresh, err := log.Subscribe(t.Context(), spec)
 		if err != nil {
 			t.Fatal(err)
@@ -83,9 +81,7 @@ func TestStaleDurableFetchIsReattachRequiredAndSubscribeByNameRecovers(t *testin
 		// JetStream 404 (err_code 10014) rather than returning a drifted
 		// identity. That must still be the sentinel — a deleted durable is
 		// exactly as unrecoverable on this handle as a re-created one.
-		if err := log.js.DeleteConsumer(t.Context(), log.opts.Stream, spec.Name); err != nil {
-			t.Fatal(err)
-		}
+		deleteConsumerSettled(t, log, spec.Name)
 		if _, err := stale.Fetch(t.Context(), 8, 0); !errors.Is(err, telemetrylog.ErrReattachRequired) {
 			t.Fatalf("stale handle err=%v, want telemetrylog.ErrReattachRequired", err)
 		}
@@ -381,7 +377,7 @@ func TestSubscribeProbesTheDurableBeforeCreating(t *testing.T) {
 	t.Run("broker restart with a preserved store attaches the recovered durable", func(t *testing.T) {
 		// The incident's own trigger, end to end: the broker restarts, its
 		// JetStream store survives, and the process re-subscribes.
-		dir := t.TempDir()
+		dir := testStoreDir(t)
 		opts := EmbeddedTestOptions(Options{AckWait: time.Minute, ConnectTimeout: 5 * time.Second})
 		before, err := Embedded(t.Context(), dir, opts)
 		if err != nil {

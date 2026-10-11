@@ -45,7 +45,7 @@ const kimiBaseConfig = "default_model = \"openai/gpt-4o\"\n\n" +
 	"[thinking]\n" +
 	"enabled = true\n"
 
-func TestRegisterKimiCodeAddsBaseURLAndBacksUp(t *testing.T) {
+func TestRegisterKimiCodeAddsBaseURLWithoutBackup(t *testing.T) {
 	home := t.TempDir()
 	path := writeKimiConfig(t, home, kimiBaseConfig)
 	r := newKimiRegistrar(t, home)
@@ -61,10 +61,9 @@ func TestRegisterKimiCodeAddsBaseURLAndBacksUp(t *testing.T) {
 		t.Errorf("BaseURL = %q", res.BaseURL)
 	}
 
-	// .bak preserves the original (no base_url).
-	bak, err := os.ReadFile(path + ".bak")
-	if err != nil || strings.Contains(string(bak), "base_url") {
-		t.Errorf("backup missing or already mutated: %v", err)
+	// T-657: no backup copy of a credential-bearing file.
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("the writer must leave no .bak copy of the file")
 	}
 
 	var doc map[string]any
@@ -105,11 +104,9 @@ func TestRegisterKimiCodeIdempotent(t *testing.T) {
 	if !res.AlreadySet || res.Added {
 		t.Errorf("re-run should be AlreadySet no-op, got Added=%v AlreadySet=%v", res.Added, res.AlreadySet)
 	}
-	// The idempotent no-op must not overwrite the .bak from the first write
-	// with a now-mutated copy... it simply returns before writing.
-	bak, _ := os.ReadFile(path + ".bak")
-	if strings.Contains(string(bak), "127.0.0.1") {
-		t.Errorf(".bak should still hold the pre-route config")
+	// T-657: no backup copy of a credential-bearing file.
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("the writer must leave no .bak copy of the file")
 	}
 }
 

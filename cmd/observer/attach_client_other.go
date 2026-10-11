@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !unix && !sbo_omit_terminals
 
 package main
 
@@ -35,7 +35,7 @@ func runAttachSession(_ context.Context, in attachLaunch) error {
 	capab, ok := integration.For(in.tool)
 	if !ok || capab.Attach == nil {
 		msg := fmt.Sprintf(
-			"observer: --attach is not available for %q — no grounded attach capability. Launch it without --attach.",
+			"observer: --attach is not available for %q - no grounded attach capability. Launch it without --attach.",
 			in.tool,
 		)
 		if in.stderr != nil {
@@ -54,7 +54,7 @@ func runAttachSession(_ context.Context, in attachLaunch) error {
 	msg := fmt.Sprintf(
 		"observer %s --attach: the interactive attach client is not available on this OS yet. "+
 			"The daemon does serve the attach channel here (%s), but the client needs a native console "+
-			"implementation. Launch without --attach — dashboard launch and Jump-in work — or run the launcher inside WSL.",
+			"implementation. Launch without --attach - dashboard launch and Jump-in work - or run the launcher inside WSL.",
 		label, attachsock.DefaultTransport().Describe(),
 	)
 	if in.stderr != nil {

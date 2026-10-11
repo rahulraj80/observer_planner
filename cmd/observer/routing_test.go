@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing
+
 package main
 
 import (

@@ -76,7 +76,7 @@ func TestGateFailsOpenWithoutSidecar(t *testing.T) {
 	if err := refuseIfToolDisallowedCfg(cfg, "codex", &bytes.Buffer{}); err != nil {
 		t.Errorf("absent sidecar must fail open, got %v", err)
 	}
-	if err := refuseIfToolDisallowed("", "codex", &bytes.Buffer{}); err != nil {
+	if err := refuseIfToolDisallowed("", "", "codex", &bytes.Buffer{}); err != nil {
 		t.Errorf("empty path must fail open, got %v", err)
 	}
 }

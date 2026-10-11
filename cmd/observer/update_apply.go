@@ -1,3 +1,5 @@
+//go:build !sbo_omit_org_update
+
 package main
 
 import (
@@ -65,6 +67,10 @@ type applyDeps struct {
 	VerifyVendorSignature func(archivePath string, a update.Artifact) error
 	// Probe runs the staged binary with --version and returns what it said.
 	Probe func(ctx context.Context, binPath string) (string, error)
+	// ProbeComponents asks the staged binary for its own components digest
+	// (modular packaging plan 5.6). Consulted only when the artifact names
+	// one (a v2 artifact); nil skips it.
+	ProbeComponents func(ctx context.Context, binPath string) (string, error)
 	// Supervise is the fork-exec-and-watch handshake (§3.7 step 7).
 	Supervise func(ctx context.Context, exePath, stateDir string, timeout time.Duration) (handshakeResult, error)
 	// FS is the swap seam.
@@ -140,6 +146,24 @@ type applyOptions struct {
 	// explicitly rather than resolved here because a snapshot restored over
 	// the wrong file is unrecoverable.
 	DBPath string
+	// CeilingInvalid is set when the OS-pinned local component ceiling exists
+	// but failed a check (managedconfig.Result.UpdatesAllowed false): every
+	// apply is refused before a byte is downloaded (plan 6.2.2). It is
+	// re-checked HERE, not only when the manifest was verified, because an
+	// apply can run from a manifest cached before the ceiling broke.
+	CeilingInvalid bool
+	// DistroTransition and DistroEpoch say that this apply moves the node to
+	// the artifact's distro under the manifest's epoch (verify rule 12); the
+	// success transition records them (plan 5.6.1: the epoch is persisted
+	// with the successful handshake, and a rolled-back apply keeps the old
+	// distro and epoch).
+	DistroTransition bool
+	DistroEpoch      int64
+	// DistroRefused names why a distro transition may not land (verify rule
+	// 12 re-checked on the apply side, for a manifest cached before the
+	// policy, the ceiling or the recorded epoch changed); empty when the
+	// apply is not refused for its distro.
+	DistroRefused update.Reason
 }
 
 // applyOutcome is what the caller reports and the ledger records.
@@ -323,6 +347,28 @@ func (r *applyRun) gate(ctx context.Context) (applyOutcome, bool, error) {
 		}
 	}
 
+	// The local ceiling gate (plan 6.2.2, verify rule 10 on the apply side):
+	// while the ceiling's source fails a check no update may land, whatever
+	// manifest is cached.
+	if r.opts.CeilingInvalid {
+		out := applyOutcome{
+			State: update.StateBlocked, Reason: update.ReasonCeilingInvalid, Deferred: true,
+			Detail: "the local component ceiling failed a check, so updates are refused until the machine owner fixes it (observer doctor names the check)",
+			Steps:  r.plan.Steps,
+		}
+		return out, true, r.record(ctx, out)
+	}
+
+	if r.opts.DistroRefused != "" {
+		out := applyOutcome{
+			State: update.StateBlocked, Reason: r.opts.DistroRefused, Deferred: true,
+			Detail: fmt.Sprintf("manifest %d would move this node to the %s distro, which its component policy, local ceiling or recorded distro epoch no longer allows",
+				r.opts.Manifest.ManifestVersion, update.NormalizeDistro(r.opts.Artifact.Distro)),
+			Steps: r.plan.Steps,
+		}
+		return out, true, r.record(ctx, out)
+	}
+
 	// The vendor-signature gate runs BEFORE the download, deliberately: an
 	// artifact with no vendor signature must be refused "without downloading
 	// a second byte" (§4 W3). Until the W6 release pipeline produces those
@@ -465,6 +511,23 @@ func (r *applyRun) probeStagedBinary(ctx context.Context) (applyOutcome, bool, e
 		out, oerr := r.fail(ctx, update.ErrorProbe,
 			fmt.Sprintf("the staged binary reports version %q, not the target %q", strings.TrimSpace(got), r.plan.TargetVersion))
 		return out, true, oerr
+	}
+	// A v2 artifact names the components digest the vendor index binds to
+	// it; the staged binary must report exactly that compiled set, or it is
+	// not the distro it claims to be (plan 5.6). Checked before the swap,
+	// while nothing live has been touched.
+	if want := strings.TrimSpace(r.opts.Artifact.ComponentsDigest); want != "" && r.deps.ProbeComponents != nil {
+		digest, derr := r.deps.ProbeComponents(ctx, r.plan.StagedBinaryPath)
+		if derr != nil || !strings.EqualFold(digest, want) {
+			_ = os.Remove(r.plan.StagedBinaryPath)
+			detail := fmt.Sprintf("the staged binary reports components digest %q, not the %s distro's %q", digest,
+				update.NormalizeDistro(r.opts.Artifact.Distro), want)
+			if derr != nil {
+				detail = fmt.Sprintf("the staged binary could not report its components digest: %v", derr)
+			}
+			out, oerr := r.fail(ctx, update.ErrorProbe, detail)
+			return out, true, oerr
+		}
 	}
 	return applyOutcome{}, false, nil
 }
@@ -851,15 +914,6 @@ func headroomBlock(deps applyDeps, opts applyOptions, plan update.ApplyPlan) (ap
 	}, true
 }
 
-// fileExists is the one stat this file performs on its own behalf.
-func fileExists(path string) bool {
-	if strings.TrimSpace(path) == "" {
-		return false
-	}
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 // markState moves the node forward through the state machine.
 func markState(ctx context.Context, deps applyDeps, next update.State, opts applyOptions, plan update.ApplyPlan, detail string) error {
 	return moveUpdateState(ctx, deps.Store, next, func(row *store.UpdateStateRow) {
@@ -917,7 +971,28 @@ func markApplied(ctx context.Context, deps applyDeps, opts applyOptions, plan up
 	row.ApplyingStartedAt = ""
 	row.ErrorClass = ""
 	row.Reason = ""
+	recordAppliedDistro(&row, opts)
 	return deps.Store.SaveUpdateState(ctx, row)
+}
+
+// recordAppliedDistro writes the migration-161 distro facts of a successful
+// apply: the installed artifact's distro and components digest, and, for a
+// distro transition, the manifest's epoch on its channel. It runs only on the
+// success transition, so a rolled-back apply keeps the old distro and epoch
+// (plan 5.6.1).
+func recordAppliedDistro(row *store.UpdateStateRow, opts applyOptions) {
+	row.CurrentDistro = update.NormalizeDistro(opts.Artifact.Distro)
+	row.ComponentsDigest = strings.TrimSpace(opts.Artifact.ComponentsDigest)
+	if !opts.DistroTransition {
+		return
+	}
+	if row.DistroEpochs == nil {
+		row.DistroEpochs = map[string]int64{}
+	}
+	ch := string(opts.Manifest.Channel)
+	if opts.DistroEpoch > row.DistroEpochs[ch] {
+		row.DistroEpochs[ch] = opts.DistroEpoch
+	}
 }
 
 // failOutcome records a failure and returns it.

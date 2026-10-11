@@ -49,7 +49,7 @@ func TestAcquireWriterRemoteSingleAuthorizationCallSite(t *testing.T) {
 func assertSingle(t *testing.T, what string, files []string, want string) {
 	t.Helper()
 	if len(files) != 1 {
-		t.Fatalf("%s: expected exactly ONE cmd file, found %v — a fabricated-grant bypass or a second authorizer landed", what, files)
+		t.Fatalf("%s: expected exactly ONE cmd file, found %v - a fabricated-grant bypass or a second authorizer landed", what, files)
 	}
 	if filepath.Base(files[0]) != want {
 		t.Fatalf("%s: expected it in %s, found %s", what, want, files[0])

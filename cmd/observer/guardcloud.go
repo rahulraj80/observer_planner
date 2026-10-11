@@ -370,32 +370,15 @@ func newGuardMCPReputationCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			if !cfg.Guard.Cloud.Enabled || !cfg.Guard.Cloud.Reputation.Enabled {
-				return fmt.Errorf("reputation lookups are a cloud feature and are OFF by default (D1): set [guard.cloud] enabled = true and [guard.cloud.reputation] enabled = true to opt in — this command makes ONE outbound HTTPS request to registry.npmjs.org")
-			}
-			req, err := notify.BuildNPMLookup(args[0])
-			if err != nil {
-				return err
-			}
-			done := make(chan notify.Result, 1)
-			e := notify.NewEgress(notify.EgressOptions{
-				Allow:        []string{notify.NPMRegistryBase},
-				MaxBodyBytes: cfg.Guard.Cloud.PayloadMaxBytes,
-				OnResult:     func(r notify.Result) { done <- r },
-				Doer:         reputationDoer,
+			// The ONE lookup (notify.LookupNPMReputation): the D1 opt-in
+			// gate, one request through the egress worker, the parse. The
+			// dashboard's Security > MCP control calls the same function.
+			info, err := notify.LookupNPMReputation(args[0], notify.ReputationLookupOptions{
+				CloudEnabled:      cfg.Guard.Cloud.Enabled,
+				ReputationEnabled: cfg.Guard.Cloud.Reputation.Enabled,
+				MaxBodyBytes:      cfg.Guard.Cloud.PayloadMaxBytes,
+				Doer:              reputationDoer,
 			})
-			e.Submit(req)
-			e.Close() // drains: the result lands before Close returns
-			res := <-done
-			switch {
-			case res.Refused || res.Err != "":
-				return fmt.Errorf("lookup failed: %s", res.Err)
-			case res.Status == 404:
-				return fmt.Errorf("package %q not found on the npm registry", args[0])
-			case res.Status != 200:
-				return fmt.Errorf("registry returned HTTP %d", res.Status)
-			}
-			info, err := notify.ParseNPMMetadata(res.Body, time.Now().UTC())
 			if err != nil {
 				return err
 			}
@@ -403,8 +386,8 @@ func newGuardMCPReputationCmd() *cobra.Command {
 			for _, line := range notify.FormatNPMInfo(info) {
 				fmt.Fprintln(out, line)
 			}
-			if info.AgeDays < 14 {
-				fmt.Fprintln(out, "warning:     package is less than 14 days old — review before trusting an MCP server from it")
+			if info.Young() {
+				fmt.Fprintln(out, "warning:     "+notify.YoungPackageWarning)
 			}
 			return nil
 		},

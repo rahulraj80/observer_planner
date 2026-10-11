@@ -1,0 +1,1118 @@
+{
+ "group": "aider",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/aider-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "aider.byok.litellm_proxy",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.byok",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "header_key",
+    "doc": "proxy virtual keys"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "proxy API"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "proxy"
+   },
+   "tier": {
+    "doc": "customer"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "customer",
+   "per_user_doc": "per virtual key",
+   "mechanism_doc": "customer points `--openai-api-base` at a LiteLLM proxy and enables its OTel / spend tracking / virtual keys; third party, not Aider",
+   "read_write_doc": "R/W",
+   "class_doc": "Telemetry, Usage, Cost, Limits (customer-run gateway)",
+   "grain_doc": "PerCall",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly for Aider (it is a LiteLLM surface; Observer's own proxy plays the same role)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.litellm.ai/docs/observability/opentelemetry_integration",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://aider.chat/docs/llms/openai-compat.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.byok.provider",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.byok",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "header_key",
+    "doc": "provider admin key"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "provider"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "provider"
+   },
+   "tier": {
+    "doc": "provider"
+   },
+   "freshness_doc": "provider",
+   "lookback_doc": "provider",
+   "per_user_doc": "provider",
+   "mechanism_doc": "the BYOK provider's own admin plane (OpenAI, Anthropic, DeepSeek balance, OpenRouter, Azure, Vertex)",
+   "read_write_doc": "R/W",
+   "class_doc": "Usage, Cost, Limits, Audit, Credentials (of the provider)",
+   "grain_doc": "varies",
+   "build": "catalog_only",
+   "build_doc": "NA here: covered by that provider's own v5 file",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/llms.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.analytics_log",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "unbounded (local)",
+   "per_user_doc": "per install",
+   "mechanism_doc": "`--analytics-log <file>.jsonl` (works with `--no-analytics` for local-only); one JSON object per line: `event`,`properties`,`user_id`,`time` (unix int)",
+   "read_write_doc": "R",
+   "class_doc": "Telemetry, Usage, Adoption",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "Driverable at node (file contract from source; sample `aider/website/assets/sample-analytics.jsonl`)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/more/analytics.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/Aider-AI/aider/main/aider/analytics.py",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.analytics_optin",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "on launch",
+   "lookback_doc": "until deleted",
+   "per_user_doc": "per install",
+   "mechanism_doc": "opt-in: if neither `--analytics` nor `--no-analytics`, users whose UUID falls in the first 10% are prompted (default answer Yes); `--analytics-disable` permanent; `AIDER_ANALYTICS` env; state in `~/.aider/analytics.json` keys `uuid`,`permanently_disable`,`asked_opt_in`",
+   "read_write_doc": "R/W (file, flags)",
+   "class_doc": "Policy (telemetry consent)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable as node file/flag",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/more/analytics.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/Aider-AI/aider/main/aider/analytics.py",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "same_as_previous_row",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.analytics_posthog",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "PostHog project key (customer's own when redirected)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "PostHog API"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "PostHog limits"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "PostHog project retention (customer-owned when redirected)",
+   "per_user_doc": "per anonymous UUID4 (not a person)",
+   "mechanism_doc": "PostHog capture; default host `https://us.i.posthog.com` and vendor project key in `aider/analytics.py`; redirectable with `--analytics-posthog-host` and `--analytics-posthog-project-api-key` (v0.85.0); super properties `python_version`,`os_platform`,`os_release`,`machine`,`aider_version`; exception autocapture ON; unknown model names redacted to `provider/REDACTED`",
+   "read_write_doc": "R (customer reads its own PostHog)",
+   "class_doc": "Telemetry, Usage (tokens per model), Adoption (feature/command use), errors",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly (mechanism documented; event schema only in source and a sample file)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/more/analytics.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://raw.githubusercontent.com/Aider-AI/aider/main/aider/analytics.py",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.chat_history",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "unbounded",
+   "per_user_doc": "per user / repo",
+   "mechanism_doc": "`.aider.chat.history.md` (`--chat-history-file`), `.aider.input.history`, `--restore-chat-history`",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "Driverable at node (current Observer capture source)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/config/aider_conf.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.conf_yml",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "on launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user / per repo",
+   "mechanism_doc": "`.aider.conf.yml` home -> git root -> cwd, last loaded wins; `--config` single file; covers analytics, model, edit format, auto-commits, attribution, history files, env-file, check-update, set-env, model settings files",
+   "read_write_doc": "R/W (file)",
+   "class_doc": "Policy, Credentials (OpenAI/Anthropic keys only in YAML)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable as node file projection (no vendor contract, no managed layer)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/config/aider_conf.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.cost_report",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "none"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "as the history file",
+   "per_user_doc": "per user",
+   "mechanism_doc": "in-session token and cost report (`/tokens`, per-message cost lines), via `litellm.completion_cost`; lands in `.aider.chat.history.md`",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "PerSession / PerCall (printed)",
+   "build": "buildable",
+   "build_doc": "Driverable at node (already parsed by the Observer aider adapter; GROSS netted)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/HISTORY.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.env",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file / env"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "on launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`.env` (default git root; `--env-file`), all `AIDER_*` vars, `--set-env`, `--api-key provider=<key>`",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials, Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable as node file",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/config/aider_conf.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://aider.chat/HISTORY.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.git_commits",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local git"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "git history",
+   "per_user_doc": "per user / repo",
+   "mechanism_doc": "git auto-commits (`--auto-commits`, `--dirty-commits`, `--commit-prompt`, `--git-commit-verify`); attribution `--attribute-author`, `--attribute-committer`, `--attribute-commit-message-author/-committer`, `--attribute-co-authored-by` (default True since v0.85.0)",
+   "read_write_doc": "R",
+   "class_doc": "Commits, LOC (via diff)",
+   "grain_doc": "PerCommit",
+   "build": "buildable",
+   "build_doc": "Driverable at node (Observer commit scanner + Co-authored-by trailer as an AI-attribution key)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Commits",
+     "grain": "per_commit",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "per_commit",
+     "unit": "lines",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/config/aider_conf.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://aider.chat/HISTORY.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.llm_history",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "unbounded",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`--llm-history-file` raw LLM message log (v0.39.0)",
+   "read_write_doc": "R",
+   "class_doc": "Content",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "Driverable at node (opt-in flag)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/HISTORY.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.node.model_settings",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "on launch",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`.aider.model.settings.yml`, `.aider.model.metadata.json` (litellm-shaped cost metadata; OpenRouter pricing auto-fetched since v0.83.0)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (model params), Cost (pricing metadata)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "Driverable as node file",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/config/aider_conf.html",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://aider.chat/HISTORY.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "aider.web.privacy",
+   "vendor_group": "aider",
+   "vendor": "aider",
+   "plane": "aider.web",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "static",
+   "lookback_doc": "not stated",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "aider.chat privacy policy (2025-04-12): analytics tied to a random id, no retention period stated, US hosting",
+   "read_write_doc": "R (doc)",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot (prose)",
+   "build": "catalog_only",
+   "build_doc": "CatalogOnly",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://aider.chat/docs/legal/privacy.html",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: none"
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

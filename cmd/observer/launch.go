@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,8 +63,14 @@ func resolveProxyURL(cfgPort int, override string) string {
 // disabled, or listening on a different port than this launcher resolved — so
 // that is what the notice names.
 func proxyDownAdvice(daemonChild bool) string {
+	// A build without capture.proxy never serves the port, so neither
+	// `observer start` nor the daemon's [proxy] block would help: name the
+	// build instead (lane MP-L1L, T-715, D-514).
+	if reason := proxyNotInBuildReason(); reason != "" {
+		return reason
+	}
 	if daemonChild {
-		return "this terminal was launched BY the daemon, so the daemon IS running — check `[proxy] enabled` and `[proxy] port` in the config it was started with"
+		return "this terminal was launched BY the daemon, so the daemon IS running - check `[proxy] enabled` and `[proxy] port` in the config it was started with"
 	}
 	return "start it with `observer start`"
 }
@@ -74,7 +81,7 @@ func proxyDownAdvice(daemonChild bool) string {
 // is injected and the whole message is table-testable.
 func proxyUnreachableNotice(tool, proxyURL string, daemonChild bool) string {
 	return fmt.Sprintf(
-		"observer %s: warning — proxy not reachable at %s — turns are NOT captured for this run (%s)",
+		"observer %s: warning - proxy not reachable at %s - turns are NOT captured for this run (%s)",
 		tool, proxyURL, proxyDownAdvice(daemonChild))
 }
 
@@ -181,7 +188,7 @@ func resolveToolBin(tool, override, pathFlag, configPath string, stderr io.Write
 		if tc, ok := cfg.Launch.Tools[tool]; ok && tc.Path != "" {
 			if fi, statErr := os.Stat(tc.Path); statErr != nil || fi.IsDir() {
 				return "", fmt.Errorf(
-					"%s binary not found at [launch.tools.%s].path = %q — fix the path or remove the entry",
+					"%s binary not found at [launch.tools.%s].path = %q - fix the path or remove the entry",
 					tool, tool, tc.Path,
 				)
 			}
@@ -191,15 +198,28 @@ func resolveToolBin(tool, override, pathFlag, configPath string, stderr io.Write
 
 	// Step 3: registry-driven resolution ladder over the Binary row.
 	if row, ok := integration.For(tool); ok && row.Binary != nil {
-		r := toolresolve.Resolve(*row.Binary, resolveEnv())
+		env := resolveEnv()
+		r := toolresolve.Resolve(*row.Binary, env)
 		switch r.Verdict {
-		case toolresolve.VerdictOK:
-			return r.Bin, nil
-		case toolresolve.VerdictOKOffPath, toolresolve.VerdictShadowed:
-			fmt.Fprint(stderr, toolresolve.FormatVerdict(tool, pathFlag, r))
+		case toolresolve.VerdictOK, toolresolve.VerdictOKOffPath, toolresolve.VerdictShadowed:
+			if r.Verdict != toolresolve.VerdictOK {
+				fmt.Fprint(stderr, toolresolve.FormatVerdict(tool, pathFlag, r))
+			}
+			// Minimum host runtime (runtime_preflight.go): a node shim whose
+			// node is older than the vendor's engines.node floor would crash
+			// at startup, so refuse up front with the plain fix. Visible, so a
+			// dashboard terminal shows it too.
+			if c, ok := launchRuntimeCheck(row.Binary, r, env, runtime.GOOS, launchDirHere()); ok && c.Blocking() {
+				return "", newVisibleLauncherError(errors.New(c.Remedy), c.Remedy)
+			}
 			return r.Bin, nil
 		default: // foreign_only / not_found
-			return "", errors.New(strings.TrimRight(toolresolve.FormatVerdict(tool, pathFlag, r), "\n"))
+			// Visible: most launchers silence Cobra, so a plain error here
+			// exited 1 with no output in a dashboard terminal. The message is
+			// our own FormatVerdict text (the same text the off-path case
+			// already prints), not an arbitrary internal error.
+			msg := strings.TrimRight(toolresolve.FormatVerdict(tool, pathFlag, r), "\n")
+			return "", newVisibleLauncherError(errors.New(msg), msg)
 		}
 	}
 
@@ -309,7 +329,34 @@ type envLauncherSpec struct {
 	// gemini launcher labels "gemini" but stores "gemini-cli") — the sweep's
 	// matcher requires exact equality with sessions.tool.
 	seedTool string
-	stderr   io.Writer
+	// routeFile, when set, re-reads the base URL of the provider entry the
+	// launcher selected in the tool's own config file (a config-file route,
+	// whose capability has no base-URL env var). It is the launch evidence
+	// the managed budget check uses for such a route (T-208). ok=false: the
+	// file or entry could not be read.
+	routeFile func() (baseURL string, ok bool)
+	// routeArgs are the operator's own forwarded arguments, without the
+	// provider selection the launcher prepended (which would otherwise read
+	// as an operator-supplied selector). Nil means args.
+	routeArgs []string
+	// unrouted marks a launch the caller has already told the operator is NOT
+	// going through the proxy (cline-cli keeping the operator's own
+	// non-proxied provider). It suppresses the routing/unreachable note,
+	// which would otherwise claim a route that does not exist. Zero value =
+	// unchanged behaviour.
+	unrouted bool
+	// routeCaveat, when set, is printed right after the routing line of a
+	// routed launch (gatedRoute.caveat): a lane the route gate cannot see that
+	// still bypasses the proxy, so "routing via" never over-claims.
+	routeCaveat string
+	stderr      io.Writer
+}
+
+// printRouteCaveat prints spec.routeCaveat (one line) when set.
+func printRouteCaveat(spec envLauncherSpec) {
+	if c := strings.TrimSpace(spec.routeCaveat); c != "" {
+		fmt.Fprintln(spec.stderr, c)
+	}
 }
 
 // runEnvLauncher injects the spec's base-URL env vars (user values win),
@@ -328,6 +375,20 @@ func runEnvLauncher(spec envLauncherSpec) error {
 	if err := refuseIfToolDisallowedDB(spec.dbPath, gateTool, spec.stderr); err != nil {
 		return err
 	}
+	// A build without capture.proxy (lane MP-L1L, T-715, D-514): with nothing
+	// serving the proxy port, launch unrouted with the one reason rather than
+	// inject a base URL that points the tool at a dead port. A config-file
+	// route drops the provider selection the launcher prepended, so the tool
+	// runs on the operator's own default provider.
+	if !spec.unrouted && proxyNotInBuild() && !proxyReachable(spec.proxyURL, 250*time.Millisecond) {
+		if notice, ok := proxyNotInBuildNotice(spec.tool); ok {
+			fmt.Fprintln(spec.stderr, notice)
+		}
+		spec.env, spec.unrouted, spec.routeFile = nil, true, nil
+		if spec.routeArgs != nil {
+			spec.args = spec.routeArgs
+		}
+	}
 	// Layer the rename-safe agent runtime-dir env under the base-URL env, so
 	// an SMB/NFS HOME can't break the agent's provider-dependency install
 	// (adapter-agnostic; no-op unless [launch].agent_runtime_dir is set).
@@ -340,6 +401,13 @@ func runEnvLauncher(spec envLauncherSpec) error {
 	// a launcher run from the operator's own shell).
 	childEnv = applyChildPATH(childEnv, daemonLoginPathDirs(), spec.bin)
 	evidence := envBudgetLaunchEvidence(gateTool, spec.proxyURL, spec.env, childEnv, spec.args)
+	if evidence.Route == budgetLaunchRouteUnknown && spec.routeFile != nil && !spec.unrouted {
+		routeArgs := spec.routeArgs
+		if routeArgs == nil {
+			routeArgs = spec.args
+		}
+		evidence = fileRouteBudgetLaunchEvidence(gateTool, spec.proxyURL, spec.routeFile, routeArgs)
+	}
 	evidence.Executable = spec.bin
 	evidence.Arguments = spec.args
 	if err := enforceBudgetControlledLaunch(context.Background(), spec.configPath, gateTool, evidence); err != nil {
@@ -352,16 +420,25 @@ func runEnvLauncher(spec envLauncherSpec) error {
 	}
 
 	switch {
+	case spec.unrouted:
+		// The caller already printed its own "not routed" note.
 	case !proxyReachable(spec.proxyURL, 250*time.Millisecond):
 		fmt.Fprintln(spec.stderr, proxyUnreachableNotice(spec.tool, spec.proxyURL, runningAsDaemonChild()))
 	case len(applied) > 0:
 		fmt.Fprintf(spec.stderr,
 			"observer %s: routing via %s (set %s)\n",
 			spec.tool, spec.proxyURL, strings.Join(applied, ", "))
+		printRouteCaveat(spec)
 	default:
 		fmt.Fprintf(spec.stderr, "observer %s: routing via %s\n", spec.tool, spec.proxyURL)
+		printRouteCaveat(spec)
 	}
 
+	// T-536: mark the run's own telemetry as proxied only when every
+	// base-URL variable is ours (a preset user value may point elsewhere).
+	if !spec.unrouted && len(presets) == 0 {
+		childEnv = withOTelRouteMarker(childEnv, gateTool)
+	}
 	child := exec.Command(spec.bin, spec.args...) //nolint:gosec // user-launched tool, args are theirs
 	child.Env = scrubOOBEnv(childEnv)             // strip the trusted OOB channel env
 	child.Dir = spec.dir                          // "" inherits the caller's cwd (default)

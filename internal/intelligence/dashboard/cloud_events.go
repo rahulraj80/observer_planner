@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -66,7 +67,7 @@ func (s *Server) handleCloudEvents(w http.ResponseWriter, r *http.Request) {
 			ResultID:   res.ResultID,
 			SessionID:  res.SessionID,
 			Title:      res.Title,
-			ReceivedAt: cloudRFC3339(res.ReceivedAt),
+			ReceivedAt: dashapi.CloudRFC3339(res.ReceivedAt),
 		})
 	}
 	writeJSON(w, resp)

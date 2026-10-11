@@ -287,7 +287,7 @@ func (e *Enricher) resume(ctx context.Context) {
 		if res.Pending == 0 && res.Retrying == 0 {
 			return
 		}
-		e.opts.Logger.Info("surfaceenrich: startup resume pass — candidates still outstanding",
+		e.opts.Logger.Info("surfaceenrich: startup resume pass - candidates still outstanding",
 			"pass", i+1, "pending", res.Pending, "retrying", res.Retrying)
 		t := time.NewTimer(e.opts.ResumeDelay)
 		select {
@@ -369,7 +369,7 @@ func (e *Enricher) resolve(ctx context.Context, now time.Time, c Candidate, res 
 			e.mu.Unlock()
 			res.Expired++
 			if exhausted {
-				e.opts.Logger.Warn("surfaceenrich: transient-retry budget exhausted — giving up on this pointer",
+				e.opts.Logger.Warn("surfaceenrich: transient-retry budget exhausted - giving up on this pointer",
 					"path", c.Path, "session", c.Surface.SessionID)
 			}
 			return
@@ -386,7 +386,7 @@ func (e *Enricher) resolve(ctx context.Context, now time.Time, c Candidate, res 
 		if reason == "" {
 			reason = "no tool/session resolved"
 		}
-		e.opts.Logger.Info("surfaceenrich: pointer file not attributable — a new host agent needs a table row",
+		e.opts.Logger.Info("surfaceenrich: pointer file not attributable - a new host agent needs a table row",
 			"path", c.Path, "reason", reason)
 		return
 	}
@@ -444,7 +444,7 @@ func (e *Enricher) noteStoreError(key string, c Candidate, err error, res *TickR
 	en.transientSeen = true
 	en.retriesLeft = e.opts.TransientRetries
 	e.mu.Unlock()
-	e.opts.Logger.Info("surfaceenrich: transient store error — retrying past the stale-pointer rule",
+	e.opts.Logger.Info("surfaceenrich: transient store error - retrying past the stale-pointer rule",
 		"path", c.Path, "session", c.Surface.SessionID,
 		"retries", e.opts.TransientRetries, "err", err)
 }

@@ -1,0 +1,43 @@
+allow_login_shell = true
+approval_policy = "on-request"
+chatgpt_base_url = "https://chatgpt.com/backend-api/"
+check_for_update_on_startup = true
+cli_auth_credentials_store = "file"
+disable_paste_burst = false
+file_opener = "vscode"
+hide_agent_reasoning = false
+mcp_oauth_credentials_store = "auto"
+model = "gpt-6.1-sol"
+model_provider = "openai"
+project_doc_fallback_filenames = []
+project_doc_max_bytes = 32768
+sandbox_mode = "read-only"
+show_raw_agent_reasoning = false
+web_search = "cached"
+windows_wsl_setup_acknowledged = false
+
+[agents]
+
+[history]
+persistence = "save-all"
+
+[sandbox_workspace_write]
+exclude_slash_tmp = false
+exclude_tmpdir_env_var = false
+network_access = false
+writable_roots = []
+
+[shell_environment_policy]
+experimental_use_profile = false
+ignore_default_excludes = false
+inherit = "all"
+[shell_environment_policy.filters]
+"AWS_*" = "exclude"
+"AZURE_*" = "exclude"
+[shell_environment_policy.set]
+
+[skills]
+
+[[skills.config]]
+enabled = false
+path = "/skills/a"

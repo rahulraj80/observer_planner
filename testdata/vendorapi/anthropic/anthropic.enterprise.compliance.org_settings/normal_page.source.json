@@ -1,0 +1,38 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "api_keys": "VerifiedOfficial",
+    "api_keys[]": "VerifiedOfficial",
+    "api_keys[].created_at": "VerifiedOfficial",
+    "api_keys[].created_by_id": "VerifiedOfficial",
+    "api_keys[].expires_at": "VerifiedOfficial",
+    "api_keys[].id": "VerifiedOfficial",
+    "api_keys[].is_active": "VerifiedOfficial",
+    "api_keys[].name": "VerifiedOfficial",
+    "api_keys[].scopes": "VerifiedOfficial",
+    "api_keys[].scopes[]": "VerifiedOfficial",
+    "api_keys[].type": "VerifiedOfficial",
+    "organization_id": "VerifiedOfficial",
+    "settings": "VerifiedOfficial",
+    "settings[]": "VerifiedOfficial",
+    "settings[].name": "VerifiedOfficial",
+    "settings[].type": "VerifiedOfficial",
+    "settings[].value": "VerifiedOfficial",
+    "type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "02feed668d075f3f545264bbc412ae81bba656ad5dc57a0ed4015b94b65d108c",
+  "http": {
+    "method": "GET",
+    "path": "/v1/compliance/organizations/{organization_id}/settings",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/compliance/organizations/{organization_id}/settings.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated Compliance API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "2ece9f3f845885fdfa0f44bbe7ea6c31fe869a313eabf2c3e6f5babf9e17a0ed",
+  "source_url": "https://platform.claude.com/docs/en/api/compliance.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.compliance.org_settings"
+}

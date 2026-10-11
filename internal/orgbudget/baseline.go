@@ -173,6 +173,21 @@ type SubjectCap struct {
 	// decides on an authoritative node, and can only tighten on an individual
 	// one.
 	Hard bool
+
+	// The warn-ladder provenance (Sol A5-04, D-016): the same facts an Origin
+	// carries for a whole-caller window, so the developer is warned at the
+	// org's 75 / 90 / 100 rungs on a per-tool or per-model cap exactly as on
+	// a daily or monthly one. Additive; enforcement reads none of them.
+	//
+	// ScopeUSD / ScopeTokens are the org scope that supplied each unit's
+	// number ("member:<id>", "team:<id>", "org", ...).
+	ScopeUSD, ScopeTokens string
+	// Enforcement is the org row's mode: report | soft | hard.
+	Enforcement string
+	// Thresholds is the org's warn ladder (fractions of the cap), as authored.
+	Thresholds []float64
+	// Timezone is the cap's calendar anchor (IANA; "" = UTC).
+	Timezone string
 }
 
 // baselineState ranks the four outcomes so a body carrying several caps can be
@@ -393,7 +408,12 @@ func subjectCapOf(
 	out := SubjectCap{
 		Kind: kind, ID: caps.resolveSubjectID(kind, id), Window: string(w),
 		CapUSD: usd, CapTokens: tokens,
-		Hard: windowHard(false, entry.Enforcement, caps.OrgAuthoritative),
+		Hard:        windowHard(false, entry.Enforcement, caps.OrgAuthoritative),
+		ScopeUSD:    firstNonEmpty(entry.ScopeUSD, entry.ResolvedScope),
+		ScopeTokens: firstNonEmpty(entry.ScopeTokens, entry.ResolvedScope),
+		Enforcement: entry.Enforcement,
+		Thresholds:  append([]float64(nil), entry.Thresholds...),
+		Timezone:    entry.Timezone,
 	}
 	state, apply, flagOnly := classifyBaseline(entry, caps.Now, maxAge)
 	if note != nil {

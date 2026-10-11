@@ -8,8 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/clientwire"
+	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/hook"
-	"github.com/marmutapp/superbased-observer/internal/mcp"
+	"github.com/marmutapp/superbased-observer/internal/mcpregister"
+	"github.com/marmutapp/superbased-observer/internal/proxyroute"
 )
 
 // newUninstallCmd implements `observer uninstall` — reverse of `init`.
@@ -30,13 +33,18 @@ func newUninstallCmd() *cobra.Command {
 		flagSkipHooks  bool
 		flagSkipMCP    bool
 		flagPurge      bool
+
+		flagSkipProxyRoute bool
 	)
 	cmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove observer hooks + MCP server from AI coding tools",
-		Long: `Remove observer's hook entries and MCP server registration from each
-selected AI coding tool's config. Only entries whose command matches the
-observer binary are removed; user-authored hooks are preserved.
+		Short: "Remove observer hooks, MCP server and proxy route from AI coding tools",
+		Long: `Remove observer's hook entries, MCP server registration and proxy route
+from each selected AI coding tool's config. Only entries whose command matches
+the observer binary are removed; user-authored hooks are preserved. The proxy
+route (Claude Code env.ANTHROPIC_BASE_URL, the Codex openai-observer provider)
+is removed only when it points at this install's proxy port, and Codex's
+previous model_provider is put back. Skip it with --skip-proxy-route.
 
 By default the tool data dir (~/.observer/) is kept so a later re-install
 retains history. Pass --purge to delete it.`,
@@ -45,16 +53,14 @@ retains history. Pass --purge to delete it.`,
 			if err != nil {
 				return err
 			}
-			hookReg, err := hook.NewRegistry(hook.Options{
+			// clientwire.Remover is the ONE removal seam: the dashboard's
+			// Connected tools Remove step drives the same registries
+			// through it, so the CLI and the dashboard cannot disagree on
+			// what an uninstall removes.
+			rem, err := clientwire.NewRemover(clientwire.RemoveOptions{
+				Getenv:     os.Getenv,
 				BinaryPath: binary,
-				DryRun:     flagDryRun,
-				Force:      flagForce,
-			})
-			if err != nil {
-				return err
-			}
-			mcpReg, err := mcp.NewRegistrar(mcp.RegisterOptions{
-				BinaryPath: binary,
+				ProxyPort:  uninstallProxyPort(),
 				DryRun:     flagDryRun,
 				Force:      flagForce,
 			})
@@ -62,28 +68,54 @@ retains history. Pass --purge to delete it.`,
 				return err
 			}
 
-			installed := unionStrings(hookReg.Installed(), mcpReg.Installed())
-			tools := selectTools(flagAll, flagClaudeCode, flagCodex, flagCursor, flagCline, installed)
+			tools := selectTools(flagAll, flagClaudeCode, flagCodex, flagCursor, flagCline, rem.Installed())
 			if len(tools) == 0 && !flagPurge {
-				fmt.Fprintln(cmd.OutOrStdout(),
-					"no tools selected and none auto-detected — pass --claude-code / --cursor / --codex / --all / --purge")
+				fmt.Fprintln(cmd.OutOrStdout(), noToolsLine("remove Observer from", flagAll,
+					"--claude-code / --cursor / --codex / --all / --purge"))
 				return nil
 			}
 
 			out := cmd.OutOrStdout()
 			anyError := false
 			for _, t := range tools {
-				if !flagSkipHooks && hookSupported(t) {
-					res := hookReg.Unregister(t)
-					printHookUnregisterResult(out, t, res, flagDryRun)
-					if res.Error != nil {
-						anyError = true
+				var parts []clientwire.Part
+				if !flagSkipHooks {
+					parts = append(parts, clientwire.PartHooks)
+				}
+				if !flagSkipMCP {
+					parts = append(parts, clientwire.PartMCP)
+				}
+				m := rem.Remove(t, parts...)
+				if m.Hooks != nil {
+					printHookUnregisterResult(out, t, *m.Hooks, flagDryRun)
+				}
+				if m.MCP != nil {
+					printMCPUnregisterResult(out, t, *m.MCP, flagDryRun)
+				}
+				if m.Failed() {
+					anyError = true
+				}
+			}
+
+			if !flagSkipProxyRoute {
+				if rerr := rem.RouteRegistrarErr(); rerr != nil {
+					fmt.Fprintf(out, "%-12s proxy ✗ %v\n", "observer", rerr)
+					anyError = true
+				} else {
+					for _, t := range tools {
+						if m := rem.Remove(t, clientwire.PartRoute); m.Route != nil && printProxyRouteRemoval(out, t, *m.Route, flagDryRun) {
+							anyError = true
+						}
 					}
 				}
-				if !flagSkipMCP && mcpSupported(t) {
-					res := mcpReg.Unregister(t)
-					printMCPUnregisterResult(out, t, res, flagDryRun)
-					if res.Error != nil {
+			}
+
+			// T-537: remove the opt-in OTLP exporter wiring too (only
+			// Observer's own keys; a user's exporter setting is kept).
+			for _, t := range tools {
+				if m := rem.Remove(t, clientwire.PartTelemetry); m.Telemetry != nil && (m.Telemetry.Changed || m.Telemetry.Error != nil) {
+					printTelemetryResult(out, *m.Telemetry)
+					if m.Telemetry.Error != nil {
 						anyError = true
 					}
 				}
@@ -111,6 +143,7 @@ retains history. Pass --purge to delete it.`,
 	cmd.Flags().BoolVar(&flagForce, "force", false, "Bypass checksum mismatch; remove observer entries even if the config file was modified since install")
 	cmd.Flags().BoolVar(&flagSkipHooks, "skip-hooks", false, "Only unregister MCP, leave hooks alone")
 	cmd.Flags().BoolVar(&flagSkipMCP, "skip-mcp", false, "Only unregister hooks, leave MCP alone")
+	cmd.Flags().BoolVar(&flagSkipProxyRoute, "skip-proxy-route", false, "Leave this install's proxy route (Claude Code ANTHROPIC_BASE_URL, Codex provider) in place")
 	cmd.Flags().BoolVar(&flagPurge, "purge", false, "Also delete ~/.observer/ (observer.db, config.toml, hook_checksums.json)")
 	return cmd
 }
@@ -139,7 +172,7 @@ func printHookUnregisterResult(out io.Writer, tool string, res hook.Unregistrati
 	}
 }
 
-func printMCPUnregisterResult(out io.Writer, tool string, res mcp.UnregistrationResult, dryRun bool) {
+func printMCPUnregisterResult(out io.Writer, tool string, res mcpregister.UnregistrationResult, dryRun bool) {
 	if res.Error != nil {
 		fmt.Fprintf(out, "%-12s mcp  ✗ %v\n", tool, res.Error)
 		return
@@ -155,6 +188,36 @@ func printMCPUnregisterResult(out io.Writer, tool string, res mcp.Unregistration
 	if res.Removed {
 		fmt.Fprintf(out, "%-12s mcp  %s observer entry from %s\n", tool, verb, res.ConfigPath)
 	}
+}
+
+// printProxyRouteRemoval prints one tool's proxy-route removal outcome and
+// reports whether it failed (the caller folds that into the exit status).
+// The route undo itself is clientwire's (RouteRemover), the seam the
+// dashboard's Compression-page undo and Connected tools Remove step share.
+func printProxyRouteRemoval(out io.Writer, tool string, res proxyroute.RegistrationResult, dryRun bool) (failed bool) {
+	switch {
+	case res.Error != nil:
+		fmt.Fprintf(out, "%-12s proxy ✗ %v\n", tool, res.Error)
+		return true
+	case res.Added && dryRun:
+		fmt.Fprintf(out, "%-12s proxy would remove proxy route %s from %s\n", tool, res.BaseURL, res.ConfigPath)
+	case res.Added:
+		fmt.Fprintf(out, "%-12s proxy removed proxy route %s from %s\n", tool, res.BaseURL, res.ConfigPath)
+	case res.BaseURL != "":
+		fmt.Fprintf(out, "%-12s proxy kept %s in %s (not this install's route)\n", tool, res.BaseURL, res.ConfigPath)
+	default:
+		fmt.Fprintf(out, "%-12s proxy no-op (no proxy route in %s)\n", tool, res.ConfigPath)
+	}
+	return false
+}
+
+// uninstallProxyPort is the proxy port whose route counts as this install's:
+// the configured [proxy] port, or the default when the config cannot be read.
+func uninstallProxyPort() int {
+	if cfg, err := config.Load(config.LoadOptions{}); err == nil && cfg.Proxy.Port > 0 {
+		return cfg.Proxy.Port
+	}
+	return 8820
 }
 
 // purgeDataDir removes ~/.observer/ after --purge. Best-effort: missing

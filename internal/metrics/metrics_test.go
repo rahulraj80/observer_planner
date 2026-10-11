@@ -19,7 +19,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/pidbridge"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -373,7 +373,7 @@ func TestRender_ProcessHealthModes(t *testing.T) {
 			name: "off",
 			health: diag.ProcessHealth{
 				Backend: "poll", BackendUp: true, QueueDepth: 0,
-				NetworkAccountingMode:   processobs.NetworkAccountingOff,
+				NetworkAccountingMode:   procmodel.NetworkAccountingOff,
 				NetworkAccountingReason: "not enabled ([observer.process.network].process_bytes)",
 			},
 			want: []string{
@@ -389,7 +389,7 @@ func TestRender_ProcessHealthModes(t *testing.T) {
 			name: "unavailable carries the untruncated reason",
 			health: diag.ProcessHealth{
 				Backend: "linux_ebpf+poll", BackendUp: true, QueueDepth: 7,
-				NetworkAccountingMode:   processobs.NetworkAccountingUnavailable,
+				NetworkAccountingMode:   procmodel.NetworkAccountingUnavailable,
 				NetworkAccountingReason: `load fentry/tcp_sendmsg: permission denied (missing CAP_BPF/CAP_PERFMON)`,
 			},
 			want: []string{
@@ -404,7 +404,7 @@ func TestRender_ProcessHealthModes(t *testing.T) {
 			name: "tcp live, backend down",
 			health: diag.ProcessHealth{
 				Backend: "", BackendUp: false,
-				NetworkAccountingMode: processobs.NetworkAccountingTCP,
+				NetworkAccountingMode: procmodel.NetworkAccountingTCP,
 			},
 			want: []string{
 				`observer_process_backend_up{backend="unknown"} 0`,
@@ -492,7 +492,7 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "no transport configured emits no transport family at all",
 			health: diag.ProcessHealth{
 				Backend: "poll", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
 			},
 			wantAbsent: []string{"observer_process_transport_"},
 		},
@@ -500,8 +500,8 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "configured but never connected reads as zeros with no timestamps",
 			health: diag.ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 			},
 			want: []string{
 				`observer_process_transport_connected{addr="127.0.0.1:8823"} 0`,
@@ -518,8 +518,8 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "a refused capturer shows auth failures against zero connections",
 			health: diag.ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures: 9,
 			},
 			want: []string{
@@ -543,11 +543,11 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "the refusal rides an info series as a BOUNDED class",
 			health: diag.ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures:       9,
 				TransportLastAuthError:      "processobs/bridge: malformed handshake: capturer speaks protocol v2, this daemon speaks v1",
-				TransportLastAuthErrorClass: processobs.TransportAuthClassProtocolVersion,
+				TransportLastAuthErrorClass: procmodel.TransportAuthClassProtocolVersion,
 			},
 			want: []string{
 				`observer_process_transport_auth_failure_info{addr="127.0.0.1:8823",class="protocol_version"} 1`,
@@ -564,8 +564,8 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "an older daemon's classless refusal reads as unknown",
 			health: diag.ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures:  1,
 				TransportLastAuthError: "processobs/bridge: invalid token",
 			},
@@ -579,8 +579,8 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "a requested transport that never started gets its own info series",
 			health: diag.ProcessHealth{
 				Backend: "composite[poll+bridge]", BackendUp: true,
-				NetworkAccountingMode:      processobs.NetworkAccountingOff,
-				TransportState:             processobs.TransportStateUnavailable,
+				NetworkAccountingMode:      procmodel.NetworkAccountingOff,
+				TransportState:             procmodel.TransportStateUnavailable,
 				TransportUnavailableReason: "processobs/bridge: listen 127.0.0.1:8823: bind: address already in use",
 			},
 			want: []string{
@@ -597,8 +597,8 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "a live capturer carries both timestamps",
 			health: diag.ProcessHealth{
 				Backend: "composite[poll+bridge-listen]", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingTCP,
-				TransportState:        processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				NetworkAccountingMode: procmodel.NetworkAccountingTCP,
+				TransportState:        procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportConnected: true, TransportConnections: 3,
 				TransportLastConnectAt: connectAt, TransportLastDisconnectAt: disconnectAt,
 			},
@@ -615,8 +615,8 @@ func TestRender_ProcessTransportGauges(t *testing.T) {
 			name: "a transport without a resolved addr is labelled unknown, not blank",
 			health: diag.ProcessHealth{
 				Backend: "etw", BackendUp: true,
-				NetworkAccountingMode: processobs.NetworkAccountingOff,
-				TransportState:        processobs.TransportStateConfigured,
+				NetworkAccountingMode: procmodel.NetworkAccountingOff,
+				TransportState:        procmodel.TransportStateConfigured,
 			},
 			want: []string{`observer_process_transport_connected{addr="unknown"} 0`},
 		},
@@ -674,8 +674,8 @@ func TestRender_TransportAuthLabelCardinalityIsBounded(t *testing.T) {
 		h := diag.ProcessHealth{
 			PID: os.Getpid(), WrittenAt: now.Add(-time.Second),
 			Backend: "composite[poll+bridge-listen]", BackendUp: true,
-			NetworkAccountingMode: processobs.NetworkAccountingOff,
-			TransportState:        processobs.TransportStateConfigured,
+			NetworkAccountingMode: procmodel.NetworkAccountingOff,
+			TransportState:        procmodel.TransportStateConfigured,
 			TransportAddr:         "127.0.0.1:8823",
 			TransportAuthFailures: int64(i + 1),
 			// A fresh remote-chosen version fragment every time — exactly
@@ -684,7 +684,7 @@ func TestRender_TransportAuthLabelCardinalityIsBounded(t *testing.T) {
 			TransportLastAuthError: fmt.Sprintf(
 				"processobs/bridge: malformed handshake: unparsable protocol version %q", "v-"+strconv.Itoa(i),
 			),
-			TransportLastAuthErrorClass: processobs.TransportAuthClassProtocolVersion,
+			TransportLastAuthErrorClass: procmodel.TransportAuthClassProtocolVersion,
 		}
 		if _, err := diag.WriteProcessHealth(filepath.Dir(path), h); err != nil {
 			t.Fatalf("WriteProcessHealth: %v", err)
@@ -723,8 +723,8 @@ func TestRender_TransportAuthClassIsNormalisedFromDisk(t *testing.T) {
 	if _, err := diag.WriteProcessHealth(filepath.Dir(path), diag.ProcessHealth{
 		PID: os.Getpid(), WrittenAt: now.Add(-time.Second),
 		Backend: "composite[poll+bridge-listen]", BackendUp: true,
-		NetworkAccountingMode: processobs.NetworkAccountingOff,
-		TransportState:        processobs.TransportStateConfigured,
+		NetworkAccountingMode: procmodel.NetworkAccountingOff,
+		TransportState:        procmodel.TransportStateConfigured,
 		TransportAddr:         "127.0.0.1:8823",
 		TransportAuthFailures: 1, TransportLastAuthError: "whatever",
 		TransportLastAuthErrorClass: "not-a-class-this-build-defines",
@@ -792,7 +792,7 @@ func TestRender_ExpositionSurvivesHostileLabels(t *testing.T) {
 	if _, err := diag.WriteProcessHealth(filepath.Dir(path), diag.ProcessHealth{
 		PID: os.Getpid(), WrittenAt: now.Add(-time.Second),
 		Backend: "composite[poll+bridge-listen]", BackendUp: true,
-		NetworkAccountingMode:   processobs.NetworkAccountingUnavailable,
+		NetworkAccountingMode:   procmodel.NetworkAccountingUnavailable,
 		NetworkAccountingReason: hostile,
 	}); err != nil {
 		t.Fatalf("WriteProcessHealth: %v", err)
@@ -844,8 +844,8 @@ func TestRender_CapturerDecodeGauges(t *testing.T) {
 	base := func() diag.ProcessHealth {
 		return diag.ProcessHealth{
 			Backend: "composite[poll+bridge-listen]", BackendUp: true,
-			NetworkAccountingMode: processobs.NetworkAccountingTCP,
-			TransportState:        processobs.TransportStateConfigured, TransportAddr: addr,
+			NetworkAccountingMode: procmodel.NetworkAccountingTCP,
+			TransportState:        procmodel.TransportStateConfigured, TransportAddr: addr,
 			TransportConnected: true, TransportConnections: 1,
 		}
 	}

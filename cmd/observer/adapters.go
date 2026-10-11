@@ -25,6 +25,7 @@ import (
 func newAdaptersCmd() *cobra.Command {
 	var (
 		jsonOut    bool
+		hooksOut   bool
 		configPath string
 	)
 	cmd := &cobra.Command{
@@ -39,12 +40,17 @@ func newAdaptersCmd() *cobra.Command {
 			"When a local observer DB is reachable, a trailing 'surface split'\n" +
 			"section reports how many sessions each adapter actually captured per\n" +
 			"CAPTURE SURFACE (cli / ide / desktop / sdk / web + host token,\n" +
-			"migration 107) and the metered spend behind them — the observed\n" +
+			"migration 107) and the metered spend behind them - the observed\n" +
 			"counterpart to the declared capability grid above. The section is\n" +
 			"skipped silently when no DB is reachable; --json emits the registry\n" +
 			"alone, unchanged.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if hooksOut {
+				// --hooks: the hook-capability matrix (hook-parity audit
+				// section 4), generated from the registry's bindings.
+				return renderHookMatrixCmd(cmd.OutOrStdout(), jsonOut)
+			}
 			caps := integration.Capabilities()
 			sort.Slice(caps, func(i, j int) bool { return caps[i].Tool < caps[j].Tool })
 			if jsonOut {
@@ -69,6 +75,7 @@ func newAdaptersCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit the registry as JSON instead of a table")
+	cmd.Flags().BoolVar(&hooksOut, "hooks", false, "Show the hook-capability matrix instead: per adapter and capability, the vendor's hook events and whether Observer wires them (generated from the registry's hook bindings)")
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (used only to locate the DB for the surface split)")
 	return cmd
 }
@@ -124,7 +131,7 @@ func renderSurfaceSplit(w io.Writer, counts []store.SurfaceCount) {
 	fmt.Fprintln(tw, "legend\tobserved capture surface per session (sessions.surface /")
 	fmt.Fprintln(tw, "\tsurface_host, migration 107), node-local and never pushed to an")
 	fmt.Fprintln(tw, "\torg server. (unstamped) = no adapter found a grounded")
-	fmt.Fprintln(tw, "\tdiscriminator on disk for that session — the honest unknown,")
+	fmt.Fprintln(tw, "\tdiscriminator on disk for that session - the honest unknown,")
 	fmt.Fprintln(tw, "\tnever guessed. Sessions ingested before the adapter learned to")
 	fmt.Fprintln(tw, "\tstamp stay unstamped until their transcript is re-read")
 	fmt.Fprintln(tw, "\t(`observer scan --force`).")
@@ -188,22 +195,22 @@ func renderAdapterMatrix(w io.Writer, caps []integration.Capability, disallowed 
 	fmt.Fprintln(tw, "\tRESUME = how a closed session reopens: native (the tool's own")
 	fmt.Fprintln(tw, "\tresume) / handoff (a --continue-from fork) / dash (neither).")
 	fmt.Fprintln(tw, "\tENFORCE = the guard-policy enforcement bucket (P7): hook-block")
-	fmt.Fprintln(tw, "\t(a wired, genuinely blocking hook mechanism can deny the call) /")
+	fmt.Fprintln(tw, "\t(a wired tool-gate hook, its deny proven live, can deny the call) /")
 	fmt.Fprintln(tw, "\tsandbox (no blocking hook, but the launcher can require a bwrap")
-	fmt.Fprintln(tw, "\tsandboxed launch — Linux/WSL2 only; this is the STATIC bucket,")
+	fmt.Fprintln(tw, "\tsandboxed launch - Linux/WSL2 only; this is the STATIC bucket,")
 	fmt.Fprintln(tw, "\tnot degraded for the current host) / org-disallow (neither hook")
-	fmt.Fprintln(tw, "\tnor sandbox — a signed org policy naming the tool disallowed is")
-	fmt.Fprintln(tw, "\tthe only lever) / recorded (no grounded lever at all — an")
+	fmt.Fprintln(tw, "\tnor sandbox - a signed org policy naming the tool disallowed is")
+	fmt.Fprintln(tw, "\tthe only lever) / recorded (no grounded lever at all - an")
 	fmt.Fprintln(tw, "\tacknowledgment, not a block).")
 	fmt.Fprintln(tw, "\tLIFECYCLE = the vendor-support status under the harness")
 	fmt.Fprintln(tw, "\tlifecycle policy: active (advertised for install / launch /")
-	fmt.Fprintln(tw, "\tinit) vs DEPRECATED / DEAD (never advertised — but ALWAYS")
+	fmt.Fprintln(tw, "\tinit) vs DEPRECATED / DEAD (never advertised - but ALWAYS")
 	fmt.Fprintln(tw, "\tstill captured; rows are never deleted). `observer doctor")
 	fmt.Fprintln(tw, "\t<tool>` prints the grounded reason verbatim. PROMPT = the")
 	fmt.Fprintln(tw, "\tprompt-submit intervention lane (docs/guard-prompt.md):")
 	fmt.Fprintln(tw, "\thook (a verified, wired dialect) / proxy-only (no hook, the")
 	fmt.Fprintln(tw, "\tproxy lane is the only path) / probe (a documented mechanism")
-	fmt.Fprintln(tw, "\twhose exact wire shape is unverified — `observer doctor")
+	fmt.Fprintln(tw, "\twhose exact wire shape is unverified - `observer doctor")
 	fmt.Fprintln(tw, "\t--probe-hook <tool>` decides) / dash (no grounded capability).")
 	_ = tw.Flush()
 	renderProductLifecycles(w, integration.ProductLifecycles())
@@ -328,6 +335,11 @@ func proxyCell(p *integration.ProxyRoute) string {
 	case integration.RouteConfigFile:
 		return "config-file"
 	case integration.RouteLauncher:
+		if p.Gate != nil {
+			// Conditional route: applies only with the developer's own
+			// provider key; otherwise the launch runs unrouted.
+			return "launcher+key"
+		}
 		return "launcher"
 	default:
 		return string(p.Kind)
@@ -580,7 +592,7 @@ func controlCoverageLine(tool string) (string, bool) {
 		line += " (route " + routeProofCell(row.RouteProof) + ")"
 	}
 	if row.Note != "" {
-		line += " — " + row.Note
+		line += " - " + row.Note
 	}
 	return line, true
 }

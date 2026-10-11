@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -42,12 +43,12 @@ func (s *Server) handleCloudEnable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	if c.loginRunning() {
-		http.Error(w, "a sign-in is running — wait for it to finish (or time out) before turning on Cloud Intelligence", http.StatusConflict)
+	if c.LoginRunning() {
+		http.Error(w, "a sign-in is running - wait for it to finish (or time out) before turning on Cloud Intelligence", http.StatusConflict)
 		return
 	}
-	if c.syncRunning() {
-		http.Error(w, "a sync is running — wait for it to finish before turning on Cloud Intelligence", http.StatusConflict)
+	if c.SyncRunning() {
+		http.Error(w, "a sync is running - wait for it to finish before turning on Cloud Intelligence", http.StatusConflict)
 		return
 	}
 	args := []string{"--yes", "--source", "dashboard"}
@@ -66,7 +67,7 @@ func (s *Server) handleCloudEnable(w http.ResponseWriter, r *http.Request) {
 		raw, _ := settings.JSON()
 		args = append(args, "--evidence-settings", raw)
 	}
-	output, ok2, exitErr := c.runOnce(r.Context(), "enable", args, cloudConsentStepTimeout)
+	output, ok2, exitErr := c.RunOnce(r.Context(), "enable", args, cloudConsentStepTimeout)
 	writeJSON(w, CloudActionResponse{OK: ok2, Output: output, ExitError: exitErr})
 }
 
@@ -81,15 +82,15 @@ func (s *Server) handleCloudDisable(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if c.loginRunning() {
-		http.Error(w, "a sign-in is running — wait for it to finish (or time out) before turning off Cloud Intelligence", http.StatusConflict)
+	if c.LoginRunning() {
+		http.Error(w, "a sign-in is running - wait for it to finish (or time out) before turning off Cloud Intelligence", http.StatusConflict)
 		return
 	}
-	if c.syncRunning() {
-		http.Error(w, "a sync is running — wait for it to finish before turning off Cloud Intelligence", http.StatusConflict)
+	if c.SyncRunning() {
+		http.Error(w, "a sync is running - wait for it to finish before turning off Cloud Intelligence", http.StatusConflict)
 		return
 	}
-	output, ok2, exitErr := c.runOnce(r.Context(), "disable", []string{"--yes", "--source", "dashboard"}, cloudConsentStepTimeout)
+	output, ok2, exitErr := c.RunOnce(r.Context(), "disable", []string{"--yes", "--source", "dashboard"}, cloudConsentStepTimeout)
 	writeJSON(w, CloudActionResponse{OK: ok2, Output: output, ExitError: exitErr})
 }
 
@@ -187,15 +188,15 @@ func (s *Server) handleCloudLedger(w http.ResponseWriter, r *http.Request) {
 			Purpose:              e.Receipt.Purpose,
 			GrantMode:            e.Receipt.GrantMode,
 			Endpoint:             e.Receipt.Endpoint,
-			CreatedAt:            cloudRFC3339(e.Receipt.CreatedAt),
+			CreatedAt:            dashapi.CloudRFC3339(e.Receipt.CreatedAt),
 			Live:                 e.Receipt.Live,
 		}
 		if e.Receipt.ReviewAt != nil {
-			v := cloudRFC3339(*e.Receipt.ReviewAt)
+			v := dashapi.CloudRFC3339(*e.Receipt.ReviewAt)
 			rv.ReviewAt = &v
 		}
 		if e.Receipt.InvalidatedAt != nil {
-			v := cloudRFC3339(*e.Receipt.InvalidatedAt)
+			v := dashapi.CloudRFC3339(*e.Receipt.InvalidatedAt)
 			rv.InvalidatedAt = &v
 		}
 		items := make([]CloudLedgerItemView, 0, len(e.Items))
@@ -207,8 +208,8 @@ func (s *Server) handleCloudLedger(w http.ResponseWriter, r *http.Request) {
 				State:      it.State,
 				RetryCount: it.RetryCount,
 				LastError:  it.LastError,
-				CreatedAt:  cloudRFC3339(it.CreatedAt),
-				UpdatedAt:  cloudRFC3339(it.UpdatedAt),
+				CreatedAt:  dashapi.CloudRFC3339(it.CreatedAt),
+				UpdatedAt:  dashapi.CloudRFC3339(it.UpdatedAt),
 			})
 		}
 		var result *CloudLedgerResultView
@@ -219,7 +220,7 @@ func (s *Server) handleCloudLedger(w http.ResponseWriter, r *http.Request) {
 				ModelRoute: e.Result.ModelRoute,
 				Tokens:     e.Result.Tokens,
 				CostUSD:    e.Result.CostUSD,
-				ReceivedAt: cloudRFC3339(e.Result.ReceivedAt),
+				ReceivedAt: dashapi.CloudRFC3339(e.Result.ReceivedAt),
 			}
 		}
 		entries = append(entries, CloudLedgerEntryView{Receipt: rv, Items: items, Result: result})

@@ -674,7 +674,7 @@ func (s *Store) ReplaceStandingConsentGrant(ctx context.Context, r CloudConsentR
 			// same generation. Say so plainly rather than retrying into a loop —
 			// this is an interactive command and a re-run allocates the next one.
 			return StandingGrantReplacement{}, fmt.Errorf(
-				"%s: consent generation %d for purpose %q was allocated concurrently — nothing was recorded; re-run the grant",
+				"%s: consent generation %d for purpose %q was allocated concurrently - nothing was recorded; re-run the grant",
 				pfx, out.ConsentGeneration, r.Purpose,
 			)
 		}
@@ -978,7 +978,7 @@ func (s *Store) PrepareCloudOutboxSend(ctx context.Context, id, sendEndpoint str
 	// rebuild from — its stored bytes ARE the artifact — so routing one here
 	// would either fail obscurely or, worse, re-aggregate. Refuse explicitly.
 	if item.Kind != CloudOutboxKindSessionEvidence {
-		return nil, CloudSendLease{}, fmt.Errorf("store.PrepareCloudOutboxSend: %w: kind %q — use PrepareStructuralSend", ErrCloudOutboxKindMismatch, item.Kind)
+		return nil, CloudSendLease{}, fmt.Errorf("store.PrepareCloudOutboxSend: %w: kind %q - use PrepareStructuralSend", ErrCloudOutboxKindMismatch, item.Kind)
 	}
 	if item.State != CloudOutboxPending && item.State != CloudOutboxFailedRetryable {
 		return nil, CloudSendLease{}, fmt.Errorf("store.PrepareCloudOutboxSend: %w: state %q is not preparable", ErrIllegalCloudOutboxTransition, item.State)
@@ -1935,7 +1935,7 @@ func (s *Store) LoadCloudEvidenceBundle(ctx context.Context, sessionID string, r
 	case req.EvidenceSettings != nil && (req.IncludeTexts || req.IncludeFirstPrompt):
 		settings := *req.EvidenceSettings
 		if !req.IncludeTexts {
-			settings = settings.ForLevel(CloudEnrichTitles)
+			settings = CloudEvidenceSettingsForLevel(settings, CloudEnrichTitles)
 		}
 		texts, terr := loadCloudSelectedTexts(ctx, conn, sessionID, settings, req.Failures)
 		if terr != nil {
@@ -2500,12 +2500,19 @@ func streamCloudFailures(ctx context.Context, db cloudReader, sessionID string, 
 // record it, with target holding a truncated rendering; the longer of the two is
 // taken so the first prompt is not clipped to an ellipsis.
 func loadCloudPromptRows(ctx context.Context, db cloudReader, sessionID string) ([]string, error) {
-	var total int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM actions WHERE session_id = ? AND action_type = 'user_prompt'`+notSidechain,
-		sessionID).Scan(&total); err != nil {
-		return nil, fmt.Errorf("store.LoadCloudSessionTexts: count prompts: %w", err)
+	// The population is the session's CANONICAL main-thread prompts (T-635):
+	// a prompt both the tool's hook and its transcript recorded is one prompt,
+	// through the one pairing table (canonicalPromptsBySession over
+	// sessionmsg.CanonicalPrompts). Hook rows are only identifiable in Go, so
+	// the fold reads the prompt METADATA (no text), the head plus stride is
+	// chosen over the folded list here, and only the chosen rows' text is read.
+	bySession, err := canonicalPromptsBySession(ctx, db,
+		`a.session_id = ? AND COALESCE(a.is_sidechain, 0) = 0`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store.LoadCloudSessionTexts: prompts: %w", err)
 	}
+	prompts := bySession[sessionID]
+	total := len(prompts)
 	if total == 0 {
 		return nil, nil
 	}
@@ -2519,18 +2526,59 @@ func loadCloudPromptRows(ctx context.Context, db cloudReader, sessionID string) 
 			stride = (remaining + budget - 1) / budget
 		}
 	}
-	return cloudTextRows(ctx, db, `
-		WITH ordered AS (
-		  SELECT substr(CASE WHEN length(COALESCE(raw_tool_input, '')) > length(COALESCE(target, ''))
-		                     THEN raw_tool_input ELSE COALESCE(target, '') END, 1, ?) AS body,
-		         ROW_NUMBER() OVER (ORDER BY timestamp ASC, id ASC) AS rn
-		    FROM actions
-		   WHERE session_id = ? AND action_type = 'user_prompt'`+notSidechain+`
-		)
-		SELECT body FROM ordered
-		 WHERE rn <= ? OR (rn - ?) % ? = 0 OR rn = ?
-		 ORDER BY rn ASC`,
-		cloudTextScanBytes, sessionID, head, head, stride, total)
+	// rn is the 1-based time-order position, the same selection the SQL
+	// window used: the head, every stride-th row after it, and the last.
+	var ids []int64
+	for i := range prompts {
+		rn := i + 1
+		if rn <= head || (rn-head)%stride == 0 || rn == total {
+			id, perr := strconv.ParseInt(prompts[i].ActionID, 10, 64)
+			if perr != nil {
+				return nil, fmt.Errorf("store.LoadCloudSessionTexts: prompt id %q: %w", prompts[i].ActionID, perr)
+			}
+			ids = append(ids, id)
+		}
+	}
+	bodies := make(map[int64]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, cloudTextScanBytes)
+	marks := make([]byte, 0, 2*len(ids))
+	for i, id := range ids {
+		if i > 0 {
+			marks = append(marks, ',')
+		}
+		marks = append(marks, '?')
+		args = append(args, id)
+	}
+	//nolint:gosec // G202: marks is a run of "?" placeholders; values bind via args.
+	rows, err := db.QueryContext(ctx, `
+		SELECT id,
+		       substr(CASE WHEN length(COALESCE(raw_tool_input, '')) > length(COALESCE(target, ''))
+		                   THEN raw_tool_input ELSE COALESCE(target, '') END, 1, ?)
+		  FROM actions
+		 WHERE id IN (`+string(marks)+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store.LoadCloudSessionTexts: prompt text: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var body sql.NullString
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, fmt.Errorf("store.LoadCloudSessionTexts: scan prompt: %w", err)
+		}
+		bodies[id] = body.String
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store.LoadCloudSessionTexts: prompt text: %w", err)
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if body := bodies[id]; strings.TrimSpace(body) != "" {
+			out = append(out, body)
+		}
+	}
+	return out, nil
 }
 
 // cloudTextRows runs a one-column text query and returns the non-empty values.

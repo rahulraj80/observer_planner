@@ -1915,3 +1915,25 @@ func TestTerminalSandboxDefaults(t *testing.T) {
 		t.Errorf("partial [terminal.sandbox] lost mechanism defaults: %+v", cfg.Terminal.Sandbox)
 	}
 }
+
+// TestLoad_OpenCodeZenLaneSurvivesUserUpstreams pins that the default
+// opencode-zen agent lane lives OUTSIDE [proxy.upstreams] (so it is not
+// a gateway lane policy) and survives a file that sets its own
+// [proxy.agent_upstreams] (the loader merges map keys over Default()).
+func TestLoad_OpenCodeZenLaneSurvivesUserUpstreams(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[proxy.upstreams]\nopenrouter = \"https://openrouter.ai/api\"\n[proxy.agent_upstreams]\nmine = \"https://example.test\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(LoadOptions{GlobalPath: path})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Proxy.Upstreams) != 1 || cfg.Proxy.Upstreams["openrouter"] != "https://openrouter.ai/api" {
+		t.Fatalf("upstreams = %v, want only the user lane", cfg.Proxy.Upstreams)
+	}
+	if cfg.Proxy.AgentUpstreams[OpenCodeZenLane] != "https://opencode.ai/zen" || cfg.Proxy.AgentUpstreams["mine"] != "https://example.test" {
+		t.Fatalf("agent upstreams = %v, want the opencode-zen default and the user entry", cfg.Proxy.AgentUpstreams)
+	}
+}

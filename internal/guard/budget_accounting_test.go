@@ -13,7 +13,9 @@ func TestManagedBudgetUsesAccountingModeFromDecisionSnapshot(t *testing.T) {
 	cfg.Mode = "enforce"
 	g := newTestGuard(t, cfg, nil)
 	old := g.set.Load()
-	if err := g.ApplyOrgBudget(config.GuardBudgetConfig{DailyUSD: 0.35, Hard: true}, nil, false, policy.BudgetProtection{DailyUSD: true}, "binding"); err != nil {
+	// FailClosed: an unverifiable binding refuses only under the org's
+	// explicit opt-in (D-502); this test is about the opted-in posture.
+	if err := g.ApplyOrgBudget(config.GuardBudgetConfig{DailyUSD: 0.35, Hard: true, FailClosed: true}, nil, false, policy.BudgetProtection{DailyUSD: true}, "binding"); err != nil {
 		t.Fatal(err)
 	}
 	managed := g.set.Load()

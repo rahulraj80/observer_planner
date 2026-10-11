@@ -24,7 +24,7 @@ type backend struct{}
 func New(opts Options) processobs.Backend {
 	if opts.NetworkAccounting {
 		opts.NetworkStatus.Set(processobs.NetworkAccountingUnavailable,
-			"per-process network bytes need eBPF (Linux); Windows needs ETW, macOS EndpointSecurity — neither implemented")
+			"per-process network bytes need eBPF (Linux); Windows needs ETW, macOS EndpointSecurity - neither implemented")
 	}
 	return &backend{}
 }

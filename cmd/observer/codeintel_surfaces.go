@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package main
 
 import (
@@ -15,10 +17,19 @@ import (
 // over a SINGLE DB handle for a CLI command, returning them plus a
 // cleanup closure. (Both share the one connection — the engine is used
 // for symbol resolution, the service for the surfaces.)
+//
+// With code intelligence off (the default since D-307) the read surfaces
+// still answer from whatever index is on disk (one built while it was on,
+// until retention prunes it), so they keep working for inspection; a
+// one-line note on stderr says the index is no longer maintained, so an
+// empty or stale answer is never mistaken for "no such symbol".
 func openCodeIntel(cmd *cobra.Command, configPath string) (*surface.Service, codeintel.Provider, func(), error) {
-	_, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
+	cfg, database, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if !cfg.CodeIntel.Enabled {
+		fmt.Fprintln(cmd.ErrOrStderr(), "note: "+codeintel.DisabledNote+"; answering from any index left on disk, which is not being updated")
 	}
 	eng := codeintel.NewEngine(store.New(database))
 	return surface.New(eng), eng, cleanup, nil
@@ -100,7 +111,7 @@ func newCodeIntelRelationCmd(use, short string, rel relationFn) *cobra.Command {
 			}
 			matches, err := eng.FindSymbols(cmd.Context(), abs, args[1], "", "")
 			if err != nil || len(matches) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "symbol %q not found in %s — index the project first?\n", args[1], abs)
+				fmt.Fprintf(cmd.OutOrStdout(), "symbol %q not found in %s - index the project first?\n", args[1], abs)
 				return nil
 			}
 			out, err := rel(svc, cmd, matches[0].ID, int64(limit))
@@ -155,7 +166,7 @@ func newCodeIntelDeadCodeCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "deadcode [path]",
-		Short: "Functions/methods with no inbound calls (heuristic — name-matched graph)",
+		Short: "Functions/methods with no inbound calls (heuristic - name-matched graph)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, _, cleanup, err := openCodeIntel(cmd, configPath)

@@ -53,6 +53,9 @@ func TestManagedBudgetLaunchRejectsUnboundOrStaleExplicitNone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cfgPath, dbPath := writeManagedBudgetLaunchFixture(t, false, "enforce")
+			// D-502 / D-509: the refusal of an unverified (unbound) body is
+			// the org's fail_closed posture; without it the launch proceeds.
+			setBudgetLaunchFailClosed(t, cfgPath)
 			ctx := context.Background()
 			database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 			if err != nil {
@@ -129,7 +132,8 @@ UPDATE org_budget_cache
 
 			cfg := config.Config{Guard: config.GuardConfig{
 				Enabled: true, Mode: "enforce",
-				Budget: config.GuardBudgetConfig{FromOrg: true},
+				// budget_required is the fail_closed posture (D-502 / D-509).
+				Budget: config.GuardBudgetConfig{FromOrg: true, FailClosed: true},
 			}}
 			line := guardBudgetPostureLineWithGrant(ctx, cfg, database, true)
 			if err := database.Close(); err != nil {

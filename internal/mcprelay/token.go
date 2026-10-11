@@ -114,7 +114,7 @@ var (
 	// ErrSTSUnavailable: the STS could not be reached or answered 5xx.
 	ErrSTSUnavailable = errors.New("mcprelay: the STS is unavailable")
 	// ErrNoAgentAccessKey: the keychain slot holds no agent-access key
-	// (run `observer org enroll` / agent-access registration first).
+	// (run `observer enroll` / agent-access registration first).
 	ErrNoAgentAccessKey = errors.New("mcprelay: no agent-access key registered on this node")
 )
 

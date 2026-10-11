@@ -269,7 +269,7 @@ func Decode(body string) ([]Announcement, error) {
 		return nil, nil
 	}
 	if trimmed == "null" {
-		return nil, fmt.Errorf("%w: %q is not a document — the retraction is the EMPTY body", ErrMalformedDocument, "null")
+		return nil, fmt.Errorf("%w: %q is not a document - the retraction is the EMPTY body", ErrMalformedDocument, "null")
 	}
 	if strings.HasPrefix(trimmed, "[") {
 		var many []Announcement
@@ -277,7 +277,7 @@ func Decode(body string) ([]Announcement, error) {
 			return nil, fmt.Errorf("%w: %w", ErrMalformedDocument, err)
 		}
 		if len(many) == 0 {
-			return nil, fmt.Errorf("%w: %q is not a document — the retraction is the EMPTY body", ErrMalformedDocument, "[]")
+			return nil, fmt.Errorf("%w: %q is not a document - the retraction is the EMPTY body", ErrMalformedDocument, "[]")
 		}
 		return many, nil
 	}

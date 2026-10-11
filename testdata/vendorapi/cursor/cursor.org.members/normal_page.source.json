@@ -1,0 +1,37 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "members": "VerifiedOfficial",
+    "members[]": "VerifiedOfficial",
+    "members[].email": "VerifiedOfficial",
+    "members[].id": "VerifiedOfficial",
+    "members[].name": "VerifiedOfficial",
+    "members[].organizationRole": "VerifiedOfficial",
+    "members[].teams": "VerifiedOfficial",
+    "members[].teams[]": "VerifiedOfficial",
+    "members[].teams[].teamId": "VerifiedOfficial",
+    "members[].teams[].teamRole": "VerifiedOfficial",
+    "pagination": "VerifiedOfficial",
+    "pagination.hasNextPage": "Inferred",
+    "pagination.hasPreviousPage": "VerifiedOfficial",
+    "pagination.page": "VerifiedOfficial",
+    "pagination.pageSize": "VerifiedOfficial",
+    "pagination.totalCount": "VerifiedOfficial",
+    "pagination.totalPages": "VerifiedOfficial"
+  },
+  "fixture_sha256": "b9c591a3cfde6ebde08811f170fe94a77ce03049d07b4d539627fb9d43d1a427",
+  "http": {
+    "method": "GET",
+    "path": "/organizations/members",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Organization Members\" section. The official example is itself a terminal page, so this first page is that example with the paging flag set to \"more\" (pagination.hasNextPage graded Inferred); last_page is the verbatim example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Organization API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "afeeece4ca452a084d847ce76824665e6f720b39acdad55c2233e4ad51b7c5b1",
+  "source_url": "https://cursor.com/docs/account/organizations/organization-admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.org.members"
+}

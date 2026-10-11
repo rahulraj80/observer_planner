@@ -27,7 +27,7 @@ import { Bug, Check, Github, Heart, Share2 } from "lucide-react";
 // Growth-review §4 upgrade (2026-07-30): the "Refer a friend" share payload
 // is upgraded from a static generic link to an OPT-IN real personal stat —
 // "$X tracked across N tools this month". The number comes from the SAME
-// /api/report/monthly endpoint Report.tsx already renders (current month,
+// /api/report/monthly endpoint the Cost page's Statement tab (CostStatement.tsx) already renders (current month,
 // all projects) — no new backend route. When there's no data yet (fresh
 // install, zero sessions this month) the toggle has nothing to offer and the
 // share falls back to the static link; it never renders "$0.00 tracked".

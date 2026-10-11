@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_pricing_feed
+
 package main
 
 import (
@@ -68,7 +70,7 @@ func TestPricingAutoSyncOnce_RePricesTheLiveEngine(t *testing.T) {
 		t.Fatal("lookupProcessCostEngine returned nil after the tick")
 	}
 	if got != engine {
-		t.Fatal("the tick replaced the engine instead of re-pricing it in place — a daemon would still be on the old table")
+		t.Fatal("the tick replaced the engine instead of re-pricing it in place - a daemon would still be on the old table")
 	}
 	p, src, ok := got.LookupWithSource(feedTestModel)
 	if !ok || src != cost.PricingSourceOrg || p.Input != rate {

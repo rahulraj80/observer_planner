@@ -52,6 +52,9 @@ type policyBundleRunner struct {
 	logger  *slog.Logger
 	orgURL  string
 	acquire func(context.Context) *guard.Guard
+	// onGuardReload, when set, runs after a successful live org-layer
+	// reload (start.go wires the hook-posture re-publish here).
+	onGuardReload func(*guard.Guard)
 
 	mu         sync.Mutex
 	lastReject string
@@ -134,7 +137,7 @@ func (r *policyBundleRunner) handleRejection(res orgclient.PolicyResult) {
 	for i := range verdicts {
 		gd.MaybeAlert(verdicts[i])
 	}
-	r.logger.Warn("org policy: bundle REJECTED — running on previous policy",
+	r.logger.Warn("org policy: bundle REJECTED - running on previous policy",
 		"version", res.Version, "detail", res.Detail, "rule", "R-205")
 }
 
@@ -167,11 +170,14 @@ func (r *policyBundleRunner) reloadGuardLayer(res orgclient.PolicyResult, diverg
 			"running", running, "cached", res.CachedVersion)
 	}
 	if err := gd.ReloadOrgLayer(ctx); err != nil {
-		r.logger.Warn("org policy: live reload failed — running on previous policy until restart",
+		r.logger.Warn("org policy: live reload failed - running on previous policy until restart",
 			"version", res.Version, "err", err)
 		return
 	}
 	r.logger.Info("org policy: applied to live engine (no restart)", "version", res.Version)
+	if r.onGuardReload != nil {
+		r.onGuardReload(gd)
+	}
 }
 
 // orgRunningVersion returns the guard's live org-layer version as an

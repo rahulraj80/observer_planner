@@ -53,6 +53,7 @@ func detectTrivialModelOverprovisioning(f *Facts, t Thresholds) []Suggestion {
 		return nil
 	}
 	return []Suggestion{{
+		// no-bare-usd:allow (advisor prose; masked on every surface under the token display)
 		DedupKey: "trivial_model_overprovisioning|window",
 		Detector: "trivial_model_overprovisioning",
 		Category: CategoryCost,

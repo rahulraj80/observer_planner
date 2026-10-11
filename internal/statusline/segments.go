@@ -28,7 +28,34 @@ type DaemonTile struct {
 	// today; carried for a future segment kind without requiring a
 	// DaemonTile shape change (CLAUDE.md #6, additive).
 	CacheReadShare *float64
+	// Budget is the node's org budget warning, already rendered short by
+	// the caller from the daemon's budget-status file (e.g. "budget 96% of
+	// $0.75/day"). nil = no org window at a warn rung, and the segment is
+	// omitted (never a "0%").
+	Budget *string
+	// CostDisplay is the node's developer cost display, resolved by the
+	// daemon from the org's signed display policy: CostDisplayTokens renders
+	// the session/today segments as token usage (TodayTokens /
+	// SessionTokens) and never a dollar figure, not even Claude Code's own
+	// stdin cost. Anything else (including "", an older daemon) is dollars.
+	CostDisplay string
+	// TodayTokens / SessionTokens are the token usage behind TodayUSD /
+	// SessionUSD (input + output + cache read + cache creation). nil =
+	// unknown, and the segment is omitted in token mode.
+	TodayTokens   *int64
+	SessionTokens *int64
+	// Grants is the org access grants in force on this node, already
+	// rendered short by the caller (e.g. "1 exception, 3h left"). nil = none,
+	// and the segment is omitted (request-grants design G6).
+	Grants *string
 }
+
+// CostDisplayTokens is the token-usage developer cost display
+// (orgcontract.DisplayCostTokens, restated: this package is pure).
+const CostDisplayTokens = "tokens"
+
+// tokenMode reports whether the tile asks for token usage instead of dollars.
+func (t DaemonTile) tokenMode() bool { return t.CostDisplay == CostDisplayTokens }
 
 // The segment-kind vocabulary accepted by RenderOptions.Segments and
 // the [statusline].segments config key (plan §1.2, §6.3). Unknown
@@ -54,6 +81,12 @@ const (
 	// SegmentModel renders the current model's display name (falling
 	// back to its raw id), sourced from Input.Model.
 	SegmentModel = "model"
+	// SegmentBudget renders DaemonTile.Budget: the node's org budget
+	// warning while a warn rung is reached (2026-10-02 budget-latency arc).
+	SegmentBudget = "budget"
+	// SegmentGrants renders DaemonTile.Grants: the org exceptions in force
+	// on this node and when the nearest one ends (request-grants G6).
+	SegmentGrants = "grants"
 )
 
 // DefaultSegments is the default ordered segment list (plan §1.2 "wordmark,
@@ -61,7 +94,39 @@ const (
 // decision lock for §9.2/§9.3: the full set including "today"). Render
 // falls back to this list whenever RenderOptions.Segments is empty, so a
 // caller need not repeat the default just to get it.
-var DefaultSegments = []string{SegmentWordmark, SegmentSession, SegmentToday, SegmentModel}
+//
+// SegmentBudget joined the default (2026-10-02): it renders only while an org
+// budget window is at a warn rung, so a node with no org budget sees the
+// exact pre-change line.
+//
+// SegmentGrants joined the default with the request-grants design: it renders
+// only while an org exception is in force, so every other node sees the
+// exact pre-change line.
+var DefaultSegments = []string{SegmentWordmark, SegmentSession, SegmentToday, SegmentModel, SegmentBudget, SegmentGrants}
+
+// renderGrantsSegment renders the "grants" segment kind from the tile.
+func renderGrantsSegment(tile DaemonTile) (string, bool) {
+	if tile.Grants == nil {
+		return "", false
+	}
+	text := sanitizeControls(*tile.Grants)
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// renderBudgetSegment renders the "budget" segment kind from the tile.
+func renderBudgetSegment(tile DaemonTile) (string, bool) {
+	if tile.Budget == nil {
+		return "", false
+	}
+	text := sanitizeControls(*tile.Budget)
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
 
 // maxModelWidth is the longest a model-name segment is allowed to display
 // before truncation with an ellipsis — long enough for the model names
@@ -86,7 +151,17 @@ type segment struct {
 // the product's existing list-price framing — plan §4.1) and falls back
 // to the daemon's own session-scoped figure when stdin didn't supply one.
 // Returns ok=false (segment omitted) when neither source has a value.
+//
+// In token mode (tile.CostDisplay) it renders the daemon's session token
+// usage ("180k tok session") and never the stdin dollar figure; with no
+// daemon figure the segment is omitted.
 func renderSessionSegment(in Input, tile DaemonTile) (string, bool) {
+	if tile.tokenMode() {
+		if tile.SessionTokens == nil {
+			return "", false
+		}
+		return formatTokens(*tile.SessionTokens) + " tok session", true
+	}
 	if in.Cost != nil && in.Cost.TotalCostUSD != nil {
 		return formatUSD(*in.Cost.TotalCostUSD) + " session", true
 	}
@@ -100,6 +175,12 @@ func renderSessionSegment(in Input, tile DaemonTile) (string, bool) {
 // sourced from the daemon tile. Returns ok=false (segment omitted) when
 // the daemon path never produced a figure (plan §2.3 cases 1/2/3/4).
 func renderTodaySegment(tile DaemonTile) (string, bool) {
+	if tile.tokenMode() {
+		if tile.TodayTokens == nil {
+			return "", false
+		}
+		return formatTokens(*tile.TodayTokens) + " tok today", true
+	}
 	if tile.TodayUSD == nil {
 		return "", false
 	}
@@ -175,7 +256,31 @@ func formatUSD(v float64) string {
 		abs = -abs
 	}
 	if abs < 100 {
+		// no-bare-usd:allow (dollar view only; the token display renders the token figures)
 		return "$" + strconv.FormatFloat(v, 'f', 2, 64)
 	}
 	return fmt.Sprintf("$%.0f", v)
+}
+
+// formatTokens renders a token count for the narrow statusline format, the
+// token-mode counterpart of formatUSD: exact below 1,000 ("950"), thousands
+// with one decimal below 10k ("1.2k") and whole thousands above ("180k"),
+// millions with one decimal below 10M ("1.2M") and whole millions above
+// ("42M"). Rounded, never negative.
+func formatTokens(n int64) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n < 1_000:
+		return strconv.FormatInt(n, 10)
+	case n < 9_950:
+		return strconv.FormatFloat(float64(n)/1e3, 'f', 1, 64) + "k"
+	case n < 999_500:
+		return strconv.FormatFloat(float64(n)/1e3, 'f', 0, 64) + "k"
+	case n < 9_950_000:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	default:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 0, 64) + "M"
+	}
 }

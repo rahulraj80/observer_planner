@@ -5,6 +5,8 @@ import { Icon } from "./Icon";
 import { DUR, prefersReducedMotion } from "../lib/motion";
 import { focusableWithin, trapTarget } from "../lib/focusTrap";
 import { lockScroll } from "../lib/scrollLock";
+import { overlayClosesOn } from "../lib/overlayEscape";
+import { STABLE_SCROLL_Y } from "../lib/scroll";
 
 // Modal: the one centred dialog for every app (SlideOver's sibling; the
 // hand-rolled `fixed inset-0` dialogs folded into it). Same contract as
@@ -89,7 +91,9 @@ export function Modal({
   useEffect(() => {
     if (!open || !dismissible) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // Same rule as SlideOver: an Escape a control inside the card
+      // already handled (defaultPrevented) is not ours.
+      if (overlayClosesOn(e)) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -114,8 +118,16 @@ export function Modal({
 
   if (!render) return null;
 
+  // grid-cols-[minmax(0,1fr)]: the single grid column is the padded viewport
+  // width, never the card's `width`. With the implicit `auto` column the
+  // track grew to fit a 440px/520px card, so the card's `maxWidth: 100%`
+  // resolved against the oversized track and the dialog ran off the right
+  // edge of a phone-width window (375px).
   return (
-    <div className="fixed inset-0 grid place-items-center p-4 sm:p-6" style={{ zIndex }}>
+    <div
+      className="fixed inset-0 grid grid-cols-[minmax(0,1fr)] place-items-center p-4 sm:p-6"
+      style={{ zIndex }}
+    >
       <div
         aria-hidden
         onClick={dismissible ? onClose : undefined}
@@ -163,7 +175,7 @@ export function Modal({
             )}
           </header>
         )}
-        <div className={clsx("min-h-0 flex-1 overflow-y-auto", bodyClassName)}>{children}</div>
+        <div className={clsx("min-h-0 flex-1", STABLE_SCROLL_Y, bodyClassName)}>{children}</div>
         {footer && (
           <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line-1 px-5 py-3">
             {footer}

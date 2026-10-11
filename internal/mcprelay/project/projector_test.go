@@ -36,6 +36,9 @@ type fakeWriter struct {
 	// binding (a buggy writer the projector must refuse).
 	ignoreBind bool
 	stageErr   error
+	// dropOwned makes Stage omit one entry's owned digest (a buggy writer
+	// the projector must refuse).
+	dropOwned  string
 	commitErr  error
 	revertErr  error
 	commits    int
@@ -114,7 +117,79 @@ func (w *fakeWriter) Stage(_ context.Context, c Client, desired Desired) (Staged
 	doc["mcpServers"] = servers
 	st.After, _ = json.Marshal(doc)
 	st.Changed = len(st.Wrapped) > 0 || len(st.RemoteKeys) > 0
+	remoteNames := map[string]bool{}
+	for _, r := range desired.Remote {
+		remoteNames[r.Name] = true
+	}
+	st.Owned = ownedOf(servers, func(k string) RowKind {
+		if remoteNames[k] {
+			return RowRemote
+		}
+		return RowStdioWrap
+	}, true)
+	if w.dropOwned != "" {
+		delete(st.Owned, w.dropOwned)
+	}
 	return st, nil
+}
+
+// ownedOf computes the owned digests of the servers the kind function
+// names: a remote entry whole, a stdio entry by its launch (only when it
+// is the wrapper, if wrapperOnly).
+func ownedOf(servers map[string]any, kind func(string) RowKind, wrapperOnly bool) map[string]string {
+	out := map[string]string{}
+	for k, v := range servers {
+		e, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		if kind(k) == RowRemote {
+			out[k] = OwnedRemoteDigest(k, e)
+			continue
+		}
+		cmd, _ := e["command"].(string)
+		if cmd == "" {
+			continue
+		}
+		var args []string
+		if ss, ok := e["args"].([]string); ok {
+			args = ss
+		}
+		for _, a := range asSlice(e["args"]) {
+			args = append(args, fmt.Sprint(a))
+		}
+		if wrapperOnly && !IsWrapper(cmd, args, WrapSpec{Command: cmd}) {
+			continue
+		}
+		out[k] = OwnedStdioDigest(k, cmd, args)
+	}
+	return out
+}
+
+func (w *fakeWriter) Owned(_ context.Context, c Client, rows []JournalRow) (map[string]string, error) {
+	if _, ok := w.d.files[c.ConfigPath]; !ok {
+		return nil, errors.New("absent")
+	}
+	_, servers, _ := w.load(c.ConfigPath)
+	kinds := map[string]RowKind{}
+	for _, r := range rows {
+		kinds[r.EntryKey] = r.Kind()
+	}
+	in := map[string]any{}
+	for k := range kinds {
+		if v, ok := servers[k]; ok {
+			in[k] = v
+		}
+	}
+	return ownedOf(in, func(k string) RowKind { return kinds[k] }, false), nil
+}
+
+// ownedFn is VerifyApplied's seam over a fake writer.
+func ownedFn(w *fakeWriter) OwnedDigestsFunc {
+	return func(c Client, rows []JournalRow) (map[string]string, bool) {
+		m, err := w.Owned(context.Background(), c, rows)
+		return m, err == nil
+	}
 }
 
 func asSlice(v any) []any {
@@ -163,27 +238,31 @@ func (w *fakeWriter) Revert(_ context.Context, c Client, rows []JournalRow) erro
 			servers[r.EntryKey] = e
 		}
 	}
-	doc["mcpServers"] = servers
+	if len(servers) == 0 {
+		delete(doc, "mcpServers")
+	} else {
+		doc["mcpServers"] = servers
+	}
+	if len(doc) == 0 {
+		delete(w.d.files, c.ConfigPath)
+		return nil
+	}
 	after, _ := json.Marshal(doc)
 	w.d.files[c.ConfigPath] = after
 	return nil
 }
 
-// fakeJournal is the in-memory mcp_relay_launch_spec + backup-file seam.
+// fakeJournal is the in-memory mcp_relay_launch_spec seam.
 type fakeJournal struct {
-	d          *disk
-	rows       map[string]JournalRow
-	backups    map[string][]byte
-	backupN    int
-	backupErr  error
-	putErr     error
-	putErrOn   string // entry key that fails ("" = every put)
-	puts       int
-	restoreErr error
+	d        *disk
+	rows     map[string]JournalRow
+	putErr   error
+	putErrOn string // entry key that fails ("" = every put)
+	puts     int
 }
 
 func newFakeJournal(d *disk) *fakeJournal {
-	return &fakeJournal{d: d, rows: map[string]JournalRow{}, backups: map[string][]byte{}}
+	return &fakeJournal{d: d, rows: map[string]JournalRow{}}
 }
 
 func (j *fakeJournal) List(context.Context) ([]JournalRow, error) {
@@ -220,44 +299,13 @@ func (j *fakeJournal) Delete(_ context.Context, tool, path, key string) error {
 	return nil
 }
 
-func (j *fakeJournal) Backup(_ context.Context, c Client, original []byte) (string, string, error) {
-	j.d.log = append(j.d.log, "backup:"+c.Tool)
-	if j.backupErr != nil {
-		return "", "", j.backupErr
+// jsonSame reports two JSON documents decode to the same value.
+func jsonSame(a, b []byte) bool {
+	var va, vb any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return false
 	}
-	j.backupN++
-	p := fmt.Sprintf("bak:%s:%d", c.Tool, j.backupN)
-	if original == nil {
-		j.backups[p] = nil
-		p += ".absent"
-		j.backups[p] = nil
-	} else {
-		j.backups[p] = append([]byte(nil), original...)
-	}
-	return p, sha(original), nil
-}
-
-func (j *fakeJournal) RestoreWhole(_ context.Context, c Client, row JournalRow) error {
-	j.d.log = append(j.d.log, "restorewhole:"+c.Tool)
-	if j.restoreErr != nil {
-		return j.restoreErr
-	}
-	if row.AppliedSHA256 == "" {
-		return ErrNoAppliedDigest
-	}
-	raw, ok := j.backups[row.BackupPath]
-	if !ok || sha(raw) != row.BackupSHA256 {
-		return errors.New("backup mismatch")
-	}
-	if sha(j.d.files[c.ConfigPath]) != row.AppliedSHA256 {
-		return fmt.Errorf("%w: %s", ErrConfigChanged, c.ConfigPath)
-	}
-	if strings.HasSuffix(row.BackupPath, ".absent") {
-		delete(j.d.files, c.ConfigPath)
-		return nil
-	}
-	j.d.files[c.ConfigPath] = append([]byte(nil), raw...)
-	return nil
+	return fmt.Sprint(va) == fmt.Sprint(vb)
 }
 
 var (
@@ -339,10 +387,11 @@ func TestPlanTable(t *testing.T) {
 	}
 }
 
-// TestApplySequenceJournalsBeforeWrite pins the §12.1 order per client
-// (stage -> backup -> journal rows -> commit), the row shapes (env KEY
-// names only, never the value; the remote sentinel), the applied digest,
-// and that observer's own server / a remote sibling are never wrapped.
+// TestApplySequenceJournalsBeforeWrite pins the order per client (stage ->
+// journal rows -> commit, no backup step: T-397), the row shapes (env KEY
+// names only, never the value; the remote sentinel), the OWNED digest (never
+// a whole-file digest), and that observer's own server / a remote sibling
+// are never wrapped.
 func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 	ctx := context.Background()
 	d, w, j, p := newEnv(t)
@@ -359,20 +408,17 @@ func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 		t.Fatalf("receipts %+v", rep.Receipts)
 	}
 	cc, cu := rep.Receipts[0], rep.Receipts[1]
-	if !cc.Changed || cc.Err != "" || len(cc.Wrapped) != 0 || len(cc.Remote) != 1 || cc.BackupPath == "" {
+	if !cc.Changed || cc.Err != "" || len(cc.Wrapped) != 0 || len(cc.Remote) != 1 {
 		t.Fatalf("claude receipt %+v", cc)
 	}
-	if !cu.Changed || cu.Err != "" || strings.Join(cu.Wrapped, ",") != "fs,gh" || len(cu.Remote) != 1 || cu.BackupPath == "" {
+	if !cu.Changed || cu.Err != "" || strings.Join(cu.Wrapped, ",") != "fs,gh" || len(cu.Remote) != 1 {
 		t.Fatalf("cursor receipt %+v", cu)
 	}
-	if cu.AppliedSHA256 != sha(d.files[cursor.ConfigPath]) {
-		t.Fatal("applied digest is not the digest of the bytes written")
-	}
-	// Order per client: stage, backup, put..., commit - never a commit
-	// before its rows, never a row before its backup.
+	// Order per client: stage, put..., commit - never a commit before its
+	// rows, and no backup of the client config at any step.
 	want := []string{
-		"stage:claude-code", "backup:claude-code", "put:claude-code/superbased-gh", "commit:claude-code",
-		"stage:cursor", "backup:cursor", "put:cursor/fs", "put:cursor/gh", "put:cursor/superbased-gh", "commit:cursor",
+		"stage:claude-code", "put:claude-code/superbased-gh", "commit:claude-code",
+		"stage:cursor", "put:cursor/fs", "put:cursor/gh", "put:cursor/superbased-gh", "commit:cursor",
 	}
 	if got := strings.Join(d.log, " "); got != strings.Join(want, " ") {
 		t.Fatalf("seam order:\n got %s\nwant %s", got, strings.Join(want, " "))
@@ -382,8 +428,14 @@ func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 		t.Fatalf("rows %d: %+v", len(rows), rows)
 	}
 	for _, r := range rows {
-		if r.ConfigGeneration != 1 || r.AppliedSHA256 == "" || r.BackupPath == "" || r.AppliedAt.IsZero() {
+		if r.ConfigGeneration != 1 || r.AppliedSHA256 == "" || r.BackupPath != "" || r.BackupSHA256 != "" || r.AppliedAt.IsZero() {
 			t.Fatalf("row shape %+v", r)
+		}
+		// Never a derivative of the whole (credential-bearing) file.
+		for _, whole := range [][]byte{d.files[r.ConfigPath], []byte(cursorPrior)} {
+			if r.AppliedSHA256 == sha(whole) {
+				t.Fatalf("row %s stores a whole-file digest", r.EntryKey)
+			}
 		}
 		raw, _ := json.Marshal(r)
 		if strings.Contains(string(raw), "SECRETVALUE") {
@@ -393,6 +445,9 @@ func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 		case "gh":
 			if r.Kind() != RowStdioWrap || r.OrigCommand != "npx" || strings.Join(r.OrigArgs, " ") != "-y gh-mcp" || strings.Join(r.OrigEnvRefs, ",") != "GITHUB_TOKEN" {
 				t.Fatalf("gh row %+v", r)
+			}
+			if r.AppliedSHA256 != OwnedStdioDigest("gh", wrap.Command, WrapArgs("cursor", "gh", wrap)) {
+				t.Fatalf("gh owned digest is not the digest of the wrapper launch: %+v", r)
 			}
 		case "fs":
 			if r.OrigCwd != "/repo" || r.OrigCommand != "/opt/fs" {
@@ -404,15 +459,6 @@ func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 			}
 		default:
 			t.Fatalf("unexpected row %+v", r)
-		}
-	}
-	// The cursor rows share ONE backup holding the verbatim original.
-	for _, r := range rows {
-		if r.Tool != "cursor" {
-			continue
-		}
-		if string(j.backups[r.BackupPath]) != cursorPrior || r.BackupSHA256 != sha([]byte(cursorPrior)) {
-			t.Fatalf("backup %q for %+v", j.backups[r.BackupPath], r)
 		}
 	}
 	// The file: gh + fs wrapped (env VALUE still there for the client to
@@ -429,7 +475,7 @@ func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 	}
 
 	// Idempotent: same desired state again => nothing staged as changed, no
-	// backup, no row, no commit.
+	// row, no commit.
 	d.log = nil
 	rep2, err := p.Apply(ctx, []Client{claude, cursor}, desiredAll)
 	if err != nil {
@@ -440,8 +486,8 @@ func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 			t.Fatalf("second apply must be a no-op: %+v", r)
 		}
 	}
-	if j.puts != 4 || w.commits != 2 || j.backupN != 2 || strings.Contains(strings.Join(d.log, " "), "backup") {
-		t.Fatalf("second apply touched the journal: puts=%d commits=%d backups=%d log=%v", j.puts, w.commits, j.backupN, d.log)
+	if j.puts != 4 || w.commits != 2 {
+		t.Fatalf("second apply touched the journal: puts=%d commits=%d log=%v", j.puts, w.commits, d.log)
 	}
 	// Fingerprint is order-independent over the remote set.
 	rev := Desired{Wrap: &wrap, Remote: []RemoteEntry{{Name: "b", URL: "https://b"}, {Name: "a", URL: "https://a"}}}
@@ -451,9 +497,9 @@ func TestApplySequenceJournalsBeforeWrite(t *testing.T) {
 	}
 }
 
-// TestApplyCrashBoundaries: a failure at each of the three §12.1 steps
-// leaves the config untouched, and a re-run completes the projection
-// under the SAME backup (first write wins) - the recovery §12.1 names.
+// TestApplyCrashBoundaries: a failure at either step (journal row, commit)
+// leaves the config untouched, and a re-run completes the projection - the
+// recovery §12.1 names - with the generation unchanged.
 func TestApplyCrashBoundaries(t *testing.T) {
 	ctx := context.Background()
 	if _, err := (&Projector{Writer: &fakeWriter{d: newDisk()}}).Apply(ctx, []Client{claude}, desiredAll); !errors.Is(err, ErrNoJournal) {
@@ -470,9 +516,8 @@ func TestApplyCrashBoundaries(t *testing.T) {
 		rows    int // rows left after the failed apply
 		errPart string
 	}{
-		{"step 1 backup fails: no row, no write", func(_ *fakeWriter, j *fakeJournal) { j.backupErr = boom }, func(_ *fakeWriter, j *fakeJournal) { j.backupErr = nil }, 0, "backup:"},
-		{"step 2 journal row fails: no write", func(_ *fakeWriter, j *fakeJournal) { j.putErr = boom; j.putErrOn = "gh" }, func(_ *fakeWriter, j *fakeJournal) { j.putErr = nil }, 1, "journal gh:"},
-		{"step 3 commit fails: rows retained, file untouched", func(w *fakeWriter, _ *fakeJournal) { w.commitErr = boom }, func(w *fakeWriter, _ *fakeJournal) { w.commitErr = nil }, 3, "commit:"},
+		{"step 1 journal row fails: no write", func(_ *fakeWriter, j *fakeJournal) { j.putErr = boom; j.putErrOn = "gh" }, func(_ *fakeWriter, j *fakeJournal) { j.putErr = nil }, 1, "journal gh:"},
+		{"step 2 commit fails: rows retained, file untouched", func(w *fakeWriter, _ *fakeJournal) { w.commitErr = boom }, func(w *fakeWriter, _ *fakeJournal) { w.commitErr = nil }, 3, "commit:"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -494,7 +539,7 @@ func TestApplyCrashBoundaries(t *testing.T) {
 			if len(rows) != tc.rows {
 				t.Fatalf("rows after failure = %d, want %d", len(rows), tc.rows)
 			}
-			// Recovery: re-run completes under the same backup.
+			// Recovery: re-run completes.
 			tc.disarm(w, j)
 			rep, err = p.Apply(ctx, []Client{cursor}, desiredAll)
 			if err != nil || !rep.Receipts[0].Changed || rep.Receipts[0].Err != "" {
@@ -505,18 +550,17 @@ func TestApplyCrashBoundaries(t *testing.T) {
 				t.Fatalf("rows after recovery %d", len(rows))
 			}
 			for _, row := range rows {
-				if row.ConfigGeneration != 1 || row.BackupSHA256 != sha([]byte(cursorPrior)) || string(j.backups[row.BackupPath]) != cursorPrior || row.AppliedSHA256 != sha(d.files[cursor.ConfigPath]) {
+				if row.ConfigGeneration != 1 || row.BackupPath != "" || row.AppliedSHA256 == "" {
 					t.Fatalf("recovered row %+v", row)
 				}
 			}
 			if s := serversOf(t, d.files[cursor.ConfigPath]); s["gh"]["command"] != wrap.Command {
 				t.Fatal("not wrapped after recovery")
 			}
-			// The recovered group is still ONE write event (a retry of an
-			// unlanded write keeps generation 1), so a disable restores it
-			// byte-identically.
+			// A disable reverses exactly the relay-owned entries back to the
+			// pre-relay values.
 			recs, rerr := p.Restore(ctx)
-			if rerr != nil || len(recs) != 1 || recs[0].Mode != RestoreWholeFile || string(d.files[cursor.ConfigPath]) != cursorPrior {
+			if rerr != nil || len(recs) != 1 || recs[0].Mode != RestoreReversal || !jsonSame(d.files[cursor.ConfigPath], []byte(cursorPrior)) {
 				t.Fatalf("restore after recovery: %+v %v %s", recs, rerr, d.files[cursor.ConfigPath])
 			}
 		})
@@ -530,6 +574,17 @@ func TestApplyCrashBoundaries(t *testing.T) {
 		t.Fatalf("%+v", rep.Receipts[0])
 	}
 	_ = j
+	// A writer that omits an owned digest: the write is refused.
+	d3, w3, j3, p3 := newEnv(t)
+	d3.files[cursor.ConfigPath] = []byte(cursorPrior)
+	w3.dropOwned = "gh"
+	rep, _ = p3.Apply(ctx, []Client{cursor}, desiredAll)
+	if rep.Receipts[0].Changed || !strings.Contains(rep.Receipts[0].Err, "no owned digest") || w3.commits != 0 {
+		t.Fatalf("missing owned digest not refused: %+v", rep.Receipts[0])
+	}
+	if rows, _ := j3.List(ctx); len(rows) != 0 {
+		t.Fatalf("rows journaled for a refused stage: %+v", rows)
+	}
 	// A stage failure is per client; the loop continues.
 	d2, w2, _, p2 := newEnv(t)
 	d2.files[cursor.ConfigPath] = []byte(cursorPrior)
@@ -540,12 +595,13 @@ func TestApplyCrashBoundaries(t *testing.T) {
 	}
 }
 
-// TestRestoreRuleTable is the restore decision table's one-case-per-row
-// test plus the CAS fallback: untouched -> whole-file byte-identical; an
-// edit between projection and disable -> whole-file REFUSED, reversal
-// applied, the edit preserved; a pre-132 row -> reversal; several write
-// events -> reversal; a refused reversal keeps the rows.
-func TestRestoreRuleTable(t *testing.T) {
+// TestRestoreReversesOnlyRelayOwnedEntries is the restore table's case per
+// shape (T-397: reversal only, no whole-file mode): untouched -> the
+// pre-relay values come back and a config the relay created is removed;
+// edited after projection -> the edit is preserved; a legacy row from an
+// older build (whole-file digest + backup reference) -> the same reversal,
+// the backup never read; a refused reversal keeps the rows.
+func TestRestoreReversesOnlyRelayOwnedEntries(t *testing.T) {
 	ctx := context.Background()
 	project := func(t *testing.T) (*disk, *fakeWriter, *fakeJournal, *Projector) {
 		t.Helper()
@@ -556,7 +612,7 @@ func TestRestoreRuleTable(t *testing.T) {
 		}
 		return d, w, j, p
 	}
-	t.Run("untouched: whole-file byte-identical, absent file removed", func(t *testing.T) {
+	t.Run("untouched: values back, relay-created file removed", func(t *testing.T) {
 		d, _, j, p := project(t)
 		recs, err := p.Restore(ctx)
 		if err != nil {
@@ -566,43 +622,35 @@ func TestRestoreRuleTable(t *testing.T) {
 			t.Fatalf("%+v", recs)
 		}
 		for _, r := range recs {
-			if !r.Restored || r.Mode != RestoreWholeFile || r.Rule != "single_write_event" || r.Note != "" {
+			if !r.Restored || r.Mode != RestoreReversal || r.Rule != "relay_owned_reversal" || r.Note != "" {
 				t.Fatalf("%+v", r)
 			}
 		}
-		if string(d.files[cursor.ConfigPath]) != cursorPrior {
-			t.Fatalf("not byte-identical: %s", d.files[cursor.ConfigPath])
+		if !jsonSame(d.files[cursor.ConfigPath], []byte(cursorPrior)) {
+			t.Fatalf("values not restored: %s", d.files[cursor.ConfigPath])
 		}
 		if _, ok := d.files[claude.ConfigPath]; ok {
-			t.Fatal("claude config must be removed (did not exist before)")
+			t.Fatal("claude config must be removed (the relay created it and nothing else is left)")
 		}
 		if rows, _ := j.List(ctx); len(rows) != 0 {
 			t.Fatalf("rows not deleted: %+v", rows)
 		}
 	})
-	t.Run("edited after projection: whole-file refused, reversal preserves the edit", func(t *testing.T) {
+	t.Run("edited after projection: reversal preserves the edit", func(t *testing.T) {
 		d, _, j, p := project(t)
 		var doc map[string]any
 		_ = json.Unmarshal(d.files[cursor.ConfigPath], &doc)
 		doc["theme"] = "light"
 		doc["mcpServers"].(map[string]any)["added-later"] = map[string]any{"command": "/opt/new"}
 		d.files[cursor.ConfigPath], _ = json.Marshal(doc)
-		d.log = nil
 		recs, err := p.Restore(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var cu RestoreReceipt
 		for _, r := range recs {
-			if r.Client.Tool == "cursor" {
-				cu = r
+			if !r.Restored || r.Mode != RestoreReversal {
+				t.Fatalf("%+v", r)
 			}
-		}
-		if !cu.Restored || cu.Mode != RestoreReversal || cu.Rule != "single_write_event" || !strings.Contains(cu.Note, "whole-file restore refused") {
-			t.Fatalf("%+v", cu)
-		}
-		if !strings.Contains(strings.Join(d.log, " "), "restorewhole:cursor revert:cursor") {
-			t.Fatalf("expected whole-file attempt then reversal: %v", d.log)
 		}
 		s := serversOf(t, d.files[cursor.ConfigPath])
 		if s["gh"]["command"] != "npx" || fmt.Sprint(s["gh"]["args"]) != "[-y gh-mcp]" || s["fs"]["command"] != "/opt/fs" {
@@ -623,73 +671,26 @@ func TestRestoreRuleTable(t *testing.T) {
 			t.Fatalf("rows not deleted after reversal: %+v", rows)
 		}
 	})
-	t.Run("pre-132 row: reversal, never whole-file", func(t *testing.T) {
+	t.Run("legacy rows (whole-file digest, backup reference): same reversal", func(t *testing.T) {
 		d, _, j, p := project(t)
 		for k, r := range j.rows {
-			if r.Tool == "cursor" {
-				r.AppliedSHA256 = ""
-				j.rows[k] = r
-			}
+			r.AppliedSHA256, r.BackupPath, r.BackupSHA256 = sha(d.files[r.ConfigPath]), "bak:legacy", sha([]byte(cursorPrior))
+			j.rows[k] = r
 		}
-		d.log = nil
-		recs, _ := p.Restore(ctx)
-		for _, r := range recs {
-			if r.Client.Tool == "cursor" && (r.Rule != "legacy_row_no_applied_digest" || r.Mode != RestoreReversal || !r.Restored) {
-				t.Fatalf("%+v", r)
-			}
-		}
-		if strings.Contains(strings.Join(d.log, " "), "restorewhole:cursor") {
-			t.Fatal("whole-file restore attempted on a legacy row")
-		}
-	})
-	t.Run("several write events: reversal", func(t *testing.T) {
-		d, _, j, p := project(t)
-		// A second write event: the operator adds a stdio server, the daemon
-		// re-projects (new row, new backup holding already-wrapped entries).
-		var doc map[string]any
-		_ = json.Unmarshal(d.files[cursor.ConfigPath], &doc)
-		doc["mcpServers"].(map[string]any)["later"] = map[string]any{"command": "/opt/later"}
-		d.files[cursor.ConfigPath], _ = json.Marshal(doc)
-		if _, err := p.Apply(ctx, []Client{cursor}, desiredAll); err != nil {
-			t.Fatal(err)
-		}
-		rows, _ := j.List(ctx)
-		if len(rows) != 5 {
-			t.Fatalf("rows %d", len(rows))
-		}
-		// Un-wrap gh by hand and re-project: the file no longer holds the
-		// pre-relay bytes, so this IS a new write event -> generation 2.
-		_ = json.Unmarshal(d.files[cursor.ConfigPath], &doc)
-		doc["mcpServers"].(map[string]any)["gh"] = map[string]any{"command": "npx", "args": []any{"-y", "gh-mcp"}}
-		d.files[cursor.ConfigPath], _ = json.Marshal(doc)
-		if _, err := p.Apply(ctx, []Client{cursor}, desiredAll); err != nil {
-			t.Fatal(err)
-		}
-		rows, _ = j.List(ctx)
-		for _, r := range rows {
-			if r.EntryKey == "gh" && r.ConfigGeneration != 2 {
-				t.Fatalf("re-wrap after the file changed must bump the generation: %+v", r)
-			}
-		}
-		d.log = nil
 		recs, err := p.Restore(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, r := range recs {
-			if r.Client.Tool == "cursor" && (r.Rule != "multi_write_event" || r.Mode != RestoreReversal || !r.Restored) {
+			if !r.Restored || r.Rule != "relay_owned_reversal" {
 				t.Fatalf("%+v", r)
 			}
 		}
-		if strings.Contains(strings.Join(d.log, " "), "restorewhole:cursor") {
-			t.Fatal("whole-file restore attempted over several write events (would drop the later server)")
-		}
-		s := serversOf(t, d.files[cursor.ConfigPath])
-		if s["later"]["command"] != "/opt/later" || s["gh"]["command"] != "npx" {
-			t.Fatalf("%v", s)
+		if !jsonSame(d.files[cursor.ConfigPath], []byte(cursorPrior)) {
+			t.Fatalf("legacy group not reversed: %s", d.files[cursor.ConfigPath])
 		}
 	})
-	t.Run("refused reversal keeps rows and backup", func(t *testing.T) {
+	t.Run("refused reversal keeps rows", func(t *testing.T) {
 		d, w, j, p := project(t)
 		d.files[cursor.ConfigPath] = append(d.files[cursor.ConfigPath], ' ')
 		w.revertErr = fmt.Errorf("%w: %s", ErrConfigChanged, cursor.ConfigPath)
@@ -703,15 +704,47 @@ func TestRestoreRuleTable(t *testing.T) {
 			}
 		}
 		rows, _ := j.List(ctx)
-		if len(rows) != 3 {
+		if len(rows) != 4 {
 			t.Fatalf("rows dropped on a refused restore: %d", len(rows))
-		}
-		if _, ok := j.backups[rows[0].BackupPath]; !ok {
-			t.Fatal("backup dropped on a refused restore")
 		}
 	})
 	if _, err := (&Projector{Writer: &fakeWriter{d: newDisk()}}).Restore(ctx); !errors.Is(err, ErrNoJournal) {
 		t.Fatal(err)
+	}
+}
+
+// TestApplyConvertsLegacyRows: a row an older build wrote (a whole-file
+// digest and a backup reference) does not verify, and the next projection,
+// even one that writes nothing, replaces it with the owned digest and drops
+// the backup reference without bumping the generation.
+func TestApplyConvertsLegacyRows(t *testing.T) {
+	ctx := context.Background()
+	d, w, j, p := newEnv(t)
+	d.files[cursor.ConfigPath] = []byte(cursorPrior)
+	if _, err := p.Apply(ctx, []Client{cursor}, desiredAll); err != nil {
+		t.Fatal(err)
+	}
+	for k, r := range j.rows {
+		r.AppliedSHA256, r.BackupPath, r.BackupSHA256 = sha(d.files[r.ConfigPath]), "bak:legacy", sha([]byte(cursorPrior))
+		j.rows[k] = r
+	}
+	rows, _ := j.List(ctx)
+	if VerifyApplied(rows, ownedFn(w)).Any() {
+		t.Fatal("a whole-file digest verified as an owned digest")
+	}
+	commits := w.commits
+	rep, err := p.Apply(ctx, []Client{cursor}, desiredAll)
+	if err != nil || rep.Receipts[0].Changed || rep.Receipts[0].Err != "" || rep.Receipts[0].Note != "" || w.commits != commits {
+		t.Fatalf("conversion must not rewrite the config: %+v %v", rep.Receipts, err)
+	}
+	rows, _ = j.List(ctx)
+	for _, r := range rows {
+		if r.BackupPath != "" || r.BackupSHA256 != "" || r.ConfigGeneration != 1 {
+			t.Fatalf("legacy row not converted: %+v", r)
+		}
+	}
+	if a := VerifyApplied(rows, ownedFn(w)); !a.StdioApplied("cursor") || !a.RemoteApplied("cursor") {
+		t.Fatalf("converted rows do not verify: %+v", a)
 	}
 }
 
@@ -866,40 +899,32 @@ func TestApplyBindsOrRefusesEveryStdioEntry(t *testing.T) {
 }
 
 // TestVerifyAppliedPerTransport pins finding 3's predicate: separate
-// stdio / remote truth, a row counts only when the config's CURRENT bytes
-// are what the relay wrote.
+// stdio / remote truth, a row counts only when its entry's CURRENT owned
+// part is what the relay wrote (T-397: an edit elsewhere in the file does
+// not matter, an edit to the owned entry does).
 func TestVerifyAppliedPerTransport(t *testing.T) {
 	ctx := context.Background()
-	digestOf := func(d *disk) func(string) (string, bool) {
-		return func(p string) (string, bool) {
-			b, ok := d.files[p]
-			if !ok {
-				return "", false
-			}
-			return sha(b), true
-		}
-	}
 	stdioOnly := `{"mcpServers":{"gh":{"command":"npx"}}}`
 
 	t.Run("stdio-only projection: stdio applied, remote NOT", func(t *testing.T) {
-		d, _, j, p := newEnv(t)
+		d, w, j, p := newEnv(t)
 		d.files[cursor.ConfigPath] = []byte(stdioOnly)
 		if _, err := p.Apply(ctx, []Client{cursor}, Desired{Wrap: &wrap, Approved: approvedAll}); err != nil {
 			t.Fatal(err)
 		}
 		rows, _ := j.List(ctx)
-		a := VerifyApplied(rows, digestOf(d))
+		a := VerifyApplied(rows, ownedFn(w))
 		if !a.StdioApplied("cursor") || a.RemoteApplied("cursor") || !a.Any() || strings.Join(a.Clients(), ",") != "cursor" {
 			t.Fatalf("%+v", a)
 		}
 	})
 	t.Run("remote-only projection: remote applied, stdio NOT", func(t *testing.T) {
-		d, _, j, p := newEnv(t)
+		_, w, j, p := newEnv(t)
 		if _, err := p.Apply(ctx, []Client{claude}, Desired{Remote: remotes}); err != nil {
 			t.Fatal(err)
 		}
 		rows, _ := j.List(ctx)
-		a := VerifyApplied(rows, digestOf(d))
+		a := VerifyApplied(rows, ownedFn(w))
 		if a.StdioApplied("claude-code") || !a.RemoteApplied("claude-code") {
 			t.Fatalf("%+v", a)
 		}
@@ -913,7 +938,7 @@ func TestVerifyAppliedPerTransport(t *testing.T) {
 		if len(rows) == 0 || rep.Receipts[0].Err == "" {
 			t.Fatalf("expected retained rows + a commit error: %+v", rep.Receipts[0])
 		}
-		a := VerifyApplied(rows, digestOf(d))
+		a := VerifyApplied(rows, ownedFn(w))
 		if a.Any() || a.StdioApplied("cursor") || a.RemoteApplied("cursor") {
 			t.Fatalf("a failed commit counted as applied: %+v", a)
 		}
@@ -923,33 +948,41 @@ func TestVerifyAppliedPerTransport(t *testing.T) {
 			t.Fatal("Applied fixture")
 		}
 	})
-	t.Run("edited since, unreadable, pre-132: NOT applied", func(t *testing.T) {
-		d, _, j, p := newEnv(t)
+	t.Run("edit elsewhere still applied; owned entry edited, unreadable, pre-132: NOT applied", func(t *testing.T) {
+		d, w, j, p := newEnv(t)
 		d.files[cursor.ConfigPath] = []byte(stdioOnly)
 		if _, err := p.Apply(ctx, []Client{cursor}, desiredAll); err != nil {
 			t.Fatal(err)
 		}
 		rows, _ := j.List(ctx)
-		d.files[cursor.ConfigPath] = append(d.files[cursor.ConfigPath], ' ')
-		if a := VerifyApplied(rows, digestOf(d)); a.Any() {
-			t.Fatalf("edited config counted: %+v", a)
+		var doc map[string]any
+		_ = json.Unmarshal(d.files[cursor.ConfigPath], &doc)
+		doc["theme"] = "light"
+		d.files[cursor.ConfigPath], _ = json.Marshal(doc)
+		if a := VerifyApplied(rows, ownedFn(w)); !a.StdioApplied("cursor") || !a.RemoteApplied("cursor") {
+			t.Fatalf("an edit outside the owned entries un-applied the projection: %+v", a)
 		}
-		if a := VerifyApplied(rows, func(string) (string, bool) { return "", false }); a.Any() {
+		doc["mcpServers"].(map[string]any)["gh"] = map[string]any{"command": "npx"}
+		d.files[cursor.ConfigPath], _ = json.Marshal(doc)
+		if a := VerifyApplied(rows, ownedFn(w)); a.StdioApplied("cursor") || !a.RemoteApplied("cursor") {
+			t.Fatalf("an unwrapped entry counted: %+v", a)
+		}
+		if a := VerifyApplied(rows, func(Client, []JournalRow) (map[string]string, bool) { return nil, false }); a.Any() {
 			t.Fatal("unreadable config counted")
 		}
 		legacy := append([]JournalRow(nil), rows...)
 		for i := range legacy {
 			legacy[i].AppliedSHA256 = ""
 		}
-		if a := VerifyApplied(legacy, func(string) (string, bool) { return "", true }); a.Any() {
+		if a := VerifyApplied(legacy, func(Client, []JournalRow) (map[string]string, bool) { return map[string]string{}, true }); a.Any() {
 			t.Fatal("pre-132 row counted")
 		}
 		if a := VerifyApplied(rows, nil); a.Any() {
 			t.Fatal("nil digest seam counted")
 		}
 	})
-	t.Run("stdio then remote: earlier rows refreshed, both applied; edit in between is not refreshed", func(t *testing.T) {
-		d, _, j, p := newEnv(t)
+	t.Run("stdio then remote: both applied; an unwrap in between is not vouched for", func(t *testing.T) {
+		d, w, j, p := newEnv(t)
 		d.files[cursor.ConfigPath] = []byte(stdioOnly)
 		if _, err := p.Apply(ctx, []Client{cursor}, Desired{Wrap: &wrap, Approved: approvedAll}); err != nil {
 			t.Fatal(err)
@@ -959,7 +992,7 @@ func TestVerifyAppliedPerTransport(t *testing.T) {
 			t.Fatalf("%+v %v", rep.Receipts, err)
 		}
 		rows, _ := j.List(ctx)
-		a := VerifyApplied(rows, digestOf(d))
+		a := VerifyApplied(rows, ownedFn(w))
 		if !a.StdioApplied("cursor") || !a.RemoteApplied("cursor") {
 			t.Fatalf("second write event lost the stdio row: %+v rows=%+v", a, rows)
 		}
@@ -968,28 +1001,24 @@ func TestVerifyAppliedPerTransport(t *testing.T) {
 				t.Fatalf("refresh bumped a generation: %+v", r)
 			}
 		}
-		// Restore still reverses (two write events, two backups).
 		recs, err := p.Restore(ctx)
-		if err != nil || recs[0].Mode != RestoreReversal || recs[0].Rule != "multi_write_event" {
-			t.Fatalf("restore after refresh: %+v %v", recs, err)
+		if err != nil || recs[0].Mode != RestoreReversal || recs[0].Rule != "relay_owned_reversal" {
+			t.Fatalf("restore: %+v %v", recs, err)
 		}
 
-		d2, _, j2, p2 := newEnv(t)
+		d2, w2, j2, p2 := newEnv(t)
 		d2.files[cursor.ConfigPath] = []byte(stdioOnly)
 		if _, err := p2.Apply(ctx, []Client{cursor}, Desired{Wrap: &wrap, Approved: approvedAll}); err != nil {
 			t.Fatal(err)
 		}
+		rows2, _ := j2.List(ctx)
 		var doc map[string]any
 		_ = json.Unmarshal(d2.files[cursor.ConfigPath], &doc)
-		doc["theme"] = "light"
+		doc["mcpServers"].(map[string]any)["gh"] = map[string]any{"command": "npx"}
 		d2.files[cursor.ConfigPath], _ = json.Marshal(doc)
-		if _, err := p2.Apply(ctx, []Client{cursor}, desiredAll); err != nil {
-			t.Fatal(err)
-		}
-		rows2, _ := j2.List(ctx)
-		a2 := VerifyApplied(rows2, digestOf(d2))
-		if a2.StdioApplied("cursor") || !a2.RemoteApplied("cursor") {
-			t.Fatalf("an edit between write events must not be vouched for: %+v", a2)
+		a2 := VerifyApplied(rows2, ownedFn(w2))
+		if a2.StdioApplied("cursor") {
+			t.Fatalf("a hand-unwrapped entry must not be vouched for: %+v", a2)
 		}
 	})
 }
@@ -1009,7 +1038,7 @@ func TestPreviewNeverJournalsOrWrites(t *testing.T) {
 	if !r.Changed || strings.Join(r.Wrapped, ",") != "gh" || len(r.Refused) != 1 || r.Refused[0].Key != "slack" || rep.Receipts[1].Skipped != "unverified" {
 		t.Fatalf("%+v", rep.Receipts)
 	}
-	if w.commits != 0 || j.puts != 0 || j.backupN != 0 || string(d.files[cursor.ConfigPath]) != prior {
+	if w.commits != 0 || j.puts != 0 || string(d.files[cursor.ConfigPath]) != prior {
 		t.Fatal("preview journaled or wrote")
 	}
 	if _, err := (&Projector{}).Preview(ctx, nil, Desired{}); !errors.Is(err, ErrNoWriter) {

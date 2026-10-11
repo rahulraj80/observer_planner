@@ -2,6 +2,17 @@
 // what ChartShell + Recharts are for. Use for at-a-glance trend
 // indicators in StatCard.
 
+/**
+ * hasSparkline is true when a series draws a sparkline (two or more points;
+ * fewer renders an empty box). StatCard (shared and web2's) and HeroStat
+ * reserve the right-hand gutter the corner sparkline floats in ONLY when
+ * this is true: without a sparkline the sub text gets the tile's full width
+ * (a half-width phone tile no longer squeezes it into a narrow column).
+ */
+export function hasSparkline(spark: readonly number[] | null | undefined): boolean {
+  return spark != null && spark.length >= 2;
+}
+
 export function Sparkline({
   data,
   width = 80,

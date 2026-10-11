@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals_sandbox && !sbo_omit_terminals
+
 package main
 
 import (
@@ -21,8 +23,8 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 	"github.com/marmutapp/superbased-observer/internal/sandbox"
 	"github.com/marmutapp/superbased-observer/internal/sandboxnet"
@@ -38,7 +40,7 @@ import (
 //
 //   - termsvc.Sandboxer      (Prepare): host-side git workspace prep +
 //     sandbox.BuildPlan → the bwrap WrapArgv prefix.
-//   - dashboard.SandboxProber (ProbeSandbox): the fail-soft availability probe
+//   - dashapi.SandboxProber (ProbeSandbox): the fail-soft availability probe
 //     the New Terminal dialog + the fail-closed launch validation read.
 //
 // Neither the pure planner (internal/sandbox) nor the workspace planner
@@ -172,12 +174,12 @@ func (h *sandboxHolder) reload(full config.Config) {
 		msg := err.Error()
 		h.initErr.Store(&msg)
 		if h.logger != nil {
-			h.logger.Warn("terminal sandbox: could not initialize the sandbox runtime — keeping the previous seam", "err", err)
+			h.logger.Warn("terminal sandbox: could not initialize the sandbox runtime - keeping the previous seam", "err", err)
 		}
 		return
 	}
 	if rt.workspacesDir() != h.managedRoot && h.logger != nil {
-		h.logger.Warn("terminal sandbox: [terminal.sandbox].workspaces_dir changed since daemon start — "+
+		h.logger.Warn("terminal sandbox: [terminal.sandbox].workspaces_dir changed since daemon start - "+
 			"live-source launches are unaffected, but a managed workspace (clone/worktree) needs a daemon restart",
 			"boot", h.managedRoot, "config", rt.workspacesDir())
 	}
@@ -213,7 +215,7 @@ func (h *sandboxHolder) refresh() {
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: h.configPath})
 	if err != nil {
 		if h.logger != nil {
-			h.logger.Warn("terminal sandbox: config changed but could not be reloaded — keeping the previous seam", "err", err)
+			h.logger.Warn("terminal sandbox: config changed but could not be reloaded - keeping the previous seam", "err", err)
 		}
 		return
 	}
@@ -240,7 +242,7 @@ func (h *sandboxHolder) stampConfig() {
 // for the daemon's life (see sandboxHolder.managedRoot).
 func (h *sandboxHolder) workspacesDir() string { return h.managedRoot }
 
-// ProbeSandbox implements dashboard.SandboxProber over the live runtime,
+// ProbeSandbox implements dashapi.SandboxProber over the live runtime,
 // distinguishing the THREE honest "no sandbox" states the dialog used to
 // flatten into one string:
 //
@@ -253,20 +255,20 @@ func (h *sandboxHolder) workspacesDir() string { return h.managedRoot }
 //     not a missing capability.
 //   - the probe verdicts (available / backend_missing / backend_too_old /
 //     userns_denied / unsupported_platform) from the runtime itself.
-func (h *sandboxHolder) ProbeSandbox(ctx context.Context) dashboard.SandboxAvailability {
+func (h *sandboxHolder) ProbeSandbox(ctx context.Context) dashapi.SandboxAvailability {
 	h.refresh()
 	if msg := h.initErr.Load(); msg != nil {
-		return dashboard.SandboxAvailability{
+		return dashapi.SandboxAvailability{
 			Available: false,
-			Verdict:   dashboard.VerdictRuntimeInitFailed,
+			Verdict:   dashapi.VerdictRuntimeInitFailed,
 			Reason:    *msg,
 		}
 	}
 	rt := h.rt.Load()
 	if rt == nil {
-		return dashboard.SandboxAvailability{
+		return dashapi.SandboxAvailability{
 			Available: false,
-			Verdict:   dashboard.VerdictDisabledByConfig,
+			Verdict:   dashapi.VerdictDisabledByConfig,
 			Reason:    "[terminal.sandbox].enabled is false on this daemon",
 		}
 	}
@@ -286,7 +288,7 @@ func (h *sandboxHolder) Prepare(ctx context.Context, req termsvc.PrepareRequest)
 	return rt.Prepare(ctx, req)
 }
 
-// sandboxRuntime implements termsvc.Sandboxer and dashboard.SandboxProber over
+// sandboxRuntime implements termsvc.Sandboxer and dashapi.SandboxProber over
 // internal/sandbox + internal/workspace. It is constructed once per daemon in
 // buildTerminalStack, ONLY when [terminal.sandbox].enabled is true — a nil
 // runtime is the honest "feature absent" state both seams fail closed on
@@ -327,21 +329,9 @@ type sandboxRuntime struct {
 	guardPolicyPaths []sandbox.ProtectedPath
 
 	mu       sync.Mutex
-	cached   dashboard.SandboxAvailability
+	cached   dashapi.SandboxAvailability
 	cachedAt time.Time
 	now      func() time.Time
-}
-
-// defaultWorkspacesDir resolves the managed-workspaces root: the explicit
-// [terminal.sandbox].workspaces_dir when set, else <observerDir>/workspaces.
-// The one owner of that default, shared by the runtime and the `observer
-// workspaces` CLI (no symlink resolution here — callers canonicalize when they
-// need to).
-func defaultWorkspacesDir(cfg config.TerminalSandboxConfig, observerDir string) string {
-	if d := strings.TrimSpace(cfg.WorkspacesDir); d != "" {
-		return d
-	}
-	return filepath.Join(observerDir, "workspaces")
 }
 
 // newSandboxRuntime constructs the runtime, resolving (and creating) the
@@ -455,20 +445,20 @@ func (r *sandboxRuntime) homeMode() string {
 	return "tmpfs"
 }
 
-// ---- dashboard.SandboxProber ------------------------------------------------
+// ---- dashapi.SandboxProber ------------------------------------------------
 
-// ProbeSandbox implements dashboard.SandboxProber. It never returns an error: a
+// ProbeSandbox implements dashapi.SandboxProber. It never returns an error: a
 // probe failure IS a verdict. The bwrap platform/backend verdict comes from the
 // pure sandbox.Probe over real I/O (LookPath / `bwrap --version` / the ms-scale
 // user-namespace canary); this method adds the config HomeMode, the per-source
 // availability list, and the per-tool sandbox-launchability map, then caches the
 // whole result ~60s so the dialog is snappy but still notices a mid-session
 // `apt install`.
-func (r *sandboxRuntime) ProbeSandbox(ctx context.Context) dashboard.SandboxAvailability {
+func (r *sandboxRuntime) ProbeSandbox(ctx context.Context) dashapi.SandboxAvailability {
 	// enabled=false is defensive here (buildTerminalStack only constructs the
 	// runtime when enabled), but keeps the seam honest if wired differently.
 	if !r.cfg.Enabled {
-		return dashboard.SandboxAvailability{
+		return dashapi.SandboxAvailability{
 			Available: false,
 			Verdict:   sandbox.VerdictDisabledByConfig,
 			Reason:    "[terminal.sandbox].enabled is false on this daemon",
@@ -489,7 +479,7 @@ func (r *sandboxRuntime) ProbeSandbox(ctx context.Context) dashboard.SandboxAvai
 	r.mu.Unlock()
 
 	av := sandbox.Probe(r.sandboxEnv(ctx))
-	out := dashboard.SandboxAvailability{
+	out := dashapi.SandboxAvailability{
 		Available:      av.Available,
 		Verdict:        av.Verdict,
 		Reason:         av.Reason,
@@ -563,18 +553,18 @@ func (r *sandboxRuntime) sandboxEnv(ctx context.Context) sandbox.Env {
 // sources reports per-workspace-source availability with honest reasons. live
 // and clone-local are always available; clone-remote and worktree are the
 // authority-expanding sources gated by their opt-in config flags (plan §4/§5).
-func (r *sandboxRuntime) sources() []dashboard.SandboxSourceAvail {
-	out := []dashboard.SandboxSourceAvail{
+func (r *sandboxRuntime) sources() []dashapi.SandboxSourceAvail {
+	out := []dashapi.SandboxSourceAvail{
 		{ID: string(workspace.SourceLive), Available: true},
 		{ID: string(workspace.SourceCloneLocal), Available: true},
 	}
-	remote := dashboard.SandboxSourceAvail{ID: string(workspace.SourceCloneRemote), Available: r.cfg.AllowRemoteClone}
+	remote := dashapi.SandboxSourceAvail{ID: string(workspace.SourceCloneRemote), Available: r.cfg.AllowRemoteClone}
 	if !remote.Available {
-		remote.Reason = "allow_remote_clone is not set — the daemon would run `git clone <url>` with your ambient auth, so it is opt-in"
+		remote.Reason = "allow_remote_clone is not set - the daemon would run `git clone <url>` with your ambient auth, so it is opt-in"
 	}
-	worktree := dashboard.SandboxSourceAvail{ID: string(workspace.SourceWorktree), Available: r.cfg.AllowWorktreeSource}
+	worktree := dashapi.SandboxSourceAvail{ID: string(workspace.SourceWorktree), Available: r.cfg.AllowWorktreeSource}
 	if !worktree.Available {
-		worktree.Reason = "allow_worktree_source is not set — a worktree needs the main repo's .git bound read-write and attributes the run to the main repo (off by default)"
+		worktree.Reason = "allow_worktree_source is not set - a worktree needs the main repo's .git bound read-write and attributes the run to the main repo (off by default)"
 	}
 	return append(out, remote, worktree)
 }
@@ -587,21 +577,21 @@ func (r *sandboxRuntime) sources() []dashboard.SandboxSourceAvail {
 // carries the Note fallback. Launchability itself is
 // integration.TerminalLaunchable, so a deprecated/dead product never appears
 // in the sandbox tool table either.
-func (r *sandboxRuntime) tools() map[string]dashboard.SandboxToolAvail {
-	out := map[string]dashboard.SandboxToolAvail{}
+func (r *sandboxRuntime) tools() map[string]dashapi.SandboxToolAvail {
+	out := map[string]dashapi.SandboxToolAvail{}
 	for _, c := range integration.Capabilities() {
 		if !integration.TerminalLaunchable(c) {
 			continue
 		}
 		if len(c.Sandbox.StateRW) > 0 {
-			out[c.Tool] = dashboard.SandboxToolAvail{Available: true}
+			out[c.Tool] = dashapi.SandboxToolAvail{Available: true}
 			continue
 		}
 		reason := c.Sandbox.Note
 		if reason == "" {
 			reason = "no grounded sandbox state-dir row for this tool"
 		}
-		out[c.Tool] = dashboard.SandboxToolAvail{Available: false, Reason: reason}
+		out[c.Tool] = dashapi.SandboxToolAvail{Available: false, Reason: reason}
 	}
 	return out
 }
@@ -828,7 +818,8 @@ var sandboxObserverSecrets = []sandbox.ProtectedPath{
 // trusted per-project guard policies, the hook integrity registry, the
 // shell-wrap PATH shims, the browser native-messaging host, and the org
 // governance sidecars (features-effective.json, and governance-effective.json,
-// whose pins every later config load applies, guard mode included).
+// whose pins every later config load applies, guard mode included, plus its
+// governance-exceptions.json, which lifts pins).
 // Re-bound read-only unless [terminal.sandbox].allow_tool_config_writes. The
 // node DB and hook logs stay writable (hook capture writes them).
 var sandboxObserverExecState = []sandbox.ProtectedPath{
@@ -840,6 +831,7 @@ var sandboxObserverExecState = []sandbox.ProtectedPath{
 	{Rel: "browser-host", Dir: true},
 	{Rel: "features-effective.json"},
 	{Rel: "governance-effective.json"},
+	{Rel: "governance-exceptions.json"},
 	{Rel: "policy-resource", Dir: true},
 	{Rel: "policy-state-seq"},
 }

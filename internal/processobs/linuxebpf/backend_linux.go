@@ -185,7 +185,7 @@ func (b *backend) startNetwork(nsDev, nsIno uint64) {
 	na, err := startNetAccounting(nsDev, nsIno)
 	if err != nil {
 		b.opts.NetworkStatus.Set(processobs.NetworkAccountingUnavailable, err.Error())
-		b.opts.Logger.Debug("processobs/linuxebpf: per-process network accounting unavailable — bytes reported as UNMEASURED, lifecycle capture unaffected", "err", err)
+		b.opts.Logger.Debug("processobs/linuxebpf: per-process network accounting unavailable - bytes reported as UNMEASURED, lifecycle capture unaffected", "err", err)
 		return
 	}
 	b.netMu.Lock()

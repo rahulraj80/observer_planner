@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/diag"
@@ -23,44 +22,6 @@ import (
 // already delegate to the nil-able cmd-side seams (Options.ToolPreflight /
 // Options.ToolInstallHint), and those seams gained a second lookup rung for
 // GUI ids. That is the point — the dashboard handler stays name-free.
-
-// Errors the cmd adapter maps a GUI launch failure onto, so the handler can
-// pick an honest status without importing termsvc.
-var (
-	// ErrLaunchGUIUnsupported signals the daemon has no GUI-spawn seam wired
-	// (501) — the feature is absent on this build/config, the same class as
-	// ErrLaunchUnsupported for the PTY seam. Never a silent fallback.
-	ErrLaunchGUIUnsupported = errors.New("GUI launch is not configured on this daemon")
-	// ErrLaunchGUINotLaunchable signals the id is not an ADVERTISED GUI launch
-	// row (400): unknown, UNVERIFIED (no grounded executable), or a product the
-	// harness lifecycle policy no longer advertises.
-	ErrLaunchGUINotLaunchable = errors.New("no launchable IDE or desktop app with this id")
-)
-
-// GUILaunchSpec is the dashboard's server-derived GUI launch request. ID is the
-// client's only free input and is a registry MAP KEY (never argv); ProjectRoot
-// is the one client-influenced path and is canonicalized + allow-list-checked
-// by the application service before the spawn. Deliberately absent, because a
-// GUI launch has none of them: Subcommand (there is no `observer <verb>`),
-// Model, Sandbox, WorkspaceSource, Rows/Cols (there is no PTY).
-type GUILaunchSpec struct {
-	ID          string
-	ProjectRoot string
-}
-
-// GUILaunchResult is what a successful GUI launch returns. There is no handle:
-// a detached app has no PTY for the browser to dock, so the response is a
-// receipt (what started, with which pid, and whether routing actually reached
-// it) rather than a terminal token.
-type GUILaunchResult struct {
-	RunID       string
-	PID         int
-	ID          string
-	Label       string
-	WrapApplied bool
-	WrapNote    string
-	Notes       []string
-}
 
 // GUILaunchableInfo is one row of the New-Terminal picker's "IDE / desktop app"
 // group. It is the GUI sibling of LaunchableTool and carries the same two
@@ -107,28 +68,6 @@ type GUILaunchableInfo struct {
 	// the picker can say what capture a given IDE actually buys. Always a real
 	// array on the wire — never null — for the same reason as Note.
 	Hosts []string `json:"hosts"`
-}
-
-// GUIRunInfo is one row of the live GUI-run list on GET /api/terminal/sessions.
-// It is NOT a LaunchInfo: there is no handle, no viewer count, no writer
-// holder, no geometry — a detached app has none of those. Exited rows are
-// retained for the daemon's lifetime (bounded), because "the app I launched has
-// since been closed" is the useful answer.
-type GUIRunInfo struct {
-	RunID       string    `json:"run_id"`
-	ID          string    `json:"id"`
-	Label       string    `json:"label"`
-	PID         int       `json:"pid"`
-	LaunchedAt  time.Time `json:"launched_at"`
-	WrapApplied bool      `json:"wrap_applied"`
-	WrapNote    string    `json:"wrap_note"`
-	// Notes are the launch-composition advisories (the packaged-app / open(1)
-	// launcher-stub pid caveat, an ignored project directory) so the run list
-	// never shows a bare "exited (1)" for a stub whose app is still running.
-	// Always a real array on the wire — never null — like Hosts.
-	Notes    []string `json:"notes"`
-	Exited   bool     `json:"exited"`
-	ExitCode int      `json:"exit_code"`
 }
 
 // wrapKindWire renders a registry WrapKind for the wire. The ONLY translation
@@ -207,14 +146,20 @@ func (s *Server) guiRuns() []GUIRunInfo {
 // no token to dock, and `kind` is present so a client can dispatch on the
 // response the same way it dispatched on the request.
 type guiLaunchResponse struct {
-	Kind        string   `json:"kind"`
-	RunID       string   `json:"run_id"`
-	PID         int      `json:"pid"`
-	Tool        string   `json:"tool"`
-	Label       string   `json:"label"`
-	WrapApplied bool     `json:"wrap_applied"`
-	WrapNote    string   `json:"wrap_note"`
-	Notes       []string `json:"notes,omitempty"`
+	Kind        string `json:"kind"`
+	RunID       string `json:"run_id"`
+	PID         int    `json:"pid"`
+	Tool        string `json:"tool"`
+	Label       string `json:"label"`
+	WrapApplied bool   `json:"wrap_applied"`
+	WrapNote    string `json:"wrap_note"`
+	// RoutingReachesApp mirrors WrapApplied under the name the preflight uses
+	// for the same verdict, so the dialog phrases both from one vocabulary;
+	// RoutingReason is the structured cause when it is false (omitted when
+	// true). wrap_applied / wrap_note stay for existing clients and doctor.
+	RoutingReachesApp bool     `json:"routing_reaches_app"`
+	RoutingReason     string   `json:"routing_reason,omitempty"`
+	Notes             []string `json:"notes,omitempty"`
 }
 
 // handleGUILaunch serves the kind:"gui" arm of POST /api/terminal/launch. It is
@@ -261,14 +206,16 @@ func (s *Server) handleGUILaunch(w http.ResponseWriter, body terminalLaunchReque
 		return
 	}
 	writeJSON(w, guiLaunchResponse{
-		Kind:        string(integration.LaunchKindGUI),
-		RunID:       res.RunID,
-		PID:         res.PID,
-		Tool:        res.ID,
-		Label:       res.Label,
-		WrapApplied: res.WrapApplied,
-		WrapNote:    res.WrapNote,
-		Notes:       res.Notes,
+		Kind:              string(integration.LaunchKindGUI),
+		RunID:             res.RunID,
+		PID:               res.PID,
+		Tool:              res.ID,
+		Label:             res.Label,
+		WrapApplied:       res.WrapApplied,
+		WrapNote:          res.WrapNote,
+		RoutingReachesApp: res.WrapApplied,
+		RoutingReason:     res.WrapReason,
+		Notes:             res.Notes,
 	})
 	// Kick the watcher for the same reason the PTY launch does: a
 	// just-installed IDE's sessions directory may not have existed at daemon

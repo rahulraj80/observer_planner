@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "consumption_by_date": "VerifiedOfficial",
+    "consumption_by_date[]": "VerifiedOfficial",
+    "consumption_by_date[].acus": "VerifiedOfficial",
+    "consumption_by_date[].acus_by_product": "VerifiedOfficial",
+    "consumption_by_date[].acus_by_product.automation": "VerifiedOfficial",
+    "consumption_by_date[].acus_by_product.cascade": "VerifiedOfficial",
+    "consumption_by_date[].acus_by_product.devin": "VerifiedOfficial",
+    "consumption_by_date[].acus_by_product.review": "VerifiedOfficial",
+    "consumption_by_date[].acus_by_product.terminal": "VerifiedOfficial",
+    "consumption_by_date[].date": "Inferred",
+    "total_acus": "VerifiedOfficial"
+  },
+  "fixture_sha256": "f62966267862b2470a451d5c1a586114a1cac1b7483ef964c51aed98048c2c04",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/consumption/daily",
+    "query": {
+      "time_after": "1791187200",
+      "time_before": "1791360000"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from ConsumptionResponse / ConsumptionByDateResponse / AcusByProduct (placeholder values; the product buckets sum to the day's acus as the schema states). date is an integer in the schema; that it is the Unix second of the 08:00 UTC billing-day start is Inferred from the documented time_after/time_before example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.consumption_daily"
+}

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
+	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
@@ -29,7 +29,9 @@ const NewestEventAge = 5 * time.Minute
 const SourceFileScheme = "demo://"
 
 // Events parses the embedded fixture transcripts through the real
-// claude-code adapter and rebases every timestamp so the newest event
+// claude-code adapter (a, the caller's: the package does not import the
+// adapter, so a build without adapter.claude-code still compiles; lane
+// MP-L1D, T-598) and rebases every timestamp so the newest event
 // lands NewestEventAge before now (relative spacing — the multi-day
 // spread — is preserved). The fixtures are written to a temp directory
 // only because the adapter API is path-based; it is removed before
@@ -38,7 +40,10 @@ const SourceFileScheme = "demo://"
 // Any adapter warning is returned as an error: the fixture set is
 // static and embedded, so a warning means a malformed fixture shipped
 // — fail loudly rather than seed a partial dataset.
-func Events(ctx context.Context, now time.Time) ([]models.ToolEvent, []models.TokenEvent, error) {
+func Events(ctx context.Context, now time.Time, a adapter.Adapter) ([]models.ToolEvent, []models.TokenEvent, error) {
+	if a == nil {
+		return nil, nil, fmt.Errorf("demo.Events: no claude-code adapter in this build")
+	}
 	dir, err := os.MkdirTemp("", "observer-demo-fixtures-*")
 	if err != nil {
 		return nil, nil, fmt.Errorf("demo.Events: temp dir: %w", err)
@@ -50,7 +55,6 @@ func Events(ctx context.Context, now time.Time) ([]models.ToolEvent, []models.To
 		return nil, nil, err
 	}
 
-	a := claudecode.New()
 	var events []models.ToolEvent
 	var tokens []models.TokenEvent
 	for _, name := range names {

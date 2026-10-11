@@ -39,8 +39,9 @@ Cloud Intelligence service (`cmd/observer-cloud`) in resource group
   assignment — a fresh `up` may see `AuthorizationFailed` briefly before the
   new definitions settle.
 - A non-production Azure AI Foundry (Cognitive Services, `AIServices` kind)
-  account, with a `luna` Global Standard model deployment (left unprovisioned
-  until real model identifiers are set — see below)
+  account, with a GPT-6 Luna Global Standard model deployment named
+  `gpt-6-luna` (`LUNA_DEPLOYMENT_NAME`; left unprovisioned until real model
+  identifiers are set; see below)
 
 ## Verbs
 
@@ -499,9 +500,20 @@ apply or a re-provision. Findings folded in here:
    before the production launch-gate item (contract §5/§1) is unblocked.
 3. **Real Luna model identifiers** — set `LUNA_MODEL_NAME` and
    `LUNA_MODEL_VERSION` (and `LUNA_MODEL_FORMAT`/`LUNA_SKU` if needed) to the
-   real GPT-5.6 Luna values before re-running `up`. Until then the script
-   deliberately skips creating the `luna` deployment (it still creates the
-   Foundry account) and prints the command it would have run.
+   real **GPT-6 Luna** values before re-running `up` (operator ruling D-299,
+   2026-10-05: GPT-6 Luna is the enrichment model for Signed-in Free and Plus;
+   the earlier target was GPT-5.6 Luna). Until then the script deliberately
+   skips creating the deployment (it still creates the Foundry account) and
+   prints the command it would have run. The deployment name defaults to
+   `gpt-6-luna` (`LUNA_DEPLOYMENT_NAME` overrides it) because it must equal
+   the `deployment` column of migration 0041's
+   `session_enrichment.gpt-6-luna.v1` route: binding a route
+   (`store.SetRouteBinding`) sets the endpoint and ARM identity, never the
+   deployment. A deployment under another name (production uses
+   `gpt-6-luna-2`, `LUNA_SKU=DataZoneStandard`, since 2026-10-08) needs the
+   route row repointed by admin SQL; see `docs/cloud-intelligence.md`
+   "Repointing the route to another deployment". The route ships inactive; see `docs/cloud-intelligence.md`
+   "Plan v3 and GPT-6 Luna" for the bind, attest and activate steps.
 4. **Foundry credential flip post-approval** — `up` never provisions a
    Foundry API key into Key Vault or the worker identity's env, by design
    (contract §1/§2 — "NO Foundry credential provisioned pre-approval"). Once

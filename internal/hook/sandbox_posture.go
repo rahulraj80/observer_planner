@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals_sandbox
+
 package hook
 
 import (

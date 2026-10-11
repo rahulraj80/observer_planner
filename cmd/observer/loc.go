@@ -164,8 +164,8 @@ func newLOCCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "loc",
 		Short: "Lines-of-code authorship counts (AI vs human, code only)",
-		Long: `Reports how many lines of CODE — comments, blank lines and
-whitespace-only reflows counted separately — an AI agent wrote, and how
+		Long: `Reports how many lines of CODE - comments, blank lines and
+whitespace-only reflows counted separately - an AI agent wrote, and how
 many a human did.
 
 Counts come from the before/after text the editing tool already recorded,
@@ -197,14 +197,14 @@ func newLOCShowCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "session %s — %d files, classifier v%d\n",
+			fmt.Fprintf(out, "session %s - %d files, classifier v%d\n",
 				res.SessionID, res.Files, res.ClassifierVersion)
 			if res.HumanCapture == "none" {
 				// The plan forbids rendering an AI SHARE with no human
 				// capture: with nothing measuring the developer's own
 				// typing, every share would read as 100% AI.
 				fmt.Fprintln(out,
-					"human capture: none — no editor is reporting saves, so no AI share is shown")
+					"human capture: none - no editor is reporting saves, so no AI share is shown")
 			} else {
 				fmt.Fprintf(out, "human capture: %s (editor-reported)\n", res.HumanCapture)
 			}
@@ -247,7 +247,7 @@ func newLOCReconcileCmd() *cobra.Command {
 working tree.
 
 THIS IS A SANITY CHECK, NEVER AN ATTRIBUTION. Agents commit as the
-developer, so git can say WHAT changed but never WHO changed it — that is
+developer, so git can say WHAT changed but never WHO changed it - that is
 exactly why the counts are derived from tool inputs instead. A large
 divergence means the counter missed a shape or the developer edited
 outside any captured tool, and either is worth knowing; it never means

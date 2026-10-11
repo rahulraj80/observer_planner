@@ -76,7 +76,9 @@ import (
 // pre-v1.6.18) — though as of the 2026-07-31 B3 convergence it mints no
 // row of its own: its finalized thinking-text is stashed and threaded
 // onto the next recordable event's PrecedingReasoning (see pending.go
-// and the EventAfterAgentThought case below). afterAgentResponse emits a
+// and the EventAfterAgentThought case below). The one exception is a
+// root-less Cloud Agent (cloudagent.go), whose thought lands a thin
+// step-marker row because no local successor ever fires. afterAgentResponse emits a
 // cursor.assistant_response row carrying the final assistant prose. Per-
 // turn token counts are still sourced from the `stop` event (single
 // source of truth — afterAgentResponse's input_tokens/output_tokens
@@ -131,6 +133,11 @@ type rawHookPayload struct {
 	CacheRead      int64           `json:"cache_read_tokens"`
 	CacheWrite     int64           `json:"cache_write_tokens"`
 	TranscriptPath string          `json:"transcript_path"`
+
+	// IsBackgroundAgent is the payload's own Cloud Agent flag
+	// (sessionStart). FALSE on the 3.23.12 bc- payloads, so it is only one
+	// of the two signals classifyConversation reads (cloudagent.go).
+	IsBackgroundAgent bool `json:"is_background_agent"`
 
 	// Per-event fields:
 	Command  string          `json:"command"`     // beforeShellCommand
@@ -251,7 +258,8 @@ func buildEvent(eventName string, body []byte, sc *scrub.Scrubber, carrier reaso
 		return models.ToolEvent{}, false, nil
 	}
 
-	projectRoot := hookProjectRoot(eventName, raw.WorkspaceRoots)
+	class := classOf(raw)
+	projectRoot := hookProjectRoot(eventName, raw.WorkspaceRoots, class)
 	if raw.ConversationID == "" {
 		return models.ToolEvent{}, false, errors.New("cursor.BuildEvent: conversation_id missing")
 	}
@@ -445,8 +453,23 @@ func buildEvent(eventName string, body []byte, sc *scrub.Scrubber, carrier reaso
 		if len(preview) > 200 {
 			preview = preview[:200]
 		}
-		carrier.stash(raw.ConversationID, preview)
-		return models.ToolEvent{}, false, nil
+		if !thoughtMintsRow(class, projectRoot) {
+			carrier.stash(raw.ConversationID, preview)
+			return models.ToolEvent{}, false, nil
+		}
+		// A root-less Cloud Agent (cloudagent.go): its turns run in
+		// Cursor's remote VM, so no local successor event ever fires to
+		// claim a stash (grounded 3.23.12: afterAgentThought is the only
+		// per-step hook such a conversation sends). The thought therefore
+		// lands a thin step-marker row of its own under the placeholder.
+		// The reasoning keeps the B3 placement (PrecedingReasoning, same
+		// 200-char scrubbed preview); the row is the remote step, and its
+		// duration_ms honestly describes that step.
+		ev.ActionType = models.ActionHarnessCall
+		ev.RawToolName = cloudAgentThoughtRawName
+		ev.Target = "cloud agent step"
+		ev.PrecedingReasoning = preview
+		ev.DurationMs = raw.DurationMs
 	case EventAfterAgentResponse:
 		// Finalized assistant response prose. Mirrors the transcript
 		// walker's cursor.assistant_text emit so a session ingested
@@ -829,7 +852,7 @@ func buildTokenEvent(body []byte, hookEvent string) (models.TokenEvent, bool, er
 		SourceEventID:       raw.GenerationID + ":" + EventStop,
 		SessionID:           raw.ConversationID,
 		MessageID:           raw.GenerationID,
-		ProjectRoot:         hookProjectRoot(EventStop, raw.WorkspaceRoots),
+		ProjectRoot:         hookProjectRoot(EventStop, raw.WorkspaceRoots, classOf(raw)),
 		Timestamp:           time.Now().UTC(),
 		Tool:                models.ToolCursor,
 		Model:               raw.Model,
@@ -860,6 +883,56 @@ type transcriptPart struct {
 type transcriptAssistantLine struct {
 	LineNumber int
 	Parts      []transcriptPart
+	// Replays counts the later assistant lines of the same turn folded into
+	// this one because they repeated its text verbatim (T-034i, see
+	// appendAssistantLine). Zero for a line that was never replayed.
+	Replays int
+}
+
+// assistantTextOnly returns the joined, trimmed text of an assistant line
+// whose every part is text ("" and false when any part is not text, or the
+// line carries no text at all).
+func assistantTextOnly(parts []transcriptPart) (string, bool) {
+	var b strings.Builder
+	for _, p := range parts {
+		if p.Type != "text" {
+			return "", false
+		}
+		if t := strings.TrimSpace(p.Text); t != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(t)
+		}
+	}
+	if b.Len() == 0 {
+		return "", false
+	}
+	return b.String(), true
+}
+
+// appendAssistantLine adds an assistant line to a turn, folding a retry
+// replay (T-034i). Live-grounded on node 1 (cursor-agent 2026.10.01,
+// transcript bb9f3afb, 2026-10-03): when a model request fails mid-turn
+// (LostConnection) and cursor-agent retries it, the transcript gains one
+// more assistant line carrying the SAME reply text, so a reply that reached
+// the developer once was stored as four assistant_message rows. A text-only
+// line whose text equals the immediately preceding text-only line of the
+// same turn (nothing in between: no tool call, no user line) is therefore
+// one reply, not two: it is folded into the kept line, whose Replays count
+// keeps the retries countable (they are also counted by the api_error rows
+// the CLI turn path emits per failed attempt). Anything else is appended as
+// before, so a reply that genuinely repeats after a tool call is kept.
+func appendAssistantLine(turn *transcriptTurn, line transcriptAssistantLine) {
+	if n := len(turn.Assistant); n > 0 {
+		if txt, ok := assistantTextOnly(line.Parts); ok {
+			if prev, pok := assistantTextOnly(turn.Assistant[n-1].Parts); pok && prev == txt {
+				turn.Assistant[n-1].Replays++
+				return
+			}
+		}
+	}
+	turn.Assistant = append(turn.Assistant, line)
 }
 
 // transcriptUserLine captures the user-role line that opens a turn.
@@ -954,7 +1027,7 @@ func parseTranscriptTurns(path string) ([]transcriptTurn, error) {
 				turns = append(turns, transcriptTurn{})
 				current = &turns[len(turns)-1]
 			}
-			current.Assistant = append(current.Assistant, transcriptAssistantLine{
+			appendAssistantLine(current, transcriptAssistantLine{
 				LineNumber: lineNo,
 				Parts:      tl.Message.Content,
 			})
@@ -1017,6 +1090,10 @@ func buildTranscriptToolEvents(
 						preview = preview[:200]
 					}
 					body := contentcap.Cap(reasoning, contentcap.DefaultMaxBytes)
+					var meta *models.ActionMetadata
+					if line.Replays > 0 {
+						meta = &models.ActionMetadata{RetryReplays: line.Replays}
+					}
 					out = append(out, models.ToolEvent{
 						SourceFile:         sourceFile,
 						SourceEventID:      fmt.Sprintf("%s:transcript:L%d:P%d:asst:%s", generationID, line.LineNumber, partIdx, shortHash(txt)),
@@ -1031,6 +1108,7 @@ func buildTranscriptToolEvents(
 						PrecedingReasoning: preview,
 						RawToolName:        "cursor.assistant_text",
 						ToolOutput:         body,
+						Metadata:           meta,
 					})
 				}
 			case "tool_use":
@@ -1297,6 +1375,11 @@ const SyntheticProjectRoot = "[cursor]"
 // root, which leaves them exactly as before (attached only when the
 // session already exists — see store.Ingest's session_end guard — or
 // dropped).
+//
+// The exclusion is lifted for a conversation whose class says
+// BootstrapsRootless (a Cloud Agent, cloudagent.go): it has no folder to
+// flip, and on Cursor 3.23.12 its sessionStart is the only lifecycle event
+// it sends, so excluding it left the conversation with no session at all.
 var rootlessNoBootstrap = map[string]bool{
 	EventSessionStart: true,
 	EventSessionEnd:   true,
@@ -1304,12 +1387,13 @@ var rootlessNoBootstrap = map[string]bool{
 
 // hookProjectRoot resolves a hook payload's project root: the decoded
 // workspace root when present, else SyntheticProjectRoot for events
-// allowed to bootstrap a root-less conversation (rootlessNoBootstrap).
-func hookProjectRoot(eventName string, roots json.RawMessage) string {
+// allowed to bootstrap a root-less conversation (rootlessNoBootstrap,
+// lifted for a class that BootstrapsRootless).
+func hookProjectRoot(eventName string, roots json.RawMessage, class conversationClass) string {
 	if root := decodeWorkspaceRoot(roots); root != "" {
 		return root
 	}
-	if rootlessNoBootstrap[eventName] {
+	if rootlessNoBootstrap[eventName] && !class.BootstrapsRootless {
 		return ""
 	}
 	return SyntheticProjectRoot
@@ -1407,6 +1491,13 @@ func cursorEventID(generationID, eventName string, raw rawHookPayload) string {
 			agentKey = raw.SubagentID
 		}
 		id += ":" + shortHash(agentKey)
+	case EventAfterAgentThought:
+		// Only a Cloud Agent's thought mints a row (thoughtMintsRow), and
+		// its generation_id is "" on every grounded payload, so the base
+		// is the conversation id: the text plus its duration is what tells
+		// one remote step from the next. Content-derived, so the live hook
+		// and the hooks-log replay compute the same identity.
+		id += ":" + shortHash(raw.Text+"|"+strconv.FormatInt(raw.DurationMs, 10))
 	case EventPreToolUse:
 		// preToolUse fires for every tool call within a turn; multiple
 		// tool calls of different names share the same generation_id.

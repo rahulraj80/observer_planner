@@ -34,20 +34,28 @@ type Candidate struct {
 	// Honesty + HonestyText: what wrapping buys (see HonestyFor).
 	Honesty     Honesty `json:"honesty"`
 	HonestyText string  `json:"honesty_text"`
+	// Side is where the real program runs: the target OS ("host") or, on
+	// the WSL bridge target, inside the distro ("wsl").
+	Side Side `json:"side"`
+	// Where says, for a bridge target only, how the shim reaches the
+	// daemon ("" on a native target).
+	Where string `json:"where,omitempty"`
+	// BridgeEnv are the base-URL variables a SideHost bridge shim asks the
+	// WSL observer for (BridgeEnvFor); empty elsewhere.
+	BridgeEnv []string `json:"bridge_env,omitempty"`
 
 	projectDirArgv  bool
 	handoffSegments []string
 	args            []string
+	bridge          *WSLBridge
+	env             []EnvVar
 }
 
-// commandsFor returns the replaced command names on goos. Windows spellings
-// lose their extension (the shim is <name>.cmd, found by PATHEXT); names a
-// shim cannot carry are dropped.
-func commandsFor(r integration.BinaryNames, goos string) []string {
-	src := r.Unix
-	if goos == "windows" {
-		src = r.Windows
-	}
+// commandNames returns the command names src spells on goos. Windows
+// spellings lose their extension (the shim is <name>.cmd, found by PATHEXT);
+// names a shim cannot carry (a space, a quote) are dropped - which spellings
+// are tried is resolveCommands' table.
+func commandNames(src []string, goos string) []string {
 	var out []string
 	for _, n := range src {
 		if goos == "windows" {
@@ -64,17 +72,24 @@ func commandsFor(r integration.BinaryNames, goos string) []string {
 	return dedupe(out)
 }
 
-// Candidates returns every wrappable row on goos, sorted by ID. The id space
-// is the union of registry tool keys and GUI launch ids; which ones resolve is
-// integration.WrappedCommandFor's decision, not this package's.
+// Candidates returns every wrappable row on goos (a native target), sorted by
+// ID. See CandidatesOn.
 func Candidates(goos string) []Candidate {
+	return CandidatesOn(Host{GOOS: goos})
+}
+
+// CandidatesOn returns every wrappable row on the target h describes (its OS
+// and, for the WSL bridge target, h.Bridge), sorted by ID. The id space is
+// the union of registry tool keys and GUI launch ids; which ones resolve is
+// integration.WrappedCommandFor's decision, not this package's.
+func CandidatesOn(h Host) []Candidate {
 	ids := append([]string{}, integration.Tools()...)
 	for _, g := range integration.GUILaunchables() {
 		ids = append(ids, g.Spec.ID)
 	}
 	var out []Candidate
 	for _, id := range dedupe(ids) {
-		if c, ok := CandidateFor(id, goos); ok {
+		if c, ok := CandidateOn(id, h); ok {
 			out = append(out, c)
 		}
 	}
@@ -82,17 +97,33 @@ func Candidates(goos string) []Candidate {
 	return out
 }
 
-// CandidateFor resolves one id. ok=false when the id is not wrappable on goos.
+// CandidateFor resolves one id on a native target. ok=false when the id is
+// not wrappable on goos.
 func CandidateFor(id, goos string) (Candidate, bool) {
+	return CandidateOn(id, Host{GOOS: goos})
+}
+
+// CandidateOn resolves one id on the target h describes. ok=false when the id
+// is not wrappable there.
+func CandidateOn(id string, h Host) (Candidate, bool) {
 	w, ok := integration.WrappedCommandFor(id)
 	if !ok {
 		return Candidate{}, false
 	}
-	cmds := commandsFor(w.Replaces, goos)
-	if len(cmds) == 0 {
+	cmds, side, ok := resolveCommands(w, h)
+	if !ok {
 		return Candidate{}, false
 	}
-	h, text := HonestyFor(w)
+	bridged := h.GOOS == "windows" && h.Bridge != nil
+	var env []EnvVar
+	if bridged && side == SideHost {
+		// The Windows program runs as Windows: what the wrap buys is exactly
+		// the variables the shim can carry, and no turn has yet been proven
+		// through such a shim.
+		env = BridgeEnvFor(id)
+		w.Routes, w.TrafficProven, w.RouteConditional = len(env) > 0, false, false
+	}
+	hon, text := HonestyFor(w)
 	c := Candidate{
 		ID:            id,
 		Label:         id,
@@ -101,9 +132,19 @@ func CandidateFor(id, goos string) (Candidate, bool) {
 		Commands:      cmds,
 		Routes:        w.Routes,
 		TrafficProven: w.TrafficProven,
-		Honesty:       h,
+		Honesty:       hon,
 		HonestyText:   text,
+		Side:          side,
 		args:          w.Args,
+		env:           env,
+	}
+	if bridged {
+		b := *h.Bridge
+		c.bridge = &b
+		c.Where = whereText(side, b)
+		for _, v := range env {
+			c.BridgeEnv = append(c.BridgeEnv, v.Name)
+		}
 	}
 	if g, ok := integration.GUILaunchFor(id); ok && w.Kind == integration.LaunchKindGUI {
 		if g.Spec.ProbeOnly {
@@ -134,7 +175,10 @@ type PlanInput struct {
 	ShimDir string
 	// ObserverPath is the absolute observer executable baked into shims.
 	ObserverPath string
-	Selection    Selection
+	// ConfigPath is the non-default observer config.toml every shim carries
+	// as `--config` (ShimSpec.ConfigPath); "" = the default config.
+	ConfigPath string
+	Selection  Selection
 	// Installed reports whether an id's vendor command is installed. It
 	// narrows AllTools and warns on an explicit selection that is not
 	// installed. nil = unknown (AllTools takes every CLI row).
@@ -211,12 +255,12 @@ func BuildPlan(in PlanInput) (Plan, error) {
 	}
 	p := Plan{ShimDir: in.ShimDir}
 
-	ids, warn := expandTools(in.Selection.Tools, goos, in.Installed)
+	ids, warn := expandTools(in.Selection.Tools, in.Host, in.Installed)
 	p.Warnings = append(p.Warnings, warn...)
 
 	claimed := map[string]string{} // command -> tool id
 	for _, id := range ids {
-		c, _ := CandidateFor(id, goos)
+		c, _ := CandidateOn(id, in.Host)
 		tp := ToolPlan{Candidate: c, Selected: true, Shimmed: []string{}}
 		if in.Installed != nil {
 			inst := in.Installed(id)
@@ -231,7 +275,7 @@ func BuildPlan(in PlanInput) (Plan, error) {
 				p.Warnings = append(p.Warnings, fmt.Sprintf("%s: `%s` is already wrapped for %s - skipped", id, cmd, owner))
 				continue
 			}
-			content, err := renderShim(c.shimSpec(cmd, in.ObserverPath, in.ShimDir), goos)
+			content, err := renderShim(c.shimSpec(cmd, in.ObserverPath, in.ConfigPath, in.ShimDir), goos)
 			if err != nil {
 				p.Warnings = append(p.Warnings, fmt.Sprintf("%s: %v", id, err))
 				continue
@@ -285,23 +329,28 @@ func BuildPlan(in PlanInput) (Plan, error) {
 // shimSpec is the one place a candidate row becomes a renderable shim, shared
 // by BuildPlan (enable) and PlanRefresh (the start-time path refresh), so a
 // refreshed shim is byte-identical to what enable would write.
-func (c Candidate) shimSpec(command, observerPath, shimDir string) ShimSpec {
+func (c Candidate) shimSpec(command, observerPath, configPath, shimDir string) ShimSpec {
 	return ShimSpec{
 		Name: command, ToolID: c.ID, Kind: c.Kind, Args: c.args,
 		ProjectDirArgv: c.projectDirArgv, HandoffSegments: c.handoffSegments,
-		ObserverPath: observerPath, ShimDir: shimDir,
+		ObserverPath: observerPath, ConfigPath: configPath, ShimDir: shimDir,
+		Bridge: c.bridge, Side: c.Side, Env: c.env,
 	}
 }
 
 func renderShim(s ShimSpec, goos string) (string, error) {
-	if goos == "windows" {
+	switch {
+	case goos == "windows" && s.Bridge != nil:
+		return RenderBridgeCmdShim(s)
+	case goos == "windows":
 		return RenderCmdShim(s)
 	}
 	return RenderPOSIXShim(s)
 }
 
 // expandTools resolves the selection to sorted, de-duplicated wrappable ids.
-func expandTools(sel []string, goos string, installed func(string) bool) ([]string, []string) {
+func expandTools(sel []string, h Host, installed func(string) bool) ([]string, []string) {
+	goos := h.GOOS
 	var ids, warn []string
 	for _, raw := range sel {
 		id := strings.TrimSpace(raw)
@@ -309,7 +358,7 @@ func expandTools(sel []string, goos string, installed func(string) bool) ([]stri
 			continue
 		}
 		if id == AllTools {
-			for _, c := range Candidates(goos) {
+			for _, c := range CandidatesOn(h) {
 				if c.Kind != integration.LaunchKindTerminal {
 					continue
 				}
@@ -320,7 +369,7 @@ func expandTools(sel []string, goos string, installed func(string) bool) ([]stri
 			}
 			continue
 		}
-		if _, ok := CandidateFor(id, goos); !ok {
+		if _, ok := CandidateOn(id, h); !ok {
 			warn = append(warn, fmt.Sprintf("%s: not a wrappable command on %s - skipped", id, goos))
 			continue
 		}

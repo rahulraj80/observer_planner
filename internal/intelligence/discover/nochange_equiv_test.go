@@ -114,7 +114,7 @@ func TestNoChangeRerunCountsMatchesReference(t *testing.T) {
 					if err != nil {
 						t.Fatalf("reference: %v", err)
 					}
-					got, err := d.noChangeRerunCounts(ctx, root, since)
+					got, err := d.noChangeRerunCounts(ctx, root, span{since: since})
 					if err != nil {
 						t.Fatalf("noChangeRerunCounts: %v", err)
 					}

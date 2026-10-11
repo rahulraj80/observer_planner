@@ -13,10 +13,19 @@ import {
   ReliabilityPill,
   SegmentedControl,
   StatCard,
+  TabPanel,
+  TabStrip,
   Tooltip,
   Stagger,
   Table,
+  resolveTab,
+  useTabVisited,
+  type TabDef,
 } from "@/components/primitives";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { usePageTabs } from "@/lib/governance";
+import { COST_TABS, defaultTab, type CostTab } from "@/lib/nodePageTabs";
+import { StatementView } from "@/pages/CostStatement";
 import { HelpInd, TitleWithHelp } from "@/components/HelpInd";
 import {
   CacheSavingsChart,
@@ -38,7 +47,16 @@ import {
 import { GranControl } from "@/components/GranControl";
 import { asGranularity, granularityUnit, perBucketTitle } from "@shared/lib/granularity";
 import { useApi } from "@/lib/useApi";
-import { fmtCompact, fmtInt, fmtPct, fmtUSD } from "@/lib/format";
+import {
+  costLabel,
+  dollarsShown,
+  fmtCompact,
+  fmtCost,
+  fmtInt,
+  fmtPct,
+  fmtUSD,
+  withoutDollars,
+} from "@/lib/format";
 import { MixCell, Td, Th } from "@/components/tableCells";
 import type {
   AnalysisCacheSavingsTrend,
@@ -65,6 +83,8 @@ import { SOURCE_TIER } from "@shared/lib/sourceVocab";
 import { cacheSummaryTone } from "@shared/lib/cacheVocab";
 import { VocabPill } from "@shared/lib/vocabPill";
 import { navIcon } from "@/lib/nav";
+import { tokenSourceMix } from "@/lib/costDisplayModel";
+import { csvText, type CsvColumn } from "@/lib/costExport";
 import { MetricIcon } from "@/components/MetricIcon";
 
 // One glyph per cost section card title (the ChartShell `icon` slot): the
@@ -78,7 +98,9 @@ const SECTION_ICONS = {
 } satisfies Record<string, LucideIcon>;
 
 export function CostPage() {
-  const { win, customRange, tool, project } = useFilters();
+  const pageTabs = usePageTabs("cost", COST_TABS);
+  const [rawTab, setTab] = useUrlTab(pageTabs.ids, defaultTab(pageTabs));
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   // Chart bucket: the shared granularity rule + the viewer's `gran=`
   // choice (lib/filters.tsx useGranularity), never an inline threshold.
@@ -90,73 +112,100 @@ export function CostPage() {
   const locDays = windowDaysApprox(win, customRange);
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
+
+  // Cowork reconciliation exists only on installs with Cowork sessions: its
+  // tab is shown when the (cheap, page-level) read says so. A deep link to it
+  // resolves to Overview until then, without rewriting the URL.
+  const cowork = useApi<CoworkReconcileResult>("/api/cowork/reconcile");
+  const hasCowork = !!cowork.data && cowork.data.sessions_total > 0;
+  const tabs: TabDef<CostTab>[] = pageTabs.ids.map((id) => ({
+    id,
+    label: COST_TABS.labels[id],
+    // Budgets and the Cowork reconciliation stay in the org's token-usage
+    // view: they render shares and drift percentages there, not dollars.
+    hidden: id === "reconciliation" && !hasCowork,
+    dot:
+      id === "reconciliation" && hasCowork && cowork.data!.sessions_over_threshold > 0
+        ? "warn"
+        : null,
+  }));
+  const tab: CostTab = resolveTab(rawTab, tabs) ?? "overview";
 
   const models = useApi<CostSummary>(
     "/api/models",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const costTs = useApi<CostTimeseries>(
     "/api/timeseries/cost",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   // Per-bucket chart: token volume (default) or dollars per bucket.
   const [dailyMode, setDailyMode] = useState<"tokens" | "cost">("tokens");
+  // The two Overview-only charts load when Overview is first shown (a cold
+  // deep link to another tab does not fetch them).
+  const overviewVisited = useTabVisited<CostTab>("overview", tab);
   const tokensByModel = useApi<TokensByModelTimeseries>(
-    "/api/timeseries/tokens-by-model",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    overviewVisited ? "/api/timeseries/tokens-by-model" : null,
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   const cacheSavings = useApi<AnalysisCacheSavingsTrend>(
-    "/api/analysis/cache-savings-trend",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    overviewVisited ? "/api/analysis/cache-savings-trend" : null,
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   const costGran = asGranularity(costTs.data?.bucket ?? gran.expected);
   const modelGran = asGranularity(tokensByModel.data?.bucket ?? gran.expected);
   const savingsGran = asGranularity(cacheSavings.data?.bucket ?? gran.expected);
-  const cowork = useApi<CoworkReconcileResult>("/api/cowork/reconcile");
 
   const summary = useMemo(() => summarize(models.data), [models.data]);
   const sparks = useMemo(() => deriveSparks(costTs.data), [costTs.data]);
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
+    <div className="p-4 sm:p-6">
+      {/* Everything above the tab panels is screen-only: printing the
+          Statement tab yields the statement document alone. */}
       <PageHeader
+        className="mb-6 print:hidden"
         icon={navIcon("cost")}
-        title="Cost"
-        sub="Per-model token consumption split into the four billable buckets - net input, cache read, cache write, output - with computed cost. Hover any column header for the formula."
+        title={costLabel("Cost", "Usage")}
+        sub={costLabel(
+          "Per-model token consumption split into the four billable buckets - net input, cache read, cache write, output - with computed cost. Hover any column header for the formula.",
+          "Per-model token consumption split into the four billable buckets - net input, cache read, cache write, output. Hover any column header for its definition.",
+        )}
         helpId="tab.cost"
-        right={
-          <Link
-            to="/report"
-            className="shrink-0 text-[11px] font-medium text-accent hover:text-accent-strong"
-          >
-            Monthly statement →
-          </Link>
-        }
       />
-      {/* Summary band — 6 KPIs matching design: Total / API Turns /
-          Net Input / Cache R / Cache W / Output. Reasoning surfaces
-          as a 7th tile only when present (e.g. captured antigravity
-          rows expose reasoning_tokens distinctly; Anthropic folds it
-          into output and so this tile renders 0 / hidden there). */}
-      <div
-        className={`relative grid grid-cols-2 gap-3 pb-4 md:grid-cols-3 ${(summary.reasoning ?? 0) > 0 ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}
+      {/* Summary strip — 6 KPIs matching design: Total / API Turns /
+          Net Input / Cache R / Cache W / Output, the same on every tab.
+          Reasoning surfaces as a 7th tile only when present (e.g. captured
+          antigravity rows expose reasoning_tokens distinctly; Anthropic
+          folds it into output and so this tile renders 0 / hidden there).
+          Hand-built rather than StatStrip, which tops out at 6 columns. */}
+      <section
+        aria-label="Cost summary"
+        className={`relative mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 print:hidden ${(summary.reasoning ?? 0) > 0 ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}
       >
         {/* Camera-ready pass (growth-review §4): this hero band is the
             surface people screenshot for "what my AI coding actually
             costs" posts — a subtle corner wordmark survives that crop. */}
         <HeroWordmark />
         <StatCard
-          label={`Total spend (${winLbl})`}
+          label={costLabel(`Total spend (${winLbl})`, `Total usage (${winLbl})`)}
           helpId="metric.cost_usd"
-          icon={<MetricIcon metric="spend" />}
+          icon={<MetricIcon metric={dollarsShown() ? "spend" : "tokens"} />}
           loading={models.loading || costTs.loading}
-          value={fmtUSD(summary.cost)}
-          sub={summary.reliability || "-"}
-          spark={sparks.cost}
+          value={fmtCost(summary.cost, summaryTokenTotal(summary.tokens))}
+          // Cost reliability qualifies a dollar figure; the token view's
+          // subtitle is the source mix the tokens came from.
+          sub={
+            dollarsShown()
+              ? summary.reliability || "-"
+              : tokenSourceMix(models.data?.rows ?? []) || undefined
+          }
+          spark={dollarsShown() ? sparks.cost : sparks.tokens}
           sparkColor="var(--accent)"
           accent
         />
@@ -221,37 +270,35 @@ export function CostPage() {
             sparkColor="var(--act-agent)"
           />
         )}
-      </div>
+      </section>
 
-      {/* Budget guardrails (P6.3) — advisory monthly budgets with
-          80/100% thresholds and a month-end forecast. */}
-      <BudgetCard />
-
-      {/* AI code lines per dollar (lines-of-code tracking §3.4). Lives on
-          Cost because the denominator is this page's own subject and its
-          window control is already here; on Overview it would be a cost
-          question on a health page. */}
-      <LOCPerDollarTile
-        days={locDays}
-        windowLabel={winLbl}
-        filtered={tool !== "all" || project !== "all"}
+      <TabStrip
+        tabs={tabs}
+        value={tab}
+        onChange={setTab}
+        idPrefix="cost"
+        ariaLabel="Cost sections"
+        className="mb-4 print:hidden"
       />
 
+      {/* Panels in source order By model, Overview, ...: only the active one
+          shows, so the order here is not the strip's. */}
+      <TabPanel id="by-model" active={tab} idPrefix="cost" className="space-y-6">
       {/* Model table — unknown-model warning + Group/Export controls
           in panel header per design 1.13 / dC5. */}
       <ChartShell
-        title="Cost by model"
+        title={costLabel("Cost by model", "Usage by model")}
         icon={SECTION_ICONS.costByModel}
         sub={`Top ${fmtInt(models.data?.rows.length)} · per-bucket share, cost reliability, source · ${winLbl}`}
         right={
           <div className="flex items-center gap-2">
             {(models.data?.fast_turn_count ?? 0) > 0 && (
-              <Tooltip content="Turns served in a provider's low-latency fast tier - Anthropic Opus 4.8 (speed:&quot;fast&quot;) or OpenAI/Codex (service_tier:&quot;priority&quot;), billed at the model's fast-mode premium (2×–2.5×). Cost shown already includes the premium.">
+              <Tooltip content="Turns served in a provider's low-latency fast tier - Anthropic Opus 4.8 (speed:&quot;fast&quot;) or OpenAI/Codex (service_tier:&quot;priority&quot;), billed at the model's fast-mode premium (2×-2.5×). Cost shown already includes the premium.">
                 <span tabIndex={0} className="inline-flex items-center gap-1.5 rounded-2 border border-info/40 bg-info-soft px-2.5 py-1 text-[10.5px] font-medium text-info focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring">
                   <Icon icon={Zap} size="xs" />
                   {fmtInt(models.data?.fast_turn_count)} fast-tier turn
-                  {(models.data?.fast_turn_count ?? 0) === 1 ? "" : "s"} ·{" "}
-                  {fmtUSD(models.data?.total_fast_cost_usd ?? 0)}
+                  {(models.data?.fast_turn_count ?? 0) === 1 ? "" : "s"}
+                  {dollarsShown() && <> · {fmtUSD(models.data?.total_fast_cost_usd ?? 0)}</>}
                 </span>
               </Tooltip>
             )}
@@ -296,6 +343,22 @@ export function CostPage() {
           )}
         </ChartState>
       </ChartShell>
+      </TabPanel>
+
+      <TabPanel id="overview" active={tab} idPrefix="cost" className="space-y-6">
+      {/* AI code lines per dollar (lines-of-code tracking §3.4). Lives on
+          Cost because the denominator is this page's own subject and its
+          window control is already here; on Overview it would be a cost
+          question on a health page. */}
+      {/* A lines-per-dollar ratio has no token form: hidden in the org's
+          token-usage view (format.ts cost affordances). */}
+      {dollarsShown() && (
+        <LOCPerDollarTile
+          days={locDays}
+          windowLabel={winLbl}
+          filtered={tool !== "all" || project !== "all" || model !== "all"}
+        />
+      )}
 
       {/* Two time-series side by side */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -319,15 +382,17 @@ export function CostPage() {
           right={
             <div className="flex flex-wrap items-center gap-2">
               <GranControl served={costTs.data} />
-              <SegmentedControl<"tokens" | "cost">
-                options={[
-                  { value: "tokens", label: "Tokens" },
-                  { value: "cost", label: `$ / ${granularityUnit(costGran)}` },
-                ]}
-                value={dailyMode}
-                onChange={setDailyMode}
-                size="sm"
-              />
+              {dollarsShown() && (
+                <SegmentedControl<"tokens" | "cost">
+                  options={[
+                    { value: "tokens", label: "Tokens" },
+                    { value: "cost", label: `$ / ${granularityUnit(costGran)}` },
+                  ]}
+                  value={dailyMode}
+                  onChange={setDailyMode}
+                  size="sm"
+                />
+              )}
             </div>
           }
         >
@@ -382,7 +447,9 @@ export function CostPage() {
         </ChartShell>
       </div>
 
-      {/* Cache savings trend */}
+      {/* Cache savings trend: dollars saved, so hidden in the org's
+          token-usage view. */}
+      {dollarsShown() && (
       <ChartShell
         title={<TitleWithHelp text="Cache savings trend" helpId="chart.analysis_cache_savings_trend" />}
         icon={SECTION_ICONS.cacheSavingsTrend}
@@ -405,51 +472,54 @@ export function CostPage() {
           )}
         </ChartState>
       </ChartShell>
-
-      {/* Cowork reconciliation — render only when there's data */}
-      {cowork.data && cowork.data.sessions_total > 0 && (
-        <CoworkReconcileCard data={cowork.data} />
       )}
+      </TabPanel>
+
+      <TabPanel id="budgets" active={tab} idPrefix="cost" className="space-y-6">
+        {/* Budget guardrails (P6.3) — advisory monthly budgets with
+            80/100% thresholds and a month-end forecast. */}
+        <BudgetCard />
+      </TabPanel>
+
+      {/* The monthly statement (was the standalone /report page): its own
+          month / project pickers and print layout, no second header. */}
+      <TabPanel id="statement" active={tab} idPrefix="cost">
+        <StatementView />
+      </TabPanel>
+
+      {/* Cowork reconciliation — the tab exists only when there's data */}
+      <TabPanel id="reconciliation" active={tab} idPrefix="cost" className="space-y-6">
+        {hasCowork && <CoworkReconcileCard data={cowork.data!} />}
+      </TabPanel>
     </div>
   );
 }
+
+// MODEL_CSV_COLUMNS is the per-model export, units in the headers. The
+// export follows the developer cost display through lib/costExport (T-204):
+// the `_usd` columns are left out in the token-usage view.
+type ModelCsvRow = CostSummary["rows"][number];
+const MODEL_CSV_COLUMNS: CsvColumn<ModelCsvRow>[] = [
+  { header: "model", value: (r) => r.key },
+  { header: "input_tokens", value: (r) => r.tokens.input },
+  { header: "cache_read_tokens", value: (r) => r.tokens.cache_read },
+  { header: "cache_creation_tokens", value: (r) => r.tokens.cache_creation },
+  { header: "output_tokens", value: (r) => r.tokens.output },
+  { header: "reasoning_tokens", value: (r) => r.tokens.reasoning || 0 },
+  { header: "turn_count", value: (r) => r.turn_count },
+  { header: "ai_cost_usd", value: (r) => r.ai_cost_usd },
+  { header: "tool_cost_usd", value: (r) => r.tool_cost_usd },
+  { header: "total_cost_usd", value: (r) => r.cost_usd },
+  { header: "source", value: (r) => r.source },
+  { header: "reliability", value: (r) => r.reliability },
+];
 
 // Build a CSV from the current per-model rows and trigger a browser
 // download. Mirrors the legacy "Export Excel" affordance but emits
 // CSV (lighter, no xlsx dep) so the user can pivot in Numbers/Sheets.
 function exportModelsCsv(summary?: CostSummary | null) {
   if (!summary?.rows?.length) return;
-  const header = [
-    "model",
-    "input_tokens",
-    "cache_read_tokens",
-    "cache_creation_tokens",
-    "output_tokens",
-    "reasoning_tokens",
-    "turn_count",
-    "ai_cost_usd",
-    "tool_cost_usd",
-    "total_cost_usd",
-    "source",
-    "reliability",
-  ].join(",");
-  const lines = summary.rows.map((r) =>
-    [
-      escapeCsv(r.key),
-      r.tokens.input,
-      r.tokens.cache_read,
-      r.tokens.cache_creation,
-      r.tokens.output,
-      r.tokens.reasoning || 0,
-      r.turn_count,
-      r.ai_cost_usd,
-      r.tool_cost_usd,
-      r.cost_usd,
-      escapeCsv(r.source),
-      escapeCsv(r.reliability),
-    ].join(","),
-  );
-  const csv = [header, ...lines].join("\n");
+  const csv = csvText(summary.rows, MODEL_CSV_COLUMNS);
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -461,16 +531,13 @@ function exportModelsCsv(summary?: CostSummary | null) {
   URL.revokeObjectURL(url);
 }
 
-function escapeCsv(s: string | undefined): string {
-  if (!s) return "";
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
 function deriveSparks(ts?: CostTimeseries | null) {
   const series = ts?.series ?? [];
   return {
     cost: series.map((p) => p.cost_usd || 0),
+    // The four billable buckets summed: the headline's spark in the org's
+    // token-usage view.
+    tokens: series.map((p) => (p.input || 0) + (p.cache_read || 0) + (p.cache_creation || 0) + (p.output || 0)),
     turns: series.map((p) => p.turn_count || 0),
     input: series.map((p) => p.input || 0),
     cacheRead: series.map((p) => p.cache_read || 0),
@@ -487,6 +554,19 @@ function deriveSparks(ts?: CostTimeseries | null) {
 // already null-safe, see lib/format.ts - render "-" for every tile
 // below rather than a confident "$0.00" while nothing has loaded.
 // Once `s` resolves, a genuine zero renders as a genuine zero.
+// summaryTokenTotal is the window's token usage in the same four buckets the
+// page's table shows (net input + cache read + cache write + output) - what
+// the headline renders in the org's token-usage view (lib/costDisplay.tsx).
+function summaryTokenTotal(t: {
+  input?: number;
+  output?: number;
+  cache_read?: number;
+  cache_creation?: number;
+}): number | undefined {
+  if (t.input == null && t.output == null) return undefined;
+  return (t.input ?? 0) + (t.output ?? 0) + (t.cache_read ?? 0) + (t.cache_creation ?? 0);
+}
+
 function summarize(s?: CostSummary | null) {
   if (!s) {
     return {
@@ -545,9 +625,15 @@ function ModelTable({
           <Th align="right">Output<HelpInd id="column.cost.output" /></Th>
           <Th align="right">Reasoning</Th>
           <Th align="right">Turns<HelpInd id="column.cost.turns" /></Th>
-          <Th align="right">AI $<HelpInd id="column.cost.cost" /></Th>
-          <Th align="right">Tool $<HelpInd id="column.cost.cost" /></Th>
-          <Th align="right">Total $<HelpInd id="column.cost.cost" /></Th>
+          {/* The three dollar columns: the token columns to their left
+              already carry the usage in the org's token-usage view. */}
+          {dollarsShown() && (
+            <>
+              <Th align="right">AI $<HelpInd id="column.cost.cost" /></Th>
+              <Th align="right">Tool $<HelpInd id="column.cost.cost" /></Th>
+              <Th align="right">Total $<HelpInd id="column.cost.cost" /></Th>
+            </>
+          )}
           <Th>Source<HelpInd id="column.cost.source" /></Th>
           <Th>Reliability<HelpInd id="column.cost.reliab" /></Th>
         </tr>
@@ -631,15 +717,19 @@ function ModelRow({
       <Td align="right" mono>
         {fmtInt(row.turn_count)}
       </Td>
-      <Td align="right" mono>
-        {fmtUSD(row.ai_cost_usd)}
-      </Td>
-      <Td align="right" mono>
-        {row.tool_cost_usd > 0 ? fmtUSD(row.tool_cost_usd) : "-"}
-      </Td>
-      <Td align="right" mono>
-        <strong className="text-fg-0">{fmtUSD(row.cost_usd)}</strong>
-      </Td>
+      {dollarsShown() && (
+        <>
+          <Td align="right" mono>
+            {fmtUSD(row.ai_cost_usd)}
+          </Td>
+          <Td align="right" mono>
+            {row.tool_cost_usd > 0 ? fmtUSD(row.tool_cost_usd) : "-"}
+          </Td>
+          <Td align="right" mono>
+            <strong className="text-fg-0">{fmtUSD(row.cost_usd)}</strong>
+          </Td>
+        </>
+      )}
       <Td>
         <SourcePill source={row.source} />
       </Td>
@@ -661,12 +751,14 @@ function SourcePill({ source }: { source: string }) {
 
 function CoworkReconcileCard({ data }: { data: CoworkReconcileResult }) {
   return (
+    // In the org's token-usage view the card keeps the session counts and the
+    // drift as a percentage; the dollar totals and dollar columns drop.
     <ChartShell
-      title="Cowork cost reconciliation"
+      title={costLabel("Cowork cost reconciliation", "Cowork reconciliation")}
       icon={SECTION_ICONS.coworkReconcile}
-      sub={`SuperBased-derived vs Cowork-authoritative spend · drift threshold ${data.drift_threshold_percent.toFixed(1)}%`}
+      sub={`SuperBased-derived vs Cowork-${costLabel("authoritative spend", "reported drift")} · drift threshold ${data.drift_threshold_percent.toFixed(1)}%`}
     >
-      <Stagger className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <Stagger className={dollarsShown() ? "grid grid-cols-2 gap-3 md:grid-cols-4" : "grid grid-cols-2 gap-3"}>
         <StatCard
           label="Cowork sessions"
           icon={<MetricIcon metric="sessions" />}
@@ -674,23 +766,27 @@ function CoworkReconcileCard({ data }: { data: CoworkReconcileResult }) {
           sub={`${data.sessions_over_threshold} over threshold`}
           warn={data.sessions_over_threshold > 0}
         />
-        <StatCard
-          label="Cowork total"
-          icon={<MetricIcon metric="vendorReportedCost" />}
-          value={fmtUSD(data.cowork_total_usd)}
-          sub="authoritative"
-        />
-        <StatCard
-          label="SuperBased derived"
-          icon={<MetricIcon metric="derivedCost" />}
-          value={fmtUSD(data.derived_total_usd)}
-          sub="pricing-table × tokens"
-        />
+        {dollarsShown() && (
+          <StatCard
+            label="Cowork total"
+            icon={<MetricIcon metric="vendorReportedCost" />}
+            value={fmtUSD(data.cowork_total_usd)}
+            sub="authoritative"
+          />
+        )}
+        {dollarsShown() && (
+          <StatCard
+            label="SuperBased derived"
+            icon={<MetricIcon metric="derivedCost" />}
+            value={fmtUSD(data.derived_total_usd)}
+            sub="pricing-table × tokens"
+          />
+        )}
         <StatCard
           label="Drift"
           icon={<MetricIcon metric="drift" />}
-          value={fmtUSD(data.overall_drift_usd)}
-          sub={fmtPct(data.overall_drift_percent, 1, false)}
+          value={dollarsShown() ? fmtUSD(data.overall_drift_usd) : fmtPct(data.overall_drift_percent, 1, false)}
+          sub={dollarsShown() ? fmtPct(data.overall_drift_percent, 1, false) : "derived vs Cowork-reported"}
           warn={Math.abs(data.overall_drift_percent) > data.drift_threshold_percent}
         />
       </Stagger>
@@ -698,7 +794,10 @@ function CoworkReconcileCard({ data }: { data: CoworkReconcileResult }) {
       <div className="mt-4">
         <DataTable<CoworkReconcileRow>
           data={data.rows.slice(0, 30)}
-          columns={COWORK_COLUMNS}
+          columns={withoutDollars(
+            COWORK_COLUMNS,
+            (c) => c.id === "cowork" || c.id === "derived" || c.id === "drift_usd",
+          )}
           rowKey={(r) => r.session_id}
           minWidth={760}
         />

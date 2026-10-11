@@ -8,10 +8,9 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/diag"
 	otlpingest "github.com/marmutapp/superbased-observer/internal/ingest/otlp"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
-	"github.com/marmutapp/superbased-observer/internal/proxy"
 	"github.com/marmutapp/superbased-observer/internal/selfobs/emit"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
@@ -65,8 +64,6 @@ func (h *obsAdmissionHandle) PublishOrgAdmission(_ string, _, _ int64, _, _ stri
 
 func (h *obsAdmissionHandle) ClearOrgAdmission() {}
 
-func (h *obsAdmissionHandle) OrgIdentityMatches(_ string, _ int64) bool { return false }
-
 func (h *obsAdmissionHandle) PublishOrgEgress(_ string, _, _ int64, _, _ string, _, _ bool, _ any) {}
 
 func (h *obsAdmissionHandle) ClearOrgEgress() {}
@@ -81,19 +78,24 @@ func (h *obsAdmissionHandle) LiveCapabilities() []string { return nil }
 // to match the !no_obs signature. The relay parameter (C1 judge relay,
 // docs/plans/c1-judge-relay-spec-2026-08-15.md §3) is accepted for signature
 // parity with the !no_obs build and ignored — there is no judge to relay to.
-func wireAdmission(_ context.Context, _ config.Config, _ *sql.DB, _ orgJudgeRelayFunc, _ *proxy.Options, _ *slog.Logger, _ emit.Sink) *obsAdmissionHandle {
+//
+// The stub binds nothing onto the proxy: obs_wire_proxy.go (the proxy half
+// of the real wiring) is not linked, so proxy.go reads obsProxyBinder as nil
+// and this file stays free of internal/proxy. That is what lets the public
+// tree, where this file is the only obs variant, build without capture.proxy
+// too (lane MP-L1L, T-715, ruling D-518).
+func wireAdmission(_ context.Context, cfg config.Config, _ *sql.DB, _ orgJudgeRelayFunc, logger *slog.Logger, _ emit.Sink) *obsAdmissionHandle {
+	// D-514 / D-516: an [observability.admission] block this build cannot
+	// honour starts off with the feasibility seam's one line.
+	if line, off := settingOffLine("observability.admission.enabled", cfg.Observability.Admission.Enabled, nil); off && logger != nil {
+		logger.Warn("admission: " + line)
+	}
 	return nil
-}
-
-// wireObsProxyTurns is a no-op in the no_obs build — the gateway rail lives
-// inside the observability subsystem, which is compiled out here. opts.ObsSink
-// stays nil, matching the proxy's existing disabled-sink no-op path.
-func wireObsProxyTurns(_ context.Context, _ config.Config, _ *sql.DB, _ *proxy.Options, _ *slog.Logger) {
 }
 
 // errObsCompiledOut is returned by the eval CLI wrappers in the no_obs build:
 // the whole observability subsystem (incl. the eval plane) is compiled out.
-var errObsCompiledOut = errors.New("this binary was built without observability (no_obs) — the eval plane is unavailable")
+var errObsCompiledOut = errors.New("this binary was built without observability (Plane A obs compiled out) - the eval plane is unavailable")
 
 // Plain eval shapes the (non-build-tagged) eval command references. Mirror the
 // !no_obs definitions so the command file compiles in both builds.
@@ -140,7 +142,7 @@ func newObsTraceHandler(_ context.Context, _ config.Config, _ *sql.DB, _ *slog.L
 // obsDashboardRoutes is the no_obs stub: no obs trajectory endpoints exist. The
 // shared-admission-handle parameter (gap P0-7) is accepted for signature parity
 // and ignored.
-func obsDashboardRoutes(_ context.Context, _ config.Config, _ string, _ *sql.DB, _ *obsAdmissionHandle, _ *slog.Logger) []dashboard.ExtraRoute {
+func obsDashboardRoutes(_ context.Context, _ config.Config, _ string, _ *sql.DB, _ *obsAdmissionHandle, _ *slog.Logger) []dashapi.ExtraRoute {
 	return nil
 }
 

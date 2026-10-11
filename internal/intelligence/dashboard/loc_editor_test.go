@@ -110,7 +110,7 @@ func TestLocEditorChangeTokenOverHTTP(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body %q)", rr.Code, tc.wantCode, rr.Body.String())
 			}
 			if tc.wantInBod != "" && !strings.Contains(rr.Body.String(), tc.wantInBod) {
-				t.Errorf("401 body %q does not name %q — an operator cannot tell what to fix",
+				t.Errorf("401 body %q does not name %q - an operator cannot tell what to fix",
 					rr.Body.String(), tc.wantInBod)
 			}
 			if tc.wantCode == http.StatusUnauthorized && strings.Contains(rr.Body.String(), secret) {

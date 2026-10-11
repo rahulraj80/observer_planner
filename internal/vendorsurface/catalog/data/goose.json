@@ -1,0 +1,2156 @@
+{
+ "group": "goose",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/goose-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "goose.byok.provider_planes",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.byok",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "header_key",
+    "doc": "provider admin keys"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "provider"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "provider"
+   },
+   "tier": {
+    "doc": "provider tier"
+   },
+   "freshness_doc": "provider",
+   "lookback_doc": "provider",
+   "per_user_doc": "per key / project",
+   "mechanism_doc": "the chosen provider's admin APIs (OpenAI usage/costs, Anthropic Admin usage/cost, Bedrock/Vertex billing, Databricks system tables / AI Gateway, OpenRouter, Azure)",
+   "read_write_doc": "per provider",
+   "class_doc": "Usage, Cost, Limits, Identity",
+   "grain_doc": "provider-defined",
+   "build": "catalog_only",
+   "build_doc": "not goose-segmentable: NA here, catalogued under each provider (requires a goose-dedicated key or project to attribute)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/environment-variables/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.acp_server",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "shared secret"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "ACP session pagination (v1.36)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "single tenant",
+   "mechanism_doc": "`goose serve` ACP over HTTP/SSE `/acp`, `GET /status`; `X-Secret-Key` = `GOOSE_SERVER__SECRET_KEY`, optional TLS; single shared secret, no users/roles",
+   "read_write_doc": "Read + Write (drive agent)",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D (ACP spec)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/remote-goose-server",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://goose-docs.ai/docs/gdk/acp/reference",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.adversary_mode",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per call",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`~/.config/goose/adversary.md` (exists = on; `tools:` line + BLOCK/ALLOW rules); fail-open",
+   "read_write_doc": "Write",
+   "class_doc": "Policy, Audit",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D (file format documented)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/security/adversary-mode",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.config",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file system"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "on restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`~/.config/goose/config.yaml` (Win `%APPDATA%\\Block\\goose\\config\\config.yaml`), env vars override file; keys incl. `active_provider`, `providers.<n>.*`, `GOOSE_MODE`, `GOOSE_MAX_TURNS`, `GOOSE_ALLOWLIST`, `GOOSE_RECIPE_GITHUB_REPO`, `SECURITY_PROMPT_*`, `GOOSE_TELEMETRY_ENABLED`, `extensions.<n>` (`enabled`, `cmd`, `args`, `available_tools`, `type` builtin/platform/stdio/streamable_http), `slash_commands`; `goose info -v` prints active settings",
+   "read_write_doc": "Read + Write (MDM / config mgmt)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "D. NO system-level or locked layer: any user env var or edit overrides",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "DelegationPolicy",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/config-files/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.custom_distro",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "n/a"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per release",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org build",
+   "mechanism_doc": "fork + rebrand: bundled extensions (`bundled-extensions.json`), hide provider UI, system prompt `crates/goose/src/prompts/system.md`, own PostHog host, `GOOSE_BUNDLE_NAME`; only \"lock\" is code modification",
+   "read_write_doc": "Write (code)",
+   "class_doc": "Policy",
+   "grain_doc": "build time",
+   "build": "catalog_only",
+   "build_doc": "C (guide, no stable contract)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/aaif-goose/goose/blob/main/CUSTOM_DISTROS.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.custom_providers",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "on restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`~/.config/goose/custom_providers/*.json` (`name`, `engine`, `base_url`, `api_key_env`, `models[]`)",
+   "read_write_doc": "Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/aaif-goose/goose/blob/main/CUSTOM_DISTROS.md",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.extension_allowlist",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "URL host (no auth transport, see issue #11705)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org-wide if URL shared",
+   "mechanism_doc": "`GOOSE_ALLOWLIST=<https url>` to YAML `extensions: [{id, command}]`; exact match on install command; fetched when first needed, cached, refetched on restart; unset = no restriction",
+   "read_write_doc": "Write (host the file + push env)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D, install-time only: re-enabling an installed disabled extension is NOT re-checked (issue #12302, closed not planned 2026-09); unreachable-URL behavior undocumented",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/allowlist/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/aaif-goose/goose/issues/12302",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.hooks",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local, none"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free (deny v1.36 2026-06, on_failure + PreToolUseResult later)"
+   },
+   "freshness_doc": "synchronous",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "Open Plugins hooks: `~/.agents/plugins/<p>/hooks/hooks.json` or `<project>/.agents/plugins/<p>/`; command via `sh -c`, stdin JSON `event`, `session_id`, `message`, `last_assistant_message`, `tool_name`, `tool_input`, `working_dir`, `tool_call_id`; PreToolUseResult adds `decision`, `policy_evaluated`, `blocked_by`, `reason`, `cause` (policy_denial / hook_failure)",
+   "read_write_doc": "Read + Write (block: exit 2 or `{\"decision\":\"block\"}`; only PreToolUse and Stop can block; `on_failure` allow (default) or block, PreToolUse only)",
+   "class_doc": "Sessions, Content, Audit, Policy",
+   "grain_doc": "Event (SessionStart/End, UserPromptSubmit, PreToolUse, PreToolUseResult, PostToolUse, PostToolUseFailure, BeforeReadFile, AfterFileEdit, BeforeShellExecution, AfterShellExecution, Stop)",
+   "build": "buildable",
+   "build_doc": "D (payload + protocol documented). Gaps: no managed/locked plugin path, user can drop via `disabledPlugins`; no approval event; SubagentStart/Stop not emitted; restart needed to load",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/context-engineering/hooks/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/aaif-goose/goose/pull/9304",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://aaif.io/blog/goose-doubles-down-on-open-in-latest-two-releases",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.init_config",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "first run",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`init-config.yaml` in a custom distribution root, applied on first run only if no config exists",
+   "read_write_doc": "Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (CUSTOM_DISTROS.md)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://github.com/aaif-goose/goose/blob/main/CUSTOM_DISTROS.md",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://goose-docs.ai/docs/guides/custom-distributions/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.langfuse",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "Langfuse project keys"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "Langfuse API"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "Langfuse's"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "Langfuse's",
+   "per_user_doc": "per session",
+   "mechanism_doc": "push to Langfuse (cloud or self-host): `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_URL`, `LANGFUSE_INIT_PROJECT_PUBLIC_KEY/SECRET_KEY`",
+   "read_write_doc": "Read (from Langfuse)",
+   "class_doc": "Telemetry, Content, Usage",
+   "grain_doc": "PerCall / trace",
+   "build": "buildable",
+   "build_doc": "D (env contract documented; trace shape is Langfuse's)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/tutorials/langfuse/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://goose-docs.ai/docs/guides/environment-variables/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.local_logs",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file system"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "2 weeks / last 10 requests",
+   "per_user_doc": "per user",
+   "mechanism_doc": "cli/ and server/ logs (date dirs, auto-deleted after 2 weeks), `llm_request.0-9.jsonl` (raw request/response + token usage, last 10 only), desktop main.log",
+   "read_write_doc": "Read",
+   "class_doc": "Audit, Usage, Content",
+   "grain_doc": "Event, PerCall",
+   "build": "catalog_only",
+   "build_doc": "C (format not documented)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "event",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Retention",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/logs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.other_tracers",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "per tool"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "backend's",
+   "per_user_doc": "per session",
+   "mechanism_doc": "Laminar, MLflow (OTLP/HTTP + `x-mlflow-experiment-id`), Clawmetry tutorials",
+   "read_write_doc": "Read",
+   "class_doc": "Telemetry",
+   "grain_doc": "trace",
+   "build": "catalog_only",
+   "build_doc": "C (tutorials only)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/tutorials/laminar",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://mlflow.org/docs/latest/genai/tracing/integrations/listing/goose/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.otlp_metrics",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "as above"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "export interval",
+   "lookback_doc": "collector's",
+   "per_user_doc": "per user (resource attrs)",
+   "mechanism_doc": "OTLP metrics: `goose.session_tokens`, `goose.session_duration_ms`, `goose.tool_calls`(tool_name), `goose.tool_completions`(tool_name,result), `goose.session_starts`(interactive), `goose.session_completions`(exit_type,duration_ms,total_tokens,message_count), `goose.cli_commands`(command)",
+   "read_write_doc": "Read",
+   "class_doc": "Usage, Adoption, Sessions",
+   "grain_doc": "per process, cumulative counters",
+   "build": "catalog_only",
+   "build_doc": "C (names third-party observed; `goose.session_tokens` is final context size, NOT spend; no cost metric; no gen_ai.client.* histograms)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "tokens",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://www.dash0.com/guides/observing-goose-on-ollama-with-opentelemetry",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.otlp_security_logs",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "as above"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free (egress inspector v1.30.0 2026-04-08; schema PR #9713 merged 2026-06-12, v1.38.0 2026-06-17)"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "collector's",
+   "per_user_doc": "per user",
+   "mechanism_doc": "OTLP logs with unified schema namespaces `security.*`, `session.*` (`session.user`, `session.host`, `session.agent_type`), `tool.*`, `network.*`, `scanner.*`; egress inspector events (`security.threat_type=data_exfiltration` + `network.*`, directionality since v1.38.0), adversary ALLOW/BLOCK, tool inspection results, user approve/deny decisions; findings id `SEC-{uuid}`",
+   "read_write_doc": "Read",
+   "class_doc": "Audit, Telemetry, Identity",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C (schema defined in PR/source, not in docs; logs carry no trace id per Dash0)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://github.com/aaif-goose/goose/pull/9713",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/aaif-goose/goose/releases/tag/v1.38.0",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://github.com/aaif-goose/goose/releases/tag/v1.30.0",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://goose-docs.ai/docs/guides/logs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.otlp_traces",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "collector side (headers you configure)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a (push)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free OSS"
+   },
+   "freshness_doc": "real time (batch span processor)",
+   "lookback_doc": "collector's",
+   "per_user_doc": "per user (resource `user.name`, `host.name` = OS user and host, not a directory identity)",
+   "mechanism_doc": "OTLP/HTTP protobuf push to customer collector; env `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_{SIGNAL}_ENDPOINT`, `OTEL_{SIGNAL}_EXPORTER`, `OTEL_SDK_DISABLED`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_EXPORTER_OTLP_TIMEOUT`; config.yaml `otel_exporter_otlp_endpoint`/`_timeout` (third parties report config.yaml OTEL keys ignored, use env)",
+   "read_write_doc": "Read (receive)",
+   "class_doc": "Telemetry, Usage, Sessions, Content, Identity",
+   "grain_doc": "PerCall (chat span), PerSession (gen_ai.conversation.id)",
+   "build": "buildable",
+   "build_doc": "D for the env contract; attribute schema C (spans `reply`/`reply_stream` invoke_agent, `stream_response_from_provider` chat with model + token counts, `dispatch_tool_call` execute_tool with `gen_ai.tool.name`/`gen_ai.tool.call.id`; observed on 1.46.0 by Dash0, not in official docs). gRPC NOT compiled in (protocol=grpc yields nothing). Content: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` default false, BUT `user_message`, `trace_input` and tool `input` attributes ship even when off (Dash0). invoke_agent spans repeat aggregated totals: dedup on chat spans only. Join key: gen_ai.conversation.id = goose session id",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Identity",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/environment-variables/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://www.dash0.com/guides/observing-goose-on-ollama-with-opentelemetry",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://aaif.io/blog/trace-and-analyze-goose-sessions-with-opentelemetry-jaeger-and-clickhouse",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.permissions",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file / env"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per session",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`GOOSE_MODE` auto (default) / approve / smart_approve / chat; per-tool Always Allow / Ask Before / Never Allow in permission.yaml (path in config-files page, key names undocumented)",
+   "read_write_doc": "Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D for GOOSE_MODE; C for per-tool file format",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ToolPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/managing-tools/goose-permissions/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://goose-docs.ai/docs/guides/managing-tools/tool-permissions",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.plugin_settings",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "session start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`disabledPlugins` in `~/.config/goose/settings.json` and `<project>/.config/goose/settings.json`",
+   "read_write_doc": "Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "AgentCapability",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/context-engineering/hooks/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.prompt_injection",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "classifier token"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per call",
+   "lookback_doc": "logs 2 weeks",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`SECURITY_PROMPT_ENABLED`, `SECURITY_PROMPT_THRESHOLD`, `SECURITY_PROMPT_CLASSIFIER_ENABLED/ENDPOINT/TOKEN`; self-hosted classifier per Classification API spec; findings `SEC-{uuid}` in cli/server logs",
+   "read_write_doc": "Write (config), Read (logs)",
+   "class_doc": "Policy, Audit",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D (classification API spec documented)",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/security/classification-api-spec",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://goose-docs.ai/docs/guides/security/prompt-injection-detection",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.proxy_env",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "env"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "per process",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per machine",
+   "mechanism_doc": "`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `GOOSE_PROVIDER__HOST` (route to an org gateway)",
+   "read_write_doc": "Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (routing only, no egress allowlist; macOS seatbelt sandbox + egress proxy of v1.25.0 was experimental and REMOVED)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/environment-variables/",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://goose-docs.ai/blog/2026/02/23/goose-v1-25-0/",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.recipes_catalog",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "GitHub repo access"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "on use",
+   "lookback_doc": "n/a",
+   "per_user_doc": "org-wide",
+   "mechanism_doc": "`GOOSE_RECIPE_GITHUB_REPO` (owner/repo), `GOOSE_RECIPE_PATH`; recipe `settings:` (goose_provider, goose_model, max_turns), `extensions:`",
+   "read_write_doc": "Write",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (recipe reference documented); not enforcement",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "DelegationPolicy",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/recipes/recipe-reference",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.session_export",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "on demand",
+   "lookback_doc": "n/a",
+   "per_user_doc": "per user",
+   "mechanism_doc": "`goose session export` JSON (full) or Markdown; `goose session list`",
+   "read_write_doc": "Read",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D (CLI)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/sessions/session-management",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.node.sessions_db",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file system"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "free"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "until user deletes",
+   "per_user_doc": "per user",
+   "mechanism_doc": "SQLite `~/.local/share/goose/sessions/sessions.db` (Win `%APPDATA%\\Block\\goose\\data\\sessions\\sessions.db`): metadata, messages, tool calls + results, token stats, accumulated cost",
+   "read_write_doc": "Read",
+   "class_doc": "Sessions, Usage, Cost, Content",
+   "grain_doc": "PerSession, per message",
+   "build": "buildable",
+   "build_doc": "D (Observer's existing adapter; node capture, not an admin surface)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_session",
+     "unit": "tokens",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/logs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "goose.vendor.usage_telemetry",
+   "vendor_group": "goose",
+   "vendor": "goose",
+   "plane": "goose.vendor",
+   "reach": "unclassified",
+   "transport": "unclassified",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "vendor-internal"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "n/a"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "not stated",
+   "per_user_doc": "anonymous",
+   "mechanism_doc": "opt-in anonymous product telemetry (`GOOSE_TELEMETRY_ENABLED`, default false; asked on first use); OS, version, provider/model, extension + tool counts, session duration/tokens, error types",
+   "read_write_doc": "none for customers",
+   "class_doc": "Adoption",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "Nothing (vendor-internal, not exposed)",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://goose-docs.ai/docs/guides/usage-data",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

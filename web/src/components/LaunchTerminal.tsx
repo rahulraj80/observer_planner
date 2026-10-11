@@ -134,62 +134,17 @@ type Props = {
   sessionPanelEnabled?: boolean;
 };
 
-export type Status =
-  | "connecting"
-  | "open"
-  | "reconnecting"
-  | "exited"
-  | "error";
-
-// PolicyStopInfo is the additive explanation the daemon attaches to a
-// terminal's exit event when an org-managed node's OWN node-intervention
-// loop stopped this PTY's child (server: internal/intelligence/dashboard
-// policystop.go, over the guard_events process_control audit trail). It
-// rides the {"t":"exit",…} control frame and GET
-// /api/terminal/<handle>/status's `policy_stop` field verbatim — undefined
-// means "nothing to show", never a guess.
-export type PolicyStopInfo = {
-  rule_id: string;
-  decision: string;
-  reason: string;
-  at: string;
-};
-
-// policyStopMessage renders the honest, decision-aware sentence a UI surface
-// should show — mirrors the server's PolicyStop.DisplayMessage so the
-// wording matches regardless of which surface (terminal modal, dock pill,
-// status API consumer) renders it. "terminated"/"killed" mean the daemon
-// actually stopped the process; any other decision (e.g.
-// "policy_unavailable") means the policy check itself failed, so the copy
-// must not claim the process was stopped.
-export function policyStopMessage(info: PolicyStopInfo): string {
-  const stopped = info.decision === "terminated" || info.decision === "killed";
-  if (stopped) {
-    let msg = "Stopped by organization policy";
-    if (info.rule_id) msg += ` (${info.rule_id})`;
-    if (info.reason) msg += `: ${info.reason}`;
-    return msg;
-  }
-  let msg = "Organization policy check failed; process was not stopped by the daemon";
-  if (info.reason) msg += `: ${info.reason}`;
-  return msg;
-}
-
-// isLiveStatus is the single predicate for "is this token still live?" — i.e.
-// its project can still be browsed and it can still be docked/paste-targeted. A
-// policy-rejected/errored socket ("error") is just as dead as an "exited" one
-// (P2-3): both must gate the project panel off, close an open panel, and revoke
-// the paste writer. Undefined/"connecting" count as live (optimistic, matching
-// the pre-existing disabled-gate semantics).
-//
-// "reconnecting" is LIVE by construction (2026-07-25, mobile terminal-continuity
-// arc): the PTY is a server-side object that outlives its viewers — the manager
-// removes a viewer WITHOUT killing the process — so a dropped websocket says
-// nothing at all about the session. Treating a transport drop as death is what
-// made a phone returning from its mail app find every terminal tombstoned.
-export function isLiveStatus(s: Status | undefined): boolean {
-  return s !== "exited" && s !== "error";
-}
+// The status vocabulary and its helpers live in lib/launchStatus.ts so the
+// dock can name a status without importing this module (and its xterm
+// chunks). Re-exported here so existing importers compile unchanged.
+import {
+  isLiveStatus,
+  policyStopMessage,
+  type PolicyStopInfo,
+  type Status,
+} from "@/lib/launchStatus";
+export { isLiveStatus, policyStopMessage };
+export type { PolicyStopInfo, Status };
 
 // STANDING_REACQUIRE_COOLDOWN_MS bounds the automatic standing re-present that
 // answers an expiry demote (review B3). A writer lease ages out on the order of
@@ -302,6 +257,8 @@ export function LaunchTerminal({
   const termTheme = useTerminalTheme();
   const termColorsRef = useRef(termTheme.colors);
   termColorsRef.current = termTheme.colors;
+  const termContrastRef = useRef(termTheme.minimumContrastRatio);
+  termContrastRef.current = termTheme.minimumContrastRatio;
   // D13: which modifier VOCABULARY the on-screen key bar prints — the DAEMON's
   // OS (/api/status.host_os), overridable from the ⋯ menu. The host, not the
   // browser: the browser is often a phone that is not the machine whose PTY
@@ -599,6 +556,10 @@ export function LaunchTerminal({
           'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
         fontSize: 12,
         theme: termColorsRef.current,
+        // Lightness-only contrast floor per terminal theme (1 = pass-through on
+        // dark; 4.5 on light, where dark-assuming truecolor output would vanish).
+        // See TERMINAL_MIN_CONTRAST in shared/lib/terminalTheme.ts.
+        minimumContrastRatio: termContrastRef.current,
         // A full-screen TUI (opencode, claude-code 2.1.220+, etc.) turns on
         // DECSET mouse-tracking (?1000/1002/1003/1006h) so it can receive
         // clicks/drags itself. xterm couples that 1:1 to its OWN selection
@@ -2122,8 +2083,10 @@ export function LaunchTerminal({
   // Swap the canvas palette live when the app theme or the preference flips.
   useEffect(() => {
     const t = termRef.current;
-    if (t) t.options.theme = termTheme.colors;
-  }, [termTheme.colors]);
+    if (!t) return;
+    t.options.theme = termTheme.colors;
+    t.options.minimumContrastRatio = termTheme.minimumContrastRatio;
+  }, [termTheme.colors, termTheme.minimumContrastRatio]);
 
   return (
     <div

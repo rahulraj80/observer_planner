@@ -25,9 +25,9 @@ observer start                    # run the local daemon
 Append this to `~/.openinterpreter/config.toml`:
 
 ```toml
-  [mcp_servers.observer]
-    args = ["serve"]
-    command = "observer"
+[mcp_servers.observer]
+args = ["serve"]
+command = "observer"
 ```
 
 Then check it with `interpreter mcp list`, or `/mcp` inside the

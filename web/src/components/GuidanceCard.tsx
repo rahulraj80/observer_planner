@@ -383,7 +383,7 @@ function GuidanceFileViewer({
             <div className="space-y-3">
               {file.data.truncated && (
                 <Pill variant="warn">
-                  Truncated — showing a partial preview of this file
+                  Truncated - showing a partial preview of this file
                 </Pill>
               )}
               <div className="flex items-center justify-between gap-2">

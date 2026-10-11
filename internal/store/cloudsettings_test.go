@@ -59,7 +59,7 @@ func TestCloudEvidenceSettingsAreFrozenOnReceipt(t *testing.T) {
 		t.Fatalf("receipt changed: %+v %v", r, err)
 	}
 	got, _, err = s.GetCloudEnrichPolicy(ctx)
-	if err != nil || *got.EvidenceSettings != settings.ForLevel(CloudEnrichTitles) {
+	if err != nil || *got.EvidenceSettings != CloudEvidenceSettingsForLevel(settings, CloudEnrichTitles) {
 		t.Fatalf("title clamp: %+v %v", got, err)
 	}
 }

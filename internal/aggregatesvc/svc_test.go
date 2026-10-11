@@ -1,3 +1,5 @@
+//go:build !sbo_omit_egress_aggregate_share
+
 package aggregatesvc
 
 import (

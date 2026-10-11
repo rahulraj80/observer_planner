@@ -3,16 +3,42 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   ChartShell,
+  EntityMultiPicker,
   Input,
   Select,
   SettingRow,
+  SinglePicker,
   Toggle,
   SuccessCheck,
 } from "@/components/primitives";
+import { KNOWN_ACTION_TYPES } from "@shared/lib/actions";
 import type { ConfigResponse } from "@/lib/types";
 import { markRestartPending } from "@/lib/restartPending";
 import { useApi } from "@/lib/useApi";
-import type { FieldDef, SectionGroup, SectionSpec } from "./sectionSpecs";
+import type { FieldDef, OptionSourceId, SectionGroup, SectionSpec } from "./sectionSpecs";
+import { keepSelected, type PickOption } from "@/lib/pickerOptions";
+import {
+  GUARD_RULE_OPTIONS,
+  type PickerSource,
+  usePricedModels,
+  useProjectRootOptions,
+  useToolOptions,
+} from "@/lib/usePickerSources";
+
+const ACTION_TYPE_OPTIONS: PickOption[] = KNOWN_ACTION_TYPES.map((t) => ({ id: t, label: t }));
+
+type PickerSources = Partial<Record<OptionSourceId, PickerSource>>;
+
+/** specSources lists the option sources a section's fields name, so the
+ *  section fetches only the rosters it renders. */
+function specSources(spec: SectionSpec): Set<OptionSourceId> {
+  const out = new Set<OptionSourceId>();
+  for (const f of [...(spec.fields ?? []), ...(spec.groups ?? []).flatMap((g) => g.fields)]) {
+    if (f.optionSource) out.add(f.optionSource);
+  }
+  return out;
+}
+import { saveConfigSection } from "@/lib/configSectionSave";
 
 // GET /api/guard/prompt/detectors response shape (backend:
 // internal/intelligence/dashboard/guard_prompt.go's
@@ -69,6 +95,23 @@ export function StructuredConfigSection({
   const dynamicOptions = useMemo<Record<string, string[] | undefined>>(
     () => ({ profile_names: config?.profile_names }),
     [config],
+  );
+
+  // Picker rosters (D-571): fetched only when a field of this section
+  // names the source.
+  const wanted = useMemo(() => specSources(spec), [spec]);
+  const adapters = useToolOptions(wanted.has("adapters"));
+  const projectRoots = useProjectRootOptions(wanted.has("project_roots"));
+  const pricedModels = usePricedModels(wanted.has("priced_models"));
+  const pickers = useMemo<PickerSources>(
+    () => ({
+      adapters,
+      project_roots: projectRoots,
+      priced_models: pricedModels,
+      action_types: { options: ACTION_TYPE_OPTIONS, loading: false },
+      guard_rules: { options: GUARD_RULE_OPTIONS, loading: false },
+    }),
+    [adapters, projectRoots, pricedModels],
   );
 
   // Resolved effective-mode sidecar for the "prompt-detectors" GROUP
@@ -148,20 +191,13 @@ export function StructuredConfigSection({
       // those keys from the OUTGOING payload; the draft itself (and the
       // rest of the section object) is untouched.
       const payload = stripDisabledFields(draft, spec);
-      const res = await fetch(`/api/config/section/${spec.id}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-      const out = await res.json().catch(() => null as null | Record<string, unknown>);
-      if (out && out.restart_required) {
-        const keys = Array.isArray(out.restart_required_keys)
-          ? (out.restart_required_keys as string[])
-          : undefined;
+      // Previews the masked diff (and any credential-shaped value) in the
+      // shell's save dialog, then writes with the confirm token (T-432).
+      const out = await saveConfigSection(spec.id, payload);
+      if (out.write_mode === "noop") {
+        setSavedMsg("Nothing to save; config.toml already says this.");
+      } else if (out.restart_required) {
+        const keys = out.restart_required_keys.length > 0 ? out.restart_required_keys : undefined;
         setSavedMsg(
           keys && keys.length > 0
             ? `Saved. Restart the observer daemon to apply ${keys.join(", ")}.`
@@ -209,6 +245,7 @@ export function StructuredConfigSection({
                 onChange={(v) => setAt([f.id], v)}
                 dynamicOptions={dynamicOptions}
                 effectiveModes={effectiveModes}
+                pickers={pickers}
               />
             ))}
           </div>
@@ -235,6 +272,7 @@ export function StructuredConfigSection({
                 }
                 dynamicOptions={dynamicOptions}
                 effectiveModes={effectiveModes}
+                pickers={pickers}
               />
             );
           })}
@@ -279,6 +317,7 @@ function GroupCard({
   onChange,
   dynamicOptions,
   effectiveModes,
+  pickers,
 }: {
   group: SectionGroup;
   draft: Record<string, unknown> | null;
@@ -286,6 +325,7 @@ function GroupCard({
   onChange: (field: string, value: unknown) => void;
   dynamicOptions?: Record<string, string[] | undefined>;
   effectiveModes?: Record<string, string>;
+  pickers?: PickerSources;
 }) {
   const groupData = useMemo(
     () => resolveSub(draft, relPath),
@@ -312,6 +352,7 @@ function GroupCard({
             onChange={(v) => onChange(f.id, v)}
             dynamicOptions={dynamicOptions}
             effectiveModes={effectiveModes}
+            pickers={pickers}
           />
         ))}
       </div>
@@ -328,12 +369,14 @@ function FieldRow({
   onChange,
   dynamicOptions,
   effectiveModes,
+  pickers,
 }: {
   field: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
   dynamicOptions?: Record<string, string[] | undefined>;
   effectiveModes?: Record<string, string>;
+  pickers?: PickerSources;
 }) {
   return (
     <SettingRow
@@ -351,6 +394,7 @@ function FieldRow({
         onChange={onChange}
         dynamicOptions={dynamicOptions}
         effectiveModes={effectiveModes}
+        pickers={pickers}
       />
     </SettingRow>
   );
@@ -362,12 +406,14 @@ function FieldInput({
   onChange,
   dynamicOptions,
   effectiveModes,
+  pickers,
 }: {
   field: FieldDef;
   value: unknown;
   onChange: (v: unknown) => void;
   dynamicOptions?: Record<string, string[] | undefined>;
   effectiveModes?: Record<string, string>;
+  pickers?: PickerSources;
 }) {
   // A spec may mark a field `disabled` — a key the config still carries but
   // that no consumer reads. It renders inert rather than live, and
@@ -442,6 +488,45 @@ function FieldInput({
           const n = e.target.valueAsNumber;
           onChange(Number.isFinite(n) ? n : 0);
         }}
+      />
+    );
+  }
+
+  // A list or text field over a known set is a picker (D-571): a closed
+  // `options` list or a daemon roster named by `optionSource`. A value the
+  // list does not carry (set by hand in config.toml) stays visible.
+  const source = field.optionSource ? pickers?.[field.optionSource] : undefined;
+  const known: PickOption[] | undefined =
+    field.kind === "list" && field.options
+      ? field.options.map((o) => ({ id: o, label: o }))
+      : source?.options;
+  if (field.kind === "list" && known) {
+    const arr = (Array.isArray(value) ? value : []).map(String);
+    return (
+      <EntityMultiPicker
+        options={keepSelected(known, arr)}
+        value={arr}
+        onChange={(next) => onChange(next)}
+        disabled={disabled}
+        allowFreeId={Boolean(field.allowFree)}
+        loading={source?.loading}
+        placeholder={field.allowFree ? "Pick, or type a value and press Enter…" : "Pick…"}
+        ariaLabel={field.label}
+      />
+    );
+  }
+  if (field.kind === "text" && known) {
+    const cur = value == null ? "" : String(value);
+    return (
+      <SinglePicker
+        options={keepSelected(known, cur ? [cur] : [])}
+        value={cur}
+        onChange={(next) => onChange(next)}
+        disabled={disabled}
+        allowFree={Boolean(field.allowFree)}
+        loading={source?.loading}
+        placeholder="Pick one…"
+        ariaLabel={field.label}
       />
     );
   }

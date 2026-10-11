@@ -1,8 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
+  Button,
   ChartShell,
+  ConfirmButton,
   EmptyState,
   ErrorState,
   HeroStat,
@@ -12,11 +14,23 @@ import {
   Pill,
   Stagger,
   Table,
+  Textarea,
   Tooltip,
 } from "@/components/primitives";
 import { DataTable } from "@/components/DataTable";
 import { useApi } from "@/lib/useApi";
-import { fmtDateOnly, fmtDateTime, fmtDuration, fmtInt, fmtUSD } from "@/lib/format";
+import { useFilters } from "@/lib/filters";
+import { fetchJSON, localConfirmHeaders } from "@/lib/api";
+import { JobResult, useCommandJob } from "@/components/CommandJobButton";
+import type { BackfillRunResponse } from "@/lib/types";
+import { costLabel, dollarsShown, fmtDateOnly, fmtDateTime, fmtDuration, fmtInt, fmtUSD, withoutDollars } from "@/lib/format";
+
+// Benchmark cost figures (spend, cost per success, mean $, Δ $/success, the
+// per-attempt cost dots) are list-price dollars with no token form: in the
+// org's token-usage view (format.ts cost affordances) they drop, and the
+// success / CI / verdict columns stay.
+const DOLLAR_COLUMN_IDS = new Set(["spend", "cost_per_success", "mean_cost", "delta_cost"]);
+const isDollarColumn = (c: { id?: string }) => DOLLAR_COLUMN_IDS.has(c.id ?? "");
 import type { VocabTable } from "@shared/lib/vocabEntry";
 import { VocabPill } from "@shared/lib/vocabPill";
 import { navIcon } from "@/lib/nav";
@@ -154,7 +168,7 @@ export function BenchmarksPage() {
       <PageHeader
         icon={navIcon("benchmarks")}
         title="Benchmarks"
-        sub="Harness × model comparisons grounded in billed-token truth - success ± Wilson CI, expected cost per successful completion, and non-inferiority verdicts over a pinned task corpus. Runs are launched from the CLI (observer benchmark run); this page reads the results."
+        sub={`Harness × model comparisons grounded in billed-token truth - success ± Wilson CI, ${costLabel("expected cost per successful completion, ", "")}and non-inferiority verdicts over a pinned task corpus. Start a run below (it runs observer benchmark run for you); this page reads the results.`}
       />
       {run ? <RunDetailView runID={run} onBack={() => setRun("")} /> : <RunListView onOpen={setRun} />}
     </div>
@@ -274,7 +288,7 @@ function configColumnsFor(baseline: string): ColumnDef<ConfigReport, unknown>[] 
           <span className="whitespace-nowrap tabular-nums text-fg-1">
             {(c.success_rate * 100).toFixed(0)}%{" "}
             <span className={wide ? "text-warn" : "text-fg-3"}>
-              [{(c.success_ci.lo * 100).toFixed(0)}–{(c.success_ci.hi * 100).toFixed(0)}]
+              [{(c.success_ci.lo * 100).toFixed(0)}-{(c.success_ci.hi * 100).toFixed(0)}]
             </span>
           </span>
         );
@@ -388,19 +402,22 @@ const COMPARISON_COLUMNS: ColumnDef<Comparison, unknown>[] = [
 ];
 
 function RunListView({ onOpen }: { onOpen: (id: string) => void }) {
-  const runs = useApi<RunsResponse>("/api/benchmarks", { limit: 100 }, []);
+  // The global Model filter keeps the runs whose config matrix ran it.
+  const { model } = useFilters();
+  const modelArg = model !== "all" ? model : undefined;
+  const runs = useApi<RunsResponse>("/api/benchmarks", { limit: 100, model: modelArg }, [modelArg]);
   const rows = runs.data?.runs ?? [];
   const latest = rows[0];
 
   return (
     <>
-      <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <Stagger className={dollarsShown() ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" : "grid grid-cols-1 gap-3 sm:grid-cols-2"}>
         <HeroStat
           label="Benchmark runs"
           icon={<MetricIcon metric="benchmarkRuns" />}
           loading={runs.loading}
           value={runs.data ? fmtInt(runs.data.total) : "-"}
-          sub="node-local, CLI-driven - never leaves this machine"
+          sub="node-local - never leaves this machine"
         />
         <HeroStat
           label="Latest run"
@@ -410,15 +427,19 @@ function RunListView({ onOpen }: { onOpen: (id: string) => void }) {
           value={latest ? latest.spec_name : "-"}
           sub={latest ? `${latest.completed_cells}/${latest.planned_cells} cells · ${fmtDateOnly(latest.started_at)}` : "no runs yet"}
         />
-        <HeroStat
-          label="Latest spend"
-          icon={<MetricIcon metric="spend" />}
-          loading={runs.loading}
-          stale={runs.isStale}
-          value={latest ? fmtUSD(latest.spend_usd) : "-"}
-          sub="estimated list price, not invoiced"
-        />
+        {dollarsShown() && (
+          <HeroStat
+            label="Latest spend"
+            icon={<MetricIcon metric="spend" />}
+            loading={runs.loading}
+            stale={runs.isStale}
+            value={latest ? fmtUSD(latest.spend_usd) : "-"}
+            sub="estimated list price, not invoiced"
+          />
+        )}
       </Stagger>
+
+      <RunBenchmarkPanel onFinished={runs.reload} />
 
       <ChartShell title="Runs">
         {runs.loading ? (
@@ -430,23 +451,17 @@ function RunListView({ onOpen }: { onOpen: (id: string) => void }) {
             variant="inline"
             illustration="setup"
             title="No benchmark runs yet"
-            body={
-              <>
-                Run a spec to populate this page:{" "}
-                <code className="rounded-1 bg-bg-3 px-1 font-mono">observer benchmark run &lt;spec.toml&gt;</code>
-              </>
-            }
+            body="Paste a spec in Run a benchmark above, review the dry-run estimate, then start the run."
           >
             <p className="text-[12px] leading-relaxed text-fg-3">
-              Dry-run by default; add <code className="rounded-1 bg-bg-3 px-1 font-mono">--confirm-spend</code> to
-              drive the harnesses. Report from the CLI with{" "}
-              <code className="rounded-1 bg-bg-3 px-1 font-mono">observer benchmark report &lt;run-id&gt;</code>.
+              A finished run appears here; click it for the full report (the same numbers{" "}
+              <code className="rounded-1 bg-bg-3 px-1 font-mono">observer benchmark report</code> prints).
             </p>
           </EmptyState>
         ) : (
           <DataTable<RunSummary>
             data={rows}
-            columns={RUN_COLUMNS}
+            columns={withoutDollars(RUN_COLUMNS, isDollarColumn)}
             rowKey={(r) => r.run_id}
             onRowClick={(r) => onOpen(r.run_id)}
             minWidth={720}
@@ -463,7 +478,10 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
   const configs = d?.configs ?? [];
   const comparisons = d?.comparisons ?? [];
   const tasks = d?.tasks ?? [];
-  const configColumns = useMemo(() => configColumnsFor(d?.baseline_config ?? ""), [d?.baseline_config]);
+  const configColumns = useMemo(
+    () => withoutDollars(configColumnsFor(d?.baseline_config ?? ""), isDollarColumn),
+    [d?.baseline_config],
+  );
 
   return (
     <>
@@ -484,6 +502,7 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
           Export JSON
         </a>
         <code className="rounded-1 bg-bg-2 px-1 font-mono text-[11px] text-fg-3">{runID}</code>
+        <DeleteRunButton runID={runID} onDeleted={onBack} />
       </div>
 
       {detail.loading && !d ? (
@@ -492,7 +511,7 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
         <ChartShell title="Run detail">
           <ErrorState
             className="py-6"
-            title="Could not load this run - it may have been deleted (observer benchmark delete)."
+            title="Could not load this run. It may have been deleted."
             error={detail.error}
             onRetry={detail.reload}
           />
@@ -510,9 +529,14 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
               <>
                 Baseline <code className="font-mono text-fg-1">{d.baseline_config}</code> · non-inferiority margin{" "}
                 {d.noninferiority_margin > 0 ? `${(d.noninferiority_margin * 100).toFixed(0)}pp` : "none declared"} ·
-                sample floor {d.min_sample} · {d.completed_cells}/{d.planned_cells} cells · total spend{" "}
-                <span className="font-semibold text-fg-1">{fmtUSD(d.total_spend_usd)}</span>{" "}
-                <span className="text-fg-3">({d.price_disclaimer})</span>
+                sample floor {d.min_sample} · {d.completed_cells}/{d.planned_cells} cells
+                {dollarsShown() && (
+                  <>
+                    {" "}· total spend{" "}
+                    <span className="font-semibold text-fg-1">{fmtUSD(d.total_spend_usd)}</span>{" "}
+                    <span className="text-fg-3">({d.price_disclaimer})</span>
+                  </>
+                )}
               </>
             }
           >
@@ -529,7 +553,7 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
             )}
             <p className="mt-2 text-[11px] leading-snug text-fg-3">
               Success uses a Wilson score interval (correct at small repeats); a wide CI (highlighted) means the N is
-              too small to rank. Cost is skewed - see the raw per-attempt dots below.
+              too small to rank.{dollarsShown() && " Cost is skewed - see the raw per-attempt dots below."}
             </p>
           </ChartShell>
 
@@ -540,13 +564,14 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
             >
               <DataTable<Comparison>
                 data={comparisons}
-                columns={COMPARISON_COLUMNS}
+                columns={withoutDollars(COMPARISON_COLUMNS, isDollarColumn)}
                 rowKey={(cmp) => cmp.candidate}
                 minWidth={640}
               />
             </ChartShell>
           )}
 
+          {dollarsShown() && (
           <ChartShell title="Cost per attempt (raw)" sub="Every attempt's snapshot billed cost - dots, never hidden.">
             <div className="space-y-2.5">
               {configs.map((c) => (
@@ -559,6 +584,7 @@ function RunDetailView({ runID, onBack }: { runID: string; onBack: () => void })
               ))}
             </div>
           </ChartShell>
+          )}
 
           {tasks.length > 0 && (
             <ChartShell title="Per-task results" sub="Pass count / attempts per task × config - the block structure behind the paired analysis.">
@@ -679,3 +705,153 @@ function signed(n: number, usd = false): string {
   return usd ? `${s}${fmtUSD(n)}` : `${s}${n.toFixed(1)}`;
 }
 
+
+type BenchmarkRunStart = BackfillRunResponse & { spec_name: string; spec_digest: string };
+
+// postBenchmarkRun starts `observer benchmark run` through the dashboard
+// (POST /api/benchmarks/run). The server parses the spec with the CLI's own
+// parser first, so a malformed spec comes back as a 400 with the reason.
+async function postBenchmarkRun(
+  spec: string,
+  confirmSpend: boolean,
+  dryRunJobID: string,
+  allowUnpriced = false,
+): Promise<BenchmarkRunStart> {
+  const res = await fetch("/api/benchmarks/run", {
+    method: "POST",
+    headers: await localConfirmHeaders(),
+    body: JSON.stringify({
+      spec,
+      confirm_spend: confirmSpend,
+      dry_run_job_id: dryRunJobID,
+      allow_unpriced: allowUnpriced,
+    }),
+  });
+  const out = (await res.json().catch(() => null)) as (BenchmarkRunStart & { error?: string }) | null;
+  if (!res.ok || !out) throw new Error(out?.error || `HTTP ${res.status}`);
+  return out;
+}
+
+// RunBenchmarkPanel: `observer benchmark run` from the dashboard (backlog
+// item 6, sweep row 10). Paste a spec, run the dry run (it launches nothing
+// and stores nothing; it prints the plan and the cost estimate), then start
+// the real run, which spends API budget within the spec's [budget] caps. The
+// spend button only arms after a finished dry run of exactly the text in the
+// box, and the server checks the same thing.
+function RunBenchmarkPanel({ onFinished }: { onFinished: () => void }) {
+  const [spec, setSpec] = useState("");
+  const [dry, setDry] = useState<{ jobID: string; text: string } | null>(null);
+  const [allowUnpriced, setAllowUnpriced] = useState(false);
+  const dryJob = useCommandJob({
+    mode: "benchmark-dry-run",
+    start: async () => {
+      const text = spec;
+      const out = await postBenchmarkRun(text, false, "");
+      setDry({ jobID: out.job_id, text });
+      return out;
+    },
+  });
+  const spendJob = useCommandJob({
+    mode: "benchmark-run",
+    start: () => postBenchmarkRun(spec, true, dry?.jobID ?? "", allowUnpriced),
+    onDone: () => onFinished(),
+  });
+  const dryDone = dryJob.job?.status === "done" && dry !== null && dry.text === spec && spec.trim() !== "";
+  return (
+    <ChartShell
+      title="Run a benchmark"
+      sub="Paste a benchmark spec (TOML, the same file observer benchmark run takes). The dry run shows the plan and the cost estimate and spends nothing."
+    >
+      <Textarea
+        mono
+        rows={8}
+        value={spec}
+        onChange={(e) => setSpec(e.target.value)}
+        placeholder={'name = "my-corpus"\nrepeats = 3\n[budget]\n  max_total_usd = 5.0\n...'}
+        aria-label="Benchmark spec (TOML)"
+        className="w-full"
+      />
+      <div className="mt-2 flex flex-wrap items-start gap-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void dryJob.run()}
+          disabled={spec.trim() === "" || dryJob.busy || dryJob.running || spendJob.running}
+        >
+          {dryJob.running ? "Estimating…" : "Dry run (estimate)"}
+        </Button>
+        <ConfirmButton
+          variant="primary"
+          armedVariant="danger"
+          size="sm"
+          onConfirm={() => void spendJob.run()}
+          disabled={!dryDone || spendJob.busy || spendJob.running}
+          title={dryDone ? undefined : "Run a dry run of this exact spec first"}
+          confirmLabel="Spend and run?"
+          armedNote={
+            allowUnpriced
+              ? "Drives the harnesses for real and spends API budget, capped by the spec's [budget] limits. Models with no price history are allowed, so the estimate cannot bound their cost."
+              : "Drives the harnesses for real and spends API budget, capped by the spec's [budget] limits."
+          }
+        >
+          {spendJob.running ? "Running…" : "Run and spend"}
+        </ConfirmButton>
+        <label className="flex items-center gap-2 self-center text-[11.5px] text-fg-2">
+          <input
+            type="checkbox"
+            checked={allowUnpriced}
+            onChange={(e) => setAllowUnpriced(e.target.checked)}
+            disabled={spendJob.running}
+          />
+          Allow models with no price history (the run is still capped by [budget])
+        </label>
+      </div>
+      <p className="mt-2 text-[11px] leading-snug text-fg-3">
+        Codex runs record into this node and appear in the list below. A claude-code spend run uses a throwaway
+        isolated benchmark daemon and copies its results into this node when it finishes, so it appears below too. The
+        output below is the CLI's own: its --confirm-spend is the Run and spend button and its --allow-unpriced is the
+        checkbox.
+      </p>
+      <JobResult job={dryJob.job} err={dryJob.err} doneText="Dry run finished. Review the estimate before you spend." lines={14} />
+      <JobResult job={spendJob.job} err={spendJob.err} doneText="Run finished. It is in the list below." lines={14} />
+    </ChartShell>
+  );
+}
+
+// DeleteRunButton: `observer benchmark delete <run-id>` (the same store
+// delete). Two-step: the first click arms it.
+function DeleteRunButton({ runID, onDeleted }: { runID: string; onDeleted: () => void }) {
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function del() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await fetchJSON("/api/benchmarks/delete", undefined, {
+        method: "POST",
+        headers: await localConfirmHeaders(),
+        body: JSON.stringify({ run_id: runID }),
+      });
+      onDeleted();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <ConfirmButton
+        size="sm"
+        variant="ghost"
+        onConfirm={() => void del()}
+        disabled={busy}
+        confirmLabel="Delete this run?"
+        armedNote="Removes the run, its attempts and scores. This cannot be undone."
+      >
+        Delete run
+      </ConfirmButton>
+      {err && <span className="text-[11px] text-danger">{err}</span>}
+    </span>
+  );
+}

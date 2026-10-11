@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/diag"
+	"github.com/marmutapp/superbased-observer/internal/remedy"
 )
 
 // doctorCheck is one diag.Check as the wire spells it.
@@ -22,6 +23,50 @@ type doctorCheck struct {
 	// doctorReport.LocalDetailWithheld.
 	Message string   `json:"message"`
 	Details []string `json:"details,omitempty"`
+	// Remediations are the check's structured fixes (T-421 item 3), each
+	// rendered by internal/remedy: the command the CLI text quotes, and the
+	// dashboard control (label + in-app link) the Health page renders as a
+	// button. The vocabulary carries no path, so the remote projection
+	// leaves it alone.
+	Remediations []doctorRemediation `json:"remediations,omitempty"`
+}
+
+// doctorRemediation is one remedy.Remediation as the wire spells it.
+type doctorRemediation struct {
+	Action  string `json:"action"`
+	Tool    string `json:"tool,omitempty"`
+	Command string `json:"command,omitempty"`
+	Label   string `json:"label"`
+	Href    string `json:"href"`
+}
+
+// doctorRemediations projects a check's remediations; an action this build
+// cannot render is dropped rather than shown as a dead button.
+func doctorRemediations(in []remedy.Remediation) []doctorRemediation {
+	out := make([]doctorRemediation, 0, len(in))
+	for _, r := range in {
+		c, ok := remedy.ControlFor(r)
+		if !ok {
+			continue
+		}
+		out = append(out, doctorRemediation{Action: string(r.Action), Tool: r.Tool, Command: remedy.Command(r), Label: c.Label, Href: c.Href})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// doctorCheckRow is one diag.Check as the wire spells it: the one mapping
+// both doctor routes (the whole report and the per-tool one) use.
+func doctorCheckRow(c diag.Check) doctorCheck {
+	return doctorCheck{
+		Name:         c.Name,
+		Status:       c.Status.String(),
+		Message:      c.Message,
+		Details:      c.Details,
+		Remediations: doctorRemediations(c.Remediations),
+	}
 }
 
 // doctorReport is the GET /api/health/doctor wire shape.
@@ -116,12 +161,7 @@ func (s *Server) handleHealthDoctor(w http.ResponseWriter, r *http.Request) {
 	}
 	checks := make([]doctorCheck, 0, len(report.Checks))
 	for _, c := range report.Checks {
-		row := doctorCheck{
-			Name:    c.Name,
-			Status:  c.Status.String(),
-			Message: c.Message,
-			Details: c.Details,
-		}
+		row := doctorCheckRow(c)
 		if remote {
 			row.Message = redactor.redact(row.Message)
 			row.Details = redactor.redactAll(row.Details)

@@ -54,6 +54,11 @@ type Entry struct {
 	Category string
 	// Surface is where the tool lives.
 	Surface Surface
+	// Operand is which input the guard judges for this native tool
+	// (operand.go): an abstract selector such as "command" or "file_path",
+	// OperandNone for a row the guard does not evaluate. Stamped on every
+	// row by withOperands from the action type plus a small override table.
+	Operand string
 }
 
 // IsGlob reports whether the row's Native is a prefix glob.

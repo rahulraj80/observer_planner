@@ -11,17 +11,19 @@ WEB_DIR        := web
 WEB_DIST       := $(WEB_DIR)/dist
 WEB_EMBED_DIST := internal/intelligence/dashboard/webapp/dist
 
-.PHONY: all build test test-race test-invariant render-module-fixtures lint fmt vet tidy clean run cover \
+.PHONY: all build test test-race test-invariant test-restart-script lint fmt vet tidy clean run cover \
         build-observer build-antigravity-bridge build-node-inspection install-node-inspection \
         web-install web-dev web-build web-clean \
         plugins-build verify-plugins-build \
         taxonomy-build verify-taxonomy-build verify-taxonomy-ts \
         config-schema-build verify-config-schema \
+        agentconfig-catalog-build verify-agentconfig-catalog \
         taxonomy-migration-build verify-taxonomy-migration \
         assistant-migration-build verify-assistant-migration \
         reasoning-migration-build verify-reasoning-migration \
         pricing-snapshot verify-pricing-snapshot \
-        verify-webcloud-dist
+        verify-webcloud-dist verify-node-embed \
+        components-build verify-components distro-build distro-all distro-smoke omit-tag-check
 
 # Targets whose INPUTS are private-only paths (cmd/observer-org*,
 # cmd/observer-edge, web2/, deploy/, docs/, website/, tools/toolcountgen)
@@ -118,16 +120,14 @@ test-race:
 test-invariant:
 	$(GO) test $(GOFLAGS) ./tests/invariant/...
 
-# Regenerates the OpenTofu module fixtures the render tests pin byte-for-
-# byte: deploy/modules/{compact,appliance}/{azure,aws}/<layer>/tests/
-# fixtures/<id>.tfvars, one file per CONTRACT.md fixture row per cloud
-# (RA-0/RA-1a/RA-1b compact; RA-2/RA-2-selfhosted/RA-3/RA-3-selfhosted
-# appliance), each the SAME bytes `observer-org deploy plan` renders for
-# that answer set. `tofu test` reads them; TestModuleFixturesMatchRender
-# fails on any drift and names this target. Run it after a deliberate
-# change to the render or the catalog, then commit the files.
-render-module-fixtures:
-	UPDATE_FIXTURES=1 $(GO) test $(GOFLAGS) ./deploy/catalog/render/ -run TestModuleFixturesMatchRender
+# Hermetic test of scripts/restart-daemon.sh against a fake daemon in a
+# private temp dir (never /tmp/obs.log, never :8820). T-557.
+test-restart-script:
+	bash scripts/test-restart-daemon.sh
+
+# render-module-fixtures lives in Makefile.private (its one owner, T-405):
+# its inputs are deploy/, which is private-only, and this file pulls that
+# one in with the `-include` above.
 
 cover:
 	$(GO) test $(GOFLAGS) -race -coverprofile=$(COVER_OUT) -covermode=atomic ./...
@@ -147,7 +147,7 @@ cover:
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo $(shell $(GO) env GOPATH)/bin/golangci-lint)
 
 lint:
-	@test -x "$(GOLANGCI_LINT)" || { echo "golangci-lint not found at '$(GOLANGCI_LINT)' — install it (https://golangci-lint.run/, install-mode goinstall) or pass GOLANGCI_LINT=/path/to/golangci-lint"; exit 1; }
+	@test -x "$(GOLANGCI_LINT)" || { echo "golangci-lint not found at '$(GOLANGCI_LINT)': install golangci-lint v2.12.2 or later, built with Go >= 1.26, the same version CI uses (https://golangci-lint.run/) or pass GOLANGCI_LINT=/path/to/golangci-lint"; exit 1; }
 	$(GOLANGCI_LINT) run ./...
 
 fmt:
@@ -161,6 +161,42 @@ tidy:
 
 clean:
 	rm -rf $(BUILD_DIR) $(COVER_OUT)
+
+# ---------------------------------------------------------------
+# Modular packaging: the component catalog and the prebuilt node
+# distros (docs/plans/modular-packaging-plan-2026-10-07.md 5.2, 5.5,
+# 5.9; phase P3). A distro build reads its tags from the catalog
+# (cmd/sbo-components), writes bin/distro/observer-<distro>-<os>-<arch>
+# plus its buildinfo, CycloneDX SBOM and proof record, and never signs,
+# publishes or pushes. `make build` is unchanged: the full product.
+#
+#   make distro-build DISTRO=minimal [DISTRO_GOOS=windows DISTRO_GOARCH=amd64]
+#   make distro-all                  every distro for this host, proved
+#   make distro-smoke DISTRO=minimal listener smoke of a built host binary
+#   make omit-tag-check              vet + test every omit-tag variant (CI)
+# ---------------------------------------------------------------
+DISTRO        ?= developer
+DISTROS       := minimal developer managed full
+DISTRO_GOOS   ?= $(shell $(GO) env GOOS)
+DISTRO_GOARCH ?= $(shell $(GO) env GOARCH)
+
+components-build:
+	$(GO) run ./cmd/sbo-components gen-docs
+
+verify-components:
+	$(GO) run ./cmd/sbo-components check
+
+distro-build:
+	scripts/build-distro.sh $(DISTRO) --goos $(DISTRO_GOOS) --goarch $(DISTRO_GOARCH) --proof
+
+distro-all:
+	@for d in $(DISTROS); do scripts/build-distro.sh $$d --proof || exit 1; done
+
+distro-smoke:
+	scripts/distro-smoke.sh $(BUILD_DIR)/distro/observer-$(DISTRO)-$(DISTRO_GOOS)-$(DISTRO_GOARCH)
+
+omit-tag-check:
+	scripts/omit-tag-check.sh
 
 # ---------------------------------------------------------------
 # Web (redesigned React/Vite dashboard, mounted at /v2/).
@@ -183,6 +219,11 @@ web-build:
 	cd $(WEB_DIR) && npm run build
 	@scripts/sync-web-embed.sh $(WEB_DIST) $(WEB_EMBED_DIST)
 	@echo "web: rebuilt $(WEB_EMBED_DIST) from $(WEB_DIST)"
+
+# Fail when the committed node embed differs from a fresh build of web/
+# (P3-07). Never mutates the tree; needs `npm ci` from the repo root.
+verify-node-embed:
+	@scripts/verify-web-embed.sh $(WEB_DIR) $(WEB_EMBED_DIST) "make web-build"
 
 web-clean:
 	rm -rf $(WEB_DIST) $(WEB_DIR)/node_modules
@@ -263,6 +304,24 @@ config-schema-build:
 # Mirrors verify-taxonomy-build's build-into-temp pattern.
 verify-config-schema:
 	@scripts/verify-config-schema-build.sh
+
+# ---------------------------------------------------------------
+# Adapter settings catalogue, schema tier
+# (docs/plans/adapter-config-and-common-vocabulary-plan-2026-10-03.md
+# phase P1). internal/agentconfig/catgen projects the pinned vendor
+# schemas under testdata/agentconfig/schemas/ into
+# internal/agentconfig/catalog_*.gen.go. Run after refreshing the pins
+# (scripts/agentconfig-schema-refresh.sh, the only networked step) or
+# after changing the generator.
+# ---------------------------------------------------------------
+agentconfig-catalog-build:
+	$(GO) run ./internal/agentconfig/catgen
+
+# Drift gate for the generated catalogue: regenerates into a scratch dir
+# and byte-diffs every catalog_*.gen.go against the committed one. Never
+# mutates the working tree.
+verify-agentconfig-catalog:
+	@scripts/verify-agentconfig-catalog.sh
 
 # ---------------------------------------------------------------
 # Build-time price snapshot (internal/intelligence/cost/pricing_snapshot.json).

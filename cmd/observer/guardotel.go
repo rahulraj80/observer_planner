@@ -1,3 +1,5 @@
+//go:build !sbo_omit_export_otel
+
 package main
 
 import (
@@ -8,6 +10,9 @@ import (
 	otelexp "github.com/marmutapp/superbased-observer/internal/exporter/otel"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
+
+// guardotel.go is part of the export.otel wiring (guardotel_omit.go is the
+// off side): it feeds the exporter, so it leaves the binary with it.
 
 // Guard-event OTel feed ([guard.export].otel, guard spec §11.4 —
 // G16). Like the §15 cloud dispatcher, this is a DAEMON-RESIDENT

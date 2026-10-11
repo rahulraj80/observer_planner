@@ -1,0 +1,24 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1730419200,
+      "end_time": 1730505600,
+      "results": [
+        {
+          "object": "organization.usage.web_searches.result",
+          "num_model_requests": 2,
+          "num_requests": 2,
+          "project_id": null,
+          "user_id": null,
+          "api_key_id": null,
+          "model": null,
+          "context_level": null
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next_page": "page_synthetic_next"
+}

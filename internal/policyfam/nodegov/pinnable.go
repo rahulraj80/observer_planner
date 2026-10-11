@@ -22,8 +22,15 @@ const (
 	DirRestrictiveOnly Direction = "restrictive_only"
 	// DirLoweringOnly is the share block's algebra (§2.1): the effective
 	// value is always at or below the node's own local value, so an org
-	// directive can pin or reduce, never raise. It is a share-key direction
-	// only; it never appears in PinnableKeys.
+	// directive can pin or reduce, never raise.
+	//
+	// In PinnableKeys it appears ONLY on an "int" row (the 2026-10-02
+	// budget-latency arc's org_client.push_interval_seconds), where it means
+	// exactly the numeric lowering the budget rail already uses
+	// (govern.LowerInt): the org's value is a CEILING. A node whose own
+	// value is lower keeps it; a node whose own value is higher (or unset,
+	// i.e. the default) takes the org's. The org can therefore make a node
+	// report faster, never slower. Pinned by TestLoweringOnlyPinRowsAreInts.
 	DirLoweringOnly Direction = "lowering_only"
 )
 
@@ -52,6 +59,18 @@ type PinnableKey struct {
 	Direction Direction
 	// Safe is the ONLY value a DirRestrictiveOnly key may carry.
 	Safe any
+	// Min / Max bound an "int" row's value, inclusive. Both zero means
+	// unbounded (no int row is unbounded today). They are checked by the
+	// publish lint and the agent accept path (compilePinned) and again by
+	// the config overlay, so a value outside them is refused at publish
+	// rather than stranding a node at accept.
+	Min, Max int64
+	// Hot marks a key the daemon applies LIVE from the resolved posture, in
+	// addition to the restart-time config overlay. A hot key is excluded
+	// from the pending_restart comparison (cmd/observer's
+	// governancePinnedHash) because a changed value converges without a
+	// restart; reporting pending_restart for it would be a false claim.
+	Hot bool
 	// Label is the admin-console display label.
 	Label string
 }
@@ -123,6 +142,18 @@ var PinnableKeys = []PinnableKey{
 	// enforce.budget — is enforced by the composition algebra
 	// (govern.LowerFloat / LowerInt), not by this row.
 	{Key: "guard.budget.from_org", Kind: "bool", Direction: DirFree, Label: "Apply the organization's budget on this node"},
+	// guard.budget.fail_closed (operator ruling D-502, 2026-10-09). A managed
+	// node that requires the org's budget but has no verified document in hand
+	// (first pull after enrolment not done yet, org never reached, signature
+	// did not verify) now FAILS OPEN on its own numbers by default. This pin is
+	// the org's EXPLICIT opt-in to refusing proxied requests (B-625) in that
+	// state instead. DirRestrictiveOnly with Safe=true for the reason
+	// guard.budget.hard is: an org may force blocking on, never off. A node
+	// with no live enrolment never fails closed whatever this says.
+	{
+		Key: "guard.budget.fail_closed", Kind: "bool",
+		Direction: DirRestrictiveOnly, Safe: true, Label: "Refuse requests until the organization's budget is verified",
+	},
 	// DirRestrictiveOnly with Safe=true, NOT free: §3 requires the `secrets`
 	// FEATURE to be on-only ("forcing scrubbing OFF is a privacy downgrade
 	// the org must not be able to command"), and §3's own closing sentence
@@ -157,6 +188,21 @@ var PinnableKeys = []PinnableKey{
 	// — the two rails do not collide because they set two different fields.
 	// W5 (docs/plans/org-observer-fundamentals-fix-plan-2026-09-13.md R4).
 	{Key: "routing.enabled", Kind: "bool", Direction: DirFree, Label: "Model routing"},
+	// org_client.push_interval_seconds is the push CEILING (2026-10-02
+	// budget-latency arc). Enrolment used to write 900 into every node's
+	// config, which made a session's spend reach the org up to 15 minutes
+	// late; operator ruling: existing nodes are corrected ONLY through this
+	// signed rail, never by a config rewrite. DirLoweringOnly: the org value
+	// is a ceiling (govern.LowerInt), so a developer who chose a faster
+	// cadence keeps it and no org can slow a node's reporting down. Bounded
+	// 30..3600 s so a typo can neither hammer the org server nor make
+	// reporting effectively stop. Hot: the push loop reads the resolved value
+	// live, so a change converges without a daemon restart.
+	{
+		Key: "org_client.push_interval_seconds", Kind: "int",
+		Direction: DirLoweringOnly, Min: 30, Max: 3600, Hot: true,
+		Label: "Org push interval ceiling (seconds)",
+	},
 }
 
 // ShareKey is one row of the capture.pin vocabulary: an [org_client.share]

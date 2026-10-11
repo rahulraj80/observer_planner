@@ -83,7 +83,7 @@ func checkHandoffReaders(ctx context.Context, database *sql.DB) Check {
 		// Actions-only tools carry metadata only — the honest floor, not a
 		// fault. Report and move on (no live probe possible).
 		if h.Transcript == integration.TranscriptActionsOnly {
-			rows = append(rows, row{name, name + ": metadata handover only (no transcript reader) — lanes " + lanesSummary(h)})
+			rows = append(rows, row{name, name + ": metadata handover only (no transcript reader) - lanes " + lanesSummary(h)})
 			continue
 		}
 		readable++
@@ -99,7 +99,7 @@ func checkHandoffReaders(ctx context.Context, database *sql.DB) Check {
 			// no reader yet — an honest classified-but-pending gap.
 			gapped++
 			bump(StatusWarn)
-			rows = append(rows, row{name, base + " — classified readable but adapter implements no reader yet"})
+			rows = append(rows, row{name, base + " - classified readable but adapter implements no reader yet"})
 			continue
 		}
 
@@ -109,11 +109,11 @@ func checkHandoffReaders(ctx context.Context, database *sql.DB) Check {
 		cands, err := recentSessionsToProbe(ctx, database, name, handoffProbeMaxSessions)
 		if err != nil {
 			bump(StatusWarn)
-			rows = append(rows, row{name, base + " — could not query recent sessions: " + err.Error()})
+			rows = append(rows, row{name, base + " - could not query recent sessions: " + err.Error()})
 			continue
 		}
 		if len(cands) == 0 {
-			rows = append(rows, row{name, base + " — reader present, no recent session to probe"})
+			rows = append(rows, row{name, base + " - reader present, no recent session to probe"})
 			continue
 		}
 
@@ -125,15 +125,15 @@ func checkHandoffReaders(ctx context.Context, database *sql.DB) Check {
 		age := shortSessionAge(chosen.started)
 		switch outcome {
 		case probeReadOK:
-			rows = append(rows, row{name, base + fmt.Sprintf(" — read OK (%d msgs, session %s)", msgs, age)})
+			rows = append(rows, row{name, base + fmt.Sprintf(" - read OK (%d msgs, session %s)", msgs, age)})
 		case probeAllUnreadable:
 			gapped++
 			bump(StatusWarn)
-			rows = append(rows, row{name, base + fmt.Sprintf(" — %s unreadable (%v)", probedCountPhrase(len(cands), age), lastErr)})
+			rows = append(rows, row{name, base + fmt.Sprintf(" - %s unreadable (%v)", probedCountPhrase(len(cands), age), lastErr)})
 		default: // probeAllEmpty
 			gapped++
 			bump(StatusWarn)
-			rows = append(rows, row{name, base + fmt.Sprintf(" — %s read but held no messages", probedCountPhrase(len(cands), age))})
+			rows = append(rows, row{name, base + fmt.Sprintf(" - %s read but held no messages", probedCountPhrase(len(cands), age))})
 		}
 	}
 

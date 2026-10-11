@@ -66,7 +66,7 @@ func (*getFileTool) Name() string { return "get_file" }
 func (*getFileTool) Description() string {
 	return "Read a file from disk under the project root, optionally line-sliced. " +
 		"Use this when a LogsCompressor elision marker tells you what's in an elided " +
-		"range and you need the actual bytes — get_file bypasses the shell tool so the " +
+		"range and you need the actual bytes - get_file bypasses the shell tool so the " +
 		"response isn't re-truncated by compression. Path must resolve under " +
 		"project_root after symlink expansion and must pass the operator's " +
 		"allow-extension / deny-path checks. Oversized responses are truncated and " +

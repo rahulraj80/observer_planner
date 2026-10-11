@@ -19,6 +19,7 @@ import type { BackfillJob, BackfillRunResponse } from "@/lib/types";
 import { MetricIcon } from "@/components/MetricIcon";
 import { JOB_STATUS } from "@shared/lib/sessionVocab";
 import { VocabPill } from "@shared/lib/vocabPill";
+import { ReclaimLeftoversCard, type ReclaimLeftover } from "./ReclaimLeftoversCard";
 
 // StorageSection — Settings → Storage (usability arc P6.8): per-table
 // size breakdown, vacuum, one-click backup, restore instructions.
@@ -40,6 +41,8 @@ type StorageResponse = {
   };
   backup_dir?: string;
   backups?: { name: string; bytes: number; modified: string }[];
+  /** Originals `observer archive reclaim` kept aside (T-493); absent on an older daemon. */
+  reclaim_leftovers?: ReclaimLeftover[];
 };
 
 function fmtBytes(n: number): string {
@@ -131,6 +134,12 @@ export function StorageSection({ icon }: { icon?: LucideIcon }) {
         buttonLabel="Vacuum now"
         runningLabel="Vacuuming…"
         path="/api/storage/vacuum"
+        onDone={() => storage.reload()}
+      />
+
+      <ReclaimLeftoversCard
+        leftovers={storage.data?.reclaim_leftovers ?? []}
+        fmtBytes={fmtBytes}
         onDone={() => storage.reload()}
       />
 

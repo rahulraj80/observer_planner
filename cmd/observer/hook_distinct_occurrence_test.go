@@ -99,7 +99,7 @@ func TestClaudeCodeHookDistinctOccurrencesArePreserved(t *testing.T) {
 					t.Fatalf("body %d: builder rejected payload", i)
 				}
 				if seen[ev.SourceEventID] {
-					t.Fatalf("body %d: SourceEventID %q collides with an earlier distinct occurrence — later events will be swallowed by UNIQUE(source_file, source_event_id)",
+					t.Fatalf("body %d: SourceEventID %q collides with an earlier distinct occurrence - later events will be swallowed by UNIQUE(source_file, source_event_id)",
 						i, ev.SourceEventID)
 				}
 				seen[ev.SourceEventID] = true
@@ -156,7 +156,7 @@ func TestUserPromptBoundariesFeedPredictor(t *testing.T) {
 		t.Fatalf("count boundaries: %v", err)
 	}
 	if boundaries != len(prompts) {
-		t.Fatalf("user_prompt boundaries = %d, want %d — the predictor's turns-per-message ladder reads exactly this count",
+		t.Fatalf("user_prompt boundaries = %d, want %d - the predictor's turns-per-message ladder reads exactly this count",
 			boundaries, len(prompts))
 	}
 }

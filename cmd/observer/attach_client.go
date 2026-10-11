@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/marmutapp/superbased-observer/internal/attachsock"
 	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/localipc"
 )
 
 // attach_client.go holds the PLATFORM-NEUTRAL half of session-attach's CLI
@@ -49,7 +49,7 @@ import (
 //     endpoint is a named pipe with no filesystem location at all — use
 //     attachEndpoint for the thing to listen on / dial.
 func attachSocketPath(dbPath string) string {
-	return attachsock.SocketPath(dbPath)
+	return localipc.SocketPath(dbPath)
 }
 
 // attachEndpoint resolves the attach ENDPOINT for an observer DB path through
@@ -59,7 +59,7 @@ func attachSocketPath(dbPath string) string {
 // they cannot drift. It fails rather than return an unusable endpoint (e.g. a
 // socket path past UNIX_PATH_MAX, DI-09).
 func attachEndpoint(dbPath string) (string, error) {
-	return attachsock.Endpoint(dbPath)
+	return localipc.Endpoint(dbPath)
 }
 
 // attachLaunch carries the resolved inputs for an `observer <tool> --attach`

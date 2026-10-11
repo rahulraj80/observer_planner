@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ModelId, SegmentedControl, Tooltip } from "../../primitives";
-import { fmtCompact, fmtInt, fmtUSD } from "../../lib/format";
+import { costChoice, dollarsShown, fmtCompact, fmtInt, fmtUSD } from "../../lib/format";
 import type { SessionModelBucketLike } from "../../lib/types";
 import { defaultRenderCost, type RenderCost } from "./cost";
 
@@ -76,7 +76,10 @@ export function ModelsUsedPanel({
   totalCost: number;
   renderCost?: RenderCost;
 }) {
-  const [mode, setMode] = useState<Mode>("cost");
+  const [picked, setMode] = useState<Mode>("cost");
+  // A developer's token-usage view has no "$" option: the panel reads in
+  // tokens and the toggle is not offered (format.ts cost affordances).
+  const mode = costChoice<Mode>(picked, ["cost"], "tokens");
 
   // Filter zero-everything rows. Rank by cost first (then turn count as
   // tiebreak — useful for sessions where pricing isn't tied yet).
@@ -138,7 +141,7 @@ export function ModelsUsedPanel({
           <h4 className="text-[12px] font-semibold text-fg-1">Models used</h4>
           <p className="mt-0.5 text-[10.5px] text-fg-3">{subtitle}</p>
         </div>
-        {ranked.length > 0 && (
+        {ranked.length > 0 && dollarsShown() && (
           <SegmentedControl<Mode>
             options={[
               { value: "cost", label: "$" },
@@ -220,7 +223,7 @@ export function ModelsUsedPanel({
                           kind: "model",
                           tokens: tokenTotal,
                         })}
-                    {r.tool_cost_usd > 0 && (
+                    {r.tool_cost_usd > 0 && dollarsShown() && (
                       <> · tool {renderCost(r.tool_cost_usd, { kind: "tool" })}</>
                     )}
                   </div>

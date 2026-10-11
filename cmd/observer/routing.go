@@ -1,3 +1,5 @@
+//go:build !sbo_omit_proxy_routing
+
 package main
 
 import (
@@ -11,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/modelvalue"
 	"github.com/marmutapp/superbased-observer/internal/routing"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -100,7 +101,7 @@ func newRoutingStatusCmd() *cobra.Command {
 			}
 
 			w := cmd.OutOrStdout()
-			fmt.Fprintln(w, "Model routing — phase P0 (advisory intelligence)")
+			fmt.Fprintln(w, "Model routing - phase P0 (advisory intelligence)")
 			fmt.Fprintln(w, "  mode                  off (enforcement ships in P1; nothing touches live traffic)")
 			fmt.Fprintf(w, "  tier table            %d model/family placements (+ :free guard, date-strip, family ladder)\n", tierKeys)
 			fmt.Fprintf(w, "  turn-kind classifier  %d ordered rules\n", len(routing.TurnKindRuleNames()))
@@ -194,22 +195,8 @@ func newRoutingLintCmd() *cobra.Command {
 	return cmd
 }
 
-// routingPriceFn adapts the cost engine to the routing package's
-// injected pricing seam — the single place the two vocabularies meet.
-func routingPriceFn(engine *cost.Engine) routing.PriceFn {
-	return func(model string, u routing.PromptUsage) (float64, bool) {
-		return engine.Compute(model, cost.TokenBundle{
-			Input:             u.Input,
-			Output:            u.Output,
-			CacheRead:         u.CacheRead,
-			CacheCreation:     u.CacheCreation,
-			CacheCreation1h:   u.CacheCreation1h,
-			Reasoning:         u.Reasoning,
-			WebSearchRequests: u.WebSearchRequests,
-			Fast:              u.Fast,
-		})
-	}
-}
+// routingPriceFn lives in the core file routing_core.go (advise and the
+// model value report use it in every build).
 
 func newRoutingSimulateCmd() *cobra.Command {
 	var (
@@ -227,11 +214,11 @@ func newRoutingSimulateCmd() *cobra.Command {
 			"decision engine under a named policy template and reports what WOULD have\n" +
 			"happened: reroute counts, estimated savings, cache-forfeit costs, and\n" +
 			"quality-risk flags (moves lacking Model Value parity evidence). Reads\n" +
-			"only — proves value before a single byte of traffic is touched.\n\n" +
+			"only - proves value before a single byte of traffic is touched.\n\n" +
 			"Deterministic given (data, policy): the engine is pure and the replay\n" +
 			"walks sessions in timestamp order.\n\n" +
 			"--turn-kind narrows the replay to turns the §R8.2 classifier maps to\n" +
-			"one kind (e.g. read_only) — useful for isolating where a template's\n" +
+			"one kind (e.g. read_only) - useful for isolating where a template's\n" +
 			"savings actually come from.\n\n" +
 			"Templates: " + fmt.Sprint(routing.TemplateNames()),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -296,13 +283,13 @@ func newRoutingSimulateCmd() *cobra.Command {
 
 // printSimReport renders the human view of a simulation.
 func printSimReport(w io.Writer, rep routing.SimReport, windowDays int) {
-	fmt.Fprintf(w, "Counterfactual replay — policy %q (hash %s, estimate %s), last %d days\n\n",
+	fmt.Fprintf(w, "Counterfactual replay - policy %q (hash %s, estimate %s), last %d days\n\n",
 		rep.PolicyName, rep.PolicyHash, rep.EstimateVersion, windowDays)
 	fmt.Fprintf(w, "  turns evaluated     %d\n", rep.TurnsEvaluated)
 	fmt.Fprintf(w, "  would reroute       %d\n", rep.WouldReroute)
 	fmt.Fprintf(w, "  est. net savings    $%.4f (cache forfeits of $%.4f already deducted)\n",
 		rep.EstSavingsUSD, rep.CacheForfeitUSD)
-	fmt.Fprintf(w, "  quality-risk flags  %d (reroutes without parity evidence — see observer model-value)\n\n",
+	fmt.Fprintf(w, "  quality-risk flags  %d (reroutes without parity evidence - see observer model-value)\n\n",
 		rep.QualityRiskFlags)
 
 	if len(rep.ByMove) > 0 {
@@ -331,7 +318,7 @@ func printSimReport(w io.Writer, rep routing.SimReport, windowDays int) {
 			fmt.Fprintf(w, "    %-24s %d\n", rc, rep.ByReason[rc])
 		}
 	}
-	fmt.Fprintln(w, "\nAdvisory replay only — no live traffic was touched (P0).")
+	fmt.Fprintln(w, "\nAdvisory replay only - no live traffic was touched (P0).")
 }
 
 func sortedTurnKinds(m map[routing.TurnKind]int) []routing.TurnKind {

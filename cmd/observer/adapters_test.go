@@ -25,29 +25,28 @@ func TestRenderAdapterMatrixCoversEveryAdapter(t *testing.T) {
 	}
 	// Representative cells (capability shapes, not tool identity).
 	for _, want := range []string{
-		"env:ANTHROPIC_BASE_URL",       // claude-code RouteEnvSettings
-		"config-file",                  // codex RouteConfigFile
-		"launcher",                     // opencode RouteLauncher
-		"cline_cli_hooks_jsonl+manual", // cline-cli not-auto-wired
-		"claude_settings_json+bridge",  // claude-code cross-OS bridge
-		"A/B/C",                        // native rails
-		"(gap)",                        // a token gap marker
-		"SURFACE",                      // routability column header
-		"routable",                     // RouteStatusRoutableNow render
-		"after-upstream",               // hermes RouteStatusAfterUpstream
-		"after-bridge",                 // gemini-cli RouteStatusAfterBridge
-		"probe",                        // RouteStatusProbeRequired render
-		"native-exempt",                // RouteStatusNativeExempt render
-		"HANDOFF",                      // handoff column header
-		"full+seeded",                  // full transcript + seeded launcher (claude-code/codex)
-		"full+doc-assisted",            // hermes DocAssisted launch
-		"VOCAB",                        // native-tool-vocabulary column header
-		"internal/tooltax",             // VOCAB legend names the taxonomy package
-		"PROMPT",                       // prompt-submit intervention lane column header
-		"hook",                         // PromptLaneHook + AutoWired render (claude-code, codex, cursor, gemini-cli, qwen-code, droid, qoder, poolside, command-code, devin, ...)
-		"hook (manual)",                // PromptLaneHook but Hook.AutoWired=false render (zcode, pending zai-org/feedback#32)
-		"proxy-only",                   // PromptLaneProxyOnly render (opencode, hermes, pi, grok, ...)
-		"probe",                        // PromptLaneProbeRequired render (kimi-code, kiro-cli, cline, ...)
+		"env:ANTHROPIC_BASE_URL",      // claude-code RouteEnvSettings
+		"config-file",                 // codex RouteConfigFile
+		"launcher",                    // opencode RouteLauncher
+		"plugin_shim_ts+manual",       // openclaw / deepseek: not auto-wired (cline-cli is, since T-342)
+		"claude_settings_json+bridge", // claude-code cross-OS bridge
+		"A/B/C",                       // native rails
+		"(gap)",                       // a token gap marker
+		"SURFACE",                     // routability column header
+		"routable",                    // RouteStatusRoutableNow render
+		"after-upstream",              // hermes RouteStatusAfterUpstream
+		"after-bridge",                // gemini-cli RouteStatusAfterBridge
+		"probe",                       // RouteStatusProbeRequired render
+		"native-exempt",               // RouteStatusNativeExempt render
+		"HANDOFF",                     // handoff column header
+		"full+seeded",                 // full transcript + seeded launcher (claude-code/codex)
+		"full+doc-assisted",           // hermes DocAssisted launch
+		"VOCAB",                       // native-tool-vocabulary column header
+		"internal/tooltax",            // VOCAB legend names the taxonomy package
+		"PROMPT",                      // prompt-submit intervention lane column header
+		"hook",                        // PromptLaneHook + AutoWired render (claude-code, codex, cursor, gemini-cli, qwen-code, droid, qoder, poolside, command-code, devin, ...)
+		"proxy-only",                  // PromptLaneProxyOnly render (opencode, hermes, pi, grok, ...)
+		"probe",                       // PromptLaneProbeRequired render (kimi-code, kiro-cli, cline, ...)
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("matrix missing expected cell %q", want)
@@ -58,8 +57,8 @@ func TestRenderAdapterMatrixCoversEveryAdapter(t *testing.T) {
 // TestPromptCellDistinguishesManualHookWiring pins promptCell's
 // autoWired branch: a PromptLaneHook row whose Hook.AutoWired is
 // false (a built, tested dialect with no registration writer in the
-// auto-register loop — today only zcode, pending its
-// zai-org/feedback#32 liveness probe) must render distinctly from a
+// auto-register loop; zcode was one until hook-parity Lane A4 gave it
+// a writer) must render distinctly from a
 // fully auto-wired PromptLaneHook row like claude-code. Before this
 // fix both rendered the identical "hook" cell, which misleadingly
 // implied zcode gets auto-registered like every other row.
@@ -76,40 +75,16 @@ func TestPromptCellDistinguishesManualHookWiring(t *testing.T) {
 		t.Errorf("promptCell(PromptLaneHook, false) = %q, want %q", manual, "hook (manual)")
 	}
 
-	// Live-registry check: zcode's own row must actually carry
-	// AutoWired:false (the fact this fix depends on), and the rendered
-	// matrix must show zcode distinctly from an auto-wired PromptLaneHook
-	// row such as claude-code.
-	zcode, ok := integration.For("zcode")
-	if !ok {
-		t.Fatal("registry has no \"zcode\" row")
-	}
-	if zcode.PromptLane != integration.PromptLaneHook {
-		t.Fatalf("zcode.PromptLane = %q, want PromptLaneHook (test assumption stale — update this test)", zcode.PromptLane)
-	}
-	if zcode.Hook.AutoWired {
-		t.Fatal("zcode.Hook.AutoWired = true, want false (test assumption stale — the zai-org/feedback#32 gap this fix renders around no longer exists; update this test)")
-	}
-
-	claudeCode, ok := integration.For("claude-code")
-	if !ok {
-		t.Fatal("registry has no \"claude-code\" row")
-	}
-	if !claudeCode.Hook.AutoWired {
-		t.Fatal("claude-code.Hook.AutoWired = false, want true (test assumption stale)")
-	}
-
+	// Since hook-parity Lane A4 (2026-10-03) zcode has a registration
+	// writer (`observer init`), so no registry row renders the manual
+	// cell today; the branch stays pinned above for the next built,
+	// writer-less PromptLaneHook row, which the matrix must then show.
 	var buf bytes.Buffer
 	renderAdapterMatrix(&buf, integration.Capabilities(), nil)
-	out := buf.String()
-	if !strings.Contains(out, "hook (manual)") {
-		t.Error("rendered matrix missing the \"hook (manual)\" cell for zcode")
-	}
-
-	zcodeRow := promptCell(zcode.PromptLane, zcode.Hook.AutoWired)
-	claudeCodeRow := promptCell(claudeCode.PromptLane, claudeCode.Hook.AutoWired)
-	if zcodeRow == claudeCodeRow {
-		t.Errorf("zcode's PROMPT cell (%q) must render distinctly from claude-code's (%q)", zcodeRow, claudeCodeRow)
+	for _, c := range integration.Capabilities() {
+		if c.PromptLane == integration.PromptLaneHook && !c.Hook.AutoWired && !strings.Contains(buf.String(), "hook (manual)") {
+			t.Errorf("%s is a writer-less PromptLaneHook row but the matrix shows no \"hook (manual)\" cell", c.Tool)
+		}
 	}
 }
 

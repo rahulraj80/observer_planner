@@ -55,7 +55,7 @@ func TestHandleSessionOrgIntel_EnrichedResult(t *testing.T) {
 	}
 	var resp orgIntelWire
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 	if !resp.Enriched || resp.Result == nil {
 		t.Fatalf("expected enriched result, got %+v", resp)
@@ -88,7 +88,7 @@ func TestHandleSessionOrgIntel_HonestEmpty(t *testing.T) {
 	}
 	var resp orgIntelWire
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+		t.Fatalf("decode: %v - body %s", err, rec.Body.String())
 	}
 	if resp.Enriched || resp.Result != nil {
 		t.Fatalf("expected honest empty, got %+v", resp)

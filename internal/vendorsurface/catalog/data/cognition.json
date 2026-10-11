@@ -1,0 +1,7520 @@
+{
+ "group": "cognition",
+ "research_file": "docs/plans/enterprise-vendor-api-research-2026-10-07/v5/cognition-surfaces.md",
+ "checked_on": "2026-10-07",
+ "surfaces": [
+  {
+   "id": "cognition.contract.deployment",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.contract",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "contract"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "retention for duration of relationship; Enterprise Cloud vs Customer Dedicated (VPC, PrivateLink), Customer Managed Keys (AWS KMS), FedRAMP / ZDR on federal",
+   "read_write_doc": "none",
+   "class_doc": "Retention",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/deployment/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_scim.groups",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_scim",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "as above"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "push",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "/scim/v2/Groups POST create, PATCH add/replace members (by email), DELETE, GET list, GET /Groups/{id} members; groups keyed by displayName",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/sso-scim",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_scim.users",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_scim",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer service key with Teams Read-Only + Teams Update + Teams Delete"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "push (Entra cycle about 40 min)",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "https://server.codeium.com/scim/v2/Users (create, update, PATCH active=false disables and frees seat)",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Seats",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/sso-scim",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v1.cascade_analytics",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v1",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key, Teams Read-Only"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "3 h",
+   "lookback_doc": "window",
+   "per_user_doc": "yes",
+   "mechanism_doc": "POST /api/v1/CascadeAnalytics (group_name XOR emails, ide_types editor/jetbrains/cli; sources cascade_lines, cascade_runs [cascadeId, model, messagesSent, promptsUsed cents], cascade_tool_usage)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost, LOC, Sessions, Adoption",
+   "grain_doc": "UserDay x model x mode x conversation; tool usage aggregate",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "usd_micros",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "user_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/cascade-analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v1.custom_analytics",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v1",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key, Analytics Read"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "3 h",
+   "lookback_doc": "window",
+   "per_user_doc": "hashed",
+   "mechanism_doc": "POST /api/v1/Analytics (USER_DATA, CHAT_DATA, COMMAND_DATA, PCW_DATA; users only as hashed api_key)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, LOC, Adoption",
+   "grain_doc": "UserHour (autocomplete), per command event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_hour",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "LOC",
+     "grain": "user_hour",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_hour",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/custom-analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v1.get_usage_config",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v1",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key, Billing Read"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "POST /api/v1/GetUsageConfig",
+   "read_write_doc": "R",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/get-usage-config",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v1.team_credit_balance",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v1",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key, Billing Read"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "current cycle",
+   "per_user_doc": "no",
+   "mechanism_doc": "POST /api/v1/GetTeamCreditBalance (promptCreditsPerSeat, numSeats, addOnCreditsAvailable/Used)",
+   "read_write_doc": "R",
+   "class_doc": "Seats, Limits, Cost",
+   "grain_doc": "Snapshot (current cycle)",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Seats",
+     "grain": "snapshot",
+     "unit": "seats",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/get-team-credit-balance",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v1.usage_config",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v1",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key, Billing Write"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "POST /api/v1/UsageConfig (set_add_on_credit_cap or clear; scope team_level / group_id / user_email; per-user cap)",
+   "read_write_doc": "W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "SpendLimitGroup",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/usage-config",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v1.user_page_analytics",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v1",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key in body, Teams Read-Only"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "429, no number"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "refreshed every 3 h",
+   "lookback_doc": "1 y default",
+   "per_user_doc": "yes",
+   "mechanism_doc": "POST /api/v1/UserPageAnalytics (name, email, apiKey [secret for non-Devin teams], activeDays, role, signupTime, last*UsageTime, promptCreditsUsed cents, teamStatus, disableCodeium; billingCycleStart/End)",
+   "read_write_doc": "R",
+   "class_doc": "Identity, Adoption, Cost",
+   "grain_doc": "Snapshot per user (window default 1 y)",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/user-page-analytics",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v2.active_users",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v2",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "as above"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "10/h"
+   },
+   "tier": {
+    "doc": "Enterprise, alpha"
+   },
+   "freshness_doc": "hourly",
+   "lookback_doc": "90 d",
+   "per_user_doc": "optional",
+   "mechanism_doc": "GET /api/v2alpha/analytics/active-users",
+   "read_write_doc": "R",
+   "class_doc": "Adoption",
+   "grain_doc": "OrgDay/month, optional per user",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/get-active-users",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v2.consumption",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v2",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer Windsurf service key (Analytics Read) or Devin cog_ (Use Local Analytics API)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor (24 h expiry), page_size 1 to 10000"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "10 requests/h/team, pagination exempt, Retry-After"
+   },
+   "tier": {
+    "doc": "Enterprise, alpha"
+   },
+   "freshness_doc": "hourly aggregated, data_freshness in metadata",
+   "lookback_doc": "90 d per query",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /api/v2alpha/analytics/consumption (product=agent; prompt_credits + flex_credits or billed_acus by billing_strategy; message_count, user_message_count null before 2026-04-11; user_id, user_email)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Cost",
+   "grain_doc": "UserDay or month x model_uid x ide x ide_version x os",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "credits",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/analytics-v2-introduction",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v2.models",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v2",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "Bearer cog_ with Use Devin Desktop"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "any with Desktop access"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET /api/v2alpha/models[?filter=allowlist] (uid, name, pricing_dimensions label/unit usd-acus-credits/value/denominator)",
+   "read_write_doc": "R",
+   "class_doc": "Cost (price list), Policy (allowlist read-back)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "credits",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ModelAccess",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/list-models",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.desktop_v2.output",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.desktop_v2",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "as above"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": true,
+    "doc": "10/h"
+   },
+   "tier": {
+    "doc": "Enterprise, alpha"
+   },
+   "freshness_doc": "hourly",
+   "lookback_doc": "90 d",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /api/v2alpha/analytics/output?metric=loc_inserted,loc_deleted (group_id unsupported with Devin keys)",
+   "read_write_doc": "R",
+   "class_doc": "LOC, Sessions",
+   "grain_doc": "UserDay x session x source (CASCADE_CLIENT desktop / CHISEL CLI)",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "LOC",
+     "grain": "user_day",
+     "unit": "lines",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/api-reference/get-output",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_scim.groups",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_scim",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "SCIM bearer"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "push",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "SCIM Groups create/read/list/update/delete; land as IdP groups",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/security-access/scim",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_scim.users",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_scim",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "SCIM bearer token (Members tab, rotate/revoke)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "SCIM"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "push real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "SCIM 2.0 base URL from Members tab: Users create/read/list/update/deactivate/delete",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/security-access/scim",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.analytics_csv",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "web UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "CSV exports: user metrics (with Group(s) column), Repositories analytics (PR ratio), Enterprise Consumption Reviews tab by repo, code scan findings",
+   "read_write_doc": "manual export",
+   "class_doc": "BillingExport, Adoption, Commits",
+   "grain_doc": "UserDay / repo week",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "user_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/release-notes/2026",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "manual_export",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.custom_roles",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI (Manage Account Membership)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "create/edit/delete custom roles (enterprise and org permission tables)",
+   "read_write_doc": "UI (read via roles API)",
+   "class_doc": "Roles",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/security-access/custom-roles",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.data_controls",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "paid plans"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Data Controls training opt-out (paid plans; also ZDR with model providers), code-snippet telemetry, conversation sharing",
+   "read_write_doc": "UI (audited)",
+   "class_doc": "Retention, Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Retention",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/security",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.guardrails",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Settings > Guardrails per preset: Off / log_only / warn_user / block_message, enterprise-wide",
+   "read_write_doc": "UI (violations via API)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/features/ai-guardrails",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.hooks_push",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "15 min",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "enterprise-pushed hooks for local agents from the dashboard",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/cascade/hooks",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.invoices",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "web UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "self-serve, Teams"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "Stripe invoices and receipts (app.devin.ai/settings/plans) for self-serve and Teams; Enterprise is contract billing",
+   "read_write_doc": "manual",
+   "class_doc": "BillingExport",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "BillingExport",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/usage",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.local_agent_controls",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "admin UI (Manage Enterprise Settings)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "up to 15 min",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "Settings > Enterprise > Devin Desktop (root) + per-org override (pure replacement, lists not merged): features, models, permissions allow/ask/deny, sandbox enforcement + domains, MCP + registry + enforcement, codebase intelligence, sharing, compliance; applies by user's primary billing org; audited as update_local_controls / update_local_enterprise_config / update_local_org_config",
+   "read_write_doc": "UI (audit gives change events, not state)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "F",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/local/controls",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.mcp_servers",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "file_projection",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "cloud MCP servers, enterprise MCP targets and credentials, managed plugins at account/org/user scope",
+   "read_write_doc": "UI (audit mcp_server_*, set_*_managed_plugins)",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": true,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/product-guides/plugin-ecosystem",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "file",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.pat_policy",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI (Manage Enterprise Settings, Manage Account API Keys)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "PAT policy mode Disabled/Approval required/Self serve, max lifetime (365 d default), approval queue (7 d lapse), PAT inventory + revoke; auto revoke on membership loss",
+   "read_write_doc": "UI (audit actions create_pat, revoke_pat, update_pat_policy, ...)",
+   "class_doc": "Credentials, Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialCreationPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/personal-access-tokens",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.security_profiles",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "network/MCP/git restrictions per cloud session (selected profile visible on session and automation objects)",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/product-guides/security-profiles",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.sso_access",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "SSO (Okta OIDC, Entra, SAML, generic OIDC), JIT toggle, seat requests (approve/decline), join requests, domain verification, attribution filtering (support-enabled)",
+   "read_write_doc": "UI (audited)",
+   "class_doc": "Identity, Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/security-access/sso/guide",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_ui.usage_policies",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_ui",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Enterprise, beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "Enterprise Settings > Usage policies (tiers, default tier, tier priority [UI only], IdP mapping, overrides, requests, guided setup, members view)",
+   "read_write_doc": "UI (API exists for all but default tier choice and priority)",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/features/usage-policies",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v1.org",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v1",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "apk_ / apk_user_ (org scoped)"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "offset"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "/v1/sessions (list/create/get/message/terminate/tags), /v1/secrets, /v1/knowledge, /v1/playbooks, /v1/attachments",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions, Content, Credentials",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D (deprecated)",
+   "sensitivity": "content",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Credentials",
+     "grain": "per_session",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v1/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v2.api_keys",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v2",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "apk_user_ enterprise admin personal key"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "page"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET/POST /v2/enterprise/api-keys, DELETE .../{api_key_id} (list across orgs, provision org service key, revoke)",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (deprecated)",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v2/api-keys/list-enterprise-api-keys",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v2.enterprise",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v2",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "apk_user_ enterprise admin"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "page (max 200)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise (consumption: Enterprise plan only, 403 otherwise)"
+   },
+   "freshness_doc": "as v3",
+   "lookback_doc": "as v3",
+   "per_user_doc": "yes",
+   "mechanism_doc": "/v2/enterprise/{audit-logs, consumption/cycles, consumption/daily[/{user_id}], groups[/{name}], hypervisors/health, members[/{id}][/organizations], members/invite, metrics/{prs,searches,sessions,usage}, org-group-limits, organizations CRUD + members/groups/git connections/git permissions/sessions/insights, playbooks, roles, self, sessions[/{id}], sessions/insights}",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Groups, Projects, Roles, Cost, Usage, Sessions, Audit",
+   "grain_doc": "mixed",
+   "build": "buildable",
+   "build_doc": "D (deprecated, still served)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Sessions",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Audit",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v2/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v2.user_usage_analysis",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v2",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "apk_user_ enterprise admin"
+   },
+   "paging": {
+    "style": "page_number",
+    "doc": "page"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "lifetime",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /beta/v2/enterprise/user-usage-analysis (per user ACUs, session counts, searches)",
+   "read_write_doc": "R",
+   "class_doc": "Cost, Adoption",
+   "grain_doc": "UserDay rollup (7 d, 30 d, lifetime)",
+   "build": "buildable",
+   "build_doc": "D (beta, deprecated family)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "user_day",
+     "unit": "acu",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "user_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v2/user-usage/get-user-usage-analysis-beta",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.acu_limits_org",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewAccountConsumption (read), ManageBilling (write, not built)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "cycle",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET /v3/enterprise/consumption/acu-limits/devin; PUT/DELETE .../devin/organizations/{org} (cycle_acu_limit; response scope enum enterprise/org/user)",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/billing/acu-limits",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/cognition ACULimits (GET /v3/enterprise/consumption/acu-limits/devin, first=200, after = end_cursor), conformance against the vendormock mock, landed as Limit/cognition.acu_limit/v1 resources keyed cognition.acu_limit = enterprise, org:<org_id> or user:<org_id>:<user_id>, with scope, owner ids and cycle_acu_limit in unit acu (never converted to money); a complete page set is authoritative. A scope that disagrees with its owner ids is schema drift. Read only: the PUT and DELETE writes are not built and nothing here feeds a budget. Synthetic only, no vendor response observed. assumption_tested: synthesized from the schema, no published example. Secret class reviewed: limits and ids only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/cognition ACULimits, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.audit_logs",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, enterprise audit permission"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "not stated",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3/enterprise/audit-logs, GET /v3/enterprise/organizations/{org}/audit-logs (time_after, time_before, action, order asc/desc); fields audit_log_id, action (256-value enum), created_at, org_id, user_id, user_email, service_user_id, service_user_name, data",
+   "read_write_doc": "R",
+   "class_doc": "Audit",
+   "grain_doc": "Event",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/audit-logs/enterprise-audit-logs",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16, T-619): driver internal/vendorapi/cognition AuditLogs (GET /v3/enterprise/audit-logs, order=asc, time_after and time_before, first=200, after = end_cursor; at most 31 days per run), conformance against the vendormock mock, landed as vendor audit events (namespace cognition.audit) once per audit_log_id; actor the user email, else the service user id (agent); an action outside the documented AuditLogAction enum (256 values, generated from the spec) lands as other with a canary. Synthetic only, no vendor response observed. Secret class may_return_secret: the open data object is undocumented, so the driver is closed-DTO and never decodes it. assumption_tested: the unit of created_at (Unix seconds) is Inferred. The org-scoped audit endpoint is not used (the enterprise one covers every org).",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16: driver internal/vendorapi/cognition AuditLogs (closed DTO), synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.automations",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ View/ManageOrgAutomations"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+, automations enabled"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "/v3/organizations/{org}/automations CRUD + /schemas + /templates (run_as, security profile, limits)",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions, Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/release-notes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.code_scans",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ View/Use(Account)CodeScans"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise, feature on"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "/v3/{enterprise,organizations/{org}}/code-scans: scans, findings, metrics, profiles, start, ingestion, auto-scan, effort, remediate, scan-new-commits",
+   "read_write_doc": "R/W",
+   "class_doc": "Audit (security findings)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.consumption_cycles",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountConsumption"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise plan only"
+   },
+   "freshness_doc": "daily",
+   "lookback_doc": "since inception",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET /v3/enterprise/consumption/cycles (after, before)",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.consumption_daily",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewAccountConsumption (enterprise)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise plan only"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "time_after/time_before",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3/enterprise/consumption/daily[/organizations/{org}][/users/{id}][/service-users/{id}][/sessions/{id}] (total_acus; per date acus + acus_by_product devin/cascade/terminal/review/automation); day boundary 08:00 UTC",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "OrgDay, UserDay, per service user day, per session day",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "acu",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/consumption/consumption-daily-users",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16, T-619): driver internal/vendorapi/cognition ConsumptionDaily (GET /v3/enterprise/consumption/daily, time_after and time_before in Unix seconds from the 08:00 UTC billing day, one settle day re-read), conformance against the vendormock mock, landed as org facts for devin: acus_total per billing day and acus per product (devin, cascade, terminal, review, automation; a null product is absent, never zero), unit acu. Synthetic only, no vendor response observed. assumption_tested: that date is the Unix second of the billing-day start is Inferred. Secret class reviewed: ACU amounts and dates, never a credential. ACUs are never converted to money here.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16: driver internal/vendorapi/cognition ConsumptionDaily, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.ent_sessions",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountSessions"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "near live (undoc)",
+   "lookback_doc": "not stated",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3/enterprise/sessions (filters session_ids, user_ids, service_user_ids, origins, org_ids, tags, playbook_id, automation_ids, repo_names, category, is_archived, parent_session_id, created/updated windows, include_deleted_orgs); GET .../{devin_id}; GET/POST/PUT .../tags. Fields: acus_consumed, origin, status, pull_requests (pr_url, pr_state), parent/child ids, security_profile, devin_mode, structured_output",
+   "read_write_doc": "R/W(tags)",
+   "class_doc": "Sessions, Commits",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/sessions/enterprise-sessions",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.ent_users",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewAccountMembership (enterprise)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor after/first, total"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET/POST /v3/enterprise/members/users (filter email; POST invites emails + enterprise_role_id); GET/PATCH/DELETE .../users/{user_id} (PATCH role_id)",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Roles",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SeatAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16, T-619): driver internal/vendorapi/cognition EnterpriseUsers (GET /v3/enterprise/members/users, first=200, after = end_cursor), conformance against the vendormock mock (end_cursor paging family), landed as User/cognition.enterprise_user/v1 resources keyed cognition.user = user_id (email, enterprise role names, org role count, join time); a complete page set is authoritative. Synthetic only, no vendor response observed. assumption_tested: the unit of enterprise_joined_at (Unix seconds) is Inferred. Secret class reviewed: identity and role names, never a credential. The invite, role and delete writes stay unbuilt (read only).",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16: driver internal/vendorapi/cognition EnterpriseUsers, synthetic gate passed",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.git_connections",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewGitIntegrations"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET /v3/enterprise/git-providers/connections; GET .../{connection_id}/repositories",
+   "read_write_doc": "R",
+   "class_doc": "Projects",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.git_permissions",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ View/ManageRepoPermissions"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "/v3/enterprise/organizations/{org}/git-providers/permissions GET/POST/PUT/DELETE, PATCH/DELETE .../{id} (repo_path, prefix_path, group_prefix, read_only)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ContentExclusion",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.hypervisors",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewEnterpriseInfraDetails"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise (dedicated/VPC)"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET /v3/enterprise/hypervisors (status, utilization_percentage, last_heartbeat)",
+   "read_write_doc": "R",
+   "class_doc": "Projects (infra)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.idp_groups",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewAccountMembership (enterprise)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "group",
+   "mechanism_doc": "GET/POST /v3/enterprise/idp-groups (bulk register up to 100), DELETE .../{name}; GET/POST/PATCH/DELETE /v3/enterprise/members/idp-groups/{name} (role); GET .../members/idp-users",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups, Roles",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/security-access/idp-groups",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/cognition IdPGroups (GET /v3/enterprise/idp-groups, first=200, after = end_cursor), conformance against the vendormock mock, landed as Group/cognition.idp_group/v1 resources keyed cognition.idp_group = idp_group_name (the only documented member). The group role mappings (/v3/enterprise/members/idp-groups/{name}) and idp-users are not built, so the Roles supply stays buildable. Synthetic only, no vendor response observed. assumption_tested: synthesized from the schema, no published example. Secret class reviewed: group names only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/cognition IdPGroups, synthetic gate passed",
+    "source_rule": "literal_url",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.ip_access_list",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageIPWhitelist"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET/PUT/POST/DELETE /v3/enterprise/ip-access-list (ip_ranges)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/enterprise/security-access/ip-access-lists",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.knowledge",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ Manage(Account/Org)Knowledge, UseAccountTools"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "/v3/enterprise/knowledge/{notes,folders} and /v3/organizations/{org}/knowledge/* CRUD",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (agent context)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.metrics",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountMetrics / ViewOrgMetrics"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+ (org), Enterprise (ent)"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "window",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET /v3/enterprise/metrics/{usage,sessions,prs,searches,sessions-by-category}; GET /v3/enterprise/organizations/{org}/metrics/usage; org scope /v3/organizations/{org}/metrics/* (sessions by origin incl. desktop, PR created/merged/taken over, avg ACUs/session)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Commits",
+   "grain_doc": "OrgDay aggregate over window",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "org_day",
+     "unit": "acu",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Commits",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/metrics/metrics-usage",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.metrics_active",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewAccountMetrics (enterprise)"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "window",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET .../metrics/{dau,wau,mau,active-users} (enterprise and org scopes)",
+   "read_write_doc": "R",
+   "class_doc": "Adoption",
+   "grain_doc": "OrgDay, week, month",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "org_day",
+     "unit": "count",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708) for the daily active users read only: driver internal/vendorapi/cognition MetricsActive (GET /v3/enterprise/metrics/dau, time_after the UTC day before the window, time_before the window end, min_sessions and min_searches at their documented default 1; at most 31 days per run), conformance against the vendormock mock, landed as org facts for devin, coverage domain cognition.enterprise, one daily_active_users fact (unit users) per UTC day. A distinct-user count, never summed across days. The wau, mau and active-users reads of this row and the org-scoped metrics are not built. Synthetic only, no vendor response observed. assumption_tested: the unit of start_time and end_time (Unix seconds) is Inferred. Secret class reviewed: counts and times only.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/cognition MetricsActive (dau), synthetic gate passed",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.org_consumption_daily",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewOrgConsumption"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "all plans"
+   },
+   "freshness_doc": "not stated",
+   "lookback_doc": "window",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3/organizations/{org}/consumption/daily[/users/{id}][/service-users/{id}][/sessions/{id}]",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "OrgDay, UserDay, SessionDay",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "org_day",
+     "unit": "unspecified",
+     "accuracy": "aggregate",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.org_group_limits",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewOrganizations / ManageOrganizations"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise + feature enablement"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "current cycle",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET/PUT /v3/enterprise/org-group-limits (groups: {org_ids[], max_cycle_acus}); PUT replaces whole config",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups, Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitGroup",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/org-group-limits/get-org-group-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.org_members",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ View/ManageAccountMembership"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "/v3/enterprise/organizations/{org}/members/{users,idp-groups,service-users,idp-users} GET/POST/PATCH/DELETE (assign to org with role)",
+   "read_write_doc": "R/W",
+   "class_doc": "Identity, Groups, ServiceAccounts",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MemberProvision",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.org_secrets",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageOrgSecrets"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET/POST /v3/organizations/{org}/secrets, DELETE .../{secret_id} (metadata: key, type cookie/key-value/totp, is_sensitive, created_by; value write-only)",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.org_sessions",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewOrgSessions / UseDevinSessions / ManageOrgSessions / ImpersonateOrgSessions"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "not stated",
+   "per_user_doc": "yes",
+   "mechanism_doc": "/v3/organizations/{org}/sessions: POST create (create_as_user_id, devin_mode normal/fast/lite, session_secrets), GET list/get, DELETE terminate, POST archive/unarchive, tags",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.org_tags",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageEnterpriseSettings"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET/POST/PUT/DELETE /v3/enterprise/organizations/{org}/tags, DELETE .../tags/{tag}, GET/PUT/DELETE .../tags/default (allowed session tags; enforced when tag validation on)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.organizations",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewOrganizations (enterprise)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET/POST /v3/enterprise/organizations; GET/PATCH/DELETE .../{org_id} (name, max_cycle_acu_limit, max_session_acu_limit)",
+   "read_write_doc": "R/W",
+   "class_doc": "Projects, Limits",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/cognition Organizations (GET /v3/enterprise/organizations, first=200, after = end_cursor), conformance against the vendormock mock (end_cursor paging family), landed as Container/cognition.organization/v1 (workspace) resources keyed cognition.org = org_id: name as the display name, created and updated times, and the per-session and per-cycle ACU limits (absent when null, never zero); a complete page set is authoritative. Synthetic only, no vendor response observed. assumption_tested: the unit of created_at and updated_at (Unix seconds) is Inferred. Secret class reviewed: names, times and limits, never a credential. The create, patch and delete writes stay unbuilt (read only).",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/cognition Organizations, synthetic gate passed",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.playbooks",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ Manage(Account/Org)Playbooks"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "/v3/enterprise/playbooks and /v3/organizations/{org}/playbooks CRUD",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy (agent context)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.pr_reviews",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ UseReviewManual"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET/POST /v3/{enterprise,organizations/{org}}/pr-reviews (trigger Devin Review, latest status)",
+   "read_write_doc": "R/W",
+   "class_doc": "Commits",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Commits",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.queue",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountMetrics"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET /v3/enterprise/queue (queue_size, status normal/elevated/high)",
+   "read_write_doc": "R",
+   "class_doc": "Adoption (capacity)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.roles",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewAccountMembership (enterprise)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET /v3/enterprise/roles, GET /v3/enterprise/roles/{role_id} (permissions[], role_type enterprise/org)",
+   "read_write_doc": "R",
+   "class_doc": "Roles",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    },
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-08"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/cognition Roles (GET /v3/enterprise/roles, first=200, after = end_cursor), conformance against the vendormock mock, landed as Role/cognition.role/v1 resources keyed cognition.role = role_id with role_type (enterprise or org) and the name as display name; a complete page set is authoritative. The v3.0.0 Role schema carries no permission list, so none is read. Synthetic only, no vendor response observed. assumption_tested: synthesized from the schema, no published example. Secret class reviewed: role names, never a credential.",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/cognition Roles, synthetic gate passed",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.schedules",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageOrgSchedules"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "/v3/organizations/{org}/schedules CRUD (deprecated 2026-09-10)",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (deprecated)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "snapshot",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/release-notes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.self",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ any"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc (429)"
+   },
+   "tier": {
+    "doc": "all"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET /v3/self (principal_type, user_id, org_id)",
+   "read_write_doc": "R",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.service_user_api_keys",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageAccountServiceUsers"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET/POST /v3beta1/enterprise/service-users/{id}/api-keys; DELETE .../{api_key_id}; POST .../{api_key_id}/rotate (fields created_at, expires_at, last_used_at, revoked_at, is_active)",
+   "read_write_doc": "R/W",
+   "class_doc": "Credentials",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "credential_metadata",
+   "secret_class": "may_return_secret",
+   "supplies": [
+    {
+     "class": "Credentials",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "CredentialLifecycle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.service_user_provision",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageAccountServiceUsers / ManageOrgServiceUsers"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "POST /v3beta1/enterprise/service-users, POST /v3beta1/organizations/{org}/service-users (privilege-escalation guarded)",
+   "read_write_doc": "W",
+   "class_doc": "ServiceAccounts",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C (release notes only; absent from current spec)",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "ServiceAccounts",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/release-notes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.service_users",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "bearer",
+    "doc": "cog_ service user, ViewAccountMembership (enterprise)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET /v3/enterprise/members/service-users; GET/POST/PATCH/DELETE .../{id} (expires_at, deleted_at, role_assignments)",
+   "read_write_doc": "R/W",
+   "class_doc": "ServiceAccounts, Roles",
+   "grain_doc": "Snapshot",
+   "build": "built",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "never_returns_secret",
+   "supplies": [
+    {
+     "class": "ServiceAccounts",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "built",
+     "verification": {
+      "synthetic": "assumption_tested",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "RoleAssign",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "hosts": [
+    {
+     "scheme": "https",
+     "host": "api.devin.ai",
+     "port": 443
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "Built (lane ENTAPI-L16B, T-708): driver internal/vendorapi/cognition ServiceUsers (GET /v3/enterprise/members/service-users, include_inactive at its documented default false, first=200, after = end_cursor), conformance against the vendormock mock, landed as ServiceAccount/cognition.service_user/v1 resources keyed cognition.service_user = service_user_id: name as display name, enterprise role names, the org role count, expiry and deletion times; a complete page set is authoritative for the active service users. Synthetic only, no vendor response observed. assumption_tested: the unit of expires_at and deleted_at (Unix seconds) is Inferred. Secret class reviewed: the ServiceUser schema has no key member (the key list is the separate service_user_api_keys row, not built).",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "lane ENTAPI-L16B: driver internal/vendorapi/cognition ServiceUsers, synthetic gate passed",
+    "source_rule": "legend_key",
+    "auth_rule": "plane: Devin v3 OpenAPI securitySchemes.bearerAuth: service user credential (cog_) as Bearer"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.session_attachments",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewOrgSessions / UseDevinSessions"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "not stated",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET .../sessions/{id}/attachments; POST /v3/organizations/{org}/attachments; GET .../attachments/{uuid}/{name}",
+   "read_write_doc": "R/W",
+   "class_doc": "Content",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.session_insights",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountSessions / ManageAccountSessions"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "on demand",
+   "lookback_doc": "not stated",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET .../sessions/insights, GET .../sessions/{id}/insights, POST .../insights/generate (classification, issues, timeline, note and skill usage, suggested prompts)",
+   "read_write_doc": "R/W",
+   "class_doc": "Sessions, Content",
+   "grain_doc": "PerSession",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_session",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_session",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3.session_messages",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ View/ManageAccountSessions, View/ManageOrgSessions"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "not stated",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET/POST /v3/{enterprise,organizations/{org}}/sessions/{id}/messages (event_id, source devin/user, message, user_id, username)",
+   "read_write_doc": "R/W",
+   "class_doc": "Content",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.default_platform",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageOrgSettings"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "GET/PUT /v3beta1/organizations/{org}/default-platform (platform, outpost pool)",
+   "read_write_doc": "R/W",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "FeatureToggle",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.guardrail_violations",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageEnterpriseSettings (org variant also accepts ViewAccountSessions/ViewOrgSessions)"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "near live",
+   "lookback_doc": "not stated",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3beta1/enterprise/guardrail-violations, GET /v3beta1/enterprise/organizations/{org}/guardrail-violations (user_message, guardrail_name, reasoning, confidence_score, action_taken, session_id)",
+   "read_write_doc": "R",
+   "class_doc": "Audit, Content",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Audit",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/v3/guardrail-violations/enterprise-guardrail-violations",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.legacy_user_acu_limits",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountConsumption / ManageBilling"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET/PATCH/DELETE /v3beta1/enterprise/users/{user_id}/consumption/acu-limits (local_agent.cycle_acu_limit = permanent override, local_agent.billing_org_id NOT deprecated); GET/PATCH /v3beta1/enterprise/users/consumption/acu-limits (default tier limit)",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits, Projects (billing_org_id)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (deprecated except billing_org_id)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/billing/legacy-user-acu-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.org_acu_limits",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ enterprise service user, ViewAccountConsumption / ManageBilling"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "monthly window",
+   "per_user_doc": "no",
+   "mechanism_doc": "GET/PATCH/DELETE /v3beta1/enterprise/organizations/{org}/consumption/acu-limits (cycle_acu_limit; 0 blocks; null clears; deprecated cloud_agent/local_agent blocks)",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (doc says not in published OpenAPI)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitProject",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/billing/org-acu-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.org_members_read",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewOrgMembership"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3beta1/organizations/{org}/members/users[/{id}], /idp-users (beta, June 2026)",
+   "read_write_doc": "R",
+   "class_doc": "Identity",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Identity",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/release-notes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.repositories",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ Index permissions"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "/v3beta1/organizations/{org}/repositories[/indexing][/{path}/indexing][/branches/{b}]",
+   "read_write_doc": "R/W",
+   "class_doc": "Projects",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (beta)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.searches",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "n/a",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3beta1/{enterprise,organizations/{org}}/searches (added 2025-12-10)",
+   "read_write_doc": "R",
+   "class_doc": "Adoption",
+   "grain_doc": "Event",
+   "build": "catalog_only",
+   "build_doc": "C (release notes only; absent from current spec)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Adoption",
+     "grain": "event",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/api-reference/release-notes",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.snapshot_setup",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ blueprint permissions"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "cursor"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Teams+"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "/v3beta1/{enterprise,organizations/{org}}/snapshot-setup/blueprints and /builds (CRUD, pin, logs)",
+   "read_write_doc": "R/W",
+   "class_doc": "Projects (environment)",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (beta)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Projects",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/v3-openapi.yaml",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.usage_policy_idp_groups",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountConsumption / ManageBilling"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paginated"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise, beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "group",
+   "mechanism_doc": "GET /v3beta1/enterprise/usage-policies/idp-groups[?tier_id], GET/PUT/DELETE .../idp-groups/{name} (group to tier)",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups, Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/billing/user-acu-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.usage_policy_requests",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageAcuLimits (read and write)"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paginated"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise, beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET /v3beta1/enterprise/usage-policies/requests[?status,user_id], GET .../{request_id}, POST .../{id}/approve (optional cycle_acu_limit), POST .../{id}/deny",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits, Content (free-text message)",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "event",
+     "unit": "requests",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "event",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/billing/user-acu-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.usage_policy_tiers",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ViewAccountConsumption / ManageBilling"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "paginated (doc)"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise, beta enablement"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "monthly window",
+   "per_user_doc": "yes",
+   "mechanism_doc": "GET/POST /v3beta1/enterprise/usage-policies/tiers; GET/PATCH/DELETE .../tiers/{tier_id} (cycle_acu_limit, policy unconditional/conditional/manual, max_limit, priority, member_count); GET .../tiers/{id}/users (effective_cycle_acu_limit, limit_source, membership); PUT/DELETE .../tiers/{id}/users/{user_id}",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitGroup",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ApprovalPolicy",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/billing/user-acu-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.devin_v3beta.usage_policy_user_override",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.devin_v3beta",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "cog_ ManageBilling"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "Enterprise, beta"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "monthly",
+   "per_user_doc": "yes",
+   "mechanism_doc": "PATCH /v3beta1/enterprise/usage-policies/users/{user_id} (cycle_acu_limit + kind permanent/temporary; null clears)",
+   "read_write_doc": "W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": false,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/admin/billing/user-acu-limits",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.federal.acu_consumption",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.federal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key in body, Analytics Read; team- or group-scoped key"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "next_page_token (24 h, bound to query), 1 to 1000 rows"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "federal multi-tenant"
+   },
+   "freshness_doc": "near real time (current_cycle)",
+   "lookback_doc": "90 d",
+   "per_user_doc": "yes",
+   "mechanism_doc": "POST https://<server>/api/v1/Analytics with acu_consumption_query (historical up to 90 d or current_cycle near real time; team total, up to 100 groups, per-user rows user_id/email/current_member/total_acus)",
+   "read_write_doc": "R",
+   "class_doc": "Cost",
+   "grain_doc": "UserPeriod, GroupPeriod, team total",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Cost",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/federal/api/acu-consumption",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.federal.groups",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.federal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key, Teams Read-Only / Teams Update"
+   },
+   "paging": {
+    "style": "cursor",
+    "doc": "page_token"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "federal multi-tenant"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "POST /api/v1/{ListGroups, GetGroup, CreateGroup, UpdateGroup (cascade_models, command_models allowlists, group cap), DeleteGroup, ListGroupMembers, AddGroupMembers, RemoveGroupMembers}",
+   "read_write_doc": "R/W",
+   "class_doc": "Groups, Policy, Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Groups",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitGroup",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "GroupMembership",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ModelAccess",
+     "facet": "R",
+     "caps": {
+      "read": true,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/federal/api/group-management",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.federal.legacy_analytics",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.federal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key"
+   },
+   "paging": {
+    "style": "none",
+    "doc": "none"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "federal"
+   },
+   "freshness_doc": "as v1",
+   "lookback_doc": "as v1",
+   "per_user_doc": "yes",
+   "mechanism_doc": "/api/v1/UserPageAnalytics, /CascadeAnalytics on the federal host (Python SDK wraps)",
+   "read_write_doc": "R",
+   "class_doc": "Usage, Adoption",
+   "grain_doc": "as desktop_v1",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Usage",
+     "grain": "unspecified",
+     "unit": "unspecified",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Adoption",
+     "grain": "unspecified",
+     "unit": "count",
+     "accuracy": "unassessed",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/federal/api/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "legend_key",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.federal.user_acu_caps",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.federal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "header_key",
+    "doc": "service_key, Teams Read-Only / Teams Update"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "undoc"
+   },
+   "tier": {
+    "doc": "federal multi-tenant"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "POST /api/v1/GetUserAcuCap, /api/v1/UpdateUserAcuCap (configured and effective cycle limit; 0 blocks)",
+   "read_write_doc": "R/W",
+   "class_doc": "Limits",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Limits",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "SpendLimitUser",
+     "facet": "A",
+     "caps": {
+      "read": true,
+      "write": true,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/federal/api/acu-caps",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: header_key"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.node.cli_otel_export",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.node",
+   "reach": "push_otlp",
+   "transport": "otlp",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "user config"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "device",
+   "mechanism_doc": "Devin CLI `otel` block in user config or OTEL_EXPORTER_OTLP_* env (added v3000.11.1, 2026-09-21); event/metric schema undocumented",
+   "read_write_doc": "push",
+   "class_doc": "Telemetry",
+   "grain_doc": "PerCall events + metrics",
+   "build": "catalog_only",
+   "build_doc": "C (changelog only, no semconv)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Telemetry",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/cli/changelog/stable",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "otlp",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.node.cli_system_json",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "at login/start",
+   "lookback_doc": "n/a",
+   "per_user_doc": "device",
+   "mechanism_doc": "MDM file /Library/Application Support/Devin/system.json, /etc/devin/system.json, C:\\ProgramData\\Devin\\system.json (enterprise_host, account_id, proxy) strict JSON, fail-open to no enforcement",
+   "read_write_doc": "file",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (file contract)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "NetworkPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/cli/enterprise/system-config",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.node.content_exclusion",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "file"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "device",
+   "mechanism_doc": ".devinignore / legacy .codeiumignore per repo, global ~/.codeium/.codeiumignore (Desktop); CLI standalone honours only .gitignore",
+   "read_write_doc": "file",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (file)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/cascade/memories",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.node.desktop_policies",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.node",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local admin / MDM"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "restart",
+   "lookback_doc": "n/a",
+   "per_user_doc": "device",
+   "mechanism_doc": "Windows registry Software\\Policies\\Windsurf\\Devin (Devin.admx), macOS .mobileconfig, Linux /etc/vscode/policy.json (AllowedExtensions, UpdateMode, EnableFeedback, TelemetryLevel)",
+   "read_write_doc": "file",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "buildable",
+   "build_doc": "D (file contract)",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "ManagedSettings",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/enterprise-policies",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "keyword: local"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.node.local_session_store",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "full",
+   "per_user_doc": "device",
+   "mechanism_doc": "Observer `devin` adapter over ~/.local/share/devin/cli/sessions.db; `devin --export`, `devin list --format csv`",
+   "read_write_doc": "R",
+   "class_doc": "Sessions, Usage, Content",
+   "grain_doc": "PerCall",
+   "build": "buildable",
+   "build_doc": "D (Observer-built)",
+   "sensitivity": "content",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Sessions",
+     "grain": "per_call",
+     "unit": "count",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Usage",
+     "grain": "per_call",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Content",
+     "grain": "per_call",
+     "unit": "text",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/cli/reference/commands",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.node.system_hooks_rules",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.node",
+   "reach": "node_local",
+   "transport": "local_file",
+   "auth": {
+    "kind": "local_file",
+    "doc": "local admin"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "any"
+   },
+   "freshness_doc": "real time",
+   "lookback_doc": "n/a",
+   "per_user_doc": "device",
+   "mechanism_doc": "system hooks.json and rules in the same admin dirs (Cascade hooks with trajectory_id; CLI lifecycle hooks)",
+   "read_write_doc": "file",
+   "class_doc": "Policy, Telemetry",
+   "grain_doc": "Event",
+   "build": "buildable",
+   "build_doc": "D",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "Telemetry",
+     "grain": "event",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "buildable",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/cli/extensibility/hooks/overview",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "node_local",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.windsurf_portal.rbac",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.windsurf_portal",
+   "reach": "manual_only",
+   "transport": "ui",
+   "auth": {
+    "kind": "console_session",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams / Enterprise"
+   },
+   "freshness_doc": "live",
+   "lookback_doc": "n/a",
+   "per_user_doc": "yes",
+   "mechanism_doc": "role management (Attribution, Analytics, Teams, Indexing, SSO, Service Key, Billing, Role, Team Settings permissions); Disable Devin Desktop access keeps admin without a license",
+   "read_write_doc": "UI",
+   "class_doc": "Roles",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "pii",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Roles",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/accounts/rbac-role-management",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "ui",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": "reach"
+   },
+   "status": "synthetic, awaiting live validation"
+  },
+  {
+   "id": "cognition.windsurf_portal.team_settings",
+   "vendor_group": "cognition",
+   "vendor": "cognition",
+   "plane": "cognition.windsurf_portal",
+   "reach": "pull_api",
+   "transport": "api",
+   "auth": {
+    "kind": "unclassified",
+    "doc": "admin UI"
+   },
+   "paging": {
+    "style": "unspecified",
+    "doc": "n/a"
+   },
+   "rate": {
+    "documented": false,
+    "doc": "n/a"
+   },
+   "tier": {
+    "doc": "Teams / Enterprise"
+   },
+   "freshness_doc": "15 min cache",
+   "lookback_doc": "n/a",
+   "per_user_doc": "n/a",
+   "mechanism_doc": "windsurf.com/team/settings and /team/cli-settings: model allowlist (by model or provider), default model, auto-run level, terminal allow/deny, MCP toggle/allowlist, web search, Enable Cascade scope, Install CLI toggle, RBAC roles, service keys",
+   "read_write_doc": "UI",
+   "class_doc": "Policy",
+   "grain_doc": "Snapshot",
+   "build": "catalog_only",
+   "build_doc": "C",
+   "sensitivity": "metadata",
+   "secret_class": "unclassified",
+   "supplies": [
+    {
+     "class": "Policy",
+     "grain": "snapshot",
+     "unit": "unspecified",
+     "accuracy": "exact",
+     "coverage": {
+      "completeness": "segment"
+     },
+     "build": "catalog_only",
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "controls": [
+    {
+     "class": "MCPAllowList",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "ToolPolicy",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "AgentCapability",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    },
+    {
+     "class": "FeatureToggle",
+     "facet": "U",
+     "caps": {
+      "read": false,
+      "write": false,
+      "readback": false,
+      "effect_evidence": false,
+      "idempotency": false,
+      "local_file": false,
+      "repository": false
+     },
+     "verification": {
+      "synthetic": "doc_only",
+      "live": "live_pending"
+     }
+    }
+   ],
+   "sources": [
+    {
+     "url": "https://docs.devin.ai/desktop/guide-for-admins",
+     "checked_on": "2026-10-07"
+    }
+   ],
+   "notes": "",
+   "derivation": {
+    "reach_rule": "http",
+    "build_rule": "build column",
+    "source_rule": "literal_url",
+    "auth_rule": ""
+   },
+   "status": "synthetic, awaiting live validation"
+  }
+ ]
+}

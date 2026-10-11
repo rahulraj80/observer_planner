@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
-// (*Store) must satisfy the processobs.Sink seam.
+// (*Store) must satisfy the procmodel.Sink seam.
 var (
-	_ processobs.Sink      = (*Store)(nil)
-	_ processobs.EventSink = (*Store)(nil)
+	_ procmodel.Sink      = (*Store)(nil)
+	_ procmodel.EventSink = (*Store)(nil)
 )
 
 // mustProjectAndSession creates the project + session rows the FK-enforced
@@ -143,7 +143,7 @@ func TestPersistProcessNetworkEventWithBody(t *testing.T) {
 	sessionID, projectID := mustProjectAndSession(t, s)
 	started := t0Proc()
 	run := execRun("proc-network", sessionID, projectID, 4242, started)
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{run}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{run}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 	rows, err := s.ProcessRunsForSession(ctx, sessionID)
@@ -153,20 +153,20 @@ func TestPersistProcessNetworkEventWithBody(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("process rows = %d, want 1", len(rows))
 	}
-	if _, err := s.PersistProcessEvents(ctx, []processobs.ProcessEvent{{
+	if _, err := s.PersistProcessEvents(ctx, []procmodel.ProcessEvent{{
 		ProcessRunID: rows[0].ID,
 		ProcessKey:   run.ProcessKey,
 		Timestamp:    started.Add(time.Second),
-		Type:         processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{
+		Type:         procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{
 			SessionID:  sessionID,
-			Source:     processobs.AttrBridge,
-			Confidence: processobs.ConfHigh,
+			Source:     procmodel.AttrBridge,
+			Confidence: procmodel.ConfHigh,
 		},
 		TargetKind: "url",
 		Target:     "https://api.example.test/v1/messages",
 		Details:    map[string]any{"status_code": 200, "provider": "anthropic"},
-		NetworkBody: &processobs.NetworkBodyCapture{
+		NetworkBody: &procmodel.NetworkBodyCapture{
 			CaptureSource:         "proxy",
 			RequestID:             "req_test",
 			Method:                "POST",
@@ -220,24 +220,24 @@ func TestNetworkSummaryForSession(t *testing.T) {
 	sessionID, _ := mustProjectAndSession(t, s)
 	started := t0Proc()
 
-	mkProxy := func(key string, reqBytes, respBytes int) processobs.ProcessEvent {
-		return processobs.ProcessEvent{
+	mkProxy := func(key string, reqBytes, respBytes int) procmodel.ProcessEvent {
+		return procmodel.ProcessEvent{
 			ProcessKey: key, Timestamp: started.Add(time.Second),
-			Type:        processobs.EventNetworkConnect,
-			Attribution: processobs.Attribution{SessionID: sessionID, Source: processobs.AttrHeuristic, Confidence: processobs.ConfMedium},
+			Type:        procmodel.EventNetworkConnect,
+			Attribution: procmodel.Attribution{SessionID: sessionID, Source: procmodel.AttrHeuristic, Confidence: procmodel.ConfMedium},
 			TargetKind:  "url", Target: "https://api.example.test/v1/messages",
 			Details: map[string]any{"capture_source": "proxy"},
-			NetworkBody: &processobs.NetworkBodyCapture{
+			NetworkBody: &procmodel.NetworkBodyCapture{
 				CaptureSource: "proxy", Method: "POST",
 				RequestBodyBytes: reqBytes, ResponseBodyBytes: respBytes,
 			},
 		}
 	}
 	// An OS-observed event: capture_source='process_backend', NO body row.
-	osEvent := processobs.ProcessEvent{
+	osEvent := procmodel.ProcessEvent{
 		ProcessKey: "os-1", Timestamp: started.Add(2 * time.Second),
-		Type:        processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{SessionID: sessionID, Source: processobs.AttrHeuristic, Confidence: processobs.ConfMedium},
+		Type:        procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{SessionID: sessionID, Source: procmodel.AttrHeuristic, Confidence: procmodel.ConfMedium},
 		TargetKind:  "network_endpoint", Target: "1.2.3.4:443",
 		Details: map[string]any{"capture_source": "process_backend"},
 	}
@@ -245,13 +245,13 @@ func TestNetworkSummaryForSession(t *testing.T) {
 	// the EVENT detail (capture_source='proxy'), not mere body presence: this
 	// event carries no proxy detail, so its 999 request bytes must NOT be summed
 	// and it counts as an OS connection.
-	nonProxyBody := processobs.ProcessEvent{
+	nonProxyBody := procmodel.ProcessEvent{
 		ProcessKey: "os-2", Timestamp: started.Add(3 * time.Second),
-		Type:        processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{SessionID: sessionID, Source: processobs.AttrHeuristic, Confidence: processobs.ConfMedium},
+		Type:        procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{SessionID: sessionID, Source: procmodel.AttrHeuristic, Confidence: procmodel.ConfMedium},
 		TargetKind:  "url", Target: "https://other.test/x",
 		Details:     map[string]any{"capture_source": "process_backend"},
-		NetworkBody: &processobs.NetworkBodyCapture{CaptureSource: "process_backend", RequestBodyBytes: 999, ResponseBodyBytes: 999},
+		NetworkBody: &procmodel.NetworkBodyCapture{CaptureSource: "process_backend", RequestBodyBytes: 999, ResponseBodyBytes: 999},
 	}
 	// A PROXIED event whose body capture was OFF: its details carry
 	// capture_source='proxy' and a body_unavailable_reason, but it has NO
@@ -259,15 +259,15 @@ func TestNetworkSummaryForSession(t *testing.T) {
 	// a proxied call with ZERO byte contribution (the body-row discriminator
 	// used to misclassify this as an OS connection — the undercount this fix
 	// closes).
-	proxyNoBody := processobs.ProcessEvent{
+	proxyNoBody := procmodel.ProcessEvent{
 		ProcessKey: "px-3", Timestamp: started.Add(4 * time.Second),
-		Type:        processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{SessionID: sessionID, Source: processobs.AttrHeuristic, Confidence: processobs.ConfMedium},
+		Type:        procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{SessionID: sessionID, Source: procmodel.AttrHeuristic, Confidence: procmodel.ConfMedium},
 		TargetKind:  "url", Target: "https://api.example.test/v1/messages",
 		Details: map[string]any{"capture_source": "proxy", "body_unavailable_reason": "body_capture_disabled"},
 	}
 
-	if _, err := s.PersistProcessEvents(ctx, []processobs.ProcessEvent{
+	if _, err := s.PersistProcessEvents(ctx, []procmodel.ProcessEvent{
 		mkProxy("px-1", 100, 200),
 		mkProxy("px-2", 50, 300),
 		osEvent,
@@ -306,19 +306,19 @@ func TestNetworkSummaryForSession(t *testing.T) {
 
 func t0Proc() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
 
-func execRun(key, sess string, projectID int64, pid int, started time.Time) processobs.ProcessRun {
-	return processobs.ProcessRun{
+func execRun(key, sess string, projectID int64, pid int, started time.Time) procmodel.ProcessRun {
+	return procmodel.ProcessRun{
 		ProcessKey:     key,
 		BootID:         "boot-1",
 		PID:            pid,
 		PPID:           1,
 		StartTimeTicks: int64(pid) * 1000,
-		Attribution: processobs.Attribution{
+		Attribution: procmodel.Attribution{
 			SessionID:  sess,
 			Tool:       "claude-code",
 			ProjectID:  projectID,
-			Source:     processobs.AttrBridge,
-			Confidence: processobs.ConfHigh,
+			Source:     procmodel.AttrBridge,
+			Confidence: procmodel.ConfHigh,
 		},
 		ExePath:     "/bin/bash",
 		ExeBasename: "bash",
@@ -336,15 +336,15 @@ func execRun(key, sess string, projectID int64, pid int, started time.Time) proc
 
 // unattributedRun builds a process run as the bridge stores Windows captures:
 // no session (AttrNone/ConfNone), Windows-shaped exe/cwd, a stable process_key.
-func unattributedRun(key, parent, basename, cwd string, pid int, started time.Time) processobs.ProcessRun {
-	return processobs.ProcessRun{
+func unattributedRun(key, parent, basename, cwd string, pid int, started time.Time) procmodel.ProcessRun {
+	return procmodel.ProcessRun{
 		ProcessKey:       key,
 		BootID:           "win-boot",
 		PID:              pid,
 		PPID:             1,
 		StartTimeTicks:   int64(pid) * 1000,
 		ParentProcessKey: parent,
-		Attribution:      processobs.Attribution{Source: processobs.AttrNone, Confidence: processobs.ConfNone},
+		Attribution:      procmodel.Attribution{Source: procmodel.AttrNone, Confidence: procmodel.ConfNone},
 		ExePath:          `C:\bin\` + basename,
 		ExeBasename:      basename,
 		CWD:              cwd,
@@ -379,7 +379,7 @@ func TestCorrelateCrossOS(t *testing.T) {
 	child := unattributedRun("w_child", "w_root", "node.exe", `C:\proj\pkg`, 1002, sessStart.Add(5*time.Second))
 	gc := unattributedRun("w_gc", "w_child", "git.exe", `C:\proj\pkg`, 1003, sessStart.Add(7*time.Second))
 	noise := unattributedRun("w_noise", "", "explorer.exe", `C:\Windows`, 1004, sessStart)
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{root, child, gc, noise}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{root, child, gc, noise}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -399,7 +399,7 @@ func TestCorrelateCrossOS(t *testing.T) {
 		t.Fatalf("session has %d runs, want 3 (noise stays unattributed)", len(runs))
 	}
 	for _, r := range runs {
-		if r.AttributionSource != string(processobs.AttrCrossOSCorrelation) || r.AttributionConfidence != string(processobs.ConfMedium) {
+		if r.AttributionSource != string(procmodel.AttrCrossOSCorrelation) || r.AttributionConfidence != string(procmodel.ConfMedium) {
 			t.Errorf("%s attribution = %s/%s, want cross_os_correlation/medium", r.ProcessKey, r.AttributionSource, r.AttributionConfidence)
 		}
 		if r.Tool != "claude-code" {
@@ -439,7 +439,7 @@ func TestCorrelateCrossOSLateDescendant(t *testing.T) {
 	root := unattributedRun("l_root", "", "claude.exe", `C:\proj`, 2001, sessStart.Add(3*time.Second))
 	late := unattributedRun("l_late", "l_root", "node.exe", `C:\proj\srv`, 2002, sessStart.Add(30*time.Minute))
 	noise := unattributedRun("l_noise", "", "explorer.exe", `C:\Windows`, 2003, sessStart.Add(45*time.Minute))
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{root, late, noise}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{root, late, noise}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -466,7 +466,7 @@ func TestPersistRunsRoundTrip(t *testing.T) {
 	sess, pid0 := mustProjectAndSession(t, s)
 
 	run := execRun("key-aaa", sess, pid0, 200, t0Proc())
-	n, err := s.PersistRuns(ctx, []processobs.ProcessRun{run})
+	n, err := s.PersistRuns(ctx, []procmodel.ProcessRun{run})
 	if err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
@@ -485,7 +485,7 @@ func TestPersistRunsRoundTrip(t *testing.T) {
 	if r.ProcessKey != "key-aaa" || r.PID != 200 || r.Tool != "claude-code" {
 		t.Errorf("roundtrip mismatch: %+v", r)
 	}
-	if r.AttributionSource != string(processobs.AttrBridge) || r.AttributionConfidence != string(processobs.ConfHigh) {
+	if r.AttributionSource != string(procmodel.AttrBridge) || r.AttributionConfidence != string(procmodel.ConfHigh) {
 		t.Errorf("attribution not persisted: %s/%s", r.AttributionSource, r.AttributionConfidence)
 	}
 	if r.ArgvPreview != "bash -c npm test" || r.ArgvArgc != 3 {
@@ -515,7 +515,7 @@ func TestPersistRunsPersistsPosture(t *testing.T) {
 	run.CgroupHash = "sha256:deadbeef"
 	run.PIDNamespace = "4026531836"
 	run.NetNamespace = "4026531992"
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{run}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{run}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -545,7 +545,7 @@ func TestPersistRunsUpsertExecThenExit(t *testing.T) {
 	sess, pid0 := mustProjectAndSession(t, s)
 
 	exec := execRun("key-bbb", sess, pid0, 300, t0Proc())
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{exec}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{exec}); err != nil {
 		t.Fatalf("persist exec: %v", err)
 	}
 
@@ -556,7 +556,7 @@ func TestPersistRunsUpsertExecThenExit(t *testing.T) {
 	exit.LastSeenAt = exit.ExitedAt
 	exit.ExitCode = 7
 	exit.DurationMs = 5000
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{exit}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{exit}); err != nil {
 		t.Fatalf("persist exit: %v", err)
 	}
 
@@ -586,17 +586,17 @@ func TestPersistRunsUnattributedLandsNullFKs(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 
-	run := processobs.ProcessRun{
+	run := procmodel.ProcessRun{
 		ProcessKey:     "key-unattr",
 		BootID:         "boot-1",
 		PID:            999,
 		StartTimeTicks: 999000,
-		Attribution:    processobs.Attribution{Source: processobs.AttrNone, Confidence: processobs.ConfNone},
+		Attribution:    procmodel.Attribution{Source: procmodel.AttrNone, Confidence: procmodel.ConfNone},
 		ExeBasename:    "mystery",
 		StartedAt:      t0Proc(),
 		LastSeenAt:     t0Proc(),
 	}
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{run}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{run}); err != nil {
 		t.Fatalf("PersistRuns (unattributed): %v", err)
 	}
 	cnt, err := s.CountProcessRuns(ctx)
@@ -640,7 +640,7 @@ func TestCorrelateProcessActions(t *testing.T) {
 	npm.ExeBasename, npm.ArgvPreview, npm.ParentProcessKey = "npm", "npm test", "k_sh"
 	node := execRun("k_node", sess, projID, 300, base.Add(2*time.Second))
 	node.ExeBasename, node.ArgvPreview, node.ParentProcessKey = "node", "node x.js", "k_npm"
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{sh, npm, node}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{sh, npm, node}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -697,7 +697,7 @@ func TestLongRunningChildRuns(t *testing.T) {
 	alive := execRun("k_alive", "sess-ended", projID, 100, endedAt.Add(-30*time.Minute)) // exited=false
 	dead := execRun("k_dead", "sess-ended", projID, 101, endedAt.Add(-30*time.Minute))
 	dead.Exited, dead.ExitedAt = true, endedAt
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{alive, dead}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{alive, dead}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -723,12 +723,12 @@ func TestProcessStatsAndActionCommands(t *testing.T) {
 	sess, projID := mustProjectAndSession(t, s)
 
 	attributed := execRun("k_a", sess, projID, 100, t0Proc())
-	unattributed := processobs.ProcessRun{
+	unattributed := procmodel.ProcessRun{
 		ProcessKey: "k_u", BootID: "b", PID: 999, StartTimeTicks: 999,
-		Attribution: processobs.Attribution{Source: processobs.AttrNone, Confidence: processobs.ConfNone},
+		Attribution: procmodel.Attribution{Source: procmodel.AttrNone, Confidence: procmodel.ConfNone},
 		ExeBasename: "mystery", StartedAt: t0Proc(), LastSeenAt: t0Proc(),
 	}
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{attributed, unattributed}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{attributed, unattributed}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -806,7 +806,7 @@ func TestPruneProcessRowsAndNoop(t *testing.T) {
 
 	old := execRun("key-old", sess, pid0, 100, t0Proc().Add(-100*24*time.Hour)) // 100 days old
 	fresh := execRun("key-fresh", sess, pid0, 101, time.Now().UTC())
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{old, fresh}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{old, fresh}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -836,12 +836,12 @@ func TestPruneProcessRowsAndNoop(t *testing.T) {
 
 // findingRun builds an attributed run with explicit exe + uid/euid (execRun
 // leaves EUID at 0, which would itself trip privileged_exec).
-func findingRun(key, sess string, projID int64, pid int, exe, base string, uid, euid int, started time.Time) processobs.ProcessRun {
-	return processobs.ProcessRun{
+func findingRun(key, sess string, projID int64, pid int, exe, base string, uid, euid int, started time.Time) procmodel.ProcessRun {
+	return procmodel.ProcessRun{
 		ProcessKey: key, BootID: "b", PID: pid, StartTimeTicks: int64(pid) * 1000,
-		Attribution: processobs.Attribution{
+		Attribution: procmodel.Attribution{
 			SessionID: sess, Tool: "claude-code", ProjectID: projID,
-			Source: processobs.AttrBridge, Confidence: processobs.ConfHigh,
+			Source: procmodel.AttrBridge, Confidence: procmodel.ConfHigh,
 		},
 		ExePath: exe, ExeBasename: base, UID: uid, EUID: euid,
 		StartedAt: started, LastSeenAt: started,
@@ -865,7 +865,7 @@ func TestProcessFindingsForSession(t *testing.T) {
 	ctx := context.Background()
 	sess, projID := mustProjectAndSession(t, s)
 
-	runs := []processobs.ProcessRun{
+	runs := []procmodel.ProcessRun{
 		findingRun("f_norm", sess, projID, 100, "/usr/bin/node", "node", 1000, 1000, t0Proc()),
 		findingRun("f_priv", sess, projID, 101, "/usr/bin/sudo", "sudo", 1000, 0, t0Proc()),
 		findingRun("f_tmp", sess, projID, 102, "/tmp/build/payload", "payload", 1000, 1000, t0Proc()),
@@ -882,7 +882,7 @@ func TestProcessFindingsForSession(t *testing.T) {
 		t.Fatalf("got %d findings %+v, want 2", len(got), got)
 	}
 	ids := ruleIDs(got)
-	if !ids[string(processobs.FindingPrivilegedExec)] || !ids[string(processobs.FindingExecutableFromTmp)] {
+	if !ids[string(procmodel.FindingPrivilegedExec)] || !ids[string(procmodel.FindingExecutableFromTmp)] {
 		t.Errorf("findings = %+v, want privileged_exec + executable_from_tmp", got)
 	}
 	for _, f := range got {
@@ -906,7 +906,7 @@ func TestRecentProcessFindings(t *testing.T) {
 	now := time.Now().UTC()
 	fresh := findingRun("r_fresh", sess, projID, 200, "/usr/bin/sudo", "sudo", 1000, 0, now.Add(-5*time.Minute))
 	old := findingRun("r_old", sess, projID, 201, "/usr/bin/sudo", "sudo", 1000, 0, now.Add(-100*24*time.Hour))
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{fresh, old}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{fresh, old}); err != nil {
 		t.Fatalf("PersistRuns: %v", err)
 	}
 
@@ -938,7 +938,7 @@ func TestSessionSeedByID(t *testing.T) {
 	if seed.SessionID != sess || seed.Tool != "claude-code" || seed.ProjectID != projID {
 		t.Errorf("seed = %+v (want sess=%s tool=claude-code proj=%d)", seed, sess, projID)
 	}
-	if seed.Source != processobs.AttrEnvToken || seed.Confidence != processobs.ConfHigh {
+	if seed.Source != procmodel.AttrEnvToken || seed.Confidence != procmodel.ConfHigh {
 		t.Errorf("seed source/conf = %s/%s, want env_token/high", seed.Source, seed.Confidence)
 	}
 
@@ -995,7 +995,7 @@ func TestDeriveProcessRunsFromActions(t *testing.T) {
 		t.Fatalf("got %d process rows, want 2 (both derived)", len(runs))
 	}
 	for _, r := range runs {
-		if r.AttributionSource != string(processobs.AttrActionCorrelation) {
+		if r.AttributionSource != string(procmodel.AttrActionCorrelation) {
 			t.Errorf("%s source = %q, want action_correlation", r.ProcessKey, r.AttributionSource)
 		}
 		if r.PID != 0 {
@@ -1024,7 +1024,7 @@ func TestDeriveProcessRunsFromActions(t *testing.T) {
 	}
 	os := execRun("k_sed_os", sess, projID, 4242, base.Add(500*time.Millisecond))
 	os.ExeBasename, os.ArgvPreview = "sed", "sed -n 1,5p README.md"
-	if _, err := s.PersistRuns(ctx, []processobs.ProcessRun{os}); err != nil {
+	if _, err := s.PersistRuns(ctx, []procmodel.ProcessRun{os}); err != nil {
 		t.Fatalf("PersistRuns OS: %v", err)
 	}
 	if _, err := s.CorrelateProcessActions(ctx, sess); err != nil {
@@ -1037,7 +1037,7 @@ func TestDeriveProcessRunsFromActions(t *testing.T) {
 	runs3, _ := s.ProcessRunsForSession(ctx, sess)
 	var derived, osRows int
 	for _, r := range runs3 {
-		if r.AttributionSource == string(processobs.AttrActionCorrelation) {
+		if r.AttributionSource == string(procmodel.AttrActionCorrelation) {
 			derived++
 		} else {
 			osRows++
@@ -1060,19 +1060,19 @@ func TestPruneProcessRowsDeletesNetworkBodies(t *testing.T) {
 	ctx := context.Background()
 	sess, _ := mustProjectAndSession(t, s)
 
-	mkEvent := func(key string, ts time.Time) processobs.ProcessEvent {
-		return processobs.ProcessEvent{
-			ProcessKey: key, Timestamp: ts, Type: processobs.EventNetworkConnect,
-			Attribution: processobs.Attribution{SessionID: sess},
+	mkEvent := func(key string, ts time.Time) procmodel.ProcessEvent {
+		return procmodel.ProcessEvent{
+			ProcessKey: key, Timestamp: ts, Type: procmodel.EventNetworkConnect,
+			Attribution: procmodel.Attribution{SessionID: sess},
 			TargetKind:  "domain", Target: "api.example.com",
-			NetworkBody: &processobs.NetworkBodyCapture{
+			NetworkBody: &procmodel.NetworkBodyCapture{
 				CaptureSource: "proxy", Method: "POST", URL: "https://api.example.com/v1",
 				Host: "api.example.com", StatusCode: 200,
 				ResponseBody: "hello", ResponseBodyBytes: 5,
 			},
 		}
 	}
-	if _, err := s.PersistProcessEvents(ctx, []processobs.ProcessEvent{
+	if _, err := s.PersistProcessEvents(ctx, []procmodel.ProcessEvent{
 		mkEvent("net-old", time.Now().UTC().Add(-100*24*time.Hour)),
 		mkEvent("net-fresh", time.Now().UTC()),
 	}); err != nil {
@@ -1113,13 +1113,13 @@ func TestNetworkSummaryForSession_MalformedDetailsJSON(t *testing.T) {
 
 	// One valid proxy event with a body so the aggregate has a proxied call +
 	// byte totals to preserve alongside the malformed row.
-	if _, err := s.PersistProcessEvents(ctx, []processobs.ProcessEvent{{
+	if _, err := s.PersistProcessEvents(ctx, []procmodel.ProcessEvent{{
 		ProcessKey: "px-1", Timestamp: started.Add(time.Second),
-		Type:        processobs.EventNetworkConnect,
-		Attribution: processobs.Attribution{SessionID: sessionID, Source: processobs.AttrHeuristic, Confidence: processobs.ConfMedium},
+		Type:        procmodel.EventNetworkConnect,
+		Attribution: procmodel.Attribution{SessionID: sessionID, Source: procmodel.AttrHeuristic, Confidence: procmodel.ConfMedium},
 		TargetKind:  "url", Target: "https://api.example.test/v1/messages",
 		Details:     map[string]any{"capture_source": "proxy"},
-		NetworkBody: &processobs.NetworkBodyCapture{CaptureSource: "proxy", RequestBodyBytes: 100, ResponseBodyBytes: 200},
+		NetworkBody: &procmodel.NetworkBodyCapture{CaptureSource: "proxy", RequestBodyBytes: 100, ResponseBodyBytes: 200},
 	}}); err != nil {
 		t.Fatalf("PersistProcessEvents: %v", err)
 	}
@@ -1128,7 +1128,7 @@ func TestNetworkSummaryForSession_MalformedDetailsJSON(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO process_events (process_key, timestamp, event_type, session_id, target_kind, target, details_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"bad-1", timestamp(started.Add(2*time.Second)), string(processobs.EventNetworkConnect),
+		"bad-1", timestamp(started.Add(2*time.Second)), string(procmodel.EventNetworkConnect),
 		sessionID, "url", "https://bad.test/x", "{not valid json"); err != nil {
 		t.Fatalf("insert malformed row: %v", err)
 	}

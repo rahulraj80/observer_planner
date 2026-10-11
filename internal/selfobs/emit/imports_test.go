@@ -9,14 +9,18 @@ import (
 	"testing"
 )
 
-// TestPackageImports_Bounded pins that emit — the gateway client — never
-// imports internal/obs (the reverse-import boundary). emit may import shape/run/
-// keys + internal/exporter/otel + stdlib + OTel.
+// TestPackageImports_Bounded pins that emit is the NEUTRAL sink contract
+// (D-436): it never imports internal/obs (the reverse-import boundary), and
+// it never imports the OpenTelemetry SDK or internal/exporter/otel, which
+// belong to the export.otel component (the otelsink subpackage). Anything
+// else it may import is the neutral run model and the standard library.
 func TestPackageImports_Bounded(t *testing.T) {
 	t.Parallel()
 
 	forbidden := []string{
 		"github.com/marmutapp/superbased-observer/internal/obs",
+		"github.com/marmutapp/superbased-observer/internal/exporter",
+		"go.opentelemetry.io",
 	}
 
 	cwd, err := os.Getwd()
@@ -44,7 +48,7 @@ func TestPackageImports_Bounded(t *testing.T) {
 			p := strings.Trim(imp.Path.Value, `"`)
 			for _, bad := range forbidden {
 				if p == bad || strings.HasPrefix(p, bad+"/") {
-					t.Errorf("%s: forbidden import %q (emit must not import internal/obs)", filepath.Base(path), p)
+					t.Errorf("%s: forbidden import %q (emit is the neutral sink contract; the OTel sink lives in emit/otelsink)", filepath.Base(path), p)
 				}
 			}
 		}

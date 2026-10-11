@@ -81,6 +81,22 @@ type GrantReplacement struct {
 	ConsentActor string `json:"consent_actor,omitempty"`
 	// Signature is base64url(Ed25519) over GrantReplacementSigningMessage.
 	Signature string `json:"signature"`
+
+	// InitialComponents is the managed node's component set until its org
+	// publishes a node.components policy, carried the same way the enrolment
+	// grant carries it (modular packaging plan 5.6.1, T-707). It travels under
+	// a SECOND signature because a replacement is one fleet-wide signed
+	// document: the server cannot shape it per node the way GrantForNode
+	// shapes an enrolment grant. Signature keeps covering exactly the fields
+	// an older node verifies (so an older node still accepts the replacement
+	// and simply never sees the set); InitialSignature covers the same message
+	// plus the set, and only a node that understands the field checks it.
+	// Both are absent on every replacement minted without a set.
+	InitialComponents *InitialComponentSet `json:"initial_components,omitempty"`
+	// InitialSignature is base64url(Ed25519) over
+	// GrantReplacementInitialSigningMessage; present exactly when
+	// InitialComponents is.
+	InitialSignature string `json:"initial_signature,omitempty"`
 }
 
 // GrantReplacementSigningMessage returns the canonical bytes signed over a
@@ -89,7 +105,24 @@ type GrantReplacement struct {
 // EnrolmentGrantSigningMessage's construction with Generation bound in
 // (encoded as its base-10 string form, itself NUL-terminated like every
 // other field) between the identity fields and the authority list.
+//
+// It never covers InitialComponents: that set has its own signature
+// (GrantReplacementInitialSigningMessage), so the bytes here are the same for
+// a replacement with or without a set and an older node keeps verifying.
 func GrantReplacementSigningMessage(g GrantReplacement) []byte {
+	return grantReplacementMessage(g, false)
+}
+
+// GrantReplacementInitialSigningMessage is GrantReplacementSigningMessage
+// plus the presence-versioned initial component block (the enrolment grant's
+// own writeInitialComponents encoding). It is only meaningful when
+// g.InitialComponents is non-nil; with a nil set it equals the legacy message,
+// which is why a set-less replacement never carries an InitialSignature.
+func GrantReplacementInitialSigningMessage(g GrantReplacement) []byte {
+	return grantReplacementMessage(g, true)
+}
+
+func grantReplacementMessage(g GrantReplacement, withInitial bool) []byte {
 	h := sha256.New()
 	write := func(s string) {
 		h.Write([]byte(s))
@@ -113,6 +146,9 @@ func GrantReplacementSigningMessage(g GrantReplacement) []byte {
 		write("consent_actor")
 		write(g.ConsentActor)
 	}
+	if withInitial {
+		writeInitialComponents(write, g.InitialComponents)
+	}
 	return h.Sum(nil)
 }
 
@@ -122,6 +158,41 @@ func GrantReplacementSigningMessage(g GrantReplacement) []byte {
 func SignGrantReplacement(priv ed25519.PrivateKey, g GrantReplacement) string {
 	sig := ed25519.Sign(priv, GrantReplacementSigningMessage(g))
 	return base64.RawURLEncoding.EncodeToString(sig)
+}
+
+// SignGrantReplacementInitial signs GrantReplacementInitialSigningMessage. The
+// caller sets it only when g.InitialComponents is non-nil.
+func SignGrantReplacementInitial(priv ed25519.PrivateKey, g GrantReplacement) string {
+	sig := ed25519.Sign(priv, GrantReplacementInitialSigningMessage(g))
+	return base64.RawURLEncoding.EncodeToString(sig)
+}
+
+// VerifyGrantReplacementInitial checks the initial component set of a
+// replacement whose primary signature already verified under pub. It returns
+// the set to store (nil when the replacement carries none) or a named error
+// when a set is present without a valid InitialSignature, or a signature is
+// present without a set: either is a tampered document, refused whole rather
+// than accepted with the set silently dropped. Removing BOTH fields leaves a
+// valid set-less replacement (what an older server sends); the node then holds
+// no initial set, which neither widens nor narrows it (the same fallback the
+// enrolment grant documents).
+func VerifyGrantReplacementInitial(g GrantReplacement, pub ed25519.PublicKey) (*InitialComponentSet, error) {
+	switch {
+	case g.InitialComponents == nil && g.InitialSignature == "":
+		return nil, nil
+	case g.InitialComponents == nil:
+		return nil, errors.New("orgcontract.VerifyGrantReplacementInitial: initial_signature present without initial_components")
+	case g.InitialSignature == "":
+		return nil, errors.New("orgcontract.VerifyGrantReplacementInitial: initial_components present without initial_signature")
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(g.InitialSignature)
+	if err != nil {
+		return nil, fmt.Errorf("orgcontract.VerifyGrantReplacementInitial: decode signature: %w", err)
+	}
+	if len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, GrantReplacementInitialSigningMessage(g), sig) {
+		return nil, errors.New("orgcontract.VerifyGrantReplacementInitial: initial component signature verification failed")
+	}
+	return g.InitialComponents, nil
 }
 
 // VerifyGrantReplacement checks a replacement's signature against its OWN

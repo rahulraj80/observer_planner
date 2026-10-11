@@ -225,7 +225,7 @@ func TestCoverageObservedMayExceedDeclared(t *testing.T) {
 		t.Fatalf("expressible_categories = %d; want %d", row.Coverage.ExpressibleCategories, len(declared))
 	}
 	if row.Coverage.ObservedCategories != len(declared)+1 {
-		t.Fatalf("observed_categories = %d; want %d — observations must NOT be truncated to the declared span",
+		t.Fatalf("observed_categories = %d; want %d - observations must NOT be truncated to the declared span",
 			row.Coverage.ObservedCategories, len(declared)+1)
 	}
 	if row.Coverage.ObservedBeyondDeclared != 1 {

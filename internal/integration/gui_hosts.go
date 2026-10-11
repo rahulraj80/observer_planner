@@ -47,7 +47,7 @@ var guiHosts = map[string]GUILaunchSpec{
 				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "--cask", "visual-studio-code"}, Display: "brew install --cask visual-studio-code"},
 			},
 			InstallNote: "no grounded Linux channel: Microsoft ships .deb/.rpm/tarball downloads plus a " +
-				"third-party snap, and which one applies depends on the distro — a single argv would be a " +
+				"third-party snap, and which one applies depends on the distro - a single argv would be a " +
 				"guess, so none is offered (see code.visualstudio.com/docs/setup/linux).",
 		},
 		DarwinApp:      "Visual Studio Code",
@@ -71,7 +71,7 @@ var guiHosts = map[string]GUILaunchSpec{
 				"only the extensions that SPAWN a vendor CLI and inherit the process env (Claude Code " +
 				"`anthropic.claude-code`, the Codex extension, the Gemini companion); extensions whose base " +
 				"URL lives in the VS Code `state.vscdb` settings store (Cline, legacy Kilo, Cursor BYOK) are " +
-				"unaffected — inventory §4.1/§4.2. Env inheritance into a GUI-launched VS Code is NOT " +
+				"unaffected - inventory §4.1/§4.2. Env inheritance into a GUI-launched VS Code is NOT " +
 				"live-verified.",
 		},
 		Hosts: []string{
@@ -99,27 +99,46 @@ var guiHosts = map[string]GUILaunchSpec{
 		Binary: BinaryResolveSpec{
 			// idea64.exe is the real launcher; bin\idea.bat is the batch
 			// form and is deliberately not listed (console window).
+			// Unix: `idea` is the launcher the Homebrew cask links and the
+			// name JetBrains' tarball docs suggest symlinking bin/idea.sh as;
+			// `intellij-idea` is the command the classic snap installs
+			// (snapcraft.io/intellij-idea, 2026-10-03).
 			Names: BinaryNames{
-				Unix:    []string{"idea"},
+				Unix:    []string{"idea", "intellij-idea"},
 				Windows: []string{"idea64.exe"},
 			},
 			ProbeDirs: []ProbeDir{
 				// ONE glob segment, expanded by toolresolve's expandGlobDirs
 				// (filepath.Glob over the whole absolute path, so an interior
 				// `*` segment works and EnvRoot dirs are glob-expanded too).
-				// Grounded on this box 2026-09-03:
+				// The glob matches the unified product's folder (JetBrains
+				// documents C:\Program Files\JetBrains\IntelliJ IDEA\bin\idea64.exe;
+				// the winget Nullsoft installer may suffix the version) AND a
+				// legacy install grounded on this box 2026-09-03:
 				// C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2025.2.6.2\bin\idea64.exe
 				{OS: ProbeWindows, Rel: "JetBrains/IntelliJ IDEA*/bin", EnvRoot: "ProgramFiles"},
 			},
+			// Re-grounded 2026-10-03 for JetBrains' UNIFIED IntelliJ IDEA
+			// (one product since 2025.3; blog.jetbrains.com/idea/2025/12/
+			// intellij-idea-unified-release/). winget: `JetBrains.IntelliJIDEA`
+			// carries 2025.3 through 2026.2.3, while
+			// `JetBrains.IntelliJIDEA.Community` is frozen at 2025.2.6.2 and
+			// `.Ultimate` at 2025.2.5 (microsoft/winget-pkgs
+			// manifests/j/JetBrains/IntelliJIDEA). Homebrew: cask
+			// `intellij-idea` (2026.2.3, installs "IntelliJ IDEA.app" + `idea`);
+			// `intellij-idea-ce` was deprecated 2025-12-08 with replacement
+			// `intellij-idea` (formulae.brew.sh/api/cask/<token>.json).
 			Installs: []InstallHint{
-				{OS: "windows", Channel: "winget", Argv: []string{"winget", "install", "--id", "JetBrains.IntelliJIDEA.Community", "-e", "--source", "winget"}, Display: "winget install --id JetBrains.IntelliJIDEA.Community -e --source winget"},
-				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "--cask", "intellij-idea-ce"}, Display: "brew install --cask intellij-idea-ce"},
+				{OS: "windows", Channel: "winget", Argv: []string{"winget", "install", "--id", "JetBrains.IntelliJIDEA", "-e", "--source", "winget"}, Display: "winget install --id JetBrains.IntelliJIDEA -e --source winget"},
+				{OS: "darwin", Channel: "brew", Argv: []string{"brew", "install", "--cask", "intellij-idea"}, Display: "brew install --cask intellij-idea"},
 			},
-			InstallNote: "no grounded Linux channel: JetBrains ships a tarball plus a third-party snap; " +
-				"the Toolbox App is the vendor's own installer and has no scriptable one-liner — see " +
-				"jetbrains.com/idea/download.",
+			InstallNote: "no guided Linux install: JetBrains documents `sudo snap install intellij-idea --classic` " +
+				"(root, and snap is outside the guided-install channel vocabulary), a tarball run as bin/idea.sh, " +
+				"and the Toolbox App, none of which is a single unprivileged argv; see " +
+				"jetbrains.com/help/idea/installation-guide.html.",
+			UserInstallHint: "On Linux, install IntelliJ IDEA with the JetBrains Toolbox App or with snap: sudo snap install intellij-idea --classic.",
 		},
-		DarwinApp:      "IntelliJ IDEA CE",
+		DarwinApp:      "IntelliJ IDEA",
 		ProjectDirArgv: true,
 		Wrap: WrapSpec{
 			Kind: WrapChildEnv,
@@ -131,9 +150,9 @@ var guiHosts = map[string]GUILaunchSpec{
 			ColdStartOnly: true,
 			Reason: "cold start ONLY: a re-used IDE instance never re-reads its environment " +
 				"(inventory §4.3 open question 1). The wrap reaches only the plugins that SPAWN a vendor " +
-				"CLI and inherit the IDE's env — Junie, the Kimi JB PTY wrapper, and every agent " +
+				"CLI and inherit the IDE's env - Junie, the Kimi JB PTY wrapper, and every agent " +
 				"registered through the JetBrains ACP registry (~/.jetbrains/acp.json: Factory/droid, " +
-				"Qwen, Mistral, Grok) — inventory §2.9/§1.5 finding 5. Copilot and Gemini Code Assist are " +
+				"Qwen, Mistral, Grok) - inventory §2.9/§1.5 finding 5. Copilot and Gemini Code Assist are " +
 				"WrapNone-class inside the IDE (inventory §4.2) and are not listed under Hosts. Env " +
 				"inheritance into a GUI-launched IDE is NOT live-verified.",
 		},
@@ -146,17 +165,21 @@ var guiHosts = map[string]GUILaunchSpec{
 			"droid", "grok", "copilot-cli",
 		},
 		Grounded: true,
-		Note: "Windows layout grounded on this box 2026-09-03: %ProgramFiles%\\JetBrains\\IntelliJ IDEA " +
-			"Community Edition 2025.2.6.2\\bin\\idea64.exe. macOS bundle \"IntelliJ IDEA CE.app\" grounded " +
-			"from the Homebrew cask `intellij-idea-ce`. The JetBrains Toolbox apps layout " +
+		Note: "Unified IntelliJ IDEA (2025.3+), re-grounded 2026-10-03: winget JetBrains.IntelliJIDEA, " +
+			"Homebrew cask intellij-idea (bundle \"IntelliJ IDEA.app\"), Linux snap intellij-idea --classic " +
+			"(command `intellij-idea`). Community Edition is no longer a separate product: JetBrains says " +
+			"existing CE 2025.2 installs keep working (jetbrains.com/help/idea/intellij-idea-single-distribution.html) " +
+			"and publishes open-source builds on github.com/JetBrains/intellij-community releases; neither is " +
+			"offered as a guided install. A legacy CE install on Windows still resolves through the " +
+			"IntelliJ IDEA* probe glob. Windows layout grounded on this box 2026-09-03: %ProgramFiles%\\JetBrains\\IntelliJ IDEA " +
+			"Community Edition 2025.2.6.2\\bin\\idea64.exe. The JetBrains Toolbox apps layout " +
 			"(%LOCALAPPDATA%\\JetBrains\\Toolbox\\apps\\*) is NOT probed: this box has only " +
 			"%LOCALAPPDATA%\\JetBrains\\IdeaIC2025.2 (the IDE's config/system dir, not a Toolbox install), " +
 			"so the Toolbox layout could not be grounded and is deliberately absent rather than guessed. " +
-			"Ultimate Edition is a separate exe stem/winget id and would be its own row. " +
 			"CAPTURE (batch-3 T1, 2026-09-03): the 2026.2 AI Assistant drives its ACP agents (Junie, " +
 			"Claude Agent, Codex, GitHub Copilot) which each write their OWN store, all captured by their " +
 			"own adapters; the IDE's aia-task-history/*.agentsession pointer files are read by " +
-			"internal/surfaceenrich to stamp ide/jetbrains-idea (hosted, host-wins) on those sessions — " +
+			"internal/surfaceenrich to stamp ide/jetbrains-idea (hosted, host-wins) on those sessions - " +
 			"no JetBrains capture row exists by design (internal/platform/jetbrainshost doc).",
 	},
 	// Qoder Work (batch-3 T4, 2026-09-03): Alibaba's multi-agent DESKTOP app
@@ -190,14 +213,14 @@ var guiHosts = map[string]GUILaunchSpec{
 		Wrap: WrapSpec{
 			Kind: WrapNone,
 			Reason: "no base-URL surface: Qoder Work's models are BYOK profiles held encrypted in its own " +
-				"main.sqlite (byok_model_credentials — never read) and routed through qodercli, whose " +
+				"main.sqlite (byok_model_credentials - never read) and routed through qodercli, whose " +
 				"registry row is native_exempt. Launch yes, wrap no.",
 		},
 		Hosts:    []string{"qoder"},
 		Grounded: true,
 		Note: "Windows layout grounded on this box 2026-09-03: %LOCALAPPDATA%\\Programs\\Qoder\\Qoder.exe " +
-			"(Electron — resources\\app.asar + LICENSE.electron.txt; the identifier-shaped data dir " +
+			"(Electron - resources\\app.asar + LICENSE.electron.txt; the identifier-shaped data dir " +
 			"%APPDATA%\\com.qoder.app.stable is just its app name, not a Tauri layout), no bin\\ shim. " +
-			"macOS bundle NOT grounded — DarwinApp left empty.",
+			"macOS bundle NOT grounded - DarwinApp left empty.",
 	},
 }

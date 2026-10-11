@@ -378,7 +378,16 @@ func (s *Store) SetOrgSnapshotInterval(d time.Duration) { s.snap.setMinInterval(
 // SelectUnpushedSince as delivered. orgclient calls it once the org server has
 // accepted the batch (and on the empty-batch path, where there is nothing to
 // deliver); a failed push must NOT call it, so the next tick recomposes.
-func (s *Store) CommitPushedSnapshots() { s.snap.commit(time.Now().UTC()) }
+//
+// The AgentConfigState change digest (agentconfigorg.go) follows the same
+// commit-on-success rule and is promoted here too, as is the AI tool
+// configuration inventory digest (agentconfiginventory.go).
+func (s *Store) CommitPushedSnapshots() {
+	s.snap.commit(time.Now().UTC())
+	s.commitAgentConfigDigest()
+	s.commitComponentPostureDigest()
+	s.commitAgentConfigInventory()
+}
 
 // OrgSnapshotGateStats returns the per-family skip / recompute tallies since
 // process start, for diagnostics and tests.

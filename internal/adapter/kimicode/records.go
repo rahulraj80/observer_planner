@@ -111,13 +111,17 @@ type loopResult struct {
 	IsError *bool  `json:"isError"`
 }
 
-// stateFile is the session-root `state.json` sibling of the wire trace.
-// WorkDir is the authoritative session cwd (the project-root seam).
+// stateFile is the session-root `state.json` sibling of the wire trace:
+// the session cwd (the project-root seam) and nothing else. Version 1
+// names it workDir; version 2 (`"version": 2`, grounded on demo node 1
+// 2026-10-02) names it cwd and carries numeric createdAt/updatedAt, so
+// only the two cwd keys are declared: a typed field for anything else
+// can fail the whole decode when its type changes (a string createdAt
+// did, which silently dropped every v2 session for want of a root). The
+// lastPrompt key is never decoded (it is prompt content).
 type stateFile struct {
-	WorkDir    string `json:"workDir"`
-	Title      string `json:"title"`
-	CreatedAt  string `json:"createdAt"`
-	LastPrompt string `json:"lastPrompt"`
+	WorkDir string `json:"workDir"`
+	Cwd     string `json:"cwd"`
 }
 
 // mapKimiTool collapses kimi-code's tool vocabulary onto the normalized

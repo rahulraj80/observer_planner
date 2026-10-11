@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Card, Pill, SlideOver } from "@/components/primitives";
 import { fetchJSON } from "@/lib/api";
+import { dollarsShown, fmtUSD } from "@/lib/format";
+import { ConfigSaveCancelled, saveConfigSection } from "@/lib/configSectionSave";
 import { pushToast } from "@/components/Toast";
 import { markRestartPending } from "@/lib/restartPending";
 import {
@@ -118,11 +120,19 @@ function TemplatePreview({ t, onDone }: { t: PolicyTemplate; onDone: () => void 
 
       // 3. Budget → config-section (always restart-oriented; no live path).
       if (t.budget) {
-        const res = await fetchJSON<{ saved: boolean; restart_required: boolean }>("/api/config/section/observability", undefined, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ Admission: { Budget: t.budget } }),
-        });
+        let res;
+        try {
+          res = await saveConfigSection("observability", { Admission: { Budget: t.budget } });
+        } catch (e) {
+          // The guardrail and routing parts above already applied; say so
+          // rather than "nothing was written" for the whole template.
+          if (e instanceof ConfigSaveCancelled) {
+            pushToast("Guardrail and routing parts applied; the budget cap was not saved.", "warn");
+            onDone();
+            return;
+          }
+          throw e;
+        }
         if (!res.saved) {
           pushToast("Budget save was not confirmed", "danger");
           return;
@@ -211,7 +221,11 @@ function TemplatePreview({ t, onDone }: { t: PolicyTemplate; onDone: () => void 
       {t.budget && (
         <Card title="Sets per-user budget">
           <p className="text-[12px] text-fg-2">
-            ${t.budget.PerUser5hUSD} / 5h · ${t.budget.PerUserWeeklyUSD} / week · ${t.budget.PerUserMonthlyUSD} / month.
+            {/* The caps are dollar amounts; under the token-usage view the
+                amounts are not shown (T-204), the windows still are. */}
+            {dollarsShown()
+              ? `${fmtUSD(t.budget.PerUser5hUSD)} / 5h · ${fmtUSD(t.budget.PerUserWeeklyUSD)} / week · ${fmtUSD(t.budget.PerUserMonthlyUSD)} / month.`
+              : "Dollar caps per 5 hours, week and month (amounts hidden: your organization shows token usage)."}
             <span className="text-fg-3"> Read at daemon start - needs a restart.</span>
           </p>
         </Card>

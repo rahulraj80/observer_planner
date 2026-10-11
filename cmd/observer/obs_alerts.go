@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
-	"github.com/marmutapp/superbased-observer/internal/notify/email"
 )
 
 // obs_alerts.go is the NODE-SIDE observability alert evaluator loop, webhook
@@ -86,30 +85,14 @@ func obsAlertLoop(ctx context.Context, configPath string) {
 	}
 }
 
-// buildAlertEmailNotifier returns a fail-soft email notifier when [email] is
-// enabled AND [observability.alerts].email is set, else nil (email off). A
-// structurally-invalid [email] block logs a warning and yields nil so alerting
-// is never blocked by a mail misconfiguration. EmailTo overrides [email].to.
-func buildAlertEmailNotifier(cfg config.Config, logger *slog.Logger) *email.Notifier {
-	if !cfg.Email.Enabled || !cfg.Observability.Alerts.Email {
-		return nil
-	}
-	ec := cfg.Email
-	if to := cfg.Observability.Alerts.EmailTo; len(to) > 0 {
-		ec.To = to
-	}
-	n, err := email.NewNotifier(ec, logger)
-	if err != nil {
-		logger.Warn("obs-alert email disabled: invalid [email] config", "err", err)
-		return nil
-	}
-	return n
-}
+// alertEmailSender delivers one fired alert by email, fail-soft (it never
+// errors). Nil means email is off; buildAlertEmailNotifier returns it.
+type alertEmailSender func(ctx context.Context, f obsFiredAlert)
 
 // obsRunAlertTick performs one evaluation pass: evaluate → (deliver webhook) →
 // record. The pure evaluator already applied cooldown/dedup, so every crossing
 // returned here is one that should fire now.
-func obsRunAlertTick(ctx context.Context, cfg config.Config, db *sql.DB, logger *slog.Logger, emailNotifier *email.Notifier) {
+func obsRunAlertTick(ctx context.Context, cfg config.Config, db *sql.DB, logger *slog.Logger, emailNotifier alertEmailSender) {
 	fired, err := obsEvaluateAlertsOnce(ctx, cfg, db, logger)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
@@ -130,7 +113,7 @@ func obsRunAlertTick(ctx context.Context, cfg config.Config, db *sql.DB, logger 
 		// errors). It does not affect the recorded delivery status (that tracks
 		// the webhook).
 		if emailNotifier != nil {
-			emailNotifier.Send(ctx, composeAlertEmail(f, version))
+			emailNotifier(ctx, f)
 		}
 		if rerr := obsRecordAlert(ctx, db, f, delivered); rerr != nil {
 			logger.Error("obs-alert persist failed", "rule", f.RuleName, "err", rerr)
@@ -176,28 +159,6 @@ func postAlertWebhook(ctx context.Context, url string, f obsFiredAlert) error {
 	return nil
 }
 
-// composeAlertEmail renders a fired node alert as an email Message from the
-// SAME content-bounded fields the webhook payload carries. version stamps the
-// footer. Pure — no I/O; the Notifier does the delivery.
-func composeAlertEmail(f obsFiredAlert, version string) email.Message {
-	subject := fmt.Sprintf("[Observer] Alert: %s — %s", f.RuleName, f.Metric)
-	heading := fmt.Sprintf("Rule %q fired: %s is %g (%s %g) over the last %d minute(s).",
-		f.RuleName, f.Metric, f.Value, comparatorSymbol(f.Comparator), f.Threshold, f.WindowMinutes)
-	return email.Compose(email.ComposeParams{
-		Subject: subject,
-		Heading: heading,
-		Fields: []email.Field{
-			{Label: "Rule", Value: f.RuleName},
-			{Label: "Metric", Value: f.Metric},
-			{Label: "Observed value", Value: fmt.Sprintf("%g", f.Value)},
-			{Label: "Condition", Value: fmt.Sprintf("%s %g", comparatorSymbol(f.Comparator), f.Threshold)},
-			{Label: "Window", Value: fmt.Sprintf("%d minute(s)", f.WindowMinutes)},
-			{Label: "Fired at", Value: f.FiredAt.Format(time.RFC3339)},
-		},
-		Version: version,
-	})
-}
-
 // newObsAlertsCmd is `observer obs alerts`: print the per-rule live status
 // (current value + whether it's currently breaching) and the recently fired
 // alerts. It funnels through the build-tagged obs wrappers, so this file
@@ -211,7 +172,7 @@ func newObsAlertsCmd() *cobra.Command {
 		Long: "Show the node-side observability alert rules ([observability.alerts]),\n" +
 			"each rule's current metric value and whether it is breaching now, and\n" +
 			"the most-recently fired alerts (requires [observability] enabled).\n\n" +
-			"Alerting evaluates THIS node's own local trajectory data — it works\n" +
+			"Alerting evaluates THIS node's own local trajectory data - it works\n" +
 			"even with org sharing off. Fired alerts POST to the configured\n" +
 			"webhook_url (an outbound call, so alerting is opt-in and default-off).\n" +
 			"There is no dashboard page: obs surfaces are admin/web2-only.",
@@ -246,7 +207,7 @@ func printObsAlertsStatus(cmd *cobra.Command, st obsAlertsStatus) {
 
 	fmt.Fprintf(out, "\nrules (%d):\n", len(st.Rules))
 	if len(st.Rules) == 0 {
-		fmt.Fprintln(out, "  (none configured — add [[observability.alerts.rules]] entries)")
+		fmt.Fprintln(out, "  (none configured - add [[observability.alerts.rules]] entries)")
 	}
 	for _, r := range st.Rules {
 		state := "ok"

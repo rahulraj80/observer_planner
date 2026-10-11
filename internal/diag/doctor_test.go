@@ -6,12 +6,15 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/codextrust"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcp"
@@ -283,7 +286,7 @@ func requireCheck(t *testing.T, r Report, name string, want Status) {
 	for _, c := range r.Checks {
 		if c.Name == name {
 			if c.Status != want {
-				t.Errorf("check %s: status %s want %s — message %q", name, c.Status, want, c.Message)
+				t.Errorf("check %s: status %s want %s - message %q", name, c.Status, want, c.Message)
 			}
 			return
 		}
@@ -336,69 +339,145 @@ func tomlKeyPath(p string) string { return strings.ReplaceAll(p, `\`, `\\`) }
 
 func TestCheckCodexHookTrust_RegisteredButNoConfigToml(t *testing.T) {
 	home := t.TempDir()
-	codexHookTrustWriteHooks(t, home, "SessionStart", "PreToolUse", "Stop")
+	events := codexExpectedHookEvents()
+	codexHookTrustWriteHooks(t, home, events...)
 	c := checkCodexHookTrust(home)
 	if c.Status != StatusWarn {
-		t.Errorf("status=%s want Warn (config.toml missing → all 3 untrusted)", c.Status)
+		t.Errorf("status=%s want Warn (config.toml missing, all untrusted)", c.Status)
 	}
-	if !strings.Contains(c.Message, "3 codex hook") {
-		t.Errorf("message=%q want '3 codex hook' count", c.Message)
+	if !strings.Contains(c.Message, fmt.Sprintf("%d codex hook", len(events))) {
+		t.Errorf("message=%q want the %d count", c.Message, len(events))
 	}
-	// Detail line should list the specific events the user must trust.
-	gotEvents := false
-	for _, d := range c.Details {
-		if strings.Contains(d, "SessionStart") && strings.Contains(d, "PreToolUse") && strings.Contains(d, "Stop") {
-			gotEvents = true
-			break
+	if len(c.Details) == 0 || !strings.HasPrefix(c.Details[0], "untrusted:") {
+		t.Fatalf("first detail must name the untrusted events: %v", c.Details)
+	}
+	for _, e := range events {
+		if !strings.Contains(c.Details[0], e) {
+			t.Errorf("untrusted line misses %s: %q", e, c.Details[0])
 		}
 	}
-	if !gotEvents {
-		t.Errorf("details did not enumerate untrusted events: %v", c.Details)
+}
+
+// codexTrustConfig renders [hooks.state] entries for the given events
+// with the given trusted_hash values.
+func codexTrustConfig(hooksPath string, hashes map[string]string) string {
+	var b strings.Builder
+	for _, e := range sortedKeys(hashes) {
+		fmt.Fprintf(&b, "[hooks.state.\"%s:%s:0:0\"]\ntrusted_hash = %q\n\n", hooksPath, codextrust.CamelToSnake(e), hashes[e])
 	}
+	return b.String()
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func TestCheckCodexHookTrust_AllTrusted(t *testing.T) {
 	home := t.TempDir()
-	hooksPath := tomlKeyPath(codexHookTrustWriteHooks(t, home, "SessionStart", "PreToolUse"))
-	cfg := `personality = "p"
-
-[hooks.state."` + hooksPath + `:session_start:0:0"]
-trusted_hash = "sha256:abc"
-
-[hooks.state."` + hooksPath + `:pre_tool_use:0:0"]
-trusted_hash = "sha256:def"
-`
+	events := codexExpectedHookEvents()
+	hooksPath := tomlKeyPath(codexHookTrustWriteHooks(t, home, events...))
+	hashes := map[string]string{}
+	for _, e := range events {
+		hashes[e] = "sha256:recorded-" + e // a Codex release whose hash we cannot reproduce
+	}
+	cfg := "personality = \"p\"\n\n" + codexTrustConfig(hooksPath, hashes)
 	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c := checkCodexHookTrust(home)
 	if c.Status != StatusOK {
-		t.Errorf("status=%s want OK (both events trusted), msg=%q details=%v", c.Status, c.Message, c.Details)
+		t.Errorf("status=%s want OK (every event trusted), msg=%q details=%v", c.Status, c.Message, c.Details)
+	}
+	if !strings.Contains(c.Message, "could not be reproduced") {
+		t.Errorf("unverifiable hashes must be named: %q", c.Message)
 	}
 }
 
 func TestCheckCodexHookTrust_PartialTrust(t *testing.T) {
 	home := t.TempDir()
-	hooksPath := tomlKeyPath(codexHookTrustWriteHooks(t, home, "SessionStart", "PreToolUse", "Stop"))
-	// Trust only 1 of 3 — Warn should list the other 2.
-	cfg := `[hooks.state."` + hooksPath + `:session_start:0:0"]
-trusted_hash = "sha256:abc"
-`
+	events := codexExpectedHookEvents()
+	hooksPath := tomlKeyPath(codexHookTrustWriteHooks(t, home, events...))
+	cfg := codexTrustConfig(hooksPath, map[string]string{"SessionStart": "sha256:abc"})
 	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c := checkCodexHookTrust(home)
 	if c.Status != StatusWarn {
-		t.Errorf("status=%s want Warn", c.Status)
+		t.Fatalf("status=%s want Warn", c.Status)
 	}
-	if strings.Contains(strings.Join(c.Details, " "), "SessionStart") {
-		t.Errorf("SessionStart shouldn't appear in untrusted list: %v", c.Details)
+	if strings.Contains(c.Details[0], "SessionStart") {
+		t.Errorf("SessionStart is trusted, not in the untrusted line: %q", c.Details[0])
 	}
-	if !strings.Contains(strings.Join(c.Details, " "), "PreToolUse") {
-		t.Errorf("PreToolUse should appear in untrusted list: %v", c.Details)
+	for _, e := range []string{"PreToolUse", "Stop"} {
+		if !strings.Contains(c.Details[0], e) {
+			t.Errorf("%s should be in the untrusted line: %q", e, c.Details[0])
+		}
 	}
-	if !strings.Contains(strings.Join(c.Details, " "), "Stop") {
-		t.Errorf("Stop should appear in untrusted list: %v", c.Details)
+}
+
+// TestCheckCodexHookTrust_ModifiedSinceTrusted: once one recorded hash
+// reproduces, a hash that does not match its entry's body means the
+// command changed after the user trusted it.
+func TestCheckCodexHookTrust_ModifiedSinceTrusted(t *testing.T) {
+	home := t.TempDir()
+	events := codexExpectedHookEvents()
+	rawPath := codexHookTrustWriteHooks(t, home, events...)
+	star := "*"
+	hashes := map[string]string{}
+	for _, e := range events {
+		cmd := "/usr/local/bin/observer hook codex " + e
+		// SessionEnd (registered since hook-parity Lane C) defaults to
+		// Codex's short 1 s hook timeout, every other event to 600 s.
+		timeout := int64(600)
+		if e == "SessionEnd" {
+			timeout = 1
+		}
+		hashes[e] = codextrust.Hash(codextrust.CamelToSnake(e), &star, cmd, timeout, false, nil)
+		if e == "UserPromptSubmit" || e == "Stop" {
+			hashes[e] = codextrust.Hash(codextrust.CamelToSnake(e), nil, cmd, 600, false, nil)
+		}
+	}
+	hashes["PreToolUse"] = "sha256:stale"
+	cfg := codexTrustConfig(tomlKeyPath(rawPath), hashes)
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := checkCodexHookTrust(home)
+	if c.Status != StatusWarn || c.Details[0] != "untrusted: PreToolUse" {
+		t.Fatalf("status=%s details=%v, want Warn with only PreToolUse blocked", c.Status, c.Details)
+	}
+	if !strings.Contains(strings.Join(c.Details, "\n"), "(re-trust in /hooks): PreToolUse") {
+		t.Errorf("modified state not explained: %v", c.Details)
+	}
+}
+
+// TestCheckCodexHookTrust_NewEventNotRegistered: an event the registry
+// expects but hooks.json lacks is listed as not registered, and is not a
+// capture-integrity trust risk.
+func TestCheckCodexHookTrust_NewEventNotRegistered(t *testing.T) {
+	home := t.TempDir()
+	events := codexExpectedHookEvents()
+	if len(events) < 2 {
+		t.Skip("registry lists fewer than two codex events")
+	}
+	present := events[:len(events)-1]
+	hooksPath := tomlKeyPath(codexHookTrustWriteHooks(t, home, present...))
+	hashes := map[string]string{}
+	for _, e := range present {
+		hashes[e] = "sha256:x"
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(codexTrustConfig(hooksPath, hashes)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := checkCodexHookTrust(home)
+	want := "not registered: " + events[len(events)-1]
+	if c.Status != StatusWarn || len(c.Details) == 0 || c.Details[0] != want {
+		t.Fatalf("status=%s details=%v, want Warn with %q first", c.Status, c.Details, want)
 	}
 }
 
@@ -417,21 +496,5 @@ func TestCheckCodexHookTrust_IgnoresUserOwnedHooks(t *testing.T) {
 	c := checkCodexHookTrust(home)
 	if c.Status != StatusOK {
 		t.Errorf("status=%s want OK (no observer-owned hooks)", c.Status)
-	}
-}
-
-func TestSnakeToCamel(t *testing.T) {
-	cases := map[string]string{
-		"session_start":      "SessionStart",
-		"pre_tool_use":       "PreToolUse",
-		"stop":               "Stop",
-		"user_prompt_submit": "UserPromptSubmit",
-		"permission_request": "PermissionRequest",
-		"":                   "",
-	}
-	for in, want := range cases {
-		if got := snakeToCamel(in); got != want {
-			t.Errorf("snakeToCamel(%q) = %q want %q", in, got, want)
-		}
 	}
 }

@@ -95,12 +95,32 @@ func TestExecutorHappyPathE2E(t *testing.T) {
 
 func TestExecutorOutputCorpora(t *testing.T) {
 	secret := "AKIA1234567890ABCDEF" // AWS access key shape — reliably masked
+	full := validResult("Refactored auth", "did work", []string{"refactor"})
 	cases := []struct {
 		name        string
 		content     string
-		wantFailed  bool // job fails (invalid) after retries
+		finish      string // provider finish reason ("" = not reported)
+		wantFailed  bool   // job fails (invalid) after retries
 		assertClean func(t *testing.T, r cloudcontract.Result)
 	}{
+		{
+			// An answer cut at max_output_tokens (D-313, T-414: the GPT-6 Luna
+			// route caps it at 1024 tokens) is incomplete JSON: retried within
+			// the attempt budget, then failed with the unit refunded, and a
+			// partial result is NEVER stored.
+			name:       "truncated_at_output_cap",
+			content:    full[:len(full)/2],
+			finish:     foundry.FinishLength,
+			wantFailed: true,
+		},
+		{
+			// A reasoning model that spent the whole cap on reasoning returns
+			// empty content with finish_reason length.
+			name:       "truncated_reasoning_exhausted_cap",
+			content:    "",
+			finish:     foundry.FinishLength,
+			wantFailed: true,
+		},
 		{
 			name:       "control_char_title",
 			content:    validResult("bad\x00title", "d", nil),
@@ -147,7 +167,7 @@ func TestExecutorOutputCorpora(t *testing.T) {
 			now := time.Now()
 			key := "corpus" + string(rune('a'+i))
 			submitWithEvidence(t, s, acct, key, []byte(`{"a":1}`), now)
-			provider := &foundry.FakeProvider{Response: foundry.Response{Content: c.content, TokensIn: 1, TokensOut: 1}}
+			provider := &foundry.FakeProvider{Response: foundry.Response{Content: c.content, TokensIn: 1, TokensOut: 1, FinishReason: c.finish}}
 			out, err := fullWorker(s, provider).ProcessOnce(ctx, now)
 			if err != nil {
 				t.Fatalf("ProcessOnce: %v", err)

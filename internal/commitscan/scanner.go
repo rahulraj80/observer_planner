@@ -367,7 +367,7 @@ func (s *Scanner) scanRootTick(ctx context.Context, root Root) {
 	if s.opts.Unavailable != nil && s.opts.Unavailable(err) {
 		if s.gitUnavailable.CompareAndSwap(false, true) {
 			s.warnOnce.Do(func() {
-				s.warn("commitscan: git not found on PATH — commit-capture scanner going idle")
+				s.warn("commitscan: git not found on PATH - commit-capture scanner going idle")
 			})
 		}
 		return

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -81,15 +82,18 @@ func (r *Runner) Keep(ctx context.Context, row *models.ArenaCandidate, projectRo
 		sha     string
 		landErr error
 	)
+	// The provenance footer follows the developer cost display once per keep,
+	// so the footer written and the footer verified agree (T-204).
+	mode := r.costMode()
 	switch strategy {
 	case KeepSquash:
-		sha, landErr = r.squashKeep(ctx, row, projectRoot)
+		sha, landErr = r.squashKeep(ctx, row, projectRoot, mode)
 	case KeepJudgeMerge:
 		var js JudgeSpec
 		if len(judge) > 0 {
 			js = judge[0]
 		}
-		sha, landErr = r.judgeMergeKeep(ctx, row, projectRoot, js)
+		sha, landErr = r.judgeMergeKeep(ctx, row, projectRoot, js, mode)
 	default:
 		landErr = fmt.Errorf("arena.Keep: unknown strategy %q", strategy)
 	}
@@ -117,7 +121,7 @@ func (r *Runner) Keep(ctx context.Context, row *models.ArenaCandidate, projectRo
 	return sha, nil
 }
 
-func (r *Runner) squashKeep(ctx context.Context, row *models.ArenaCandidate, projectRoot string) (string, error) {
+func (r *Runner) squashKeep(ctx context.Context, row *models.ArenaCandidate, projectRoot, mode string) (string, error) {
 	// Keep requires a clean tree: a conflicted squash merge leaves no
 	// MERGE_HEAD, so `merge --abort` cannot roll it back — the only
 	// rollback is `reset --hard`, which is safe ONLY on a clean repo,
@@ -152,7 +156,7 @@ func (r *Runner) squashKeep(ctx context.Context, row *models.ArenaCandidate, pro
 		}
 		return "", fmt.Errorf("arena.squashKeep: merge: %w: %s", err, truncateStr(string(out), 400))
 	}
-	sha, err := git.CommitAll(ctx, projectRoot, provenanceMessage(row))
+	sha, err := git.CommitAll(ctx, projectRoot, provenanceMessage(row, mode))
 	if err != nil {
 		if rbErr := git.ResetHard(context.WithoutCancel(ctx), projectRoot, baseHead); rbErr != nil {
 			return "", fmt.Errorf("arena.squashKeep: commit failed (%w); rollback failed: %w", err, rbErr)
@@ -169,7 +173,7 @@ func (r *Runner) squashKeep(ctx context.Context, row *models.ArenaCandidate, pro
 // behalf — it verifies outcomes honestly: a new HEAD commit on the project
 // branch with a clean tree, else an error that leaves triage to the
 // operator (a half-resolved state is reported, never silently reset).
-func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate, projectRoot string, js JudgeSpec) (string, error) {
+func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate, projectRoot string, js JudgeSpec, mode string) (string, error) {
 	if js.Tool == "" {
 		return "", errors.New("arena.judgeMergeKeep: no judge tool supplied")
 	}
@@ -198,7 +202,7 @@ func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate,
 		Tool:         js.Tool,
 		Model:        js.Model,
 		WorktreePath: projectRoot,
-		Prompt:       renderJudgeMergePrompt(row),
+		Prompt:       renderJudgeMergePrompt(row, mode),
 		ProxyURL:     r.opts.ProxyURL,
 		ConfigDir:    cfgDir,
 		Timeout:      DefaultTimeout,
@@ -228,7 +232,7 @@ func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate,
 			if rbErr := rollbackExactCleanHead(ctx, projectRoot, newHead, baseHead); rbErr != nil {
 				return "", fmt.Errorf("arena.judgeMergeKeep: judge committed an unchanged tree and rollback failed: %w", rbErr)
 			}
-			return "", errors.New("arena.judgeMergeKeep: judge committed but the tree is unchanged from the base — commit rolled back")
+			return "", errors.New("arena.judgeMergeKeep: judge committed but the tree is unchanged from the base - commit rolled back")
 		}
 	}
 
@@ -236,12 +240,12 @@ func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate,
 	case derr != nil && newHead == baseHead:
 		return "", fmt.Errorf("arena.judgeMergeKeep: judge drive failed before landing (%w)", derr)
 	case newHead == baseHead && stillDirty:
-		return "", errors.New("arena.judgeMergeKeep: judge left conflicts unresolved and landed nothing — resolve or reset manually")
+		return "", errors.New("arena.judgeMergeKeep: judge left conflicts unresolved and landed nothing - resolve or reset manually")
 	case newHead == baseHead:
 		return "", fmt.Errorf("arena.judgeMergeKeep: judge landed no commit (exit %d): %s",
 			res.ExitCode, truncateStr(stripANSI(res.FinalAnswer), 300))
 	case stillDirty:
-		return "", fmt.Errorf("arena.judgeMergeKeep: judge committed %s but left the tree dirty — commit or clean the residue", newHead)
+		return "", fmt.Errorf("arena.judgeMergeKeep: judge committed %s but left the tree dirty - commit or clean the residue", newHead)
 	}
 	landed, aerr := git.IsAncestor(ctx, projectRoot, row.BranchName, newHead)
 	if aerr != nil {
@@ -251,7 +255,7 @@ func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate,
 		if rbErr := rollbackExactCleanHead(ctx, projectRoot, newHead, baseHead); rbErr != nil {
 			return "", fmt.Errorf("arena.judgeMergeKeep: judge commit does not contain candidate branch and rollback failed: %w", rbErr)
 		}
-		return "", errors.New("arena.judgeMergeKeep: judge changed HEAD without history-merging the candidate branch — commit rolled back")
+		return "", errors.New("arena.judgeMergeKeep: judge changed HEAD without history-merging the candidate branch - commit rolled back")
 	}
 
 	// Ensure the provenance footer survives regardless of what message the
@@ -263,9 +267,9 @@ func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate,
 		}
 		return "", fmt.Errorf("arena.judgeMergeKeep: read landed provenance; commit rolled back: %w", merr)
 	}
-	if !hasArenaProvenance(msg, row) {
+	if !hasArenaProvenance(msg, row, mode) {
 		amended, aerr := git.AmendCommitMessage(ctx, projectRoot,
-			strings.TrimRight(msg, "\n")+"\n\n"+provenanceFooter(row))
+			strings.TrimRight(msg, "\n")+"\n\n"+provenanceFooter(row, mode))
 		if aerr != nil {
 			if rbErr := rollbackExactCleanHead(ctx, projectRoot, newHead, baseHead); rbErr != nil {
 				return "", fmt.Errorf("arena.judgeMergeKeep: provenance amend failed (%w); rollback failed: %w", aerr, rbErr)
@@ -277,13 +281,13 @@ func (r *Runner) judgeMergeKeep(ctx context.Context, row *models.ArenaCandidate,
 	return newHead, nil
 }
 
-func hasArenaProvenance(message string, row *models.ArenaCandidate) bool {
+func hasArenaProvenance(message string, row *models.ArenaCandidate, mode string) bool {
 	if row == nil {
 		return false
 	}
 	markers := []string{
 		fmt.Sprintf("Arena-Run:  %s\n", row.RunID),
-		fmt.Sprintf("Usage:      %d input / %d output / $%.6f\n", row.InputTokens, row.OutputTokens, row.CostUSD),
+		provenanceUsage(row, mode),
 		"Generated-by: observer agent arena",
 	}
 	harness := fmt.Sprintf("Harness:    %s", row.Tool)
@@ -323,27 +327,27 @@ func rollbackExactCleanHead(ctx context.Context, projectRoot, landedHead, baseHe
 // renderJudgeMergePrompt builds the judge-driven merge instruction. The
 // judge works INSIDE the main repository: merge the candidate branch,
 // resolve conflicts itself, commit with the provenance footer.
-func renderJudgeMergePrompt(row *models.ArenaCandidate) string {
+func renderJudgeMergePrompt(row *models.ArenaCandidate, mode string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "In this git repository, merge the branch %q into the current branch and commit the result.\n", row.BranchName)
-	b.WriteString("Resolve any merge conflicts yourself — do not leave conflicts unresolved or ask for help; pick the resolution that preserves BOTH the candidate's intent and the current branch's content.\n")
+	b.WriteString("Resolve any merge conflicts yourself - do not leave conflicts unresolved or ask for help; pick the resolution that preserves BOTH the candidate's intent and the current branch's content.\n")
 	fmt.Fprintf(&b, "Use a plain merge (history-preserving), NOT --squash. Stage everything the merge needs (git add -A) before committing.\n\n")
-	fmt.Fprintf(&b, "The commit message MUST end with exactly this provenance block:\n\n%s", provenanceFooter(row))
+	fmt.Fprintf(&b, "The commit message MUST end with exactly this provenance block:\n\n%s", provenanceFooter(row, mode))
 	b.WriteString("\nWhen done, reply with only the resulting commit SHA.")
 	return b.String()
 }
 
 // provenanceMessage is the squash-keep commit message: header + footer.
-func provenanceMessage(row *models.ArenaCandidate) string {
+func provenanceMessage(row *models.ArenaCandidate, mode string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "arena: land %s candidate\n\n", row.Tool)
-	b.WriteString(provenanceFooter(row))
+	b.WriteString(provenanceFooter(row, mode))
 	return b.String()
 }
 
 // provenanceFooter answers "which model wrote this" in history: what
 // landed, from which harness/model/run.
-func provenanceFooter(row *models.ArenaCandidate) string {
+func provenanceFooter(row *models.ArenaCandidate, mode string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Arena-Run:  %s\n", row.RunID)
 	fmt.Fprintf(&b, "Harness:    %s", row.Tool)
@@ -354,8 +358,28 @@ func provenanceFooter(row *models.ArenaCandidate) string {
 	if len(row.SessionIDs) > 0 {
 		fmt.Fprintf(&b, "Sessions:   %s\n", strings.Join(row.SessionIDs, ", "))
 	}
-	fmt.Fprintf(&b, "Usage:      %d input / %d output / $%.6f\n", row.InputTokens, row.OutputTokens, row.CostUSD)
+	b.WriteString(provenanceUsage(row, mode))
 	fmt.Fprintf(&b, "Kept:       %s\n", time.Now().UTC().Format(time.RFC3339))
 	b.WriteString("\nGenerated-by: observer agent arena\n")
 	return b.String()
+}
+
+// provenanceUsage is the footer's usage line. A kept commit lands in shared
+// git history, so under the token-usage developer cost display (D-013) it
+// carries the token counts only; in dollar mode it also carries the cost.
+func provenanceUsage(row *models.ArenaCandidate, mode string) string {
+	if costtext.Tokens(mode) {
+		return fmt.Sprintf("Usage:      %d input / %d output\n", row.InputTokens, row.OutputTokens)
+	}
+	// no-bare-usd:allow (reached only when the display shows dollars)
+	return fmt.Sprintf("Usage:      %d input / %d output / $%.6f\n", row.InputTokens, row.OutputTokens, row.CostUSD)
+}
+
+// costMode is the developer cost display for one keep; dollars when the
+// runner was built without a resolver.
+func (r *Runner) costMode() string {
+	if r.opts.CostDisplay == nil {
+		return costtext.ModeUSD
+	}
+	return r.opts.CostDisplay()
 }

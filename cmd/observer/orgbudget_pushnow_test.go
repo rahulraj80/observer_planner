@@ -21,7 +21,10 @@ import (
 //
 // One row per (prime, fetch) transition the CLI can observe.
 func TestGuardlessBudgetHandlePostureFollowsTheFetch(t *testing.T) {
-	local := config.GuardBudgetConfig{FromOrg: true}
+	// FailClosed: since D-502 / D-509 a missing org body blocks only under the
+	// org's explicit fail_closed opt-in, and that blocking posture is what the
+	// budget_required rows below follow through the fetch.
+	local := config.GuardBudgetConfig{FromOrg: true, FailClosed: true}
 	body := orgcontract.BudgetPolicyBody{
 		Version: 4, ResolvedScope: "team:eng", CapTokens: 1_000_000,
 		Period: orgcontract.BudgetPolicyPeriodCalendarMonth, Timezone: "UTC",

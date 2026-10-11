@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -163,6 +165,7 @@ func newCloudConsentGrantCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
+	// no-bare-usd:allow (not money: an environment variable name)
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Cloud base URL (else $"+cloudBaseURLEnv+", else [cloud].base_url)")
 	cmd.Flags().StringVar(&purpose, "purpose", "", "Consent purpose to grant standing (required)")
 	cmd.Flags().StringVar(&timezone, "timezone", "", "IANA timezone the day windows are defined in (default: this host's zone)")
@@ -203,7 +206,7 @@ func cloudRecordStandingGrant(ctx context.Context, st *store.Store, cfg config.C
 
 	resolved := resolveCloudBaseURL(baseURLFlag, cfg)
 	if resolved == "" {
-		return false, fmt.Errorf("no cloud base URL — pass --base-url, set %s, or set [cloud].base_url in config.toml (the grant binds the upload endpoint)", cloudBaseURLEnv)
+		return false, fmt.Errorf("no cloud base URL - pass --base-url, set %s, or set [cloud].base_url in config.toml (the grant binds the upload endpoint)", cloudBaseURLEnv)
 	}
 
 	gw, err := openCloudGateway(cfg, resolved, "", st, nil)
@@ -264,7 +267,7 @@ func cloudRecordStandingGrant(ctx context.Context, st *store.Store, cfg config.C
 			return false, cerr
 		}
 		if !ok {
-			fmt.Fprintln(w, "Aborted — nothing recorded, and nothing will be sent.")
+			fmt.Fprintln(w, "Aborted - nothing recorded, and nothing will be sent.")
 			return false, nil
 		}
 	}
@@ -294,7 +297,7 @@ func cloudRecordStandingGrant(ctx context.Context, st *store.Store, cfg config.C
 // before the confirmation prompt. Everything the receipt will bind is shown —
 // there is no field a developer agrees to without seeing it.
 func cloudPrintStandingBinding(w io.Writer, r store.CloudConsentReceipt, zoneNote string) {
-	fmt.Fprintf(w, "Standing consent grant — %s\n", r.Purpose)
+	fmt.Fprintf(w, "Standing consent grant - %s\n", r.Purpose)
 	fmt.Fprintln(w, "  This authorizes a SCHEMA, not one upload. Every snapshot sent under it still")
 	fmt.Fprintln(w, "  gets its own digest, its own local record, and a revocation check before it")
 	fmt.Fprintln(w, "  is sent. Revoke any time; pending snapshots are cancelled with it.")
@@ -327,15 +330,15 @@ func cloudPrintStandingBinding(w io.Writer, r store.CloudConsentReceipt, zoneNot
 // at the end of cloudPrintStandingBinding).
 var cloudStandingDisclosureByPurpose = map[cloudcontract.Purpose][]string{
 	cloudcontract.PurposeStructuralInsights: {
-		"  What a snapshot contains: one row per completed day — counts of sessions and",
+		"  What a snapshot contains: one row per completed day - counts of sessions and",
 		"  actions, the tool and model-family mix, token and cost sums, and two coverage",
 		"  bands with their raw numerators. No paths, no commands, no excerpts, no repo",
 		"  identity, no per-session rows. Only sessions classified PERSONAL are counted.",
 	},
 	cloudcontract.PurposeCohortBenchmarking: {
 		"  What a contribution contains: one value per metric for the CURRENT, IN-PROGRESS",
-		"  UTC calendar month — sessions per active day, and verification coverage as a",
-		"  percentage — rounded to the published precision and folded into a global cohort",
+		"  UTC calendar month - sessions per active day, and verification coverage as a",
+		"  percentage - rounded to the published precision and folded into a global cohort",
 		"  aggregate. The value is recomputed from this month's sessions so far and",
 		"  re-sent on every sync until that month closes; after the close the server",
 		"  freezes the last value it received and no later send can change it. No paths,",
@@ -458,7 +461,7 @@ func cloudRevokeStanding(ctx context.Context, st *store.Store, p cloudcontract.P
 		}
 	}
 	if revoked == 0 {
-		fmt.Fprintf(w, "No live standing grant for %q — nothing to revoke.\n", string(p))
+		fmt.Fprintf(w, "No live standing grant for %q - nothing to revoke.\n", string(p))
 		return nil
 	}
 	fmt.Fprintf(w, "Revoked %d standing grant(s) for %q and cancelled %d queued item(s).\n",
@@ -493,7 +496,7 @@ func newCloudConsentListCmd() *cobra.Command {
 				return err
 			}
 			if len(receipts) == 0 {
-				fmt.Fprintln(w, "No consent receipts on this device — nothing has ever been authorized to leave it.")
+				fmt.Fprintln(w, "No consent receipts on this device - nothing has ever been authorized to leave it.")
 				cloudPrintGrantableHelp(w)
 				return nil
 			}
@@ -534,7 +537,7 @@ func cloudPrintGrantableHelp(w io.Writer) {
 			continue
 		}
 		_, reason := cloudgateway.StandingGrantable(p)
-		fmt.Fprintf(w, "  %s: not grantable — %s\n", p, reason)
+		fmt.Fprintf(w, "  %s: not grantable - %s\n", p, reason)
 	}
 }
 
@@ -554,7 +557,7 @@ func cloudPrintGrantSummary(ctx context.Context, st *store.Store, w io.Writer) {
 	}
 	fmt.Fprintf(w, "  live consent grants: %d (%d standing)\n", len(live), standing)
 	if standing == 0 {
-		fmt.Fprintln(w, "  structural rail:     not authorized — `observer cloud consent grant --purpose structural_activity_insights`")
+		fmt.Fprintln(w, "  structural rail:     not authorized - `observer cloud consent grant --purpose structural_activity_insights`")
 	}
 }
 
@@ -576,10 +579,10 @@ func resolveDeclaredTimezone(flagVal string) (zone, note string, err error) {
 	}
 	name := time.Now().Location().String()
 	if name == "" || name == "Local" {
-		return "UTC", "this host exposes no named IANA zone, so UTC was recorded — pass --timezone to set it deliberately", nil
+		return "UTC", "this host exposes no named IANA zone, so UTC was recorded - pass --timezone to set it deliberately", nil
 	}
 	if _, lerr := time.LoadLocation(name); lerr != nil {
-		return "UTC", fmt.Sprintf("this host's zone %q could not be loaded, so UTC was recorded — pass --timezone to set it deliberately", name), nil
+		return "UTC", fmt.Sprintf("this host's zone %q could not be loaded, so UTC was recorded - pass --timezone to set it deliberately", name), nil
 	}
 	return name, "taken from this host's clock", nil
 }
@@ -592,9 +595,9 @@ func resolveFixedTimezone(p cloudcontract.Purpose, fixed, flagVal string) (zone,
 	if v := strings.TrimSpace(flagVal); v != "" && v != fixed {
 		return "", "", fmt.Errorf("--timezone %q is not accepted for %s: this purpose's windows are %s calendar months "+
 			"everywhere (eligibility, computation, wire and hosted finalization), so its declared timezone is fixed to %s "+
-			"— omit --timezone or pass --timezone %s", v, string(p), fixed, fixed, fixed)
+			"- omit --timezone or pass --timezone %s", v, string(p), fixed, fixed, fixed)
 	}
-	return fixed, fmt.Sprintf("fixed for this purpose — windows are %s calendar months", fixed), nil
+	return fixed, fmt.Sprintf("fixed for this purpose - windows are %s calendar months", fixed), nil
 }
 
 // cloudDispatchLeaseFor is the production DispatchLease (Sol re-review N2) both

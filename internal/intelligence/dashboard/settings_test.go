@@ -355,8 +355,8 @@ func TestHandleConfigSection_Dashboard(t *testing.T) {
 
 	// Valid save persists.
 	rr := httptest.NewRecorder()
-	server.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPut,
-		"/api/config/section/dashboard", strings.NewReader(`{"Addr":"127.0.0.1:8082"}`)))
+	server.Handler().ServeHTTP(rr, confirmedReq(t, server, httptest.NewRequest(http.MethodPut,
+		"/api/config/section/dashboard", strings.NewReader(`{"Addr":"127.0.0.1:8082"}`))))
 	if rr.Code != 200 {
 		t.Fatalf("valid save status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -432,7 +432,7 @@ windows_binary_path = "/mnt/c/Users/x/.observer/observer.exe"
 	body := `{"Enabled":true,"Backend":"both","CaptureUnattributed":true,"PollIntervalMS":5000,"BridgePollIntervalMS":0,"Network":{"Enabled":true,"CaptureRemoteHost":true,"RedactPrivateIPs":true,"CaptureBodies":"proxied","MaxRequestBytes":4096,"MaxResponseBytes":8192,"CaptureHeaders":true,"ScrubBodies":true,"StoreBinary":false}}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/process", strings.NewReader(body)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/process", strings.NewReader(body))))
 	if rr.Code != 200 {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -610,7 +610,7 @@ per_user_weekly_usd = 25.0
 	put := func(body string) int {
 		rr := httptest.NewRecorder()
 		server.Handler().ServeHTTP(rr,
-			httptest.NewRequest(http.MethodPut, "/api/config/section/observability", strings.NewReader(body)))
+			confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/observability", strings.NewReader(body))))
 		return rr.Code
 	}
 
@@ -728,7 +728,7 @@ func TestHandleConfigSection_SaveTerminalPartialBody(t *testing.T) {
 		t.Errorf("F6: a RouteProxy-only save must NOT require a restart")
 	}
 	if att := reload(); !att.Enabled {
-		t.Errorf("F5: {\"RouteProxy\":false} zeroed Attach.Enabled — must be preserved true")
+		t.Errorf("F5: {\"RouteProxy\":false} zeroed Attach.Enabled - must be preserved true")
 	} else if att.RouteProxy {
 		t.Errorf("RouteProxy not persisted false: %+v", att)
 	}
@@ -743,7 +743,7 @@ func TestHandleConfigSection_SaveTerminalPartialBody(t *testing.T) {
 		t.Errorf("F6: changing Attach.Enabled MUST require a restart")
 	}
 	if att := reload(); att.RouteProxy {
-		t.Errorf("F5: {\"Enabled\":false} flipped Attach.RouteProxy — must be preserved false: %+v", att)
+		t.Errorf("F5: {\"Enabled\":false} flipped Attach.RouteProxy - must be preserved false: %+v", att)
 	} else if att.Enabled {
 		t.Errorf("Enabled not persisted false: %+v", att)
 	}
@@ -769,7 +769,7 @@ func TestHandleConfigSection_SaveTerminalPartialBody(t *testing.T) {
 	if att := reload(); att.DefaultOn {
 		t.Errorf("DefaultOn not persisted false: %+v", att)
 	} else if att.Enabled {
-		t.Errorf("F5: {\"DefaultOn\":false} flipped Attach.Enabled — must be preserved false: %+v", att)
+		t.Errorf("F5: {\"DefaultOn\":false} flipped Attach.Enabled - must be preserved false: %+v", att)
 	}
 
 	// All three fields in one body round-trip and persist together.
@@ -852,8 +852,8 @@ func TestHandleConfigSection_SaveBrowser(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/browser",
-			strings.NewReader(`{"GranularityCeiling":"usage_only"}`)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/browser",
+			strings.NewReader(`{"GranularityCeiling":"usage_only"}`))))
 	if rr.Code != 200 {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -919,7 +919,7 @@ func TestHandleConfigSection_AdvisorCachetrackSecrets(t *testing.T) {
 		t.Helper()
 		rr := httptest.NewRecorder()
 		server.Handler().ServeHTTP(rr,
-			httptest.NewRequest(http.MethodPut, "/api/config/section/"+section, strings.NewReader(body)))
+			confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/"+section, strings.NewReader(body))))
 		if rr.Code != 200 {
 			t.Fatalf("PUT %s: status %d body=%s", section, rr.Code, rr.Body.String())
 		}
@@ -1058,7 +1058,7 @@ output = 999
 	body := `{"MonthlyBudgetUSD":250,"APIKeyEnv":"OBSERVER_API_KEY","SummaryModel":"haiku-4-5"}`
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr,
-		httptest.NewRequest(http.MethodPut, "/api/config/section/intelligence", strings.NewReader(body)))
+		confirmedReq(t, server, httptest.NewRequest(http.MethodPut, "/api/config/section/intelligence", strings.NewReader(body))))
 	if rr.Code != 200 {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -1117,7 +1117,7 @@ func TestHandleConfigSection_UnknownSection(t *testing.T) {
 // kill the test runner. The 500ms delay path is exercised by hand with
 // the smoke-test recipe in docs/.
 func TestHandleAdminRestart_ScheduledResponse(t *testing.T) {
-	t.Skip("os.Exit invocation tested manually — would kill the test runner")
+	t.Skip("os.Exit invocation tested manually - would kill the test runner")
 }
 
 // TestHandleBackfillStatus pins the per-mode shape: every documented
@@ -1319,7 +1319,7 @@ func TestHandleConfigSection_Profiles(t *testing.T) {
 		t.Error("saved=false")
 	}
 	if resp.RestartRequired {
-		t.Error("profiles saves hot-reload (P2.5) — restart_required must be false")
+		t.Error("profiles saves hot-reload (P2.5) - restart_required must be false")
 	}
 	if fired != 1 {
 		t.Errorf("OnConfigSaved fired %d times, want 1 (the hot-reload trigger)", fired)
@@ -1420,11 +1420,11 @@ func TestHandleConfigSection_ConcurrentSectionSavesBothPersist(t *testing.T) {
 			t.Fatalf("iter %d: reload: %v", i, err)
 		}
 		if got.Observer.LogLevel != "error" {
-			t.Fatalf("iter %d: observer save lost — log_level=%q want error (budget=%v)",
+			t.Fatalf("iter %d: observer save lost - log_level=%q want error (budget=%v)",
 				i, got.Observer.LogLevel, got.Intelligence.MonthlyBudgetUSD)
 		}
 		if got.Intelligence.MonthlyBudgetUSD != 999 {
-			t.Fatalf("iter %d: intelligence save lost — monthly_budget_usd=%v want 999 (log_level=%q)",
+			t.Fatalf("iter %d: intelligence save lost - monthly_budget_usd=%v want 999 (log_level=%q)",
 				i, got.Intelligence.MonthlyBudgetUSD, got.Observer.LogLevel)
 		}
 	}
@@ -1546,11 +1546,11 @@ func TestConfigWrite_RemoteManageRaceSectionSave(t *testing.T) {
 			t.Fatalf("iter %d: reload: %v", i, err)
 		}
 		if got.Observer.LogLevel != "error" {
-			t.Fatalf("iter %d: section save lost — log_level=%q want error (allow_fresh_agent=%v)",
+			t.Fatalf("iter %d: section save lost - log_level=%q want error (allow_fresh_agent=%v)",
 				i, got.Observer.LogLevel, got.Terminal.Launch.AllowFreshAgent)
 		}
 		if !got.Terminal.Launch.AllowFreshAgent {
-			t.Fatalf("iter %d: terminal-policy save lost — allow_fresh_agent=false want true (log_level=%q)",
+			t.Fatalf("iter %d: terminal-policy save lost - allow_fresh_agent=false want true (log_level=%q)",
 				i, got.Observer.LogLevel)
 		}
 	}

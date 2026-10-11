@@ -32,8 +32,10 @@ import {
 } from "@/components/primitives";
 import { AnchoredPopover } from "@/components/primitives/AnchoredPopover";
 import { shortModel } from "@/lib/models";
+import { orgIntelSessionsBanner, orgPlaneEnrichAction, SESSION_ENRICH_PLANE_COPY, sessionEffectiveTitle, sessionEnrichPlane, type OrgIntelStatusResponse } from "@/lib/orgIntel";
 import { HelpInd } from "@/components/HelpInd";
 import { CopyOnClick } from "@/components/CopyOnClick";
+import { CommandJobButton } from "@/components/CommandJobButton";
 import { Summary } from "@/components/Summary";
 import { DataTable, Pagination } from "@/components/DataTable";
 import { ChartState } from "@/components/ChartState";
@@ -48,7 +50,9 @@ import { cloudFetchEvents } from "@/lib/cloud";
 import type { CloudStatusWithDigestPlan } from "@/lib/cloud";
 import { CloudDigestCard } from "@/components/CloudDigestCard";
 import { CloudEnrichmentSummary } from "@/components/CloudEnrichmentSummary";
+import { OrgSessionsBannerView } from "@/components/OrgSessionsBanner";
 import { CloudRow } from "@/components/sessiondetail/CloudRow";
+import { OrgIntelCard } from "@/components/sessiondetail/OrgIntelCard";
 import { cloudProgressAction, cloudProgressMeta } from "@/lib/cloudProgress";
 import { vocabIcon } from "@shared/lib/vocabIcons";
 import { CodeCommentSplit } from "@shared/primitives/CodeCommentSplit";
@@ -58,9 +62,13 @@ import {
   fmtDuration,
   fmtInt,
   fmtPct,
+  fmtCost,
   fmtUSD,
+  costLabel,
+  getCostDisplayMode,
   localeString,
 } from "@/lib/format";
+import { csvText } from "@/lib/costExport";
 import type {
   AttachSessionsResponse,
   SessionRow,
@@ -136,20 +144,21 @@ type View = "table" | "calendar";
 // silently hide matching sessions on other pages.
 const SURFACE_FILTER_OPTIONS: ReadonlyArray<{ value: SurfaceKind | ""; label: string }> = [
   { value: "", label: "Client: any" },
-  { value: "cli", label: "cli — terminal" },
-  { value: "ide", label: "ide — editor / plugin" },
-  { value: "desktop", label: "desktop — desktop app" },
-  { value: "sdk", label: "sdk — programmatic" },
-  { value: "web", label: "web — browser" },
+  { value: "cli", label: "cli - terminal" },
+  { value: "ide", label: "ide - editor / plugin" },
+  { value: "desktop", label: "desktop - desktop app" },
+  { value: "sdk", label: "sdk - programmatic" },
+  { value: "web", label: "web - browser" },
 ];
 
 export function SessionsPage() {
-  const { win, customRange, tool, project, query: globalQuery } = useFilters();
+  const { win, customRange, tool, model, project, query: globalQuery } = useFilters();
   const winParams = windowParams(win, customRange);
   // CalendarView needs a plain day-count for its grid span; sub-day
   // windows round up to a day.
   const calendarDays = windowDaysApprox(win, customRange);
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
   const projectParam = project === "all" ? undefined : project;
 
   const [view, setView] = useState<View>("table");
@@ -264,7 +273,7 @@ export function SessionsPage() {
   };
 
   // Reset page when filters change (incl. picked calendar day).
-  const filterKey = `${win}|${tool}|${project}|${pickedDay ?? ""}|${sortBy}|${sortDir}|${tagKey}|${favoriteOnly}|${surfaceFilter}`;
+  const filterKey = `${win}|${tool}|${project}|${model}|${pickedDay ?? ""}|${sortBy}|${sortDir}|${tagKey}|${favoriteOnly}|${surfaceFilter}`;
   const lastKey = useMemo(() => filterKey, [filterKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => setPage(1), [lastKey]);
@@ -278,6 +287,7 @@ export function SessionsPage() {
       page,
       limit: PAGE_LIMIT,
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       ...winParams,
       from_date: pickedDay ?? undefined,
@@ -297,6 +307,7 @@ export function SessionsPage() {
       customRange,
       tool,
       project,
+      model,
       pickedDay,
       sortBy,
       sortDir,
@@ -326,10 +337,11 @@ export function SessionsPage() {
     view === "calendar" ? "/api/sessions/calendar" : null,
     {
       tool: toolParam,
+      model: modelParam,
       project: projectParam,
       ...winParams,
     },
-    [view, win, customRange, tool, project],
+    [view, win, customRange, tool, model, project],
   );
 
   // Live attach sessions (session-attach Phase 2): polled every 15s WHILE the
@@ -391,6 +403,10 @@ export function SessionsPage() {
   const cloudSignedIn = !!cloudStatus.data?.sign_in?.signed_in;
   const cloudProviderWaiting = cloudStatus.data?.provider_state === "waiting";
   const [cloudBannerDismissed, setCloudBannerDismissed] = useState(false);
+  // The org plane's status (ruling Q6): when the listed sessions are on the
+  // org plane, the banner above the table describes org enrichment instead of
+  // personal sign-in.
+  const orgIntelStatus = useApi<OrgIntelStatusResponse>("/api/intel/status", undefined, [], { refreshMs: 300000 });
 
   // Polls GET /api/cloud/events every 30s while the policy is on. The FIRST
   // response only records which result ids already exist (nothing to
@@ -462,6 +478,10 @@ export function SessionsPage() {
     // byte-identical guard, so this only recomputes on real change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sessions.data, annotations],
+  );
+  const orgSessionsBanner = useMemo(
+    () => orgIntelSessionsBanner(orgIntelStatus.data?.status, rows.map(sessionEnrichPlane)),
+    [orgIntelStatus.data, rows],
   );
 
   // patchAnnotation records an optimistic (or server-confirmed) override.
@@ -581,7 +601,13 @@ export function SessionsPage() {
     }
     if (filters.minCostUsd || filters.maxCostUsd) {
       c.push({
-        label: `cost: ${rangeLabel(filters.minCostUsd, filters.maxCostUsd, "$")}`,
+        // A cost range carried in from a shared link names dollars, which
+        // the token-usage view does not show (T-204): the chip says a cost
+        // filter is set and still clears it.
+        label: costLabel(
+          `cost: ${rangeLabel(filters.minCostUsd, filters.maxCostUsd, "$")}`,
+          "cost filter set (amounts hidden)",
+        ),
         onClear: () =>
           setFilters((f) => ({ ...f, minCostUsd: "", maxCostUsd: "" })),
       });
@@ -684,8 +710,9 @@ export function SessionsPage() {
           />
         }
       />
-      {!showScoring && sessions.data && <ScoringHintBanner />}
-      {cloudStatus.data && <CloudEnrichmentSummary data={cloudStatus.data} />}
+      {!showScoring && sessions.data && <ScoringHintBanner onScored={() => sessions.reload()} />}
+      {orgSessionsBanner && <OrgSessionsBannerView banner={orgSessionsBanner} />}
+      {cloudStatus.data && (!orgSessionsBanner || orgSessionsBanner.mode === "mixed") && <CloudEnrichmentSummary data={cloudStatus.data} />}
       {cloudProviderWaiting && !cloudBannerDismissed && (
         <CloudProviderWaitingBanner onDismiss={() => setCloudBannerDismissed(true)} />
       )}
@@ -916,7 +943,7 @@ export function SessionsPage() {
                   ? `No sessions on ${pickedDay}. Clear the day filter to see all sessions.`
                   : query
                     ? `No sessions match "${query}". Clear the search or widen filters.`
-                    : "No sessions in window. Run `observer init` to register hooks with your AI tools."
+                    : "No sessions in window. Set up your AI tools in Settings > Connected tools: each tool's Set up registers its hooks, MCP and proxy route, one confirm per write."
               }
               height={240}
             >
@@ -966,9 +993,15 @@ export function SessionsPage() {
         )}
       </ChartShell>
 
-      <SlideOver open={enrichmentSession !== null} onClose={() => setEnrichmentSession(null)} title="Session enrichment"
-        subtitle={enrichmentSession?.title || enrichmentSession?.cloud_title || enrichmentSession?.project} width={640}>
-        {enrichmentSession && <div className="space-y-4 p-4">
+      <SlideOver open={enrichmentSession !== null} onClose={() => setEnrichmentSession(null)}
+        title={SESSION_ENRICH_PLANE_COPY[enrichmentSession ? sessionEnrichPlane(enrichmentSession) : "personal"].drawerTitle}
+        subtitle={enrichmentSession?.title || enrichmentSession?.cloud_title || enrichmentSession?.org_title || enrichmentSession?.project} width={640}>
+        {enrichmentSession && sessionEnrichPlane(enrichmentSession) === "org" && <div className="space-y-4 p-4">
+          <p className="text-[11.5px] leading-relaxed text-fg-3">{SESSION_ENRICH_PLANE_COPY.org.drawerNote}</p>
+          <OrgIntelCard key={enrichmentSession.id} sessionId={enrichmentSession.id} />
+        </div>}
+        {enrichmentSession && sessionEnrichPlane(enrichmentSession) === "personal" && <div className="space-y-4 p-4">
+          <p className="text-[11.5px] leading-relaxed text-fg-3">{SESSION_ENRICH_PLANE_COPY.personal.drawerNote}</p>
           <CloudRow key={enrichmentSession.id} sessionId={enrichmentSession.id} onChanged={() => { sessions.reload(); cloudStatus.reload(); }} />
           {cloudStatus.data && <details className="space-y-2">
             <Summary className="w-fit text-caption font-medium text-fg-3">Enrichment settings and allowance</Summary>
@@ -1015,7 +1048,7 @@ export function SessionsPage() {
 function rangeLabel(min: string, max: string, prefix: string): string {
   const lo = min.trim();
   const hi = max.trim();
-  if (lo && hi) return `${prefix}${lo}–${prefix}${hi}`;
+  if (lo && hi) return `${prefix}${lo}-${prefix}${hi}`;
   if (lo) return `≥ ${prefix}${lo}`;
   if (hi) return `≤ ${prefix}${hi}`;
   return "-";
@@ -1026,9 +1059,9 @@ function durationLabel(d: SessionFilters["duration"]): string {
     case "short":
       return "<5m";
     case "medium":
-      return "5–30m";
+      return "5-30m";
     case "long":
-      return "30m–2h";
+      return "30m-2h";
     case "xlong":
       return ">2h";
     default:
@@ -1158,22 +1191,32 @@ function CloudProviderWaitingBanner({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function ScoringHintBanner() {
+// ScoringHintBanner: the no-score state. "Score all now" runs `observer
+// score` (the same command, as a dashboard job), which scores every session
+// that has no score yet; the table reloads when it finishes.
+function ScoringHintBanner({ onScored }: { onScored: () => void }) {
   return (
     <div className="flex items-start gap-3 rounded-3 border border-warn/30 bg-warn-soft/60 px-4 py-2.5 text-[11.5px]">
       <Icon icon={Info} size="md" className="mt-px shrink-0 text-warn" />
-      <div className="text-fg-2">
+      <div className="min-w-0 flex-1 text-fg-2">
         <b className="text-fg-1">
           No session in this view has a quality score yet.
         </b>{" "}
         The running daemon scores each session once it has been idle for a
         while (30 minutes by default), and the Quality / Errors / Redundancy
-        columns appear as soon as one is scored. To score everything now, run{" "}
-        <code className="rounded-1 border border-line-3 bg-bg-3 px-1.5 py-0.5 font-mono text-[11px] text-fg-1">
-          observer score
-        </code>
-        . Sessions get a 0-100 quality score and a redundancy index that flags
-        repeat-work patterns.
+        columns appear as soon as one is scored. Sessions get a 0-100 quality
+        score and a redundancy index that flags repeat-work patterns.
+        <CommandJobButton
+          job="score"
+          className="mt-2"
+          confirmLabel="Score every unscored session?"
+          armedNote="Writes quality scores for every session that has none yet. Local only, no model involved."
+          runningLabel="Scoring…"
+          doneText="Scored. The table now shows the new scores."
+          onDone={onScored}
+        >
+          Score all now
+        </CommandJobButton>
       </div>
     </div>
   );
@@ -1240,7 +1283,7 @@ function CalendarView({
       <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b border-line-1 pb-2.5">
         <div className="flex items-baseline gap-2">
           <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-fg-1">
-            {fmtHeader(first)} – {fmtHeader(last)}
+            {fmtHeader(first)} - {fmtHeader(last)}
           </span>
           <span className="font-mono text-[10.5px] text-fg-3">
             {byDay.size} active day{byDay.size === 1 ? "" : "s"}
@@ -1486,12 +1529,14 @@ function SessionTitleCell({
   onSetTitle: (row: SessionRow, title: string) => Promise<void>;
 }) {
   const userTitle = row.title ?? "";
-  const cloudTitle = row.cloud_title ?? "";
-  const effectiveTitle = userTitle || cloudTitle;
+  // Effective title: yours, then the personal-plane AI title, then the
+  // org-plane AI title (lib/orgIntel sessionEffectiveTitle, design 3.2).
+  const eff = sessionEffectiveTitle(row);
+  const effectiveTitle = eff.text;
   // The primary text duplicates the cloud-enriched dot's tooltip exactly
   // when it's showing the cloud title with no user override — so the dot is
   // hidden in that one case (see the cell renderer below).
-  const usingAI = userTitle === "" && cloudTitle !== "";
+  const usingAI = eff.source === "cloud" || eff.source === "org";
   const fallback = `${(row.id.split(":agent:").at(-1) ?? row.id).slice(0, 12)}…`;
   const primaryText = effectiveTitle || fallback;
 
@@ -1560,7 +1605,11 @@ function SessionTitleCell({
         openEditor();
       }}
     >
-      {usingAI && <Pill variant="accent">AI</Pill>}
+      {usingAI && (
+        <Pill variant="accent" className="shrink-0 whitespace-nowrap" title={eff.source === "org" ? "Title from your organization's session enrichment" : undefined}>
+          {eff.source === "org" ? "org" : "AI"}
+        </Pill>
+      )}
       <CopyOnClick
         value={row.id}
         className="min-w-0 font-mono text-[11px] text-accent hover:text-accent-strong"
@@ -1645,7 +1694,7 @@ function buildColumns(
       cell: ({ row }) => (
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <SessionTitleCell row={row.original} onSetTitle={tagsCtx.onSetTitle} />
-          <Tooltip content="Open this session's enrichment status and controls">
+          <Tooltip content={SESSION_ENRICH_PLANE_COPY[sessionEnrichPlane(row.original)].tooltip}>
           <button type="button" className="inline-flex items-center gap-1 rounded-1 border border-accent/30 px-1.5 py-0.5 text-micro font-medium text-accent hover:bg-accent/10"
             onClick={(event) => { event.stopPropagation(); onEnrich(row.original); }}
             onKeyDown={(event) => event.stopPropagation()}>
@@ -1658,7 +1707,9 @@ function buildColumns(
                 className="shrink-0 animate-pulse"
               />
             )}
-            {cloudProgressAction(row.original.cloud_enrichment, !!row.original.cloud_enriched)}
+            {sessionEnrichPlane(row.original) === "org"
+              ? orgPlaneEnrichAction(row.original)
+              : cloudProgressAction(row.original.cloud_enrichment, !!row.original.cloud_enriched)}
           </button>
           </Tooltip>
           {row.original.id.includes(":agent:") && (
@@ -1945,7 +1996,7 @@ function buildColumns(
         const v = row.original.ai_code_lines;
         if (v === undefined || v === null) {
           return (
-            <Tooltip content="No agent code lines recorded: either this session changed no code, or its line counts have not been computed yet. Run `observer backfill --loc` to populate history.">
+            <Tooltip content="No agent code lines recorded: either this session changed no code, or its line counts have not been computed yet. Settings > Backfill > loc populates history.">
               <span tabIndex={0} className="text-fg-4 focus:outline-none">
                 -
               </span>
@@ -2064,7 +2115,9 @@ function buildColumns(
       // SessionDetailPanel's CostStat tile per operator feedback that
       // the Sessions table had too many cost cols. Hover shows the
       // 3-way split as a tooltip so the data isn't hidden.
-      header: () => <>Total $<HelpInd id="column.sessions.cost" /></>,
+      // The cell renders the row's token total in the org's token-usage view,
+      // so the header names tokens there too.
+      header: () => <>{costLabel("Total $", "Total tok")}<HelpInd id="column.sessions.cost" /></>,
       accessorKey: "cost_usd",
       meta: { align: "right", width: COL_W.cost },
       cell: ({ row }) => {
@@ -2080,6 +2133,19 @@ function buildColumns(
               : "text-fg-0";
         const api = row.original.ai_cost_usd;
         const tool = row.original.tool_cost_usd;
+        // In the org's token-usage view (lib/costDisplay.tsx) fmtCost renders
+        // this row's token total instead of dollars, and the dollar split
+        // tooltip renders hidden values - so it is not offered.
+        const rowTokens =
+          row.original.input_tokens +
+          row.original.output_tokens +
+          row.original.cache_read_tokens +
+          row.original.cache_creation_tokens;
+        if (getCostDisplayMode() === "tokens") {
+          return (
+            <span className="font-semibold tabular-nums text-fg-0">{fmtCost(total, rowTokens)}</span>
+          );
+        }
         const split =
           api > 0 || tool > 0
             ? `api ${fmtUSD(api)} · tool ${fmtUSD(tool)}`
@@ -2097,7 +2163,7 @@ function buildColumns(
               tabIndex={0}
               className={`cursor-help font-semibold tabular-nums focus:outline-none ${color}`}
             >
-              {fmtUSD(total)}
+              {fmtCost(total, rowTokens)}
             </span>
           </Tooltip>
         );
@@ -2187,47 +2253,28 @@ function fmtTimestamp(iso: string): string {
 // doesn't expose per-session yet).
 function exportSessionsCsv(rows: SessionRow[]) {
   if (!rows.length) return;
-  const header = [
-    "session_id",
-    "tool",
-    "surface",
-    "surface_host",
-    "project",
-    "started_at",
-    "duration_seconds",
-    "total_actions",
-    "sidechain_action_count",
-    "input_tokens",
-    "cache_read_tokens",
-    "cache_creation_tokens",
-    "output_tokens",
-    "ai_cost_usd",
-    "tool_cost_usd",
-    "cost_usd",
-    "cost_reliability",
-  ].join(",");
-  const lines = rows.map((r) =>
-    [
-      escapeCsv(r.id),
-      escapeCsv(r.tool),
-      escapeCsv(r.surface),
-      escapeCsv(r.surface_host),
-      escapeCsv(r.project),
-      escapeCsv(r.started_at),
-      r.duration_seconds,
-      r.total_actions,
-      r.sidechain_action_count,
-      r.input_tokens,
-      r.cache_read_tokens,
-      r.cache_creation_tokens,
-      r.output_tokens,
-      r.ai_cost_usd,
-      r.tool_cost_usd,
-      r.cost_usd,
-      escapeCsv(r.cost_reliability),
-    ].join(","),
-  );
-  const blob = new Blob([[header, ...lines].join("\n")], {
+  // The export follows the developer cost display through lib/costExport
+  // (T-204): the `_usd` columns are left out in the token-usage view.
+  const csv = csvText<SessionRow>(rows, [
+    { header: "session_id", value: (r) => r.id },
+    { header: "tool", value: (r) => r.tool },
+    { header: "surface", value: (r) => r.surface },
+    { header: "surface_host", value: (r) => r.surface_host },
+    { header: "project", value: (r) => r.project },
+    { header: "started_at", value: (r) => r.started_at },
+    { header: "duration_seconds", value: (r) => r.duration_seconds },
+    { header: "total_actions", value: (r) => r.total_actions },
+    { header: "sidechain_action_count", value: (r) => r.sidechain_action_count },
+    { header: "input_tokens", value: (r) => r.input_tokens },
+    { header: "cache_read_tokens", value: (r) => r.cache_read_tokens },
+    { header: "cache_creation_tokens", value: (r) => r.cache_creation_tokens },
+    { header: "output_tokens", value: (r) => r.output_tokens },
+    { header: "ai_cost_usd", value: (r) => r.ai_cost_usd },
+    { header: "tool_cost_usd", value: (r) => r.tool_cost_usd },
+    { header: "cost_usd", value: (r) => r.cost_usd },
+    { header: "cost_reliability", value: (r) => r.cost_reliability },
+  ]);
+  const blob = new Blob([csv], {
     type: "text/csv;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
@@ -2238,9 +2285,4 @@ function exportSessionsCsv(rows: SessionRow[]) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-function escapeCsv(s: string | undefined | null): string {
-  if (!s) return "";
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

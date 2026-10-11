@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/commitlog"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/alignment"
 	"github.com/marmutapp/superbased-observer/internal/loc"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -180,7 +181,7 @@ func TestAPIProjectDetail(t *testing.T) {
 		t.Fatalf("status %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var got apiProjectDetail
+	var got dashapi.APIProjectDetail
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v; body=%s", err, rr.Body.String())
 	}
@@ -310,7 +311,7 @@ func TestAPIProjectPrompts(t *testing.T) {
 func TestAPIProjectCost(t *testing.T) {
 	s, _, projectID, _, _ := seedProjectsFixture(t)
 
-	get := func(by string) []apiProjectCostBucketRow {
+	get := func(by string) []dashapi.APIProjectCostBucketRow {
 		t.Helper()
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/project/"+itoa64(projectID)+"/cost?by="+by, nil))
@@ -318,7 +319,7 @@ func TestAPIProjectCost(t *testing.T) {
 			t.Fatalf("by=%s: status %d body=%s", by, rr.Code, rr.Body.String())
 		}
 		var got struct {
-			Rows []apiProjectCostBucketRow `json:"rows"`
+			Rows []dashapi.APIProjectCostBucketRow `json:"rows"`
 		}
 		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 			t.Fatalf("by=%s: decode: %v", by, err)
@@ -375,7 +376,7 @@ func TestAPIProjectCostUnpricedCoverage(t *testing.T) {
 		t.Fatalf("seed unpriced api_turns: %v", err)
 	}
 
-	get := func(by string) []apiProjectCostBucketRow {
+	get := func(by string) []dashapi.APIProjectCostBucketRow {
 		t.Helper()
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/project/"+itoa64(projectID)+"/cost?by="+by, nil))
@@ -383,7 +384,7 @@ func TestAPIProjectCostUnpricedCoverage(t *testing.T) {
 			t.Fatalf("by=%s: status %d body=%s", by, rr.Code, rr.Body.String())
 		}
 		var got struct {
-			Rows []apiProjectCostBucketRow `json:"rows"`
+			Rows []dashapi.APIProjectCostBucketRow `json:"rows"`
 		}
 		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 			t.Fatalf("by=%s: decode: %v", by, err)
@@ -607,7 +608,7 @@ func withCap(t *testing.T, cap *int, value int) {
 // rather than going blank.
 func TestAPIProjectCommitsTruncationMeta(t *testing.T) {
 	s, _, projectID, _, _ := seedProjectsFixture(t)
-	withCap(t, &promptLinkCap, 1) // fixture seeds 2 prompts -> forces truncation
+	withCap(t, &dashapi.PromptLinkCap, 1) // fixture seeds 2 prompts -> forces truncation
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/project/"+itoa64(projectID)+"/commits", nil))
@@ -646,7 +647,7 @@ func TestAPIProjectCommitsTruncationMeta(t *testing.T) {
 // of the five known values (never a fabricated "unknown").
 func TestAPIProjectPromptsTruncationMetaAndStatusUncertain(t *testing.T) {
 	s, _, projectID, p1ID, p2ID := seedProjectsFixture(t)
-	withCap(t, &editLinkCap, 1) // fixture seeds 2 AI edits -> forces truncation
+	withCap(t, &dashapi.EditLinkCap, 1) // fixture seeds 2 AI edits -> forces truncation
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/project/"+itoa64(projectID)+"/prompts", nil))
@@ -672,7 +673,7 @@ func TestAPIProjectPromptsTruncationMetaAndStatusUncertain(t *testing.T) {
 	}
 	for _, r := range got.Rows {
 		if !r.StatusUncertain {
-			t.Errorf("action %d (session %s): status_uncertain = false, want true — a capped edits input can make ANY row's status wrong, every row must carry the caveat (p1=%d p2=%d)",
+			t.Errorf("action %d (session %s): status_uncertain = false, want true - a capped edits input can make ANY row's status wrong, every row must carry the caveat (p1=%d p2=%d)",
 				r.ActionID, r.SessionID, p1ID, p2ID)
 		}
 		switch r.Status {
@@ -689,7 +690,7 @@ func TestAPIProjectPromptsTruncationMetaAndStatusUncertain(t *testing.T) {
 // never carries truncation meta even with the caps still overridden.
 func TestAPIProjectCostByCommitTruncationMeta(t *testing.T) {
 	s, _, projectID, _, _ := seedProjectsFixture(t)
-	withCap(t, &promptLinkCap, 1)
+	withCap(t, &dashapi.PromptLinkCap, 1)
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/project/"+itoa64(projectID)+"/cost?by=commit", nil))
@@ -697,9 +698,9 @@ func TestAPIProjectCostByCommitTruncationMeta(t *testing.T) {
 		t.Fatalf("status %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got struct {
-		Rows      []apiProjectCostBucketRow `json:"rows"`
-		Truncated bool                      `json:"truncated"`
-		Affects   []string                  `json:"affects"`
+		Rows      []dashapi.APIProjectCostBucketRow `json:"rows"`
+		Truncated bool                              `json:"truncated"`
+		Affects   []string                          `json:"affects"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -819,7 +820,7 @@ func TestAPIProjectCommitsRowCapTruncation(t *testing.T) {
 			foundRowCap = true
 		}
 		if in == "commits" {
-			t.Errorf("truncated_inputs unexpectedly names the LINK cap %q — the LINK caps were left at their defaults, only the OUTPUT cap fired here", in)
+			t.Errorf("truncated_inputs unexpectedly names the LINK cap %q - the LINK caps were left at their defaults, only the OUTPUT cap fired here", in)
 		}
 	}
 	if !foundRowCap {
@@ -869,7 +870,7 @@ func TestAPIProjectPromptsRowCapTruncation(t *testing.T) {
 			foundRowCap = true
 		}
 		if in == "edits" || in == "commits" {
-			t.Errorf("truncated_inputs unexpectedly names a LINK cap %q — the LINK caps were left at their defaults, only the OUTPUT cap fired here", in)
+			t.Errorf("truncated_inputs unexpectedly names a LINK cap %q - the LINK caps were left at their defaults, only the OUTPUT cap fired here", in)
 		}
 	}
 	if !foundRowCap {
@@ -913,7 +914,7 @@ func TestAPIProjectSurfacesCarryCodeCommentSplit(t *testing.T) {
 		}
 	}
 
-	var detail apiProjectDetail
+	var detail dashapi.APIProjectDetail
 	get("/api/project/"+itoa64(projectID), &detail)
 	if detail.LOC.AIComment == 0 {
 		t.Errorf("detail loc.ai_comment = 0, want the fixture's comment line")

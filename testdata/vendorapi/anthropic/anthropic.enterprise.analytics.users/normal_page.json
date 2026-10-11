@@ -1,0 +1,127 @@
+{
+  "data": [
+    {
+      "chat_metrics": {
+        "connectors_used_count": 0,
+        "distinct_artifacts_created_count": 0,
+        "distinct_connectors_used_count": 0,
+        "distinct_conversation_count": 0,
+        "distinct_files_uploaded_count": 0,
+        "distinct_projects_created_count": 0,
+        "distinct_projects_used_count": 0,
+        "distinct_shared_artifacts_viewed_count": 0,
+        "distinct_skills_used_count": 0,
+        "message_count": 0,
+        "shared_conversations_viewed_count": 0,
+        "thinking_message_count": 0
+      },
+      "claude_code_metrics": {
+        "core_metrics": {
+          "artifacts_created_count": 0,
+          "commit_count": 0,
+          "distinct_session_count": 0,
+          "lines_of_code": {
+            "added_count": 0,
+            "removed_count": 0
+          },
+          "pull_request_count": 0
+        },
+        "tool_actions": {
+          "edit_tool": {
+            "accepted_count": 0,
+            "rejected_count": 0
+          },
+          "multi_edit_tool": {
+            "accepted_count": 0,
+            "rejected_count": 0
+          },
+          "notebook_edit_tool": {
+            "accepted_count": 0,
+            "rejected_count": 0
+          },
+          "write_tool": {
+            "accepted_count": 0,
+            "rejected_count": 0
+          }
+        }
+      },
+      "cowork_metrics": {
+        "action_count": 0,
+        "artifacts_created_count": 0,
+        "connectors_used_count": 0,
+        "dispatch_turn_count": 0,
+        "distinct_connectors_used_count": 0,
+        "distinct_session_count": 0,
+        "distinct_skills_used_count": 0,
+        "message_count": 0,
+        "skills_used_count": 0,
+        "distinct_plugins_used_count": 0,
+        "edit_tool_count": 0,
+        "file_edit_count": 0,
+        "multi_edit_tool_count": 0,
+        "notebook_edit_tool_count": 0,
+        "plugins_used_count": 0,
+        "sessions_with_file_edits_count": 0,
+        "write_tool_count": 0
+      },
+      "design_metrics": {
+        "distinct_projects_created_count": 0,
+        "distinct_projects_used_count": 0,
+        "distinct_session_count": 0,
+        "message_count": 0
+      },
+      "office_metrics": {
+        "excel": {
+          "connectors_used_count": 0,
+          "distinct_connectors_used_count": 0,
+          "distinct_session_count": 0,
+          "distinct_skills_used_count": 0,
+          "message_count": 0,
+          "skills_used_count": 0
+        },
+        "outlook": {
+          "connectors_used_count": 0,
+          "distinct_connectors_used_count": 0,
+          "distinct_session_count": 0,
+          "distinct_skills_used_count": 0,
+          "message_count": 0,
+          "skills_used_count": 0
+        },
+        "powerpoint": {
+          "connectors_used_count": 0,
+          "distinct_connectors_used_count": 0,
+          "distinct_session_count": 0,
+          "distinct_skills_used_count": 0,
+          "message_count": 0,
+          "skills_used_count": 0
+        },
+        "word": {
+          "connectors_used_count": 0,
+          "distinct_connectors_used_count": 0,
+          "distinct_session_count": 0,
+          "distinct_skills_used_count": 0,
+          "message_count": 0,
+          "skills_used_count": 0
+        }
+      },
+      "science_metrics": {
+        "delegation_count": 0,
+        "distinct_session_count": 0,
+        "message_count": 0,
+        "remote_compute_job_count": 0,
+        "skills_used_count": 0
+      },
+      "web_search_count": 0,
+      "distinct_user_count": 0,
+      "last_activity_date": "2019-12-27",
+      "rbac_group_id": "rbac_group_id",
+      "rbac_group_name": "rbac_group_name",
+      "user": {
+        "id": "id",
+        "email_address": "email_address",
+        "type": "user"
+      }
+    }
+  ],
+  "next_page": "next_page"
+}

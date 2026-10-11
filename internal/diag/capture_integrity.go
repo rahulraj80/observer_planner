@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/marmutapp/superbased-observer/internal/hookdigest"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 )
 
@@ -25,9 +26,25 @@ type CaptureIntegritySignals struct {
 }
 
 type captureRegistryEntry struct {
-	SHA256     string `json:"sha256"`
-	BinaryPath string `json:"binary_path"`
-	LastResult string `json:"last_result"`
+	SHA256      string `json:"sha256"`
+	DigestScope string `json:"digest_scope"`
+	HooksSHA256 string `json:"hooks_sha256"`
+	BinaryPath  string `json:"binary_path"`
+	LastResult  string `json:"last_result"`
+}
+
+// hookEntryMatches reports whether body still matches a hook_checksums.json
+// entry. A credential-bearing file's entry (digest_scope "hooks", the D-268
+// exception) carries a digest of the hooks subtree only, never a whole-file
+// hash, so it is compared with internal/hookdigest; any other entry with the
+// whole-file SHA-256.
+func hookEntryMatches(path string, body []byte, wholeSHA, scope, hooksSHA string) bool {
+	if scope == hookdigest.Scope {
+		got, err := hookdigest.HooksSubtree(path, body)
+		return err == nil && hooksSHA != "" && got == hooksSHA
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:]) == wholeSHA
 }
 
 const (
@@ -63,9 +80,13 @@ func InspectCaptureIntegrity(homeDir, binaryPath string) CaptureIntegritySignals
 
 	trust := checkCodexHookTrust(homeDir)
 	if trust.Status == StatusWarn {
-		if len(trust.Details) > 0 && strings.HasPrefix(trust.Details[0], "untrusted:") {
+		switch {
+		case len(trust.Details) > 0 && strings.HasPrefix(trust.Details[0], "untrusted:"):
 			risks[orgcontract.CaptureRiskCodexHookUntrusted] = true
-		} else {
+		case len(trust.Details) > 0 && strings.HasPrefix(trust.Details[0], "not registered:"):
+			// Every present entry runs; an event a newer Observer adds is
+			// a registration gap, not a trust risk or an unknown.
+		default:
 			unknown[orgcontract.CaptureUnknownCodexTrust] = true
 		}
 	}
@@ -92,11 +113,10 @@ func inspectCaptureRegistryEntries(entries map[string]captureRegistryEntry, bina
 			} else {
 				unknown[orgcontract.CaptureUnknownConfigUnreadable] = true
 			}
-		case strings.TrimSpace(entry.SHA256) == "":
+		case strings.TrimSpace(entry.SHA256) == "" && strings.TrimSpace(entry.HooksSHA256) == "":
 			unknown[orgcontract.CaptureUnknownChecksumMissing] = true
 		default:
-			sum := sha256.Sum256(body)
-			if hex.EncodeToString(sum[:]) != entry.SHA256 {
+			if !hookEntryMatches(configPath, body, entry.SHA256, entry.DigestScope, entry.HooksSHA256) {
 				risks[orgcontract.CaptureRiskHookConfigChanged] = true
 			}
 		}

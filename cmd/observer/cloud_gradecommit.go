@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -88,7 +90,7 @@ func newCloudGradeCommitCmd() *cobra.Command {
 		Short: "Grade one prompt's delivered-vs-missed alignment with its linked commit (Cloud Intelligence)",
 		Long: "Builds commit-alignment evidence for one prompt (--prompt is the prompt's local\n" +
 			"action id) under the extended_evidence_deep_review purpose, and shows the exact\n" +
-			"literal bytes and two digests a future send would upload — what you see is what\n" +
+			"literal bytes and two digests a future send would upload - what you see is what\n" +
 			"would upload, exactly like `observer cloud preview`.\n\n" +
 			"No network call is ever made by this command today: the hosted commit-alignment\n" +
 			"job kind does not exist yet, so it always ends by printing an honest\n" +
@@ -140,7 +142,7 @@ func newCloudGradeCommitCmd() *cobra.Command {
 	}
 	cmd.Flags().Int64Var(&promptID, "prompt", 0, "Prompt action id to grade (required)")
 	cmd.Flags().StringVar(&projectID, "project", "", "Local project id (currently advisory; the loader resolves the project from the prompt's own session)")
-	cmd.Flags().BoolVar(&preview, "preview", false, "Preview only — accepted for symmetry with 'observer cloud preview'; this command never sends regardless")
-	cmd.Flags().BoolVar(&yes, "yes", false, "Skip the interactive confirmation — accepted for forward compatibility; unused today because no network call is ever made")
+	cmd.Flags().BoolVar(&preview, "preview", false, "Preview only - accepted for symmetry with 'observer cloud preview'; this command never sends regardless")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip the interactive confirmation - accepted for forward compatibility; unused today because no network call is ever made")
 	return cmd
 }

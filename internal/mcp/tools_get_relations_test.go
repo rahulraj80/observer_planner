@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package mcp
 
 import (
@@ -96,14 +98,6 @@ func callsCycleSeed() ([]symbolSeed, []edgeSeed) {
 		{sourceID: 1, targetID: 4, kind: "CALLS"},
 	}
 	return seeds, edges
-}
-
-func defaultGetRelationsOpts() GetRelationsOptions {
-	return GetRelationsOptions{
-		AllowExtensions: []string{"ts", "tsx", "go"},
-		MaxDepth:        5,
-		MaxResults:      100,
-	}
 }
 
 func TestGetRelations_CalleesHappyPath(t *testing.T) {

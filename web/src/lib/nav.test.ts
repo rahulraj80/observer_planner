@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { NAV_GROUPS, NAV_ITEMS, navIcon } from "./nav.ts";
+import { DollarSign } from "lucide-react";
+import { setCostDisplayMode } from "../../../shared/lib/format.ts";
 
 // Every nav item carries its own glyph: two pages sharing an icon was the
 // pre-WS4 defect (Live vs Actions both lightning, Security vs Privacy both
@@ -51,4 +53,30 @@ test("every page header resolves its icon through navIcon", () => {
     }
   }
   for (const it of NAV_ITEMS) assert.ok(used.has(it.id), `no page header uses navIcon("${it.id}")`);
+});
+
+// The cost page's entry follows the org's developer cost display: "Usage"
+// with a non-dollar glyph in token-usage mode, the same route, and the glyph
+// stays distinct from every other page's in both modes.
+test("the cost entry reads Usage with a distinct glyph in token-usage mode", () => {
+  const cases = [
+    { mode: "usd" as const, label: "Cost" },
+    { mode: "tokens" as const, label: "Usage" },
+  ];
+  try {
+    for (const c of cases) {
+      setCostDisplayMode(c.mode);
+      const cost = NAV_ITEMS.find((i) => i.id === "cost");
+      assert.ok(cost, "cost nav item");
+      assert.equal(cost.label, c.label, c.mode);
+      assert.equal(cost.path, "/cost", c.mode);
+      assert.equal(navIcon("cost"), cost.icon, c.mode);
+      const clash = NAV_ITEMS.find((i) => i.id !== "cost" && i.icon === cost.icon);
+      assert.equal(clash, undefined, `${c.mode}: cost reuses the icon of ${clash?.id}`);
+    }
+    setCostDisplayMode("tokens");
+    assert.notEqual(navIcon("cost"), DollarSign, "no dollar glyph in token-usage mode");
+  } finally {
+    setCostDisplayMode("usd");
+  }
 });

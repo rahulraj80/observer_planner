@@ -340,7 +340,7 @@ func resolveCarry(ctx context.Context, deps Deps, sub store.HandoffSubstrate, ca
 	// aren't available whole, but the whole conversation flow still crosses.
 	if carry == handoff.CarryFullCache && !usedFull {
 		carry = handoff.CarryFull
-		degradeReason = fmt.Sprintf("%s has no un-excerpted (full-body) reader — full_cache degraded to full (excerpts)", sub.Session.Tool)
+		degradeReason = fmt.Sprintf("%s has no un-excerpted (full-body) reader - full_cache degraded to full (excerpts)", sub.Session.Tool)
 	}
 	return carry, transcript, degradeReason
 }
@@ -446,7 +446,7 @@ func readTranscript(ctx context.Context, deps Deps, sub store.HandoffSubstrate, 
 func readSessionTranscript(ctx context.Context, adapters []adapter.Adapter, sess models.Session, sourceHints []string, preferFull bool) (msgs []models.TranscriptMessage, usedFull bool, note string) {
 	cap, _ := integration.For(sess.Tool)
 	if cap.Handoff.Transcript == integration.TranscriptActionsOnly {
-		return nil, false, fmt.Sprintf("%s has no readable transcript capability — metadata carry", sess.Tool)
+		return nil, false, fmt.Sprintf("%s has no readable transcript capability - metadata carry", sess.Tool)
 	}
 	var reader TranscriptReader
 	var fullReader FullTranscriptReader
@@ -465,22 +465,22 @@ func readSessionTranscript(ctx context.Context, adapters []adapter.Adapter, sess
 	if preferFull && fullReader != nil {
 		full, err := fullReader.ReadTranscriptFull(ctx, sess, sourceHints)
 		if err != nil {
-			return nil, false, fmt.Sprintf("transcript unreadable (%v) — metadata carry", err)
+			return nil, false, fmt.Sprintf("transcript unreadable (%v) - metadata carry", err)
 		}
 		if len(full) == 0 {
-			return nil, false, "transcript on disk holds no messages — metadata carry"
+			return nil, false, "transcript on disk holds no messages - metadata carry"
 		}
 		return full, true, ""
 	}
 	if reader == nil {
-		return nil, false, fmt.Sprintf("%s transcript reader not implemented yet (classified %s) — metadata carry", sess.Tool, cap.Handoff.Transcript)
+		return nil, false, fmt.Sprintf("%s transcript reader not implemented yet (classified %s) - metadata carry", sess.Tool, cap.Handoff.Transcript)
 	}
 	capped, err := reader.ReadTranscript(ctx, sess, sourceHints)
 	if err != nil {
-		return nil, false, fmt.Sprintf("transcript unreadable (%v) — metadata carry", err)
+		return nil, false, fmt.Sprintf("transcript unreadable (%v) - metadata carry", err)
 	}
 	if len(capped) == 0 {
-		return nil, false, "transcript on disk holds no messages — metadata carry"
+		return nil, false, "transcript on disk holds no messages - metadata carry"
 	}
 	return capped, false, ""
 }
@@ -565,7 +565,7 @@ func capCacheDoc(rendered string, maxBytes int) (string, string) {
 	for cut > 0 && !utf8.RuneStart(rendered[cut]) {
 		cut--
 	}
-	note := fmt.Sprintf("full_cache doc truncated at %d bytes ([handoff].max_cache_bytes) — the source read content exceeded the cap", maxBytes)
+	note := fmt.Sprintf("full_cache doc truncated at %d bytes ([handoff].max_cache_bytes) - the source read content exceeded the cap", maxBytes)
 	return rendered[:cut] + "\n\n[…full_cache truncated at the byte cap…]\n", note
 }
 

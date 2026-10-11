@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "globalLimit": "VerifiedOfficial",
+    "userLimits": "VerifiedOfficial",
+    "userLimits[]": "VerifiedOfficial",
+    "userLimits[].email": "VerifiedOfficial",
+    "userLimits[].limit": "VerifiedOfficial"
+  },
+  "fixture_sha256": "89f785819cc746bac8775ec54543e2e361bce63e56e9ee954c170338830c5e03",
+  "http": {
+    "method": "GET",
+    "path": "/api/v0/organization/usage/limits/users",
+    "status": 200
+  },
+  "notes": "Synthesized from the getUserLimits 200 schema: globalLimit (integer credits, nullable) and userLimits (email, limit nullable: null means the user uses the global default). Values honour the documented 1,000,000 minimum of the PUT.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Factory Public API OpenAPI 3.0.1 (info.version 0.1.0), openapi.json fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "175733226aee49800589391733956664b42d384051cb4d28f845c123c6968d05",
+  "source_url": "https://docs.factory.com/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.api.limits_users"
+}

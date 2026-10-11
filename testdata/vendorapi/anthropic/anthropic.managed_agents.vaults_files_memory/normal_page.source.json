@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].archived_at": "VerifiedOfficial",
+    "data[].created_at": "VerifiedOfficial",
+    "data[].display_name": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].metadata": "VerifiedOfficial",
+    "data[].metadata.environment": "VerifiedOfficial",
+    "data[].type": "VerifiedOfficial",
+    "data[].updated_at": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "231a01b6fa41f4fb4b046ade46b15577ebebee1c150482c99a2a4e89db87bece",
+  "http": {
+    "method": "GET",
+    "path": "/v1/vaults",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/vaults.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated Managed Agents API reference (vaults), fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "83cc06cbed21d3577b01e7070b4141766b034511e6fb44d7ecf89ec483c42166",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/vaults.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.managed_agents.vaults_files_memory"
+}

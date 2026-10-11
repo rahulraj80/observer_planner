@@ -112,7 +112,7 @@ func CompareDirs(mcpDir, proxyDir string) (bool, string) {
 		return true, ""
 	}
 	return false, fmt.Sprintf(
-		"proxy is writing to %s but this MCP server reads from %s — "+
+		"proxy is writing to %s but this MCP server reads from %s - "+
 			"point both at the same path via [compression.conversation.stash].Dir, "+
 			"OR start both processes with the same --config file",
 		proxyDir, mcpDir,

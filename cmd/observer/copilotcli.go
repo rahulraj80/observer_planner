@@ -12,22 +12,29 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 )
 
-// newCopilotCLICmd implements `observer copilot-cli` — points GitHub Copilot
-// CLI's BYOK (bring-your-own-key) custom provider at the observer proxy's
-// OpenAI-compatible endpoint via the COPILOT_PROVIDER_* env vars, then execs
-// `copilot`.
+// newCopilotCLICmd implements `observer copilot-cli` — launches GitHub Copilot
+// CLI, routing it through the observer proxy when the developer uses its BYOK
+// (bring-your-own-key) custom-provider lane, then execs `copilot`.
 //
-// BYOK only: GitHub's native hosted-model routing is NOT proxyable (that
-// traffic stays exempt). This launcher sets COPILOT_PROVIDER_TYPE,
-// COPILOT_PROVIDER_BASE_URL and (optionally) COPILOT_MODEL. It deliberately
-// does NOT set COPILOT_PROVIDER_API_KEY — that secret must already be in the
-// environment (implementation rule: a launcher writes only base-URL fields,
-// never keys). A pre-flight warns when the key is absent so the BYOK turn
-// doesn't silently fail.
+// The route is conditional (registry ProxyRoute.Gate, resolveGatedRoute):
+//   - no provider key in the environment: the developer is on their GitHub
+//     Copilot sign-in, which no base URL can route (COPILOT_PROVIDER_BASE_URL
+//     switches Copilot INTO BYOK mode). Launch unrouted, set no
+//     COPILOT_PROVIDER_* variable, say so in one line; capture rides the
+//     copilot-cli watcher adapter.
+//   - a provider key is present: set COPILOT_PROVIDER_TYPE=openai and
+//     COPILOT_PROVIDER_BASE_URL=<proxy>/v1. BYOK requires an explicit model
+//     (--model, COPILOT_MODEL or COPILOT_PROVIDER_MODEL_ID); without one the
+//     launch is refused with a message naming the fix.
+//   - COPILOT_PROVIDER_BASE_URL already set to the developer's own endpoint:
+//     left alone, unrouted.
+//   - COPILOT_PROVIDER_TYPE (or --provider-type) set to anything but openai:
+//     the key belongs to that provider, and the route is the proxy's OpenAI
+//     lane, so the launch stays unrouted on the developer's own provider
+//     settings (pass-2 review C156-19).
 //
-// PROBE STATUS (2026-06-26): integration registry has copilot-cli at
-// Routability=probe_required. Confirm a live turn lands an api_turns row
-// before the matrix PROXY cell is flipped on.
+// It never sets or reads the key's value (implementation rule: a launcher
+// writes only base-URL fields, never keys).
 func newCopilotCLICmd() *cobra.Command {
 	var (
 		configPath   string
@@ -44,15 +51,21 @@ func newCopilotCLICmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "copilot-cli [-- copilot-args...]",
-		Short: "Launch GitHub Copilot CLI BYOK traffic through the observer proxy (probe)",
-		Long: "Wraps `copilot` (GitHub Copilot CLI) in BYOK mode: sets\n" +
+		Short: "Launch GitHub Copilot CLI; routes BYOK traffic through the observer proxy",
+		Long: "Wraps `copilot` (GitHub Copilot CLI).\n\n" +
+			"On your GitHub Copilot sign-in (no provider key set) Copilot runs\n" +
+			"UNROUTED: GitHub-hosted traffic cannot be proxied, and the session\n" +
+			"is captured from Copilot's own session files instead.\n\n" +
+			"With your own provider key in the environment\n" +
+			"(COPILOT_PROVIDER_API_KEY, _API_KEY_COMMAND or _BEARER_TOKEN) the\n" +
+			"launcher routes Copilot's BYOK lane through the proxy: it sets\n" +
 			"COPILOT_PROVIDER_TYPE=openai and COPILOT_PROVIDER_BASE_URL to the\n" +
-			"observer proxy's OpenAI-compatible endpoint (…/v1), plus\n" +
-			"COPILOT_MODEL when --model is given.\n\n" +
-			"BYOK ONLY — native GitHub-hosted Copilot routing is not proxyable\n" +
-			"and stays exempt. Your COPILOT_PROVIDER_API_KEY must already be in\n" +
-			"the environment; this launcher never sets or moves it.\n\n" +
-			"PROBE: confirm a turn lands an api_turns row before trusting it.\n\n" +
+			"proxy's OpenAI-compatible endpoint (…/v1). BYOK needs an explicit\n" +
+			"model: pass --model (sets COPILOT_MODEL) or export COPILOT_MODEL.\n" +
+			"A COPILOT_PROVIDER_TYPE other than openai (anthropic, azure, ...)\n" +
+			"launches unrouted, so that provider's key never reaches the\n" +
+			"proxy's OpenAI lane.\n" +
+			"This launcher never sets, reads or moves the key itself.\n\n" +
 			"All arguments after the subcommand are forwarded to copilot. Use\n" +
 			"`--` to separate observer flags from copilot flags. Requires a\n" +
 			"running observer proxy (`observer start`).",
@@ -109,20 +122,20 @@ func newCopilotCLICmd() *cobra.Command {
 				return err
 			}
 
-			// Pre-flight: BYOK needs a provider key, which we never set.
-			if os.Getenv("COPILOT_PROVIDER_API_KEY") == "" {
-				fmt.Fprintln(cmd.ErrOrStderr(),
-					"observer copilot-cli: warning — COPILOT_PROVIDER_API_KEY is not set. BYOK mode needs it; "+
-						"export your provider key before launching (this launcher never sets it).")
+			// The route is CONDITIONAL (registry ProxyRoute.Gate): the
+			// COPILOT_PROVIDER_* lane is BYOK, and setting its base URL
+			// switches Copilot off the developer's GitHub sign-in. Without a
+			// provider key the launch runs unrouted on that sign-in (capture
+			// rides the watcher); with one, a model is required. Presence only:
+			// the key's value is never read.
+			route := resolveGatedRoute("copilot-cli", "copilot-cli", resolved, model, args, os.Environ())
+			if route.err != nil {
+				return route.err
 			}
-
-			env := map[string]string{
-				"COPILOT_PROVIDER_TYPE":     "openai",
-				"COPILOT_PROVIDER_BASE_URL": strings.TrimRight(resolved, "/") + "/v1",
+			if route.notice != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), route.notice)
 			}
-			if model != "" {
-				env["COPILOT_MODEL"] = model
-			}
+			env := copilotLaunchEnv(route.routed, resolved, model)
 			var continueDir string
 			if continueFrom != "" {
 				seeded, cwd, cerr := continueFromArgs(cmd.Context(), continueFromParams{
@@ -163,6 +176,7 @@ func newCopilotCLICmd() *cobra.Command {
 				proxyURL:   resolved,
 				env:        env,
 				dbPath:     cfg.Observer.DBPath,
+				unrouted:   !route.routed, // the notice above already said why
 				stderr:     cmd.ErrOrStderr(),
 			})
 		},
@@ -170,7 +184,7 @@ func newCopilotCLICmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml)")
 	cmd.Flags().StringVar(&proxyURL, "proxy", "", "Override the observer proxy URL (default: http://127.0.0.1:<cfg.proxy.port>)")
 	cmd.Flags().StringVar(&binPath, "copilot-path", "", "Path to the copilot binary (default: resolve `copilot` on PATH)")
-	cmd.Flags().StringVar(&model, "model", "", "Set COPILOT_MODEL for the BYOK provider (optional)")
+	cmd.Flags().StringVar(&model, "model", "", "Set COPILOT_MODEL (the agent model; required for a routed BYOK launch)")
 	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "Session id to continue from: distill a handover from that session and seed it via copilot's -i/--interactive flag (delivery=inject_prompt). See docs/session-handoff.md.")
 	cmd.Flags().StringVar(&carry, "carry", "", "Carry mode for --continue-from: metadata|distilled|distilled_tail|full|full_cache (default from [handoff] config)")
 	cmd.Flags().IntVar(&fromMessage, "from-message", 0, "With --continue-from: fork after this 1-based transcript message (default: last message)")
@@ -178,6 +192,24 @@ func newCopilotCLICmd() *cobra.Command {
 	attach, noAttach = registerAttachFlags(cmd, "copilot-cli")
 	resume = registerResumeFlag(cmd, "copilot-cli")
 	return cmd
+}
+
+// copilotLaunchEnv is the env the launcher injects (user values still win in
+// applyBaseURLEnv). A routed launch gets the BYOK base URL and provider type;
+// an unrouted one gets NO COPILOT_PROVIDER_* variable at all, since any of
+// them would pull Copilot off the developer's own sign-in. COPILOT_MODEL is
+// Copilot's general agent-model variable (`copilot help environment`), so a
+// --model value applies on both lanes. Never a key.
+func copilotLaunchEnv(routed bool, proxyURL, model string) map[string]string {
+	env := map[string]string{}
+	if routed {
+		env["COPILOT_PROVIDER_TYPE"] = "openai"
+		env["COPILOT_PROVIDER_BASE_URL"] = strings.TrimRight(proxyURL, "/") + "/v1"
+	}
+	if model != "" {
+		env["COPILOT_MODEL"] = model
+	}
+	return env
 }
 
 // copilotAttachPassthrough forwards --copilot-path and --model to the

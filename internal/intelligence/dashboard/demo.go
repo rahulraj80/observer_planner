@@ -60,7 +60,7 @@ func (s *Server) handleDemoStart(w http.ResponseWriter, r *http.Request) {
 	// guarantee explicit rather than incidental.
 	s.statusSnap.invalidate()
 	s.analytics.invalidate()
-	s.opts.Logger.Info("demo mode started — data surfaces now serve the seeded sample database")
+	s.opts.Logger.Info("demo mode started - data surfaces now serve the seeded sample database")
 	writeJSON(w, map[string]any{"available": true, "active": true})
 }
 
@@ -93,6 +93,6 @@ func (s *Server) handleDemoStop(w http.ResponseWriter, r *http.Request) {
 		}
 		s.demoCleanup = nil
 	}
-	s.opts.Logger.Info("demo mode cleared — data surfaces back on the real database")
+	s.opts.Logger.Info("demo mode cleared - data surfaces back on the real database")
 	writeJSON(w, map[string]any{"available": s.opts.DemoSeeder != nil, "active": false})
 }

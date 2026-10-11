@@ -94,7 +94,7 @@ func marketingRedirectTarget(base, path string) string {
 // table's exact entries because mountRootRedirect registers each as an
 // exact-match pattern, so the target is never derived from arbitrary input.
 func (s *Server) handleMarketingRedirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, marketingRedirectTarget(s.rootRedirectURL, r.URL.Path), http.StatusFound)
+	http.Redirect(w, r, marketingRedirectTarget(s.rootRedirectURL, r.URL.Path), http.StatusFound) //nolint:gosec // G710: the path is one exact entry of the fixed redirect table
 }
 
 // handleRoot answers the bare "/" with a 302 redirect to s.rootRedirectURL.

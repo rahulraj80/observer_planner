@@ -56,6 +56,7 @@ import (
 // no-ops) and this test FAILS — the cache advances to v2 but the live engines
 // stay at v1, so the snapshot stays pending_restart at running-v1/cached-v2.
 func TestReloadConvergesPendingRestartToEffective(t *testing.T) {
+	requireComponents(t, "org.client", "proxy.routing")
 	dir := t.TempDir()
 	// Isolate the daemon's home so the real start path can never read/write the
 	// developer's ~/.claude etc. t.Setenv forbids t.Parallel — intentionally serial.
@@ -220,7 +221,7 @@ func TestReloadConvergesPendingRestartToEffective(t *testing.T) {
 	// Guard org-bundle CACHE file v1 (guard.New loads the org layer from here).
 	cachePath := orgBundleCachePath(cfg)
 	if cachePath == "" {
-		t.Fatal("orgBundleCachePath resolved empty — the guard org rail would be off")
+		t.Fatal("orgBundleCachePath resolved empty - the guard org rail would be off")
 	}
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
 		t.Fatalf("mkdir cache dir: %v", err)
@@ -326,7 +327,7 @@ func awaitConverged(t *testing.T, reports <-chan orgcontract.PolicyStateReport, 
 			for _, row := range last.Rows {
 				by[row.EnforcementPoint] = row
 			}
-			t.Fatalf("guard+router did not converge to effective@v%d within %s (P0-7 reload did not fire — stuck?):\n  guard=%+v\n  router=%+v",
+			t.Fatalf("guard+router did not converge to effective@v%d within %s (P0-7 reload did not fire - stuck?):\n  guard=%+v\n  router=%+v",
 				wantVersion, timeout, by["guard"], by["router"])
 		}
 	}

@@ -72,6 +72,9 @@ test("section state: loading, error wins, unavailable body, disabled, on", () =>
   const off = mcpAccessSectionState(view({ daemon_relay: false }, { enabled: false }), false, null);
   assert.equal(off.kind, "disabled");
   assert.match(off.kind === "disabled" ? off.message : "", /no MCP call on this machine is mediated/);
+  // T-374: the off state names the card's own control, not a CLI command.
+  assert.match(off.kind === "disabled" ? off.message : "", /'Turn on the relay' button below\.$/);
+  assert.doesNotMatch(off.kind === "disabled" ? off.message : "", /observer mcp-relay/);
   assert.equal(mcpAccessSectionState(view(), false, null).kind, "on");
 });
 
@@ -85,7 +88,7 @@ test("notes: wrapped leftovers while off, restart needed, no grant, pending loss
   const notes = left.kind === "disabled" ? left.notes : [];
   assert.equal(notes.length, 1);
   assert.match(notes[0], /^2 journaled client MCP entries are still wrapped \(cursor, opencode\)/);
-  assert.match(notes[0], /observer mcp unwrap/);
+  assert.match(notes[0], /Restore original configs/);
 
   const on = mcpAccessSectionState(
     view(

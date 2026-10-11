@@ -1,0 +1,838 @@
+{
+ "resourceLogs": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "qwen-code"
+      }
+     },
+     {
+      "key": "service.version",
+      "value": {
+       "stringValue": "0.21.0"
+      }
+     }
+    ],
+    "droppedAttributesCount": 0
+   },
+   "scopeLogs": [
+    {
+     "scope": {
+      "name": "qwen-code"
+     },
+     "logRecords": [
+      {
+       "timeUnixNano": "1791242701980000000",
+       "observedTimeUnixNano": "1791242701980000000",
+       "body": {
+        "stringValue": "Auth event: auto success for openai"
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.auth"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:01.979Z"
+         }
+        },
+        {
+         "key": "auth_type",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "action_type",
+         "value": {
+          "stringValue": "auto"
+         }
+        },
+        {
+         "key": "status",
+         "value": {
+          "stringValue": "success"
+         }
+        },
+        {
+         "key": "error_message",
+         "value": {}
+        }
+       ],
+       "droppedAttributesCount": 0
+      },
+      {
+       "timeUnixNano": "1791242702403000000",
+       "observedTimeUnixNano": "1791242702403000000",
+       "body": {
+        "stringValue": "CLI configuration loaded."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.config"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:02.403Z"
+         }
+        },
+        {
+         "key": "model",
+         "value": {
+          "stringValue": "mock-model"
+         }
+        },
+        {
+         "key": "sandbox_enabled",
+         "value": {
+          "boolValue": false
+         }
+        },
+        {
+         "key": "core_tools_enabled",
+         "value": {
+          "stringValue": ""
+         }
+        },
+        {
+         "key": "approval_mode",
+         "value": {
+          "stringValue": "yolo"
+         }
+        },
+        {
+         "key": "file_filtering_respect_git_ignore",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "debug_mode",
+         "value": {
+          "boolValue": false
+         }
+        },
+        {
+         "key": "truncate_tool_output_threshold",
+         "value": {
+          "intValue": 25000
+         }
+        },
+        {
+         "key": "truncate_tool_output_lines",
+         "value": {
+          "intValue": 1000
+         }
+        },
+        {
+         "key": "mcp_servers",
+         "value": {
+          "stringValue": ""
+         }
+        },
+        {
+         "key": "mcp_servers_count",
+         "value": {
+          "intValue": 0
+         }
+        },
+        {
+         "key": "mcp_tools",
+         "value": {
+          "stringValue": ""
+         }
+        },
+        {
+         "key": "mcp_tools_count",
+         "value": {
+          "intValue": 0
+         }
+        },
+        {
+         "key": "hooks",
+         "value": {}
+        },
+        {
+         "key": "ide_enabled",
+         "value": {
+          "boolValue": false
+         }
+        },
+        {
+         "key": "interactive_shell_enabled",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "output_format",
+         "value": {
+          "stringValue": "text"
+         }
+        },
+        {
+         "key": "skills",
+         "value": {
+          "stringValue": "batch,dataviz,extension-creator,loop,new-app,qc-helper,review,simplify,stuck"
+         }
+        },
+        {
+         "key": "subagents",
+         "value": {
+          "stringValue": "general-purpose,Explore,statusline-setup"
+         }
+        }
+       ],
+       "droppedAttributesCount": 0
+      },
+      {
+       "timeUnixNano": "1791242702502000000",
+       "observedTimeUnixNano": "1791242702502000000",
+       "body": {
+        "stringValue": "User prompt. Length: 19."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.user_prompt"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:02.501Z"
+         }
+        },
+        {
+         "key": "prompt_length",
+         "value": {
+          "intValue": 19
+         }
+        },
+        {
+         "key": "prompt_id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366########0"
+         }
+        },
+        {
+         "key": "auth_type",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "prompt",
+         "value": {
+          "stringValue": "list the files here"
+         }
+        }
+       ],
+       "droppedAttributesCount": 0
+      },
+      {
+       "timeUnixNano": "1791242702868000000",
+       "observedTimeUnixNano": "1791242702868000000",
+       "body": {
+        "stringValue": "Memory recall: strategy=none. Selected 0/0 docs."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.memory.recall"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:02.868Z"
+         }
+        },
+        {
+         "key": "query_length",
+         "value": {
+          "intValue": 19
+         }
+        },
+        {
+         "key": "docs_scanned",
+         "value": {
+          "intValue": 0
+         }
+        },
+        {
+         "key": "docs_selected",
+         "value": {
+          "intValue": 0
+         }
+        },
+        {
+         "key": "strategy",
+         "value": {
+          "stringValue": "none"
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": 71
+         }
+        }
+       ],
+       "droppedAttributesCount": 0
+      },
+      {
+       "timeUnixNano": "1791242703050000000",
+       "observedTimeUnixNano": "1791242703050000000",
+       "body": {
+        "stringValue": "API request to mock-model."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.api_request"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:03.049Z"
+         }
+        },
+        {
+         "key": "model",
+         "value": {
+          "stringValue": "mock-model"
+         }
+        },
+        {
+         "key": "prompt_id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366########0"
+         }
+        },
+        {
+         "key": "request_text",
+         "value": {
+          "stringValue": "[fixture: truncated]"
+         }
+        },
+        {
+         "key": "subagent_name",
+         "value": {}
+        }
+       ],
+       "droppedAttributesCount": 0,
+       "flags": 1,
+       "traceId": "ead36b83d5cb8e209859134e0006609b",
+       "spanId": "0d6dbf2a664674d6"
+      },
+      {
+       "timeUnixNano": "1791242703165000000",
+       "observedTimeUnixNano": "1791242703165000000",
+       "body": {
+        "stringValue": "API response from mock-model. Status: 200. Duration: 113ms."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.api_response"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:03.165Z"
+         }
+        },
+        {
+         "key": "response_id",
+         "value": {
+          "stringValue": "chatcmpl-mock1791242703121"
+         }
+        },
+        {
+         "key": "model",
+         "value": {
+          "stringValue": "mock-model"
+         }
+        },
+        {
+         "key": "status_code",
+         "value": {
+          "intValue": 200
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": 113
+         }
+        },
+        {
+         "key": "input_token_count",
+         "value": {
+          "intValue": 1234
+         }
+        },
+        {
+         "key": "output_token_count",
+         "value": {
+          "intValue": 56
+         }
+        },
+        {
+         "key": "cached_content_token_count",
+         "value": {
+          "intValue": 1000
+         }
+        },
+        {
+         "key": "thoughts_token_count",
+         "value": {
+          "intValue": 16
+         }
+        },
+        {
+         "key": "total_token_count",
+         "value": {
+          "intValue": 1290
+         }
+        },
+        {
+         "key": "response_text",
+         "value": {}
+        },
+        {
+         "key": "prompt_id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366########0"
+         }
+        },
+        {
+         "key": "auth_type",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "subagent_name",
+         "value": {}
+        },
+        {
+         "key": "http.status_code",
+         "value": {
+          "intValue": 200
+         }
+        }
+       ],
+       "droppedAttributesCount": 0,
+       "flags": 1,
+       "traceId": "ead36b83d5cb8e209859134e0006609b",
+       "spanId": "0d6dbf2a664674d6"
+      },
+      {
+       "timeUnixNano": "1791242703277000000",
+       "observedTimeUnixNano": "1791242703277000000",
+       "body": {
+        "stringValue": "Tool call: list_directory. Success: false. Duration: 0ms."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.tool_call"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:03.277Z"
+         }
+        },
+        {
+         "key": "function_name",
+         "value": {
+          "stringValue": "list_directory"
+         }
+        },
+        {
+         "key": "function_args",
+         "value": {
+          "stringValue": "{\n  \"path\": \".\"\n}"
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": 0
+         }
+        },
+        {
+         "key": "status",
+         "value": {
+          "stringValue": "error"
+         }
+        },
+        {
+         "key": "success",
+         "value": {
+          "boolValue": false
+         }
+        },
+        {
+         "key": "decision",
+         "value": {}
+        },
+        {
+         "key": "error",
+         "value": {
+          "stringValue": "Path must be absolute: ."
+         }
+        },
+        {
+         "key": "error_type",
+         "value": {
+          "stringValue": "invalid_tool_params"
+         }
+        },
+        {
+         "key": "prompt_id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366########0"
+         }
+        },
+        {
+         "key": "response_id",
+         "value": {
+          "stringValue": "chatcmpl-mock1791242703121"
+         }
+        },
+        {
+         "key": "tool_type",
+         "value": {
+          "stringValue": "native"
+         }
+        },
+        {
+         "key": "content_length",
+         "value": {
+          "intValue": 24
+         }
+        },
+        {
+         "key": "mcp_server_name",
+         "value": {}
+        },
+        {
+         "key": "metadata",
+         "value": {}
+        },
+        {
+         "key": "error.message",
+         "value": {
+          "stringValue": "Path must be absolute: ."
+         }
+        },
+        {
+         "key": "error.type",
+         "value": {
+          "stringValue": "invalid_tool_params"
+         }
+        }
+       ],
+       "droppedAttributesCount": 0
+      },
+      {
+       "timeUnixNano": "1791242703278000000",
+       "observedTimeUnixNano": "1791242703278000000",
+       "body": {
+        "stringValue": "Memory recall delivery: phase=refined. delivery_point=discarded. Selected 0 doc(s)."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.memory.recall.delivery"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:03.278Z"
+         }
+        },
+        {
+         "key": "phase",
+         "value": {
+          "stringValue": "refined"
+         }
+        },
+        {
+         "key": "delivery_point",
+         "value": {
+          "stringValue": "discarded"
+         }
+        },
+        {
+         "key": "strategy",
+         "value": {
+          "stringValue": "none"
+         }
+        },
+        {
+         "key": "docs_selected",
+         "value": {
+          "intValue": 0
+         }
+        },
+        {
+         "key": "latency_ms",
+         "value": {
+          "intValue": 473
+         }
+        },
+        {
+         "key": "discard_reason",
+         "value": {
+          "stringValue": "no_relevant_results"
+         }
+        }
+       ],
+       "droppedAttributesCount": 0
+      },
+      {
+       "timeUnixNano": "1791242703289000000",
+       "observedTimeUnixNano": "1791242703289000000",
+       "body": {
+        "stringValue": "API request to mock-model."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.api_request"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:03.289Z"
+         }
+        },
+        {
+         "key": "model",
+         "value": {
+          "stringValue": "mock-model"
+         }
+        },
+        {
+         "key": "prompt_id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366########0"
+         }
+        },
+        {
+         "key": "request_text",
+         "value": {
+          "stringValue": "[fixture: truncated]"
+         }
+        },
+        {
+         "key": "subagent_name",
+         "value": {}
+        }
+       ],
+       "droppedAttributesCount": 0,
+       "flags": 1,
+       "traceId": "765b656e72323f83a16a854a8166e0a4",
+       "spanId": "04acadecc582aeab"
+      },
+      {
+       "timeUnixNano": "1791242703321000000",
+       "observedTimeUnixNano": "1791242703321000000",
+       "body": {
+        "stringValue": "API response from mock-model. Status: 200. Duration: 21ms."
+       },
+       "attributes": [
+        {
+         "key": "session.id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366"
+         }
+        },
+        {
+         "key": "event.name",
+         "value": {
+          "stringValue": "qwen-code.api_response"
+         }
+        },
+        {
+         "key": "event.timestamp",
+         "value": {
+          "stringValue": "2026-10-05T23:25:03.321Z"
+         }
+        },
+        {
+         "key": "response_id",
+         "value": {
+          "stringValue": "chatcmpl-mock1791242703304"
+         }
+        },
+        {
+         "key": "model",
+         "value": {
+          "stringValue": "mock-model"
+         }
+        },
+        {
+         "key": "status_code",
+         "value": {
+          "intValue": 200
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": 21
+         }
+        },
+        {
+         "key": "input_token_count",
+         "value": {
+          "intValue": 1234
+         }
+        },
+        {
+         "key": "output_token_count",
+         "value": {
+          "intValue": 56
+         }
+        },
+        {
+         "key": "cached_content_token_count",
+         "value": {
+          "intValue": 1000
+         }
+        },
+        {
+         "key": "thoughts_token_count",
+         "value": {
+          "intValue": 16
+         }
+        },
+        {
+         "key": "total_token_count",
+         "value": {
+          "intValue": 1290
+         }
+        },
+        {
+         "key": "response_text",
+         "value": {
+          "stringValue": "Hello from the mock."
+         }
+        },
+        {
+         "key": "prompt_id",
+         "value": {
+          "stringValue": "00f3ac91-e678-4ff1-8dfe-b3b89499a366########0"
+         }
+        },
+        {
+         "key": "auth_type",
+         "value": {
+          "stringValue": "openai"
+         }
+        },
+        {
+         "key": "subagent_name",
+         "value": {}
+        },
+        {
+         "key": "http.status_code",
+         "value": {
+          "intValue": 200
+         }
+        }
+       ],
+       "droppedAttributesCount": 0,
+       "flags": 1,
+       "traceId": "765b656e72323f83a16a854a8166e0a4",
+       "spanId": "04acadecc582aeab"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

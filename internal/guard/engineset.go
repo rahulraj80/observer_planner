@@ -58,9 +58,49 @@ type engineSet struct {
 	projectEngines map[string]*policy.Engine
 	projectStates  []PolicyState
 	projectCats    map[string]policy.Category
+
+	// localBudgetOnly marks a derived snapshot built by localBudgetSet: its
+	// base carries ONLY the node's own [guard.budget] numbers. It never
+	// builds a project engine (that funnel reads the published, org-composed
+	// budget) and its verdicts take no organization label.
+	localBudgetOnly bool
+	// localOnce / local cache that derived snapshot (REVIEW-4 P4-02), built
+	// lazily the first time an admission needs it, so a node whose
+	// enrolment is live never pays for a second engine.
+	localOnce sync.Once
+	local     *engineSet
 }
 
 var engineRevision atomic.Uint64
+
+// localBudgetSet returns a snapshot that evaluates the node's OWN
+// [guard.budget] block over the same org and user rule layers, with nothing an
+// organization composed (no per-subject caps, no protection, no soft-window
+// set, no B-625, no enrolment binding, UTC calendars). The proxy admission
+// uses it when the enrolment this snapshot was composed for is confirmed gone
+// or replaced and the org did not opt into fail-closed (D-502: fail open on
+// the node's own numbers). nil when the engine cannot be built; the caller
+// then admits, the guard's usual fail-safe.
+func (es *engineSet) localBudgetSet(g *Guard) *engineSet {
+	if es == nil || es.base == nil {
+		return nil
+	}
+	if es.localBudgetOnly {
+		return es
+	}
+	es.localOnce.Do(func() {
+		base, err := g.buildEngineWith(es.base.Mode(), es.orgLayer, es.userLayer, nil, nil, g.localBudgetInputs())
+		if err != nil {
+			g.recordIssues([]string{fmt.Sprintf("local-only budget engine: %v", err)})
+			return
+		}
+		local := newEngineSet(base, es.orgLayer, es.userLayer, es.states, es.ruleCategories, "")
+		local.revision = es.revision
+		local.localBudgetOnly = true
+		es.local = local
+	})
+	return es.local
+}
 
 func (es *engineSet) accountingContext(managed bool) BudgetAccountingContext {
 	return BudgetAccountingContext{Managed: managed, Calendars: BudgetCalendars{
@@ -100,7 +140,7 @@ func (es *engineSet) engineFor(g *Guard, projectRoot string) *policy.Engine {
 	// Clearing project_policy is exactly the hardening that motivates the
 	// trusted layer, so it must not also switch that layer off — gate on
 	// both resolvers, not on the in-repo key alone.
-	if projectRoot == "" || (ProjectPolicyPath(g.cfg, projectRoot) == "" &&
+	if es.localBudgetOnly || projectRoot == "" || (ProjectPolicyPath(g.cfg, projectRoot) == "" &&
 		TrustedProjectPolicyPath(g.cfg, g.home, projectRoot) == "") {
 		return es.base
 	}
@@ -229,6 +269,15 @@ func namedRuleIDs(pf *policyFile) map[string]bool {
 		}
 	}
 	return out
+}
+
+// promptRuleFlagOnly reports whether the snapshot's base engine (org +
+// user layers) caps ruleID at flag through an explicit `enforce = false`.
+// It is for seams that have a rule ID but no evaluated verdict; a seam
+// holding a verdict reads Verdict.EnforceCappedBy, which also reflects
+// the per-project layers.
+func (es *engineSet) promptRuleFlagOnly(ruleID string) bool {
+	return es.base.RuleEnforceCapped(ruleID)
 }
 
 // orgState returns the snapshot's org-layer state (ok=false when the
@@ -397,6 +446,7 @@ func (g *Guard) ReloadOrgLayer(ctx context.Context) error {
 	if !loaded {
 		if issue != "" {
 			g.recordIssues([]string{issue})
+			g.orgBundleRejected.Store(true)
 			return fmt.Errorf("guard.ReloadOrgLayer: %s", issue)
 		}
 		return fmt.Errorf("guard.ReloadOrgLayer: no org bundle present at %s", g.orgBundlePath)
@@ -413,6 +463,7 @@ func (g *Guard) ReloadOrgLayer(ctx context.Context) error {
 		// keep the warm project cache. Hash-only equality is NOT enough
 		// (a version-only bump must publish so running converges).
 		if curOrg.ContentHash == st.ContentHash && curOrg.Version == st.Version {
+			g.orgBundleRejected.Store(false)
 			return nil
 		}
 		// Non-regressing publish: refuse a candidate OLDER than the
@@ -434,6 +485,7 @@ func (g *Guard) ReloadOrgLayer(ctx context.Context) error {
 	// Recompute the immutable layer state: replace the org entry, keep
 	// the user entry; the project cache resets (rebuilds lazily against
 	// the new org layer).
+	g.orgBundleRejected.Store(false)
 	states := replaceOrgState(cur.states, st)
 	newES := newEngineSet(base, pf, cur.userLayer, states, buildRuleCategories(pf, cur.userLayer), g.budgetBinding(), g.budgetCalendars())
 	g.set.Store(newES)

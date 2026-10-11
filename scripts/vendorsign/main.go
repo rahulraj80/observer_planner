@@ -23,6 +23,7 @@ const usage = `usage:
   vendorsign keygen         -out DIR
   vendorsign sign           -key FILE ARCHIVE...
   vendorsign manifest       -key FILE -dir DIR -version vX.Y.Z -channel stable -out FILE
+  vendorsign index          -key FILE -dir DIR -version vX.Y.Z
   vendorsign schema-version`
 
 // run dispatches a verb. Split from main so the whole tool is testable
@@ -38,6 +39,8 @@ func run(args []string, out *os.File) error {
 		return runSign(args[1:], out)
 	case "manifest":
 		return runManifest(args[1:], out)
+	case "index":
+		return runIndex(args[1:], out)
 	case "schema-version":
 		return runSchemaVersion(out)
 	case "-h", "--help", "help":

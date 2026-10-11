@@ -5,8 +5,9 @@ import { CodeCommentSplit } from "@shared/primitives/CodeCommentSplit";
 import { ownerReasonMeta, SHARE_BASIS_TIP } from "@/components/projectdetail/commitOwner";
 import { ChartState } from "@/components/ChartState";
 import { describeTruncation, TruncationBanner } from "@/components/projectdetail/TruncationBanner";
+import { windowKey, type WindowParams } from "@/lib/projectDrawer";
 import { useApi } from "@/lib/useApi";
-import { fmtInt, fmtPct, fmtRelative, fmtShortId, fmtUSD } from "@/lib/format";
+import { dollarsShown, fmtInt, fmtPct, fmtRelative, fmtShortId, fmtUSD } from "@/lib/format";
 import type { ProjectCommitOwner, ProjectCommitRow, ProjectCommitsResponse } from "@/lib/types";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -24,14 +25,14 @@ const LIMIT = 500;
 // shows a guessed session. The expanded row lists every contributing
 // session with its share and the AI code-vs-comment split it carried.
 
-export function CommitsTab({ projectId, days }: { projectId: number; days: number }) {
+export function CommitsTab({ projectId, win }: { projectId: number; win: WindowParams }) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const navigate = useNavigate();
 
   const commits = useApi<ProjectCommitsResponse>(
     `/api/project/${projectId}/commits`,
-    { days, limit: LIMIT },
-    [projectId, days],
+    { ...win, limit: LIMIT },
+    [projectId, windowKey(win)],
   );
   const rows = commits.data?.rows ?? [];
   const truncationNote = describeTruncation(commits.data, "commits");
@@ -63,7 +64,8 @@ export function CommitsTab({ projectId, days }: { projectId: number; days: numbe
               <th className="py-1.5 text-right font-medium">+/-</th>
               <th className="py-1.5 text-right font-medium">AI files</th>
               <th className="py-1.5 pl-3 font-medium">Owner</th>
-              <th className="py-1.5 pr-1 text-right font-medium">Spend</th>
+              {/* Dollars only: dropped in the org's token-usage view. */}
+              {dollarsShown() && <th className="py-1.5 pr-1 text-right font-medium">Spend</th>}
             </tr>
           }
         >
@@ -124,12 +126,12 @@ function CommitRows({
         <td className="py-1.5 pl-3">
           <OwnerCell owner={c.owner} onOpenSession={onOpenSession} />
         </td>
-        <td className="py-1.5 pr-1 text-right tabular-nums text-fg-1">{fmtUSD(c.spend_usd)}</td>
+        {dollarsShown() && <td className="py-1.5 pr-1 text-right tabular-nums text-fg-1">{fmtUSD(c.spend_usd)}</td>}
       </tr>
       {open && (
         <tr className="border-b border-line-1 last:border-0 bg-bg-2/60">
           <td />
-          <td colSpan={7} className="py-2 pr-3">
+          <td colSpan={dollarsShown() ? 7 : 6} className="py-2 pr-3">
             <CommitOwnershipDetail c={c} onOpenSession={onOpenSession} />
             {c.prompts.length === 0 ? (
               <p className="text-[11px] text-fg-4">No prompts linked to this commit.</p>

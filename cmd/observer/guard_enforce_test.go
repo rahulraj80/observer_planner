@@ -30,7 +30,7 @@ func TestGuardRulesDocInSync(t *testing.T) {
 	// checkout may materialize CRLF depending on git config.
 	got := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	if got != want {
-		t.Error("docs/guard-rules.md is out of sync with the rule catalog — regenerate with `observer guard rules --markdown > docs/guard-rules.md` (raw-byte redirect; PowerShell `>` writes UTF-16)")
+		t.Error("docs/guard-rules.md is out of sync with the rule catalog - regenerate with `observer guard rules --markdown > docs/guard-rules.md` (raw-byte redirect; PowerShell `>` writes UTF-16)")
 	}
 }
 
@@ -199,7 +199,7 @@ func TestGuardSimulateAndRescan(t *testing.T) {
 		t.Errorf("[§18 GOLDEN] simulate output diverged from the pinned verdict set:\n%s", out)
 	}
 	if countEvents() != 0 {
-		t.Fatal("simulate persisted guard events — it must be a dry run")
+		t.Fatal("simulate persisted guard events - it must be a dry run")
 	}
 
 	// Rescan persists exactly the golden set; a second rescan adds zero.

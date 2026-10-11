@@ -35,7 +35,7 @@ func AttachProcess(cmd *exec.Cmd) (io.Closer, error) {
 		return nil, errors.New("jobobject.AttachProcess: cmd is nil")
 	}
 	if cmd.Process == nil {
-		return nil, errors.New("jobobject.AttachProcess: cmd.Process is nil — call cmd.Start() first")
+		return nil, errors.New("jobobject.AttachProcess: cmd.Process is nil - call cmd.Start() first")
 	}
 
 	job, err := windows.CreateJobObject(nil, nil)

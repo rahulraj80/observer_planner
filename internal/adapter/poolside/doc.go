@@ -18,7 +18,8 @@
 //
 // # Storage layout
 //
-// Two roots, grounded on Windows 2026-09-05:
+// Two roots, grounded on Windows 2026-09-05 (the Linux layout follows
+// after this block):
 //
 //	~/.config/poolside/                          (XDG-style, UNIVERSAL —
 //	                                               used even on Windows,
@@ -51,17 +52,39 @@
 // encoded-path convention); this package never needs to decode it because
 // the trajectory itself states the real cwd in its `session.start` record.
 //
-// Only `ShapeWindowsLocal` (`%LOCALAPPDATA%\poolside`) is grounded — the
-// only OS available on the grounding host. macOS is DEFENSIVELY declared
-// as `Library/Application Support/poolside` on the strength of every other
-// JetBrains-bundled ACP agent's OS-native (not XDG) data-home convention;
-// this has NOT been verified on a live macOS install. No Linux data-home
-// shape is declared: the `internal/adapter.AppDataSpec` vocabulary has no
-// "XDG data" shape distinct from `ShapeXDGConfig` (which `~/.config/
-// poolside` already claims for config), and guessing `~/.local/share/
-// poolside` would be exactly the kind of fabricated capability the
-// checklist forbids. A Linux/macOS operator whose install does not
-// capture should be treated as a real gap, not a silent one.
+// `ShapeWindowsLocal` (`%LOCALAPPDATA%\poolside`) is grounded on the
+// Windows JetBrains ACP install (2026-09-05).
+//
+// Linux (T-706, standalone `pool` 1.0.16 TUI on demo node 1, 2026-10-08)
+// splits the same tree across two XDG homes:
+//
+//	~/.local/state/poolside/                     ($XDG_STATE_HOME)
+//	    trajectories/trajectory-standalone_<sid>.ndjson   THE session log
+//	    sessions/session-<sid>.json               run/session id pointer (not parsed)
+//	    pool/logs/<encoded-cwd>/<sid>/{acp,tui}.log.jsonl  (not parsed)
+//	    pool/<encoded-cwd>/prompt-history.json    (never read: prompt text)
+//	    logs/pool-<id>.log                        (not parsed)
+//	~/.local/share/poolside/                     ($XDG_DATA_HOME)
+//	    acp/<encoded-cwd>/<sid>.json              flat summary (NOT PARSED)
+//
+// The trajectory format and filename are the ones documented below; the
+// session id in the filename is a UUIDv7 and matches the summary's
+// sessionId. `ShapeXDGState` covers it (the adapter honours an absolute
+// $XDG_STATE_HOME on the native home). The Windows-and-Linux pair is the
+// state-home mapping a Go XDG library makes per OS, so macOS stays
+// declared as `Library/Application Support/poolside`: an expectation,
+// NOT verified on a live macOS install.
+//
+// The Linux TUI's session.start carries `client_metadata` (version, host,
+// environment); host "acp:pool" (the TUI is itself the ACP client) is
+// stamped as the `cli` / `poolside-cli` capture surface. The Windows ACP
+// capture has no client_metadata; its surface comes from
+// internal/surfaceenrich's JetBrains pointer, which wins over any
+// self-report. The Linux TUI also advertises tools never called in the
+// grounding run (question, shell_list, shell_tail, shell_status,
+// shell_kill, shell_send, shell_wait, skill, subagent, switch_mode,
+// list_secrets, web_fetch); they are not mapped until a call is seen, and
+// a call to one lands as an unknown action with its raw name kept.
 //
 // # Off-limits files
 //
@@ -229,6 +252,6 @@
 //     registry row carries no `Handoff.Launch`, matching Junie's
 //     JetBrains-embedded precedent — there is no standalone process for
 //     `observer poolside` to start or join.
-//   - macOS data-home shape is an unverified, documented guess; no Linux
-//     data-home shape is declared at all (see "Storage layout" above).
+//   - macOS data-home shape is an unverified, documented expectation; the
+//     Linux state home is grounded since T-706 (see "Storage layout").
 package poolside

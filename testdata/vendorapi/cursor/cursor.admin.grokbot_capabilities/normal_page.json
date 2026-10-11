@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "cloudAgents": true,
+  "templateSharing": "team_only",
+  "actionRecording": false,
+  "localExecution": "ask",
+  "localEgressAllowed": true
+}

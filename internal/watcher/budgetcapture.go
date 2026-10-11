@@ -102,7 +102,8 @@ const (
 	// BudgetCaptureReasonUnreadable means a root, directory, or source file
 	// exists but this node cannot read it: a non-ENOENT stat or walk error
 	// (permissions, an I/O error, an unreadable mount), a source that is not a
-	// regular file, or a directory symlink the walk cannot descend. Unlike
+	// regular file, or a directory symlink leading out of the watch root (one
+	// pointing back inside the root is read through its real path). Unlike
 	// scan_incomplete it does not resolve by waiting, so it is structural.
 	BudgetCaptureReasonUnreadable = "source_unreadable"
 	// BudgetCaptureReasonNoFiles means roots existed but no recognized source
@@ -349,6 +350,11 @@ type budgetCaptureFileOutcome struct {
 	incompleteDetail string
 	parseError       error
 	storeError       error
+	// windowed / windowEnd describe an ordinary pass bounded to one window of
+	// an over-cap file (T-413): the window was read and its parse ended at
+	// windowEnd. A forced rescan uses them to read the next window (T-568).
+	windowed  bool
+	windowEnd int64
 }
 
 // budgetCaptureSeenEntry memoizes one (adapter, source file) strict result
@@ -1010,6 +1016,16 @@ func (w *Watcher) walkBudgetRoot(ctx context.Context, a adapter.Adapter, root st
 				return nil
 			}
 			if info.IsDir() {
+				if budgetSymlinkInsideRoot(root, path) {
+					// The link points back into the tree this walk is already
+					// reading, so every file behind it is reached through its
+					// real path and nothing sits unread. Devin's own install
+					// layout is one (<root>/_versions/current -> 3000.11.3);
+					// flagging it made the source structurally unavailable and
+					// the process controller stopped every Devin launch under a
+					// managed USD cap (node 1, 2026-10-06).
+					return nil
+				}
 				// WalkDir never descends it, so an entire source store can sit
 				// behind this link unread on every future pass too. That does
 				// not resolve by waiting.
@@ -1095,6 +1111,27 @@ func (w *Watcher) walkBudgetRoot(ctx context.Context, a adapter.Adapter, root st
 		report.incomplete = true
 		report.addIssue(budgetWalkFailureReason(walkErr), fmt.Sprintf("walk %s: %v", root, walkErr))
 	}
+}
+
+// budgetSymlinkInsideRoot reports whether the directory symlink at link
+// resolves to a directory inside root (both compared by their fully resolved
+// paths). Such a link adds no unread files: the walk reaches its target
+// through the real path. A link that cannot be resolved, or that leaves the
+// root, is not inside it.
+func budgetSymlinkInsideRoot(root, link string) bool {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	target, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(realRoot, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }
 
 // budgetWalkFailureReason separates a tree that MOVED from a tree this node

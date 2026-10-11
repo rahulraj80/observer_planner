@@ -1,3 +1,5 @@
+//go:build !sbo_omit_ui_export_xlsx
+
 package dashboard
 
 import (
@@ -14,7 +16,7 @@ import (
 
 // handleExportXLSX serves /api/export.xlsx — a multi-sheet workbook
 // covering Cost / Sessions / Actions / Tools / Compression / Discovery
-// / Patterns. Honors ?days=N&tool=X&project=Y exactly like the JSON
+// / Patterns. Honors ?days=N&tool=X&project=Y&model=Z exactly like the JSON
 // endpoints.
 //
 // Implementation reuses the in-process Handler so each sheet's row
@@ -33,6 +35,10 @@ func (s *Server) handleExportXLSX(w http.ResponseWriter, r *http.Request) {
 	}
 	if project != "" {
 		commonQS.Set("project", project)
+	}
+	model := modelParam(r)
+	if model != "" {
+		commonQS.Set("model", model)
 	}
 
 	handler := s.Handler()
@@ -99,6 +105,7 @@ func (s *Server) handleExportXLSX(w http.ResponseWriter, r *http.Request) {
 			{"Window (days)", days, "filter applied to all sheets"},
 			{"Tool filter", coalesceStr(tool, "all"), ""},
 			{"Project filter", coalesceStr(project, "all"), ""},
+			{"Model filter", coalesceStr(model, "all"), ""},
 			{"DB schema version", status["schema_version"], ""},
 			{"DB path", status["db_path"], ""},
 			{"Sessions (total)", numFromAny(counts["sessions"]), "all-time"},
@@ -287,7 +294,7 @@ func (s *Server) handleExportXLSX(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
-		writeSheet("Discovery — stale rereads", header, out)
+		writeSheet("Discovery - stale rereads", header, out)
 
 		header2 := []string{"Command", "Total runs", "No-change reruns", "Successful", "Failed", "Project"}
 		var out2 [][]any
@@ -304,7 +311,7 @@ func (s *Server) handleExportXLSX(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
-		writeSheet("Discovery — repeated commands", header2, out2)
+		writeSheet("Discovery - repeated commands", header2, out2)
 	}
 
 	// --- Sheet: Patterns ---

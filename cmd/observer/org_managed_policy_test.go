@@ -346,7 +346,9 @@ func TestManagedPolicyFamiliesToWrite(t *testing.T) {
 		{
 			name:    "accepted, managed, authority governs a family: writes",
 			outcome: grantOutcome{Accepted: true, Managed: true, Authority: []string{govern.AuthorityDashboardVisibility}},
-			want:    []string{"node.governance"},
+			// node.features rides every managed grant that governs anything
+			// (review C156-04): feature locks must not need a hand edit.
+			want: []string{"node.features", "node.governance"},
 		},
 		{
 			name: "accepted, managed, mixed authority including a retired token plus a real one",
@@ -354,7 +356,12 @@ func TestManagedPolicyFamiliesToWrite(t *testing.T) {
 				Accepted: true, Managed: true,
 				Authority: []string{govern.AuthorityCaptureRaise, govern.AuthorityEnforceAdmission},
 			},
-			want: []string{"admission.input"},
+			want: []string{"admission.input", "node.features"},
+		},
+		{
+			name:    "accepted, managed, the default managed grant governs node.features via feature.lock",
+			outcome: grantOutcome{Accepted: true, Managed: true, Authority: govern.ManagedEnrolmentAuthoritySet()},
+			want:    []string{"node.features", "node.governance", "tools.mcp_access"},
 		},
 	}
 	for _, tc := range cases {

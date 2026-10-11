@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -310,7 +312,7 @@ func TestCloudDisableRequiresConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("disable (declined): %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "Aborted — nothing changed.") {
+	if !strings.Contains(out, "Aborted - nothing changed.") {
 		t.Errorf("declined disable did not abort:\n%s", out)
 	}
 

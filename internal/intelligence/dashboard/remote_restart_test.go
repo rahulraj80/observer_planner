@@ -54,7 +54,7 @@ func TestHandleAdminRestart(t *testing.T) {
 		called := false
 		rec := postRestart(t, newRestartServer(t, func() error {
 			called = true
-			return errors.New("restart refused — config would not load")
+			return errors.New("restart refused - config would not load")
 		}))
 		if rec.Code == http.StatusOK {
 			t.Fatalf("a refusal must not 200: %s", rec.Body.String())

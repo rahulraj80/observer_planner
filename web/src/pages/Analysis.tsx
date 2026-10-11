@@ -29,7 +29,19 @@ import { useFilters, useGranularity, windowDaysApprox, windowParams } from "@/li
 import { GranControl } from "@/components/GranControl";
 import { asGranularity, perBucketTitle, viewerTimeZone } from "@shared/lib/granularity";
 import { useApi } from "@/lib/useApi";
-import { fmtBytes, fmtCompact, fmtInt, fmtPct, fmtTaskUSD, fmtUSD } from "@/lib/format";
+import {
+  costLabel,
+  dollarsShown,
+  fmtBytes,
+  fmtCompact,
+  fmtCost,
+  fmtInt,
+  fmtPct,
+  fmtTaskUSD,
+  fmtUSD,
+  maskDollarAmounts,
+  withoutDollars,
+} from "@/lib/format";
 import type {
   AnalysisCacheSavingsTrend,
   AnalysisCostByDowHour,
@@ -81,10 +93,12 @@ const SECTION_ICONS = {
 type VerbDim = "model" | "project" | "day";
 
 
-const ANALYSIS_SECTIONS: SectionNavItem[] = [
+// A function, not a const: the labels follow the cost display mode, which is
+// set at boot after module evaluation (format.ts cost affordances).
+const analysisSections = (): SectionNavItem[] => [
   { id: "an-headline", label: "Headline" },
-  { id: "an-trend", label: "Spend trend" },
-  { id: "an-when", label: "When and cache" },
+  { id: "an-trend", label: costLabel("Spend trend", "Usage trend") },
+  { id: "an-when", label: costLabel("When and cache", "When you work") },
   { id: "an-changed", label: "What changed" },
   { id: "an-sessions", label: "Top sessions" },
   { id: "an-routing", label: "Routing" },
@@ -93,18 +107,19 @@ const ANALYSIS_SECTIONS: SectionNavItem[] = [
 ];
 
 export function AnalysisPage() {
-  const { win, customRange, tool, project } = useFilters();
+  const { win, customRange, tool, model, project } = useFilters();
   const winParams = windowParams(win, customRange);
   const projectParam = project === "all" ? undefined : project;
   const toolParam = tool === "all" ? undefined : tool;
+  const modelParam = model === "all" ? undefined : model;
 
   const [dim, setDim] = useState<AnalysisDim>("model");
   const [vbDim, setVbDim] = useState<VerbDim>("model");
 
   const head = useApi<AnalysisHeadline>(
     "/api/analysis/headline",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   // Only the all-time project count is read from /api/status. The payload
   // changes on every 5 s TopBar/Sidebar poll (uptime is stamped per request),
@@ -115,52 +130,58 @@ export function AnalysisPage() {
   });
   const scoped = useApi<StatusScoped>(
     "/api/status/scoped",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   // Chart bucket: the shared granularity rule + the viewer's `gran=`.
   const gran = useGranularity();
   const trend = useApi<AnalysisTrend>(
     "/api/analysis/trend",
-    { ...winParams, ...gran.params, dim, tool: toolParam, project: projectParam },
-    [win, customRange, dim, tool, project, gran.params],
+    { ...winParams, ...gran.params, dim, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, dim, tool, model, project, gran.params],
   );
   // The day-of-week x hour heatmap stays cyclic by design; it honours the
   // global window and buckets in the viewer's zone.
   const hours = useApi<AnalysisCostByDowHour>(
     "/api/analysis/cost-by-dow-hour",
-    { ...winParams, tz: viewerTimeZone(), tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tz: viewerTimeZone(), tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const savings = useApi<AnalysisCacheSavingsTrend>(
     "/api/analysis/cache-savings-trend",
-    { ...winParams, ...gran.params, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project, gran.params],
+    { ...winParams, ...gran.params, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project, gran.params],
   );
   const trendGran = asGranularity(trend.data?.bucket ?? gran.expected);
   const savingsGran = asGranularity(savings.data?.bucket ?? gran.expected);
   const movers = useApi<AnalysisMovers>(
     "/api/analysis/movers",
-    { ...winParams, dim, tool: toolParam, project: projectParam },
-    [win, customRange, dim, tool, project],
+    { ...winParams, dim, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, dim, tool, model, project],
   );
   const topSessions = useApi<AnalysisTopSessions>(
     "/api/analysis/top-sessions",
-    { ...winParams, limit: 12, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, limit: 12, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   const routing = useApi<AnalysisRoutingSuggestions>(
     "/api/analysis/routing-suggestions",
-    { ...winParams, limit: 8, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, limit: 8, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
   // /api/verbosity/aggregate takes a day-grained `since_days` (not
   // the standard days/hours/since window shape), so it uses the
   // rounded-up day count for sub-day / custom windows.
   const verbosity = useApi<VerbosityAggregateResponse>(
     "/api/verbosity/aggregate",
-    { by: vbDim, since_days: windowDaysApprox(win, customRange) },
-    [win, customRange, vbDim],
+    {
+      by: vbDim,
+      since_days: windowDaysApprox(win, customRange),
+      tool: toolParam,
+      project: projectParam,
+      model: modelParam,
+    },
+    [win, customRange, vbDim, tool, model, project],
   );
   // /api/tasks (docs/task-tracking.md) takes the same days/hours/since/until
   // window shape as every other analysis endpoint here, plus the same
@@ -170,8 +191,8 @@ export function AnalysisPage() {
   // for API compatibility, which nothing in the frontend resolves to.
   const taskRollup = useApi<TaskRollup>(
     "/api/tasks",
-    { ...winParams, tool: toolParam, project: projectParam },
-    [win, customRange, tool, project],
+    { ...winParams, tool: toolParam, project: projectParam, model: modelParam },
+    [win, customRange, tool, model, project],
   );
 
   return (
@@ -179,12 +200,15 @@ export function AnalysisPage() {
       <PageHeader
         icon={navIcon("analysis")}
         title="Analysis"
-        sub="Spending insights for the selected window. Headline KPIs comparing this period to the prior period, daily trend with a dimension toggle, top movers, and cost-sensitive signals - $/M output, cache savings, high-context turns, per-turn variance, burn rate, top-model concentration, and routing efficiency suggestions."
+        sub={costLabel(
+          "Spending insights for the selected window. Headline KPIs comparing this period to the prior period, daily trend with a dimension toggle, top movers, and cost-sensitive signals - $/M output, cache savings, high-context turns, per-turn variance, burn rate, top-model concentration, and routing efficiency suggestions.",
+          "Usage insights for the selected window. Headline KPIs, token trend with a dimension toggle, top movers, cache efficacy, high-context turns, top-model concentration, and routing suggestions.",
+        )}
         helpId="tab.analysis"
       />
       {/* The page grew into one long column: a sticky chip row jumps to each
           section and tracks the one in view. */}
-      <SectionNav items={ANALYSIS_SECTIONS} />
+      <SectionNav items={analysisSections()} />
       <span id="an-headline" aria-hidden className="-mb-6 block scroll-mt-14" />
       <HeadlineGrid
         data={head.data}
@@ -199,9 +223,9 @@ export function AnalysisPage() {
       {/* Spend per bucket by dim */}
       <span id="an-trend" aria-hidden className="-mb-6 block scroll-mt-14" />
       <ChartShell
-        title={<TitleWithHelp text={perBucketTitle("Spend", trendGran)} helpId="chart.analysis_trend" />}
+        title={<TitleWithHelp text={perBucketTitle(costLabel("Spend", "Tokens"), trendGran)} helpId="chart.analysis_trend" />}
         icon={SECTION_ICONS.dailySpend}
-        sub={`${perBucketTitle("Cost", trendGran)}, stacked by ${dim} · ${win}`}
+        sub={`${perBucketTitle(costLabel("Cost", "Tokens"), trendGran)}, stacked by ${dim} · ${win}`}
         right={
           <div className="flex flex-wrap items-center gap-2">
             <GranControl served={trend.data} />
@@ -225,7 +249,7 @@ export function AnalysisPage() {
           denied={trend.denied}
           deniedPermission={trend.deniedPermission}
           empty={!trend.data?.series?.length}
-          emptyHint="No spend data in this window."
+          emptyHint={costLabel("No spend data in this window.", "No usage data in this window.")}
           height={280}
         >
           {trend.data && (
@@ -242,11 +266,13 @@ export function AnalysisPage() {
 
       {/* Hourly heatmap + cache savings trend side by side */}
       <span id="an-when" aria-hidden className="-mb-6 block scroll-mt-14" />
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      {/* The cache savings trend is dollars only: in the org's token-usage
+          view the heatmap (turns by hour) runs full width. */}
+      <div className={dollarsShown() ? "grid grid-cols-1 gap-4 xl:grid-cols-2" : "grid grid-cols-1 gap-4"}>
         <ChartShell
-          title={<TitleWithHelp text="When you spend" helpId="chart.analysis_cost_by_hour" />}
+          title={<TitleWithHelp text={costLabel("When you spend", "When you work")} helpId="chart.analysis_cost_by_hour" />}
           icon={SECTION_ICONS.whenYouSpend}
-          sub={`Cost by hour of day × day of week · ${hours.data?.timezone ?? "UTC"} · ${win}`}
+          sub={`${costLabel("Cost", "Turns")} by hour of day × day of week · ${hours.data?.timezone ?? "UTC"} · ${win}`}
         >
           <ChartState
             loading={hours.loading}
@@ -255,8 +281,8 @@ export function AnalysisPage() {
             error={hours.error}
             denied={hours.denied}
             deniedPermission={hours.deniedPermission}
-            empty={!hours.data?.cells.some((c) => c.cost_usd > 0)}
-            emptyHint="No hourly spend in window."
+            empty={!hours.data?.cells.some((c) => c.cost_usd > 0 || c.turn_count > 0)}
+            emptyHint={costLabel("No hourly spend in window.", "No hourly activity in window.")}
             height={200}
           >
             {hours.data && (
@@ -268,6 +294,7 @@ export function AnalysisPage() {
           </ChartState>
         </ChartShell>
 
+        {dollarsShown() && (
         <ChartShell
           title={<TitleWithHelp text="Cache savings trend" helpId="chart.analysis_cache_savings_trend" />}
           icon={SECTION_ICONS.cacheSavingsTrend}
@@ -290,6 +317,7 @@ export function AnalysisPage() {
             )}
           </ChartState>
         </ChartShell>
+        )}
       </div>
 
       {/* What changed */}
@@ -298,7 +326,7 @@ export function AnalysisPage() {
         <ChartShell
           title={<TitleWithHelp text="Top movers" helpId="chart.analysis_movers" />}
           icon={SECTION_ICONS.topMovers}
-          sub={`Δ$ vs prior ${win} · grouped by ${dim}`}
+          sub={`${costLabel("Δ$", "Δ%")} vs prior ${win} · grouped by ${dim}`}
         >
           <ChartState
             loading={movers.loading}
@@ -347,9 +375,9 @@ export function AnalysisPage() {
       {/* Top expensive sessions */}
       <span id="an-sessions" aria-hidden className="-mb-6 block scroll-mt-14" />
       <ChartShell
-        title={<TitleWithHelp text="Top expensive sessions" helpId="chart.analysis_top_sessions" />}
+        title={<TitleWithHelp text={costLabel("Top expensive sessions", "Top sessions")} helpId="chart.analysis_top_sessions" />}
         icon={SECTION_ICONS.topSessions}
-        sub={`Ranked by cost · ${win} · click to drill into session`}
+        sub={`${costLabel("Ranked by cost", "Heaviest sessions")} · ${win} · click to drill into session`}
         right={
           <Link
             to="/sessions"
@@ -367,7 +395,7 @@ export function AnalysisPage() {
           denied={topSessions.denied}
           deniedPermission={topSessions.deniedPermission}
           empty={!topSessions.data?.sessions?.length}
-          emptyHint="No spend in window."
+          emptyHint={costLabel("No spend in window.", "No sessions in window.")}
           height={240}
         >
           {topSessions.data && (
@@ -381,12 +409,12 @@ export function AnalysisPage() {
       <ChartShell
         title={<TitleWithHelp text="Routing efficiency" helpId="chart.analysis_routing" />}
         icon={SECTION_ICONS.routingEfficiency}
-        sub={
+        sub={maskDollarAmounts(
           routing.data?.framing_note ||
-          "Informational only - model choice may be deliberate"
-        }
+          "Informational only - model choice may be deliberate",
+        )}
         right={
-          routing.data ? (
+          routing.data && dollarsShown() ? (
             <span className="text-[11px] text-fg-3">
               potential savings:{" "}
               <strong className="text-success">
@@ -418,7 +446,7 @@ export function AnalysisPage() {
       <ChartShell
         title={<TitleWithHelp text="Output composition" helpId="chart.analysis_verbosity" />}
         icon={SECTION_ICONS.outputComposition}
-        sub={`Code (writes + commands + code blocks) vs explanation by ${vbDim} · bytes exact, $ estimated · ${win}`}
+        sub={`Code (writes + commands + code blocks) vs explanation by ${vbDim} · ${costLabel("bytes exact, $ estimated", "bytes exact")} · ${win}`}
         right={
           <SegmentedControl<VerbDim>
             options={[
@@ -492,7 +520,7 @@ function VerbosityAggregateTable({
 }) {
   type Group = VerbosityAggregateResponse["groups"][number];
   const columns = useMemo<ColumnDef<Group, unknown>[]>(
-    () => [
+    () => withoutDollars<ColumnDef<Group, unknown>>([
       {
         id: "key",
         header: dim,
@@ -574,7 +602,7 @@ function VerbosityAggregateTable({
           </span>
         ),
       },
-    ],
+    ], (c) => c.id === "usd"),
     [dim, keyDim],
   );
   return (
@@ -586,9 +614,11 @@ function VerbosityAggregateTable({
         minWidth={760}
       />
       <p className="mt-2 pl-2 text-[10px] text-fg-3">
-        Code = file writes + shell commands + fenced code blocks. Bytes are
-        exact; “Est. $” apportions each group's output tokens by content type
-        and prices at the model's output rate.
+        Code = file writes + shell commands + fenced code blocks.{" "}
+        {costLabel(
+          "Bytes are exact; “Est. $” apportions each group's output tokens by content type and prices at the model's output rate.",
+          "Bytes are exact.",
+        )}
       </p>
     </div>
   );
@@ -643,6 +673,18 @@ function HeadlineGrid({
     );
   }
   if (!data) return null;
+  if (!dollarsShown()) {
+    return (
+      <TokenHeadlineGrid
+        data={data}
+        projectsAllTime={projectsAllTime}
+        scoped={scoped}
+        trend={trend}
+        win={win}
+        loading={loading}
+      />
+    );
+  }
 
   const periodDelta = data.period.prior_is_zero ? null : data.period.delta_pct;
   const monthDelta = data.month.prior_month_is_zero
@@ -861,6 +903,160 @@ function HeadlineGrid({
   );
 }
 
+// TokenHeadlineGrid is the headline in the org's token-usage view (format.ts
+// cost affordances): the dollar-only tiles (period and month spend, $/M
+// output, cache savings, $ per turn, burn rate) give way to the token and
+// activity figures the same payloads carry, and the budget shows as a share
+// of its cap, never as dollars.
+function TokenHeadlineGrid({
+  data,
+  projectsAllTime,
+  scoped,
+  trend,
+  win,
+  loading,
+}: {
+  data: AnalysisHeadline;
+  projectsAllTime: number | null;
+  scoped: StatusScoped | null;
+  trend: AnalysisTrend | null;
+  win: string;
+  loading: boolean;
+}) {
+  const byBucket = new Map<string, { t: number; v: number }>();
+  for (const g of trend?.grid ?? []) byBucket.set(g.bucket, { t: g.t, v: 0 });
+  let total = 0;
+  for (const p of trend?.series ?? []) {
+    const cur = byBucket.get(p.bucket) ?? { t: p.t, v: 0 };
+    cur.v += p.total_tokens;
+    total += p.total_tokens;
+    byBucket.set(p.bucket, cur);
+  }
+  const bucketTokens = [...byBucket.values()].sort((a, b) => a.t - b.t).map((b) => b.v);
+  const budget = data.month.budget_usd;
+  const budgetPct = budget > 0 ? data.month.budget_pct : null;
+  const pacePct = budget > 0 ? (data.month.projection_usd / budget) * 100 : null;
+
+  return (
+    <Stagger className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+      <StatCard
+        label={`Tokens (${win})`}
+        icon={<MetricIcon metric="tokens" />}
+        loading={loading}
+        value={trend ? fmtCompact(total) : "-"}
+        sub={`${fmtInt(data.per_turn.count)} turns`}
+        spark={bucketTokens}
+        sparkColor="var(--accent)"
+        accent
+      />
+
+      {budgetPct != null && (
+        <StatCard
+          label="Budget MTD"
+          icon={<MetricIcon metric="budget" />}
+          loading={loading}
+          value={`${Math.round(budgetPct)}%`}
+          unit="of cap"
+          sub={
+            pacePct != null && pacePct > 0
+              ? `day ${data.month.days_elapsed}/${data.month.days_in_month} · on pace ${Math.round(pacePct)}%`
+              : `day ${data.month.days_elapsed}/${data.month.days_in_month}`
+          }
+          warn={budgetPct > 80}
+        >
+          <div className="mt-2 h-1 w-full overflow-hidden rounded-pill bg-bg-3">
+            <span
+              className="block h-full"
+              style={{
+                width: `${Math.min(100, budgetPct)}%`,
+                background:
+                  budgetPct > 100
+                    ? "var(--danger)"
+                    : budgetPct > 80
+                      ? "var(--warn)"
+                      : "var(--success)",
+              }}
+            />
+          </div>
+        </StatCard>
+      )}
+
+      <StatCard
+        label="Output"
+        icon={<MetricIcon metric="output" />}
+        loading={loading}
+        value={fmtCompact(data.output_rate.output_tokens)}
+        sub="output tokens"
+      />
+
+      <StatCard
+        label="Cache Efficacy"
+        helpId="tile.analysis.cache_efficacy"
+        icon={<MetricIcon metric="cacheHitRate" />}
+        loading={loading}
+        value={fmtPct(data.cache.efficacy)}
+        sub={`${fmtCompact(data.cache.read_tokens)} / ${fmtCompact(
+          data.cache.read_tokens + data.cache.write_tokens,
+        )}`}
+      />
+
+      <StatCard
+        label="High Context"
+        helpId="tile.analysis.high_context"
+        icon={<MetricIcon metric="highContext" />}
+        loading={loading}
+        value={fmtInt(data.high_context.turns_over_100k)}
+        sub={`${fmtInt(data.high_context.turns_over_200k)} over 200K`}
+        warn={data.high_context.turns_over_200k > 0}
+      />
+
+      <StatCard
+        label="Active hours"
+        icon={<MetricIcon metric="burnRate" />}
+        loading={loading}
+        value={fmtInt(data.burn_rate.active_hours)}
+        sub={`${fmtInt(data.per_turn.count)} turns`}
+      />
+
+      <StatCard
+        label="Top Model"
+        icon={<MetricIcon metric="topModel" />}
+        loading={loading}
+        value={
+          data.top_model.key ? (
+            <ModelId model={data.top_model.key} markSize={18} className="min-w-0 text-[18px]" />
+          ) : (
+            <span className="font-mono text-[18px]">-</span>
+          )
+        }
+        sub={`${fmtPct(data.top_model.concentration_pct, 1, false)} concentration`}
+      />
+
+      <StatCard
+        label="Waste"
+        icon={<MetricIcon metric="waste" />}
+        loading={loading}
+        value={fmtCost(data.waste.usd, data.waste.tokens)}
+        sub="stale-read tokens"
+        warn={data.waste.tokens > 0}
+      />
+
+      <StatCard
+        label={`Sessions (${win})`}
+        helpId="tile.sessions"
+        icon={<MetricIcon metric="sessions" />}
+        loading={loading}
+        value={fmtInt(scoped?.sessions)}
+        sub={
+          projectsAllTime
+            ? `across ${fmtInt(projectsAllTime)} projects all-time`
+            : undefined
+        }
+      />
+    </Stagger>
+  );
+}
+
 // ----------------------------------------------------- Movers / Entrants
 
 // Per-dimension key renderer, table-driven (CLAUDE.md #5): a MODEL key gets
@@ -911,7 +1107,8 @@ function MoversBlock({
     const deltaCls = positive ? "text-success" : "text-danger";
     const deltaPct = (m: Mover) =>
       m.prior_usd > 0 ? (m.delta_usd / m.prior_usd) * 100 : null;
-    return [
+    // The $ columns drop in the org's token-usage view; Δ % stays (a ratio).
+    return withoutDollars<ColumnDef<Mover, unknown>>([
       {
         id: "key",
         header: "Key",
@@ -970,7 +1167,7 @@ function MoversBlock({
           );
         },
       },
-    ];
+    ], (c) => c.id === "prior" || c.id === "current" || c.id === "delta");
   }, [dim, positive]);
   if (!rows.length) {
     return (
@@ -997,7 +1194,7 @@ function MoversBlock({
   );
 }
 
-const entrantColumns = (dim: string): ColumnDef<Entrant, unknown>[] => [
+const entrantColumns = (dim: string): ColumnDef<Entrant, unknown>[] => withoutDollars<ColumnDef<Entrant, unknown>>([
   {
     id: "key",
     header: "Key",
@@ -1025,7 +1222,7 @@ const entrantColumns = (dim: string): ColumnDef<Entrant, unknown>[] => [
       <span className="font-medium text-success">{fmtUSD(row.original.current_usd)}</span>
     ),
   },
-];
+], (c) => c.id === "current");
 
 function EntrantsList({ entrants, dim }: { entrants: Entrant[]; dim: string }) {
   const columns = useMemo(() => entrantColumns(dim), [dim]);
@@ -1126,7 +1323,7 @@ function TopSessionsTable({ rows }: { rows: TopSession[] }) {
   return (
     <DataTable<TopSession>
       data={rows}
-      columns={TOP_SESSION_COLUMNS}
+      columns={withoutDollars(TOP_SESSION_COLUMNS, (c) => c.id === "cost")}
       rowKey={(s) => s.id}
       // DataTable pads every cell (px-2), so the old 760 floor left the
       // session/models columns wrapping at phone width.
@@ -1218,7 +1415,10 @@ function RoutingList({ suggestions }: { suggestions: RoutingSuggestion[] }) {
   return (
     <DataTable<RoutingSuggestion>
       data={suggestions}
-      columns={ROUTING_COLUMNS}
+      columns={withoutDollars(
+        ROUTING_COLUMNS,
+        (c) => c.id === "current" || c.id === "suggested" || c.id === "savings",
+      )}
       rowKey={(s) => s.session_id}
       minWidth={840}
     />
@@ -1269,7 +1469,7 @@ function TaskRollupSection({ data }: { data: TaskRollup }) {
   if (data.sessions_with_tasks === 0) {
     return (
       <p className="text-[11.5px] text-fg-3">
-        No sessions in this window used a todo/plan tool — most don't; this
+        No sessions in this window used a todo/plan tool - most don't; this
         is the normal case, not a gap.
       </p>
     );
@@ -1292,7 +1492,7 @@ function TaskRollupSection({ data }: { data: TaskRollup }) {
       {data.by_tool.length > 0 && (
         <DataTable<TaskToolRow>
           data={data.by_tool}
-          columns={TASK_TOOL_COLUMNS}
+          columns={withoutDollars(TASK_TOOL_COLUMNS, (c) => c.id === "cost")}
           rowKey={(t) => t.tool}
           minWidth={480}
         />
@@ -1310,11 +1510,11 @@ function TaskRollupSection({ data }: { data: TaskRollup }) {
       {data.counts.unmatched > 0 && !data.counts.all_sessions_keys_native && (
         <p className="text-[10.5px] text-fg-3">
           {data.counts.unmatched} item(s) across these sessions could not be
-          matched across updates (the tool has no stable id — text changed
+          matched across updates (the tool has no stable id - text changed
           between snapshots).
         </p>
       )}
-      {data.cost_note && (
+      {data.cost_note && dollarsShown() && (
         <p className="text-[10.5px] text-fg-3">{data.cost_note}</p>
       )}
     </div>
@@ -1347,7 +1547,10 @@ function TaskBucketCard({
         {label}
       </div>
       <div className="mt-0.5 tabular-nums text-[14px] font-semibold text-fg-1">
-        {bucket.unpriced ? (
+        {!dollarsShown() ? (
+          // Token-usage view: the bucket's token volume in place of its cost.
+          fmtCompact(bucket.tokens.input_tokens + bucket.tokens.output_tokens) + " tok"
+        ) : bucket.unpriced ? (
           <span className="text-fg-3">unpriced</span>
         ) : (
           fmtTaskUSD(bucket.cost_usd)

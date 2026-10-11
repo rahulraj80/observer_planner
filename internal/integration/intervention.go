@@ -65,16 +65,25 @@ const (
 	// WorkerVersionedSibling names native files in the launcher's directory
 	// whose basename starts with the declared prefix.
 	WorkerVersionedSibling WorkerDiscoveryKind = "versioned_sibling"
+	// WorkerVersionedDirectory names one native file at the exact Inner path
+	// inside every version-named subdirectory of the launcher-relative
+	// Relative directory (Relative/<version>/Inner). It is the layout of a
+	// self-updating installer whose shell shim execs a per-version payload.
+	WorkerVersionedDirectory WorkerDiscoveryKind = "versioned_directory"
 )
 
 // WorkerDiscoverySpec declares a grounded native worker path relative to a
-// resolved launcher. Relative is used by WorkerExactRelative. Prefix is used
-// by WorkerVersionedSibling. Both forms require the discovered file to be a
+// resolved launcher. Relative is used by WorkerExactRelative (the worker
+// file) and WorkerVersionedDirectory (the directory holding one subdirectory
+// per version). Prefix is used by WorkerVersionedSibling. Inner is used by
+// WorkerVersionedDirectory: the exact relative path of the worker inside each
+// version subdirectory. Every form requires the discovered file to be a
 // regular executable ELF before it enters an install manifest.
 type WorkerDiscoverySpec struct {
 	Kind     WorkerDiscoveryKind
 	Relative string
 	Prefix   string
+	Inner    string
 }
 
 // InvocationSpec is the closed argv classifier for one process surface.
@@ -129,11 +138,25 @@ func (s InvocationSpec) AllowsCLI() bool {
 // ProcessBindingSpec states which installed process shapes are safe to bind
 // for one dedicated surface. A shell launcher is never itself bindable. It
 // may lead to a native target only through a grounded Workers declaration.
+//
+// NativeNames lists grounded basenames the RESOLVED native executable may
+// carry besides the Binary row's launcher names, for an installer whose PATH
+// entry is a symlink to a release asset kept under its own name (for example
+// grok's ~/.local/bin/grok -> ~/.grok/downloads/grok-linux-x86_64). A
+// resolved file whose name is in neither list is still refused, so a symlink
+// to an unrelated program can never become a target.
+//
+// LaunchOverrideEnv names the environment variables the vendor's own launcher
+// reads to run a binary OUTSIDE the declared layout (cline's CLINE_BIN_PATH,
+// junie's JUNIE_DATA). The controller cannot bind such a binary, so a launch
+// that sets one is never admitted on process cutoff.
 type ProcessBindingSpec struct {
 	AllowNative       bool
 	Invocation        InvocationSpec
 	Interpreters      []InterpreterKind
 	Workers           []WorkerDiscoverySpec
+	NativeNames       []string
+	LaunchOverrideEnv []string
 	UnsupportedReason string
 }
 
@@ -166,7 +189,20 @@ var interventionDeclarations = map[string][]interventionDeclaration{
 	"claude-code":     {dedicated("cli", native(), NativeUsagePresent), shared("embedded", "desktop and IDE embedded surfaces are shared hosts")},
 	"claude-web":      {remote("web")},
 	"cline":           {shared("ide", "the VS Code extension runs in a shared Code host")},
-	"cline-cli":       {dedicated("cli", nativeOnlyWithUnsupportedLauncher("the npm launcher hands off to an undeclared platform worker layout"), NativeUsagePresent)},
+	"cline-cli": {
+		// npm `cline` 3.0.68, grounded read-only on demo node 1 (2026-10-08):
+		// bin/cline is a Node resolver that spawnSync()s a compiled worker
+		// with the user's argv, trying bin/.cline (written by postinstall)
+		// first, then @cline/cli-<platform>-<arch>/bin/cline found by walking
+		// up node_modules. Each declared worker is bound exactly; the Node
+		// resolver is never a target.
+		dedicated("cli", ProcessBindingSpec{
+			AllowNative:       true,
+			Invocation:        defaultInvocation(),
+			Workers:           clineCLILinuxWorkers(),
+			LaunchOverrideEnv: []string{"CLINE_BIN_PATH"},
+		}, NativeUsagePresent),
+	},
 	"codex": {
 		dedicated("cli", ProcessBindingSpec{
 			AllowNative: true,
@@ -182,24 +218,63 @@ var interventionDeclarations = map[string][]interventionDeclaration{
 		}, NativeUsagePresent),
 		shared("embedded", "desktop and IDE embedded cores require a separate child identity"),
 	},
-	"command-code":  {dedicated("cli", interpreted(InterpreterNode), NativeUsageApproximate)},
-	"copilot":       {shared("ide", "the VS Code extension runs in a shared Code host")},
-	"copilot-cli":   {dedicated("cli", nativeOnlyWithUnsupportedLauncher("the npm loader hands off to an undeclared platform worker layout"), NativeUsageApproximate)},
-	"copilot-web":   {remote("web")},
-	"cowork":        {shared("desktop", "the desktop shell and its children do not isolate one governed session")},
-	"crush":         {dedicated("cli", unsupportedBinding("the Node shim hands off to an undeclared Go worker layout"), NativeUsageApproximate)},
-	"cursor":        {dedicated("cli", nativeInvoking(cursorInvocation()), NativeUsageApproximate), shared("ide", "the Cursor IDE host may contain unrelated sessions")},
-	"deepseek":      {remote("web")},
-	"devin":         {dedicated("cli", native(), NativeUsageApproximate), shared("desktop", "the Cascade desktop host is shared")},
-	"droid":         {dedicated("cli", native(), NativeUsageApproximate)},
-	"freebuff":      {dedicated("cli", nativeOnlyWithUnsupportedLauncher("the npm launcher downloads and spawns a worker outside its package; bind the grounded native candidate directly"), NativeUsageUnavailable), shared("desktop", "the desktop host is not a session-isolated worker")},
-	"gemini-cli":    {dedicated("cli", interpreted(InterpreterNode), NativeUsagePresent)},
-	"gemini-web":    {remote("web")},
-	"goose":         {dedicated("cli", native(), NativeUsageApproximate)},
-	"grok":          {dedicated("cli", native(), NativeUsageApproximate)},
-	"grokbot":       {remote("provider-sandbox")},
-	"hermes":        {dedicated("cli", unsupportedBinding("the Bourne launcher and Python worker relationship has no exact installed entrypoint declaration"), NativeUsagePresent)},
-	"junie":         {shared("jetbrains-acp", "the ACP child is launched from a shared JetBrains host and has no Binary resolution row")},
+	"command-code": {dedicated("cli", interpreted(InterpreterNode), NativeUsageApproximate)},
+	"copilot":      {shared("ide", "the VS Code extension runs in a shared Code host")},
+	"copilot-cli":  {dedicated("cli", nativeOnlyWithUnsupportedLauncher("the npm loader hands off to an undeclared platform worker layout"), NativeUsageApproximate)},
+	"copilot-web":  {remote("web")},
+	"cowork":       {shared("desktop", "the desktop shell and its children do not isolate one governed session")},
+	"crush": {
+		// npm `@charmland/crush` 0.97.1, grounded read-only on demo node 1
+		// (2026-10-08): the PATH entry links to run-crush.js, a GoReleaser
+		// Node shim whose lib.js spawnSync()s <package>/bin/crush (a static
+		// Go ELF) with the user's argv. A release-archive or `go install`
+		// crush is that same Go binary named crush, bound natively.
+		dedicated("cli", ProcessBindingSpec{
+			AllowNative: true,
+			Invocation:  defaultInvocation(),
+			Workers:     []WorkerDiscoverySpec{{Kind: WorkerExactRelative, Relative: "bin/crush"}},
+		}, NativeUsageApproximate),
+	},
+	"cursor":     {dedicated("cli", nativeInvoking(cursorInvocation()), NativeUsageApproximate), shared("ide", "the Cursor IDE host may contain unrelated sessions")},
+	"deepseek":   {remote("web")},
+	"devin":      {dedicated("cli", native(), NativeUsageApproximate), shared("desktop", "the Cascade desktop host is shared")},
+	"droid":      {dedicated("cli", native(), NativeUsageApproximate)},
+	"freebuff":   {dedicated("cli", nativeOnlyWithUnsupportedLauncher("the npm launcher downloads and spawns a worker outside its package; bind the grounded native candidate directly"), NativeUsageUnavailable), shared("desktop", "the desktop host is not a session-isolated worker")},
+	"gemini-cli": {dedicated("cli", interpreted(InterpreterNode), NativeUsagePresent)},
+	"gemini-web": {remote("web")},
+	"goose":      {dedicated("cli", native(), NativeUsageApproximate)},
+	"grok": {
+		// Grounded read-only on demo node 1 (2026-10-08): the installer's
+		// ~/.local/bin/grok links through ~/.grok/bin/grok to the release
+		// asset ~/.grok/downloads/grok-linux-x86_64, a native ELF.
+		dedicated("cli", ProcessBindingSpec{
+			AllowNative: true,
+			Invocation:  defaultInvocation(),
+			NativeNames: []string{"grok-linux-x86_64"},
+		}, NativeUsageApproximate),
+	},
+	"grokbot": {remote("provider-sandbox")},
+	"hermes":  {dedicated("cli", unsupportedBinding("the Bourne launcher and Python worker relationship has no exact installed entrypoint declaration"), NativeUsagePresent)},
+	"junie": {
+		// The standalone CLI (2026-10-03): install.sh writes a bash shim at
+		// ~/.local/bin/junie (junie.bat on Windows). Grounded on demo node 1
+		// (2026-10-08, junie 3579.5, read-only): the shim execs
+		// ~/.local/share/junie/versions/<v>/junie, a 100-byte bash script that
+		// execs <v>/junie-app/bin/junie, a jpackage native ELF launcher that
+		// runs the bundled JVM (lib/runtime) in its own process image. The
+		// shim's own get_binary_path_in also accepts <v>/junie/bin/junie as
+		// the Linux layout, so both inner paths are declared. Each version
+		// directory's ELF is bound exactly; the shell shim and the script are
+		// never targets. events.jsonl carries per-call modelUsage (tokens +
+		// cost), live-captured from a CLI run on 2026-09-07.
+		dedicated("cli", ProcessBindingSpec{
+			AllowNative:       true,
+			Invocation:        defaultInvocation(),
+			Workers:           junieLinuxWorkers(),
+			LaunchOverrideEnv: []string{"JUNIE_DATA"},
+		}, NativeUsagePresent),
+		shared("jetbrains-acp", "the ACP child is launched from a shared JetBrains host"),
+	},
 	"kilo-code":     {shared("ide", "the VS Code extension runs in a shared Code host")},
 	"kilo-code-cli": {dedicated("cli", nativeOnlyWithUnsupportedLauncher("the npm shim hands off to an undeclared platform worker layout"), NativeUsagePresent)},
 	"kimi-code":     {dedicated("cli", native(), NativeUsageApproximate)},
@@ -222,12 +297,26 @@ var interventionDeclarations = map[string][]interventionDeclaration{
 	"opencode":         {dedicated("cli", native(), NativeUsagePresent), shared("desktop", "the Electron desktop host is shared")},
 	"perplexity-web":   {remote("web")},
 	"pi":               {dedicated("cli", interpreted(InterpreterNode), NativeUsageApproximate)},
-	"poolside":         {shared("jetbrains-acp", "the ACP child lacks a grounded standalone Binary resolution row")},
-	"prime-agent":      {dedicated("cli", interpreted(InterpreterNode), NativeUsageApproximate)},
-	"qoder":            {dedicated("cli", nativeOrInterpreted(InterpreterNode), NativeUsageUnavailable), shared("ide", "the hosted IDE surface is shared")},
-	"qwen-code":        {dedicated("cli", interpreted(InterpreterNode), NativeUsageApproximate)},
-	"zcode":            {dedicated("cli", interpretedInvoking(nonBillableInvocation(zcodeNonBillableArguments()...), InterpreterNode), NativeUsagePresent), shared("desktop", "the Electron desktop host is shared")},
-	"zed":              {shared("ide", "Zed is the editor host and has no session-isolated worker declaration")},
+	"poolside": {
+		// The standalone `pool` CLI (2026-10-03): install.sh MOVES the native
+		// binary to ~/.local/bin/pool, so the installed file is the target.
+		// Usage source (T-706, demo node 1, 2026-10-08): a Linux `pool` 1.0.16
+		// run writes ~/.local/state/poolside/trajectories/trajectory-
+		// standalone_<sid>.ndjson, the same per-call
+		// tool_call.inference.end token records the Windows ACP store
+		// carries, and the adapter now watches that root.
+		dedicated("cli", native(), NativeUsagePresent),
+		shared("jetbrains-acp", "the ACP child is launched from a shared JetBrains host"),
+	},
+	// prime-agent 0.9.8 on demo node 1 (2026-10-08, read-only):
+	// ~/.local/bin/prime-agent links to a native ELF named prime-agent under
+	// ~/.local/share/prime-agent/releases/<version>/; a Node entrypoint stays
+	// declared for a package-manager install.
+	"prime-agent": {dedicated("cli", nativeOrInterpreted(InterpreterNode), NativeUsageApproximate)},
+	"qoder":       {dedicated("cli", nativeOrInterpreted(InterpreterNode), NativeUsageUnavailable), shared("ide", "the hosted IDE surface is shared")},
+	"qwen-code":   {dedicated("cli", interpreted(InterpreterNode), NativeUsageApproximate)},
+	"zcode":       {dedicated("cli", interpretedInvoking(nonBillableInvocation(zcodeNonBillableArguments()...), InterpreterNode), NativeUsagePresent), shared("desktop", "the Electron desktop host is shared")},
+	"zed":         {shared("ide", "Zed is the editor host and has no session-isolated worker declaration")},
 }
 
 func dedicated(id string, binding ProcessBindingSpec, nativeUsage NativeUsageKind) interventionDeclaration {
@@ -423,6 +512,31 @@ func codexLinuxWorkers() []WorkerDiscoverySpec {
 	}
 }
 
+// clineCLILinuxWorkers is the resolution order of the npm `cline` package's
+// own bin/cline resolver (3.0.68, read on demo node 1): the postinstall cache
+// beside the resolver, then the platform package in the package's own
+// node_modules, then in the global node_modules the package sits in.
+func clineCLILinuxWorkers() []WorkerDiscoverySpec {
+	return []WorkerDiscoverySpec{
+		{Kind: WorkerExactRelative, Relative: ".cline"},
+		{Kind: WorkerExactRelative, Relative: "../node_modules/@cline/cli-linux-x64/bin/cline"},
+		{Kind: WorkerExactRelative, Relative: "../node_modules/@cline/cli-linux-arm64/bin/cline"},
+		{Kind: WorkerExactRelative, Relative: "../../@cline/cli-linux-x64/bin/cline"},
+		{Kind: WorkerExactRelative, Relative: "../../@cline/cli-linux-arm64/bin/cline"},
+	}
+}
+
+// junieLinuxWorkers is the installer layout read from demo node 1 and from
+// the vendor shim's own get_binary_path_in (2026-10-08): the shim lives in
+// ~/.local/bin and every installed version is a directory under
+// ~/.local/share/junie/versions.
+func junieLinuxWorkers() []WorkerDiscoverySpec {
+	return []WorkerDiscoverySpec{
+		{Kind: WorkerVersionedDirectory, Relative: "../share/junie/versions", Inner: "junie-app/bin/junie"},
+		{Kind: WorkerVersionedDirectory, Relative: "../share/junie/versions", Inner: "junie/bin/junie"},
+	}
+}
+
 // InterventionFor returns every declared local/remote surface for tool. A
 // known registry row without a declaration returns one unclassified surface,
 // ensuring a newly added adapter cannot inherit process control accidentally.
@@ -479,5 +593,7 @@ func cloneProcessBinding(in ProcessBindingSpec) ProcessBindingSpec {
 	out.Invocation.NonCLILeadingArguments = append([]string(nil), in.Invocation.NonCLILeadingArguments...)
 	out.Interpreters = append([]InterpreterKind(nil), in.Interpreters...)
 	out.Workers = append([]WorkerDiscoverySpec(nil), in.Workers...)
+	out.NativeNames = append([]string(nil), in.NativeNames...)
+	out.LaunchOverrideEnv = append([]string(nil), in.LaunchOverrideEnv...)
 	return out
 }

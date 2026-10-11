@@ -36,7 +36,7 @@ func TestResolveTools_AllReturnsLongTailVendors(t *testing.T) {
 			t.Errorf("resolveTools(--all) selected=%v for %q, but autoInitSupported(%q)=%v (registry/predicate mismatch)", gotSelected, tool, tool, wantSelected)
 		}
 		if !wantSelected {
-			t.Errorf("autoInitSupported(%q) = false — this long-tail vendor is no longer auto-detected by --all; if this is an intentional registry change, update this test and the brief that assumed all seven pass", tool)
+			t.Errorf("autoInitSupported(%q) = false - this long-tail vendor is no longer auto-detected by --all; if this is an intentional registry change, update this test and the brief that assumed all seven pass", tool)
 		}
 	}
 	if !slices.Contains(got, "claude-code") {
@@ -159,13 +159,13 @@ func TestResolveBrowserExtensionIDFlag(t *testing.T) {
 			want:    idA + "," + idB,
 		},
 		{
-			name:    "valid multi-id, flag not changed (defensive — shouldn't happen in practice)",
+			name:    "valid multi-id, flag not changed (defensive - shouldn't happen in practice)",
 			changed: false,
 			raw:     idA + "," + idB,
 			want:    idA + "," + idB,
 		},
 		{
-			name:    "supplied but tokenizes to zero ids — commas and whitespace only — is rejected",
+			name:    "supplied but tokenizes to zero ids - commas and whitespace only - is rejected",
 			changed: true,
 			raw:     ", ,",
 			wantErr: true,
@@ -183,13 +183,13 @@ func TestResolveBrowserExtensionIDFlag(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "flag not supplied at all — empty string tolerated (placeholder path)",
+			name:    "flag not supplied at all - empty string tolerated (placeholder path)",
 			changed: false,
 			raw:     "",
 			want:    "",
 		},
 		{
-			name:    "flag not supplied at all — zero-token garbage tolerated too (defensive)",
+			name:    "flag not supplied at all - zero-token garbage tolerated too (defensive)",
 			changed: false,
 			raw:     ", ,",
 			want:    "",

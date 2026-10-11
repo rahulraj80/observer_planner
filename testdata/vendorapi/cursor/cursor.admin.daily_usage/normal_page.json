@@ -1,0 +1,36 @@
+{
+  "data": [
+    {
+      "userId": 12345,
+      "day": "2024-03-18",
+      "date": 1710720000000,
+      "isActive": true,
+      "totalLinesAdded": 1543,
+      "totalLinesDeleted": 892,
+      "acceptedLinesAdded": 1102,
+      "acceptedLinesDeleted": 645,
+      "totalApplies": 87,
+      "totalAccepts": 73,
+      "totalRejects": 14,
+      "totalTabsShown": 342,
+      "totalTabsAccepted": 289,
+      "composerRequests": 45,
+      "chatRequests": 128,
+      "agentRequests": 12,
+      "cmdkUsages": 67,
+      "subscriptionIncludedReqs": 180,
+      "apiKeyReqs": 0,
+      "usageBasedReqs": 5,
+      "bugbotUsages": 3,
+      "mostUsedModel": "gpt-5",
+      "applyMostUsedExtension": ".tsx",
+      "tabMostUsedExtension": ".ts",
+      "clientVersion": "0.25.1",
+      "email": "developer@company.com"
+    }
+  ],
+  "period": {
+    "startDate": 1710720000000,
+    "endDate": 1710892800000
+  }
+}

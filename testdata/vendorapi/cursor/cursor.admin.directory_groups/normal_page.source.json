@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "groups": "VerifiedOfficial",
+    "groups[]": "VerifiedOfficial",
+    "groups[].createdAt": "VerifiedOfficial",
+    "groups[].id": "VerifiedOfficial",
+    "groups[].memberCount": "VerifiedOfficial",
+    "groups[].monthlySpendingLimitDollars": "VerifiedOfficial",
+    "groups[].name": "VerifiedOfficial",
+    "groups[].updatedAt": "VerifiedOfficial",
+    "pagination": "VerifiedOfficial",
+    "pagination.hasNextPage": "Inferred",
+    "pagination.hasPreviousPage": "VerifiedOfficial",
+    "pagination.page": "VerifiedOfficial",
+    "pagination.pageSize": "VerifiedOfficial",
+    "pagination.totalCount": "VerifiedOfficial",
+    "pagination.totalPages": "VerifiedOfficial"
+  },
+  "fixture_sha256": "820924b6edc25307163e3a4c72bb9f4cf63eca3a14fd64baeda1c1aa8bb6e3bc",
+  "http": {
+    "method": "GET",
+    "path": "/teams/directory-groups",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Team directory groups\" section. The official example is itself a terminal page, so this first page is that example with the paging flag set to \"more\" (pagination.hasNextPage graded Inferred); last_page is the verbatim example.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Admin API docs page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "d6cf7e1dd3314a1b28f4ac1f699c255c0fd0b6acbff5c0d03cfb7b0837325cd3",
+  "source_url": "https://cursor.com/docs/account/teams/admin-api.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.admin.directory_groups"
+}

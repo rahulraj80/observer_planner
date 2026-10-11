@@ -136,7 +136,7 @@ export function CloudRow({ sessionId, onChanged }: { sessionId: string; onChange
       {error && <p role="alert" className="rounded-2 border border-danger/30 bg-danger-soft p-2 text-[11px] text-danger">{error}</p>}
       {notice && state !== "complete" && <p className="text-[11px] text-fg-3">{notice}</p>}
       {d.result && <div className="space-y-2">
-        {state !== "complete" && <p className="text-[11px] font-medium text-fg-3">Previous enrichment — the new request is shown above.</p>}
+        {state !== "complete" && <p className="text-[11px] font-medium text-fg-3">Previous enrichment - the new request is shown above.</p>}
         <CloudResultBlock result={d.result} />
       </div>}
       {d.result && !blocked && state === "complete" && <Button size="sm" onClick={() => setReenrich((v) => !v)}>{reenrich ? "Cancel re-enrichment" : "Re-enrich this session"}</Button>}

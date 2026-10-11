@@ -394,3 +394,43 @@ func DriftedTools(statuses []RouteStatus, absentIsDrift bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ObserverRoutePorts reports, for every inspected tool whose persisted route
+// points at a loopback observer URL, the port that URL names (U9, lane
+// FIX-UPGRADE): a route written for :8820 keeps pointing there after
+// [proxy].port changes, because Register* treats any loopback route as
+// already set. A URL without an explicit port reports its scheme default.
+// Read-only, like every inspector.
+func ObserverRoutePorts(homeDir string) map[string]int {
+	out := map[string]int{}
+	for _, ri := range routeInspectors() {
+		raw, _ := ri.read(homeDir)
+		if !IsObserverBaseURL(raw) {
+			continue
+		}
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			continue
+		}
+		port := u.Port()
+		switch {
+		case port != "":
+		case u.Scheme == "https":
+			port = "443"
+		default:
+			port = "80"
+		}
+		n := 0
+		for _, c := range port {
+			if c < '0' || c > '9' {
+				n = -1
+				break
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > 0 {
+			out[ri.tool] = n
+		}
+	}
+	return out
+}

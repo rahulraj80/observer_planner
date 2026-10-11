@@ -1,0 +1,26 @@
+{
+  "teamMemberSpend": [
+    {
+      "userId": "user_abc123",
+      "teamId": 101,
+      "name": "Alex",
+      "email": "developer@company.com",
+      "role": "member",
+      "spendCents": 2450
+    },
+    {
+      "userId": "user_def456",
+      "teamId": 202,
+      "name": "Sam",
+      "email": "admin@company.com",
+      "role": "owner",
+      "spendCents": 1875
+    }
+  ],
+  "totalMembers": 15,
+  "totalPages": 1,
+  "period": {
+    "startDate": 1735689600000,
+    "endDate": 1767225600000
+  }
+}

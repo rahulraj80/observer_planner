@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "role_id": "role_synth_org_member",
+      "role_name": "Member",
+      "role_type": "org"
+    }
+  ],
+  "has_next_page": false,
+  "end_cursor": null,
+  "total": 3
+}

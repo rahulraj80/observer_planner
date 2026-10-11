@@ -392,7 +392,7 @@ func TestRunGenericDiscovery(t *testing.T) {
 			t.Fatalf("announce calls=%d id=%q, want 1 / disco-1", calls, got)
 		}
 		if elapsed < cfg.window/2 {
-			t.Fatalf("announced after %v — must observe the whole window before announcing (>= %v)", elapsed, cfg.window/2)
+			t.Fatalf("announced after %v - must observe the whole window before announcing (>= %v)", elapsed, cfg.window/2)
 		}
 	})
 
@@ -491,6 +491,7 @@ func TestRunGenericDiscovery(t *testing.T) {
 }
 
 func TestResolveDiscoverableAdapter(t *testing.T) {
+	requireAdapter(t, "claude-code")
 	if a := resolveDiscoverableAdapter(""); a != nil {
 		t.Fatalf("empty tool must resolve nil, got %v", a.Name())
 	}

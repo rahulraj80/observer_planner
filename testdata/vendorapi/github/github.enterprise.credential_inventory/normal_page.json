@@ -1,0 +1,178 @@
+[
+  {
+    "inventory_id": "MDEyMzQ1Njc4OWFiY2RlZg",
+    "credential_id": 987654,
+    "hashed_token": "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=",
+    "fingerprint": null,
+    "item_type": "credential",
+    "credential_type": "classic_pat",
+    "display_name": "ci-automation",
+    "owner": {
+      "id": 1,
+      "login": "octocat"
+    },
+    "owner_type": "user",
+    "application": null,
+    "credential_state": "active",
+    "authorization_state": "currently_authorized",
+    "effective_access_state": "effective",
+    "state_reason": null,
+    "created_at": "2024-01-15T09:00:00Z",
+    "last_used_at": "2024-06-01T12:30:00Z",
+    "expires_at": "2025-01-15T09:00:00Z",
+    "next_expires_at": "2025-01-15T09:00:00Z",
+    "credential_instance_count": 1,
+    "enterprise_authorized": false,
+    "authorization_count": 1,
+    "authorized_organizations": [
+      {
+        "id": 10,
+        "login": "acme-eng"
+      }
+    ],
+    "age_days": 138,
+    "never_expires": false,
+    "past_expiration_policy": false,
+    "past_expiration_policy_basis": "enforced_limit",
+    "expiry_unknown": false,
+    "scopes": [
+      "repo",
+      "read:org"
+    ],
+    "permissions": null,
+    "repository_selection": null
+  },
+  {
+    "inventory_id": "ZmVkY2JhOTg3NjU0MzIxMA",
+    "credential_id": 246810,
+    "hashed_token": "B4iMbnUY6xW/eOlR2nDqA9pKz3sVt1cX8mZ0jL5wQpE=",
+    "fingerprint": null,
+    "item_type": "credential",
+    "credential_type": "oauth_app_user_token",
+    "display_name": "Acme Deploy",
+    "owner": {
+      "id": 2,
+      "login": "hubot"
+    },
+    "owner_type": "user",
+    "application": {
+      "id": 42,
+      "name": "Acme Deploy"
+    },
+    "credential_state": "active",
+    "authorization_state": "currently_authorized",
+    "effective_access_state": "effective",
+    "state_reason": null,
+    "created_at": "2024-03-10T14:00:00Z",
+    "last_used_at": "2024-06-02T08:15:00Z",
+    "expires_at": null,
+    "next_expires_at": null,
+    "credential_instance_count": 1,
+    "enterprise_authorized": false,
+    "authorization_count": 2,
+    "authorized_organizations": [
+      {
+        "id": 10,
+        "login": "acme-eng"
+      },
+      {
+        "id": 11,
+        "login": "acme-ops"
+      }
+    ],
+    "age_days": 83,
+    "never_expires": true,
+    "past_expiration_policy": false,
+    "past_expiration_policy_basis": "proposed_baseline",
+    "expiry_unknown": false,
+    "scopes": [
+      "read:user",
+      "repo"
+    ],
+    "permissions": null,
+    "repository_selection": null
+  },
+  {
+    "inventory_id": "c3NoLWtleS1leGFtcGxlLTAwMQ",
+    "credential_id": null,
+    "hashed_token": null,
+    "fingerprint": "SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8",
+    "item_type": "credential",
+    "credential_type": "ssh_key",
+    "display_name": "laptop-2024",
+    "owner": {
+      "id": 3,
+      "login": "monalisa"
+    },
+    "owner_type": "user",
+    "application": null,
+    "credential_state": "active",
+    "authorization_state": "currently_authorized",
+    "effective_access_state": "effective",
+    "state_reason": null,
+    "created_at": "2023-11-01T10:00:00Z",
+    "last_used_at": "2024-05-20T16:45:00Z",
+    "expires_at": null,
+    "next_expires_at": null,
+    "credential_instance_count": 1,
+    "enterprise_authorized": false,
+    "authorization_count": 1,
+    "authorized_organizations": [
+      {
+        "id": 10,
+        "login": "acme-eng"
+      }
+    ],
+    "age_days": 213,
+    "never_expires": true,
+    "past_expiration_policy": true,
+    "past_expiration_policy_basis": "proposed_baseline",
+    "expiry_unknown": false,
+    "scopes": null,
+    "permissions": null,
+    "repository_selection": null
+  },
+  {
+    "inventory_id": "YWJjZGVmMDEyMzQ1Njc4OQ",
+    "credential_id": 135790,
+    "hashed_token": null,
+    "fingerprint": null,
+    "item_type": "credential",
+    "credential_type": "fine_grained_pat",
+    "display_name": "release-bot",
+    "owner": {
+      "id": 3,
+      "login": "monalisa"
+    },
+    "owner_type": "user",
+    "application": null,
+    "credential_state": "active",
+    "authorization_state": "currently_authorized",
+    "effective_access_state": "effective",
+    "state_reason": null,
+    "created_at": "2024-05-01T10:00:00Z",
+    "last_used_at": "2024-06-03T16:45:00Z",
+    "expires_at": "2024-11-01T10:00:00Z",
+    "next_expires_at": "2024-11-01T10:00:00Z",
+    "credential_instance_count": 1,
+    "enterprise_authorized": false,
+    "authorization_count": 1,
+    "authorized_organizations": [
+      {
+        "id": 10,
+        "login": "acme-eng"
+      }
+    ],
+    "age_days": 45,
+    "never_expires": false,
+    "past_expiration_policy": false,
+    "past_expiration_policy_basis": "enforced_limit",
+    "expiry_unknown": false,
+    "scopes": null,
+    "permissions": {
+      "contents": "read",
+      "pull_requests": "write"
+    },
+    "repository_selection": "subset"
+  }
+]

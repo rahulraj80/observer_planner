@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"strings"
+
+	"github.com/marmutapp/superbased-observer/internal/sandboxcidr"
 )
 
 // Rule names used by DestinationAllowed. They appear in RefusedError.Rule and
@@ -22,19 +23,13 @@ const (
 	RuleLimitedBroadcast        = "limited-broadcast"
 	RuleIPv4Compatible          = "ipv4-compatible"
 	RuleHostLocal               = "host-local-address"
-	// RulePrivate refuses the RFC 1918 private IPv4 ranges (10/8,
-	// 172.16/12, 192.168/16): the WSL2 NAT gateway (the Windows host and
-	// every service it listens on), Docker bridge containers and LAN hosts
-	// all live there.
-	RulePrivate = "private-rfc1918"
-	// RuleSharedAddress refuses the RFC 6598 shared address space
-	// 100.64.0.0/10 (carrier-grade NAT, and the tailnet addresses of a
-	// Tailscale network).
-	RuleSharedAddress = "shared-address-cgnat"
-	// RuleUniqueLocal refuses IPv6 unique local addresses fc00::/7.
-	RuleUniqueLocal = "unique-local-ipv6"
-	// RuleSiteLocal refuses the deprecated IPv6 site-local range fec0::/10.
-	RuleSiteLocal = "site-local-ipv6"
+	// The four allow-listable private-range rules are defined in
+	// internal/sandboxcidr (the neutral owner of the ranges, shared with
+	// config validation) and re-exported here.
+	RulePrivate       = sandboxcidr.RulePrivate
+	RuleSharedAddress = sandboxcidr.RuleSharedAddress
+	RuleUniqueLocal   = sandboxcidr.RuleUniqueLocal
+	RuleSiteLocal     = sandboxcidr.RuleSiteLocal
 )
 
 // AllowCIDRsConfigKey is the operator-facing config key that allow-lists
@@ -77,23 +72,6 @@ type policyRule struct {
 // address inside it carries an IPv4 destination in its last four bytes.
 var nat64Prefix = net.IP{0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0}
 
-// privateRanges maps each allow-listable rule to the prefixes it refuses.
-// It is the one owner of those ranges: the rule rows below and
-// ParseAllowCIDRs both read it.
-var privateRanges = []struct {
-	rule     string
-	prefixes []netip.Prefix
-}{
-	{RulePrivate, []netip.Prefix{
-		netip.MustParsePrefix("10.0.0.0/8"),
-		netip.MustParsePrefix("172.16.0.0/12"),
-		netip.MustParsePrefix("192.168.0.0/16"),
-	}},
-	{RuleSharedAddress, []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10")}},
-	{RuleUniqueLocal, []netip.Prefix{netip.MustParsePrefix("fc00::/7")}},
-	{RuleSiteLocal, []netip.Prefix{netip.MustParsePrefix("fec0::/10")}},
-}
-
 // inRanges reports whether ip lies in any prefix of the named private rule.
 func inRanges(rule string) func(ip net.IP, _ []net.IP) bool {
 	return func(ip net.IP, _ []net.IP) bool {
@@ -101,11 +79,11 @@ func inRanges(rule string) func(ip net.IP, _ []net.IP) bool {
 		if !ok {
 			return false
 		}
-		for _, r := range privateRanges {
-			if r.rule != rule {
+		for _, r := range sandboxcidr.PrivateRanges() {
+			if r.Rule != rule {
 				continue
 			}
-			for _, p := range r.prefixes {
+			for _, p := range r.Prefixes {
 				if p.Contains(a) {
 					return true
 				}
@@ -247,59 +225,9 @@ func DestinationAllowed(ip net.IP, local []net.IP) error {
 }
 
 // ParseAllowCIDRs validates the operator's allow-list (AllowCIDRsConfigKey)
-// and returns it as prefixes. It is the ONE owner of what an allow-list
-// entry may be, shared by config validation, the daemon's runtime and the
-// host-side helper. Each entry must be a canonical CIDR (no host bits set,
-// IPv4 in dotted form rather than IPv4-mapped IPv6) lying entirely inside
-// one of the ranges the allow-listable rules refuse: a public prefix would
-// be a no-op (public addresses are already allowed) and a loopback,
-// link-local or metadata prefix can never be allow-listed. An empty list is
-// valid (the default).
+// and returns it as prefixes. The rules live in internal/sandboxcidr, the
+// neutral owner shared with config validation (modular packaging phase PB);
+// see sandboxcidr.ParseAllowCIDRs.
 func ParseAllowCIDRs(entries []string) ([]netip.Prefix, error) {
-	out := make([]netip.Prefix, 0, len(entries))
-	for _, raw := range entries {
-		s := strings.TrimSpace(raw)
-		p, err := netip.ParsePrefix(s)
-		if err != nil {
-			return nil, fmt.Errorf("sandboxnet.ParseAllowCIDRs: %q is not a CIDR (for example 10.20.0.0/16): %w", raw, err)
-		}
-		if p.Addr().Is4In6() {
-			return nil, fmt.Errorf("sandboxnet.ParseAllowCIDRs: %q is an IPv4-mapped IPv6 prefix; write the IPv4 form", raw)
-		}
-		if p.Addr().Zone() != "" {
-			return nil, fmt.Errorf("sandboxnet.ParseAllowCIDRs: %q carries a zone", raw)
-		}
-		if m := p.Masked(); m != p {
-			return nil, fmt.Errorf("sandboxnet.ParseAllowCIDRs: %q has host bits set; did you mean %s", raw, m)
-		}
-		if !insidePrivateRange(p) {
-			return nil, fmt.Errorf("sandboxnet.ParseAllowCIDRs: %q is not inside a private range the egress gateway refuses (%s); public addresses are already allowed, and loopback, link-local and host addresses cannot be allow-listed", raw, privateRangeList())
-		}
-		out = append(out, p)
-	}
-	return out, nil
-}
-
-// insidePrivateRange reports whether p lies entirely inside one of the
-// allow-listable ranges.
-func insidePrivateRange(p netip.Prefix) bool {
-	for _, r := range privateRanges {
-		for _, rp := range r.prefixes {
-			if rp.Addr().Is4() == p.Addr().Is4() && rp.Bits() <= p.Bits() && rp.Contains(p.Addr()) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// privateRangeList renders every allow-listable prefix for an error message.
-func privateRangeList() string {
-	var parts []string
-	for _, r := range privateRanges {
-		for _, p := range r.prefixes {
-			parts = append(parts, p.String())
-		}
-	}
-	return strings.Join(parts, ", ")
+	return sandboxcidr.ParseAllowCIDRs(entries)
 }

@@ -126,7 +126,7 @@ func stageMirrorIfForeign(srcDB string) (string, error) {
 			}
 			return "", fmt.Errorf("read %s: %w", src, err)
 		}
-		if err := os.WriteFile(dst, data, 0o600); err != nil {
+		if err := os.WriteFile(dst, data, 0o600); err != nil { //nolint:gosec // G703: dst is a private staging copy under the adapter's own temp dir
 			return "", fmt.Errorf("write %s: %w", dst, err)
 		}
 	}

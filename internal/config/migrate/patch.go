@@ -127,11 +127,11 @@ func (d *document) insertBlocker(path []string) string {
 	for i := 1; i < len(path); i++ {
 		anc := path[:i]
 		if idx := d.findKey(anc); idx >= 0 {
-			return "table " + dottedPath(anc) + " is written as an inline value at line " + strconv.Itoa(idx+1) + " — cannot insert " + dottedPath(path) + " by line surgery"
+			return "table " + dottedPath(anc) + " is written as an inline value at line " + strconv.Itoa(idx+1) + " - cannot insert " + dottedPath(path) + " by line surgery"
 		}
 		for j, m := range d.metas {
 			if m.kind == kArray && pathEqual(m.table, anc) {
-				return "table " + dottedPath(anc) + " is an [[array]] table at line " + strconv.Itoa(j+1) + " — cannot insert " + dottedPath(path) + " by line surgery"
+				return "table " + dottedPath(anc) + " is an [[array]] table at line " + strconv.Itoa(j+1) + " - cannot insert " + dottedPath(path) + " by line surgery"
 			}
 		}
 	}

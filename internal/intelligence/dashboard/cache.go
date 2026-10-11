@@ -12,6 +12,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/cachetrack"
 	"github.com/marmutapp/superbased-observer/internal/cachewarmsvc"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/timebucket"
 )
@@ -643,6 +644,7 @@ func (s *Server) handleCacheOverview(w http.ResponseWriter, r *http.Request) {
 		PeriodOffsetDays: offset,
 		Tool:             r.URL.Query().Get("tool"),
 		Project:          r.URL.Query().Get("project"),
+		Model:            modelParam(r),
 	}
 	if offset == 0 {
 		// The global window (since / hours / days + until), so a 1h window
@@ -682,6 +684,9 @@ type cacheOverviewQuery struct {
 	Since, Until     time.Time
 	Tool             string
 	Project          string
+	// Model is the global Model filter: cache_events carries its own
+	// model column, so it is turn grain (modelfilter.RowIs).
+	Model string
 }
 
 // timeWhere renders the window predicate over ce.timestamp.
@@ -742,6 +747,10 @@ func loadOverviewEvents(ctx context.Context, db *sql.DB, q cacheOverviewQuery) (
 	if q.Project != "" {
 		where = append(where, "p.root_path = ?")
 		args = append(args, q.Project)
+	}
+	if frag, margs := modelfilter.RowIs("ce.model", q.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
 	}
 	whereClause := ""
 	if len(where) > 0 {
@@ -828,6 +837,7 @@ func (s *Server) handleCacheTimeseries(w http.ResponseWriter, r *http.Request) {
 		Spec:    spec,
 		Tool:    r.URL.Query().Get("tool"),
 		Project: r.URL.Query().Get("project"),
+		Model:   modelParam(r),
 	}
 
 	sparse, err := loadCacheTimeseries(r.Context(), s.db(), q)
@@ -874,6 +884,7 @@ type cacheTimeseriesQuery struct {
 	Spec         timebucket.Spec
 	Tool         string
 	Project      string
+	Model        string
 }
 
 // loadCacheTimeseries buckets cache_events by q.Spec (sparse: only
@@ -900,6 +911,10 @@ func loadCacheTimeseries(ctx context.Context, db *sql.DB, q cacheTimeseriesQuery
 	if q.Project != "" {
 		where = append(where, "p.root_path = ?")
 		args = append(args, q.Project)
+	}
+	if frag, margs := modelfilter.RowIs("ce.model", q.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
 	}
 	whereClause := ""
 	if len(where) > 0 {
@@ -1063,7 +1078,10 @@ type CacheHealthDominantCause struct {
 // scope is intentionally ignored here so the WARN banner reads
 // "engine is unhealthy" without false negatives from a project
 // filter narrowing the corpus.
-func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary, error) {
+// model is the dashboard's global Model filter ("" = none); cache events and
+// the untracked-provider turns both carry their own model, so it is turn
+// grain (modelfilter.AndRowIs).
+func loadCacheHealthSummary(ctx context.Context, db *sql.DB, model string) (CacheHealthSummary, error) {
 	const (
 		defaultMinEvents     = 200
 		defaultMaxRate       = 0.05
@@ -1075,10 +1093,12 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 		MaxRate:   defaultMaxRate,
 	}
 
-	const q = `SELECT kind, COALESCE(cause, ''), COALESCE(predicted_kind, ''),
+	mWhere, mArgs := modelfilter.AndRowIs("model", model)
+	//nolint:gosec // G202: the model fragment is a code constant; its value is bound.
+	q := `SELECT kind, COALESCE(cause, ''), COALESCE(predicted_kind, ''),
 	           COALESCE(tokens_read, 0), COALESCE(tokens_written, 0)
-	           FROM cache_events ORDER BY id ASC`
-	rows, err := db.QueryContext(ctx, q)
+	           FROM cache_events WHERE 1=1` + mWhere + ` ORDER BY id ASC`
+	rows, err := db.QueryContext(ctx, q, mArgs...)
 	if err != nil {
 		return s, fmt.Errorf("loadCacheHealthSummary: query: %w", err)
 	}
@@ -1188,7 +1208,9 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 	// them" info banner. Tolerates the api_turns.provider column
 	// being NULL on legacy installs (no rows match → counts stay
 	// zero, no banner shown).
-	const untrackedQ = `
+	atWhere, atArgs := modelfilter.AndRowIs("at.model", model)
+	//nolint:gosec // G202: the model fragments are code constants; their values are bound.
+	untrackedQ := `
 		SELECT
 		  COUNT(*),
 		  COUNT(DISTINCT session_id),
@@ -1199,7 +1221,7 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 		    WHERE at.provider IS NOT NULL AND at.provider != ''
 		      AND LOWER(at.provider) != 'anthropic'
 		      AND at.timestamp >= ?
-		      AND s.tool IS NOT NULL AND s.tool != ''
+		      AND s.tool IS NOT NULL AND s.tool != ''` + atWhere + `
 		    GROUP BY s.tool
 		    ORDER BY COUNT(DISTINCT at.session_id) DESC, s.tool ASC
 		    LIMIT 1
@@ -1207,9 +1229,10 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB) (CacheHealthSummary
 		FROM api_turns
 		WHERE provider IS NOT NULL AND provider != ''
 		  AND LOWER(provider) != 'anthropic'
-		  AND timestamp >= ?`
+		  AND timestamp >= ?` + mWhere
 	since := time.Now().UTC().Add(-7 * 24 * time.Hour).Format(time.RFC3339Nano)
-	_ = db.QueryRowContext(ctx, untrackedQ, since, since).Scan(
+	untrackedArgs := append(append(append([]any{since}, atArgs...), since), mArgs...)
+	_ = db.QueryRowContext(ctx, untrackedQ, untrackedArgs...).Scan(
 		&s.UntrackedProviderTurns,
 		&s.UntrackedProviderSessions,
 		&s.UntrackedProviderTopTool,
@@ -1248,7 +1271,7 @@ func isRewriteKindLocal(k cachetrack.Kind) bool {
 // global summary regardless of TopBar filters — engine health is
 // not a windowed signal.
 func (s *Server) handleCacheHealth(w http.ResponseWriter, r *http.Request) {
-	summary, err := loadCacheHealthSummary(r.Context(), s.db())
+	summary, err := loadCacheHealthSummary(r.Context(), s.db(), modelParam(r))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load cache health: %v", err), http.StatusInternalServerError)
 		return
@@ -1297,6 +1320,7 @@ func (s *Server) handleCacheEvents(w http.ResponseWriter, r *http.Request) {
 		Days:    days,
 		Tool:    r.URL.Query().Get("tool"),
 		Project: r.URL.Query().Get("project"),
+		Model:   modelParam(r),
 	}
 	// The global window (since / hours / days + until); days=0 stays all
 	// time.
@@ -1325,6 +1349,10 @@ func loadCacheEvents(ctx context.Context, db *sql.DB, q cacheOverviewQuery, limi
 	if q.Project != "" {
 		where = append(where, "p.root_path = ?")
 		args = append(args, q.Project)
+	}
+	if frag, margs := modelfilter.RowIs("ce.model", q.Model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
 	}
 	whereClause := ""
 	if len(where) > 0 {
@@ -1399,7 +1427,7 @@ type CacheEntryStatesResponse struct {
 // makes the engine-state distribution visible without requiring a
 // soak measurement first.
 func (s *Server) handleCacheEntryStates(w http.ResponseWriter, r *http.Request) {
-	rows, total, err := loadCacheEntryStates(r.Context(), s.db())
+	rows, total, err := loadCacheEntryStates(r.Context(), s.db(), modelParam(r))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load cache entry states: %v", err), http.StatusInternalServerError)
 		return
@@ -1410,10 +1438,14 @@ func (s *Server) handleCacheEntryStates(w http.ResponseWriter, r *http.Request) 
 // loadCacheEntryStates groups cache_entries by state. Returns a
 // deterministic state-ordered slice (alphabetical) so the front-
 // end can map state→color without surprises across reloads.
-func loadCacheEntryStates(ctx context.Context, db *sql.DB) ([]CacheEntryStateRow, int64, error) {
-	const q = `SELECT COALESCE(state, ''), COUNT(*)
-	           FROM cache_entries GROUP BY 1 ORDER BY 1 ASC`
-	rows, err := db.QueryContext(ctx, q)
+// model is the global Model filter ("" = none): a cache entry carries its own
+// model, so it is turn grain.
+func loadCacheEntryStates(ctx context.Context, db *sql.DB, model string) ([]CacheEntryStateRow, int64, error) {
+	mWhere, mArgs := modelfilter.AndRowIs("model", model)
+	//nolint:gosec // G202: the model fragment is a code constant; its value is bound.
+	q := `SELECT COALESCE(state, ''), COUNT(*)
+	           FROM cache_entries WHERE 1=1` + mWhere + ` GROUP BY 1 ORDER BY 1 ASC`
+	rows, err := db.QueryContext(ctx, q, mArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("loadCacheEntryStates: query: %w", err)
 	}

@@ -108,9 +108,9 @@ func printCacheStatus(cmd *cobra.Command, statuses []cachewarmsvc.WindowStatus, 
 	tw.Flush()
 	if shown == 0 {
 		if all {
-			fmt.Fprintln(out, "no live caches modelled — route the client through the proxy (observer init) to capture cache state")
+			fmt.Fprintln(out, "no live caches modelled - route the client through the proxy (observer init) to capture cache state")
 		} else {
-			fmt.Fprintln(out, "no caches expiring soon — all modelled caches have comfortable headroom (use --all to list them)")
+			fmt.Fprintln(out, "no caches expiring soon - all modelled caches have comfortable headroom (use --all to list them)")
 		}
 	}
 }

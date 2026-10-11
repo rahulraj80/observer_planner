@@ -545,6 +545,8 @@ var analyticsNoInvalidateRoutes = []analyticsNoInvalidateRoute{
 	{"/api/suggest", "CLAUDE.md suggestion preview; writes nothing (the write is /api/suggest/write)"},
 	{"/api/obs/admission/test", "admission judge dry-run; records nothing"},
 	{"/api/guard/prompt/probe", "prompt-guard detector probe; no analytics data"},
+	{"/api/guard/hook-doctor", "per-binding hook doctor (registration DryRun + trust read); writes nothing"},
+	{"/api/guard/hook-probe", "gate-hook probe; one guard verdict under a probe session id, read by no cached endpoint"},
 	{"/api/guard/prompt/clear", "prompt-guard decision state; read by no cached endpoint"},
 	{"/api/guard/prompt/allow/", "prompt-guard allow-list decisions; read by no cached endpoint"},
 	{"/api/guard/approvals", "guard approval grants; read by no cached endpoint"},

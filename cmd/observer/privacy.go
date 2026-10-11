@@ -130,34 +130,43 @@ func buildPrivacySockets(cfg config.Config) []privacySocket {
 	}
 	processActive := cfg.Observer.Process.Enabled && cfg.Observer.Process.ETW.Enabled
 
+	proxyPurpose := "Reverse proxy an AI tool can point at to get accurate token counts + conversation compression. The listener binds whenever the daemon runs (`observer start` or `observer proxy start`), REGARDLESS of [proxy].enabled - that flag is validated but never gates the listener. Forwards a request only when a tool is actually configured to route through it. The `--bind` CLI flag can override the bind address shown here for a single invocation."
+	// REVIEW-4 P4-19: a build without capture.proxy never binds it, so the
+	// row says so instead of reporting a listener that does not exist.
+	if reason := proxyNotInBuildReason(); reason != "" {
+		proxyPurpose = "Not bound: " + reason + ". Nothing in this binary listens on this port."
+	}
+
 	sockets := []privacySocket{
 		{
 			Name:   "proxy",
 			Addr:   fmt.Sprintf("127.0.0.1:%d", proxyPort),
-			Active: true,
+			Active: !proxyNotInBuild(),
 			// F8: buildProxy is called unconditionally by both `observer
 			// start` and `observer proxy start` — cfg.Proxy.Enabled is
 			// validated (port-range check) but never gates whether the
-			// listener binds, so Active is unconditionally true here.
-			Purpose: "Reverse proxy an AI tool can point at to get accurate token counts + conversation compression. The listener binds whenever the daemon runs (`observer start` or `observer proxy start`), REGARDLESS of [proxy].enabled — that flag is validated but never gates the listener. Forwards a request only when a tool is actually configured to route through it. The `--bind` CLI flag can override the bind address shown here for a single invocation.",
+			// listener binds, so Active is true in every build that carries
+			// capture.proxy (and false in one that does not, P4-19).
+			Purpose: proxyPurpose,
 		},
 		{
-			Name:    "dashboard",
-			Addr:    dashboardAddr,
-			Active:  true,
+			Name: "dashboard",
+			Addr: dashboardAddr,
+			// A build without ui.dashboard never binds it (MP-L1M).
+			Active:  dashboardInBuild,
 			Purpose: "Local analytics dashboard + REST API (`observer start` or `observer dashboard`). Serves the embedded UI and this machine's own captured data. The `--addr` CLI flag can override the bind address shown here for a single invocation.",
 		},
 		{
 			Name:    "browser-ingest",
 			Addr:    browserAddr,
 			Active:  browserActive,
-			Purpose: "Opt-in HTTP receiver for the browser-capture extension. Off by default — the extension's default transport is native messaging, which never opens a socket. Has its own [browser.listener].allow_non_loopback escape hatch (off by default).",
+			Purpose: "Opt-in HTTP receiver for the browser-capture extension. Off by default - the extension's default transport is native messaging, which never opens a socket. Has its own [browser.listener].allow_non_loopback escape hatch (off by default).",
 		},
 		{
 			Name:    "otlp-ingest",
 			Addr:    otlpGRPCAddr + " (gRPC), " + otlpHTTPAddr + " (HTTP)",
 			Active:  otlpActive,
-			Purpose: "Opt-in OTLP receiver: serves an AI tool's own native telemetry export ([ingest.otel].enabled, e.g. Claude Code with CLAUDE_CODE_ENABLE_TELEMETRY=1) AND the generalized-observability trace receiver ([observability].enabled) — it binds when EITHER gate is set, not just the logs one. Has its own [ingest.otel].allow_non_loopback escape hatch (off by default).",
+			Purpose: "Opt-in OTLP receiver: serves an AI tool's own native telemetry export ([ingest.otel].enabled, e.g. Claude Code with CLAUDE_CODE_ENABLE_TELEMETRY=1) AND the generalized-observability trace receiver ([observability].enabled) - it binds when EITHER gate is set, not just the logs one. Has its own [ingest.otel].allow_non_loopback escape hatch (off by default).",
 		},
 		{
 			Name:    "processobs-accept",
@@ -179,7 +188,7 @@ func buildPrivacySockets(cfg config.Config) []privacySocket {
 			// backend addr). Active reflects that, not the enabled flag.
 			// Not the only rail that can leave loopback — see
 			// browser-ingest / otlp-ingest / processobs-accept above.
-			Purpose: "Opt-in remote dashboard access (`observer remote enable`) — tailnet-only, or an explicit lan bind_addr, never a bare 0.0.0.0; every request still requires device auth. Armed by [remote].enabled=true, but nothing binds until an exposure mode resolves to a concrete address (see Active).",
+			Purpose: "Opt-in remote dashboard access (`observer remote enable`) - tailnet-only, or an explicit lan bind_addr, never a bare 0.0.0.0; every request still requires device auth. Armed by [remote].enabled=true, but nothing binds until an exposure mode resolves to a concrete address (see Active).",
 		})
 	}
 
@@ -205,7 +214,7 @@ func remoteSocketAddr(cfg config.Config) (addr string, bound bool) {
 			return cfg.Remote.BindAddr, true
 		}
 	}
-	return "(exposure mode not yet configured — substrate armed, nothing bound)", false
+	return "(exposure mode not yet configured - substrate armed, nothing bound)", false
 }
 
 // guardCloudSweepArmed reports whether the daemon-resident guard-cloud
@@ -251,7 +260,7 @@ func prewarmTargetsList(targets []string) string {
 // on-by-default startup HEAD request against [proxy].prewarm_targets that
 // carries no session data (see the "TLS pre-warm" row).
 func buildPrivacyEgress(cfg config.Config) []privacyEgress {
-	orgPushDetail := "Pushes rollup rows (hashed by default; raw content only under a local [org_client.share].full_content/admin_managed opt-in — the org admin can never flip this remotely) and polls the org policy bundle. The same poll also fetches the org's dashboard announcement, if any — a GET on the connection this cycle already opens, no extra request and nothing sent about you; it can only put dismissible text in your dashboard banner, there is no acknowledgment wire back, and [dashboard].org_announcements = false silences it locally. Stated plainly, because it is inherent to any fetch and not something a client-side switch can remove: the server can SEE the request — that your enrolled node polled, and when — exactly as it sees the push. There is no read receipt (whether a banner was shown or dismissed is never reported), but the poll itself is observable to the org you enrolled with. The same cycle also fetches this node's own signed BUDGET policy (GET /api/agent/budget) when [org_client] is on — one more conditional GET on the same already-open connection to the same already-enrolled host, sending nothing about you beyond the bearer that identifies the node. What comes BACK is your effective cap; what goes back UP is an enum-only posture row (enforcement point / guard mode / where the numbers came from / last fetch state / proxy-only coverage) carrying no cap value and no team label. Set [guard.budget].from_org = false and the org's numbers are never applied."
+	orgPushDetail := "Pushes rollup rows (hashed by default; raw content only under a local [org_client.share].full_content/admin_managed opt-in - the org admin can never flip this remotely) and polls the org policy bundle. The same poll also fetches the org's dashboard announcement, if any - a GET on the connection this cycle already opens, no extra request and nothing sent about you; it can only put dismissible text in your dashboard banner, there is no acknowledgment wire back, and [dashboard].org_announcements = false silences it locally. Stated plainly, because it is inherent to any fetch and not something a client-side switch can remove: the server can SEE the request - that your enrolled node polled, and when - exactly as it sees the push. There is no read receipt (whether a banner was shown or dismissed is never reported), but the poll itself is observable to the org you enrolled with. The same cycle also fetches this node's own signed BUDGET policy (GET /api/agent/budget) when [org_client] is on - one more conditional GET on the same already-open connection to the same already-enrolled host, sending nothing about you beyond the bearer that identifies the node. What comes BACK is your effective cap; what goes back UP is an enum-only posture row (enforcement point / guard mode / where the numbers came from / last fetch state / proxy-only coverage) carrying no cap value and no team label. Set [guard.budget].from_org = false and the org's numbers are never applied."
 	switch {
 	case cfg.OrgClient.Enabled && cfg.OrgClient.ConfiguredServerURL():
 		orgPushDetail += fmt.Sprintf(" For this config: enrolled against %s.", cfg.OrgClient.OrgServerURL)
@@ -265,7 +274,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 		// row does; the push/announcement/routing-policy loops then dial
 		// that row's own server, never this config field. Say so honestly
 		// instead of guessing either way.
-		orgPushDetail += " For this config: [org_client].enabled = true but org_server_url is empty in config. This report cannot see whether a persisted enrolment record exists (it reads config only, by design) — if one does, the org rail is still ACTIVE against that record's own server; if this node was never enrolled, it is inactive. Run `observer doctor` for the definitive state."
+		orgPushDetail += " For this config: [org_client].enabled = true but org_server_url is empty in config. This report cannot see whether a persisted enrolment record exists (it reads config only, by design) - if one does, the org rail is still ACTIVE against that record's own server; if this node was never enrolled, it is inactive. Run `observer doctor` for the definitive state."
 	}
 
 	guardCloudArmed := guardCloudSweepArmed(cfg)
@@ -277,9 +286,9 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			// F8: [proxy].enabled does not gate the listener (see the
 			// proxy socket row), so it doesn't gate forwarding either —
 			// said explicitly here rather than left implicit.
-			Gate:   "an AI tool's own base URL is pointed at the local proxy AND it sends a request ([proxy].enabled is validated but does not gate this — the listener binds regardless)",
+			Gate:   "an AI tool's own base URL is pointed at the local proxy AND it sends a request ([proxy].enabled is validated but does not gate this - the listener binds regardless)",
 			Active: true,
-			Detail: "Forwards that request unchanged to the same upstream provider the tool already talks to (Anthropic/OpenAI/Gemini), using the API key already present in the request. Not a new destination — it's the tool's own traffic passing through a local relay.",
+			Detail: "Forwards that request unchanged to the same upstream provider the tool already talks to (Anthropic/OpenAI/Gemini), using the API key already present in the request. Not a new destination - it's the tool's own traffic passing through a local relay.",
 		},
 		{
 			Name: "Teams org push + policy poll",
@@ -296,7 +305,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			// — the necessary but not sufficient condition this report CAN
 			// see — rather than pretending precision it doesn't have; run
 			// `observer doctor` for the definitive state.
-			Gate:   "[org_client].enabled = true AND (org_server_url is non-empty OR a persisted enrolment record exists) (Active reflects only this config flag) AND a valid enrollment bearer credential (neither the DB row nor the credential is checked by this report — run `observer doctor` or `observer org status`)",
+			Gate:   "[org_client].enabled = true AND (org_server_url is non-empty OR a persisted enrolment record exists) (Active reflects only this config flag) AND a valid enrollment bearer credential (neither the DB row nor the credential is checked by this report - run `observer doctor` or `observer org status`)",
 			Active: cfg.OrgClient.Enabled,
 			Detail: orgPushDetail,
 		},
@@ -304,7 +313,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			Name:   "dashboard update check",
 			Gate:   "the operator clicks \"Check for updates\" in Settings → Health",
 			Active: false,
-			Detail: "A GET to registry.npmjs.org for the latest published version number. That same response — the published package.json of our own npm package — may also carry an optional release announcement, which the dashboard shows as a dismissible banner. It is read from this one response: no second request, no other host, and nothing is sent about you. Never automatic — no background timer, no fetch on tab load. See web/src/lib/version.ts.",
+			Detail: "A GET to registry.npmjs.org for the latest published version number. That same response - the published package.json of our own npm package - may also carry an optional release announcement, which the dashboard shows as a dismissible banner. It is read from this one response: no second request, no other host, and nothing is sent about you. Never automatic - no background timer, no fetch on tab load. See web/src/lib/version.ts.",
 		},
 		{
 			Name: "org update manifest + artifact fetch",
@@ -320,7 +329,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			// is no rail at all, so reporting this row active on a solo
 			// install would claim an egress capability that cannot fire.
 			Active: cfg.Update.Enabled && cfg.OrgClient.Enabled,
-			Detail: "Two GETs to the org server this node is already enrolled with, on the connection the push loop already opens: the signed update manifest, and — only when an apply actually runs — the artifact bytes. What it DISCLOSES is inherent to any fetch: that this node asked for version X at time T, exactly as the announcement rail already states. Nothing is sent about the developer, and no other host is contacted. The node's own update state rides the existing push envelope as an enum-only row (version / channel / os / arch / state / target / error class / install method) with no hostname, no path and no free-text error.",
+			Detail: "Two GETs to the org server this node is already enrolled with, on the connection the push loop already opens: the signed update manifest, and - only when an apply actually runs - the artifact bytes. What it DISCLOSES is inherent to any fetch: that this node asked for version X at time T, exactly as the announcement rail already states. Nothing is sent about the developer, and no other host is contacted. The node's own update state rides the existing push envelope as an enum-only row (version / channel / os / arch / state / target / error class / install method) with no hostname, no path and no free-text error.",
 		},
 		{
 			Name:   "observer summarize",
@@ -332,7 +341,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			Name: "aggregate-share rail",
 			// F9: same honesty note as org push — a fresh consent
 			// receipt is a separate, unverified-by-this-report precondition.
-			Gate:   "[aggregate_share].enabled = true (Active reflects only this config flag) AND a valid consent receipt (not checked by this report — run `observer aggregate status`)",
+			Gate:   "[aggregate_share].enabled = true (Active reflects only this config flag) AND a valid consent receipt (not checked by this report - run `observer aggregate status`)",
 			Active: cfg.AggregateShare.Enabled,
 			Detail: fmt.Sprintf("POSTs a coarsened monthly usage aggregate to %s. The product's first opt-in network call outside Teams org-push; off by default and inert without a fresh consent receipt even when the config flag is set.", nonEmpty(cfg.AggregateShare.Endpoint, "the configured collector")),
 		},
@@ -361,9 +370,9 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			// wires the same OnExit closure for EVERY terminal session
 			// (attach/resume/launch), not just remote-originated ones.
 			// [remote].enabled is NOT part of this gate.
-			Gate:   "[remote.notify].enabled = true — fires on ANY terminal session exit; [remote].enabled is NOT part of this gate",
+			Gate:   "[remote.notify].enabled = true - fires on ANY terminal session exit; [remote].enabled is NOT part of this gate",
 			Active: cfg.Remote.Notify.Enabled,
-			Detail: "Fires a webhook/ntfy call on a terminal session's lifecycle event (session_blocked, session_finished, ...) for every attach/resume/launch session — the OnExit wiring in cmd/observer/attach_standalone.go is shared, it isn't specific to remote-originated sessions. Off by default.",
+			Detail: "Fires a webhook/ntfy call on a terminal session's lifecycle event (session_blocked, session_finished, ...) for every attach/resume/launch session - the OnExit wiring in cmd/observer/attach_standalone.go is shared, it isn't specific to remote-originated sessions. Off by default.",
 		},
 		{
 			// F1: internal/proxy.Prewarm fires HEAD requests against
@@ -372,9 +381,9 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			// Default()). This is the one automatic, on-by-default
 			// outbound call in the binary; see the qualified closing line.
 			Name:   "TLS pre-warm",
-			Gate:   "[proxy].prewarm_targets is non-empty (default: chatgpt.com + api.openai.com) — fires automatically at proxy startup, no operator action needed",
+			Gate:   "[proxy].prewarm_targets is non-empty (default: chatgpt.com + api.openai.com) - fires automatically at proxy startup, no operator action needed",
 			Active: len(cfg.Proxy.PrewarmTargets) > 0,
-			Detail: fmt.Sprintf("HEAD requests fired at proxy startup against: %s — to warm the TLS connection so the first real request through the proxy doesn't pay the handshake. No session data, no request body, no headers beyond the bare HEAD; not driven by anything you typed or ran.", prewarmTargetsList(cfg.Proxy.PrewarmTargets)),
+			Detail: fmt.Sprintf("HEAD requests fired at proxy startup against: %s - to warm the TLS connection so the first real request through the proxy doesn't pay the handshake. No session data, no request body, no headers beyond the bare HEAD; not driven by anything you typed or ran.", prewarmTargetsList(cfg.Proxy.PrewarmTargets)),
 		},
 		{
 			// F2: internal/guard/notify/egress.go is the single egress
@@ -401,7 +410,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			Name:   "guard cloud reputation lookup",
 			Gate:   "[guard.cloud].enabled = true AND [guard.cloud.reputation].enabled = true AND the operator runs `observer guard mcp reputation <package>` (on-demand, no background sweep)",
 			Active: cfg.Guard.Cloud.Enabled && cfg.Guard.Cloud.Reputation.Enabled,
-			Detail: "One GET per invocation to registry.npmjs.org for an MCP server package's registry metadata (age, maintainers, version count). Never fires automatically — no sweep, no hook.",
+			Detail: "One GET per invocation to registry.npmjs.org for an MCP server package's registry metadata (age, maintainers, version count). Never fires automatically - no sweep, no hook.",
 		},
 		{
 			// F2: internal/compression/conversation/rolling.go, wired via
@@ -411,7 +420,7 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			// runs inside the conversation-compression pipeline, which only
 			// executes on requests the proxy forwards.
 			Name:   "rolling conversation summarization",
-			Gate:   "[compression.conversation.rolling].enabled = true AND an AI tool is routed through the proxy (the conversation-compression pipeline — and therefore rolling summarization — only runs on requests the proxy forwards)",
+			Gate:   "[compression.conversation.rolling].enabled = true AND an AI tool is routed through the proxy (the conversation-compression pipeline - and therefore rolling summarization - only runs on requests the proxy forwards)",
 			Active: cfg.Compression.Conversation.Rolling.Enabled,
 			Detail: fmt.Sprintf("When a session's estimated tokens cross [compression.conversation.rolling].threshold_tokens, sends the accumulated conversation content to the configured summarizer provider (%s for Anthropic-shaped traffic, %s for OpenAI-shaped) to produce a rolling summary that replaces the older turns. Off by default.", nonEmpty(cfg.Compression.Conversation.Rolling.SummaryModel, "claude-haiku-4-5"), nonEmpty(cfg.Compression.Conversation.Rolling.OpenAISummaryModel, "gpt-5-nano")),
 		},
@@ -449,13 +458,13 @@ outbound call it can make, each with the condition that has to be true
 before it fires.
 
 This command makes no network calls itself and reads no external state
-beyond your config file — it's a report on what the binary CAN do given
+beyond your config file - it's a report on what the binary CAN do given
 its current configuration, not a live traffic capture.
 
 There is no telemetry, no analytics, and no automatic phone-home in this
 binary, with one narrow exception: an on-by-default TLS pre-warm HEAD
 request the proxy fires at startup against [proxy].prewarm_targets (no
-session data carried — see the "TLS pre-warm" row below). Every other
+session data carried - see the "TLS pre-warm" row below). Every other
 outbound row below is either forwarding a request your own AI tool already
 made, or something you explicitly configured or clicked.`,
 		Args: cobra.NoArgs,
@@ -507,7 +516,7 @@ func writePrivacyText(w io.Writer, report privacyReport) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "No telemetry, no analytics, no crash reporting — the one automatic call is")
+	fmt.Fprintln(w, "No telemetry, no analytics, no crash reporting - the one automatic call is")
 	fmt.Fprintln(w, "the TLS pre-warm HEAD request above (no session data carried); everything")
 	fmt.Fprintln(w, "else needs an explicit opt-in or your own tool's request.")
 	fmt.Fprintf(w, "Full detail: %s\n", report.DocsURL)

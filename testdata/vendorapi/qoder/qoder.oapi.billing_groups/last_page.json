@@ -1,0 +1,21 @@
+{
+  "billingGroups": [
+    {
+      "id": "2f1e0d9c-8b7a-4695-8473-625140302010",
+      "organizationId": "org_xxx",
+      "name": "Contractors",
+      "isUnassigned": false,
+      "memberCount": 3,
+      "limitAmount": 0,
+      "currentUsed": 0,
+      "isBlocked": true,
+      "createdAt": "2026-08-03T08:00:00Z",
+      "updatedAt": "2026-08-03T08:00:00Z"
+    }
+  ],
+  "maxResults": 100,
+  "selectedPeriod": {
+    "periodStart": "2026-08-01T00:00:00Z",
+    "periodEnd": "2026-09-01T00:00:00Z"
+  }
+}

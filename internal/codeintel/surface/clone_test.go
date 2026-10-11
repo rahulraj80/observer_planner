@@ -1,3 +1,5 @@
+//go:build !sbo_omit_codeintel
+
 package surface_test
 
 import (

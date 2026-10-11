@@ -58,14 +58,37 @@
 // state.vscdb has no composerHeaders root for them. They are filed under
 // SyntheticProjectRoot ("[cursor]") so a session row exists at all
 // (store.Ingest drops an empty ProjectRoot). Lifecycle-only events
-// (sessionStart / sessionEnd) never bootstrap under the placeholder, and
-// the guard sees an empty project root for them, never "[cursor]". A
+// (sessionStart / sessionEnd) of a LOCAL chat never bootstrap under the
+// placeholder (a Cloud Agent's do, see below), and the guard sees an
+// empty project root for all of them, never "[cursor]". A
 // root-less payload for a conversation the store already knows under a
 // folder resolves to that folder (ResolveSyntheticRoots: same-batch
 // root, then the stored session's root), never flipping it onto the
 // placeholder; and a root-less state.vscdb composerData row bootstraps
 // only when it has content (a header entry, a bubble, or a `bc-` id), so
 // drafts and unused chats stay dropped.
+//
+// # Cloud Agents (`bc-<uuid>`)
+//
+// Grounded on Cursor 3.23.12 (2026-10-05). The class is resolved once, at
+// the boundary, by an ordered rule table (cloudagent.go,
+// classifyConversation): `draft-` never bootstraps, `bc-` does, and so
+// does a payload with is_background_agent=true (3.23.12 sends it FALSE
+// for bc-, so the id is the signal that carries the fact). Cursor fires
+// only sessionStart and afterAgentThought for a Cloud Agent (3.21.13 also
+// subagentStart); no tool, prompt, response or stop hook, because the
+// turns run in Cursor's remote VM. So its sessionStart / sessionEnd
+// bootstrap the session under the placeholder, and each thought lands a
+// thin `cursor.cloud_agent_thought` step row (harness_call, the thought
+// in PrecedingReasoning, the step's duration_ms) instead of a stash no
+// successor ever claims. The hooks-log replay goes through the same
+// buildEvent, so it lands the same rows under the same identity. In
+// state.vscdb a Cloud Agent lives under `bcCachedDetails:<bc-id>`; that
+// key family yields one KEY-ONLY session_start per id (the protobuf value
+// is never fetched), skipped when the hook already captured the session.
+// Tokens and model cost stay honestly absent: no local surface carries
+// them. The sessionStart hook also skips the pidbridge seed for a Cloud
+// Agent (no local process; its traffic never reaches the proxy).
 //
 // The first two are written by the Cursor IDE (the VS Code fork); the
 // third by the `cursor-agent` CLI. layoutUnknown gets no stamp — an

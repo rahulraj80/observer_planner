@@ -231,7 +231,7 @@ func TestEnroll_MemberNotActiveVsGenuinelyInvalid(t *testing.T) {
 			status: http.StatusForbidden,
 			body: map[string]string{
 				"error":   "member_not_active",
-				"message": "your organisation account is not active yet: redeem your dashboard sign-in invite and set a password first, then run this command again — your enrolment token is still valid",
+				"message": "your organization account is not active yet: redeem your dashboard sign-in invite and set a password first, then run this command again — your enrolment token is still valid",
 			},
 			wantErrIs: ErrMemberNotActive,
 			wantContains: []string{

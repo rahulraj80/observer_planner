@@ -44,8 +44,8 @@ import (
 // back at cold start ([Client.LoadPersistedBudget]), and the first poll of a
 // new process is still CONDITIONAL because the ETag is stored with it. The
 // in-memory cache remains the hot path; the table is the restart bridge.
-// Only a SIGNED body ever replaces it, and only an explicit not-found (or an
-// unenrol) ever clears it.
+// Only a SIGNED body ever replaces it (a signed explicit none included), and
+// only that or an unenrol ever clears it. An unsigned 404 never does (D-016).
 //
 // WHY THE ETAG AND NOT THE VERSION. org_budget_policy_version moves on budget
 // CRUD only. A member added to a capped TEAM changes that member's effective
@@ -375,7 +375,12 @@ func (c *Client) budgetFetchRequest(ctx context.Context, enr *store.Enrolment, i
 		return nil, empty, orgcontract.BudgetFetchNotEnrolled,
 			fmt.Errorf("orgclient.FetchBudgetPolicy: bearer: %w", err)
 	}
-	url := strings.TrimRight(enr.OrgServerURL, "/") + "/api/agent/budget"
+	// SAY WHAT THIS BINARY UNDERSTANDS (T-625): it decodes the request-grant
+	// fields and budget_id, so the org may name each cap's budget (the
+	// banner's request link and the request picker need it) and send the
+	// offline-revert fields. A plain query marker, the ?policy_caps precedent:
+	// a server that predates it ignores it.
+	url := strings.TrimRight(enr.OrgServerURL, "/") + "/api/agent/budget?policy_caps=" + orgcontract.BudgetGrantCapability
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, empty, orgcontract.BudgetFetchUnreachable,
@@ -396,6 +401,9 @@ func (c *Client) budgetFetchRequest(ctx context.Context, enr *store.Enrolment, i
 	// same as absent and it is honest to say nothing.
 	if machine := orgcontract.SanitizeMachineHeader(c.ManagedMachineIdentity(ctx)); machine != "" {
 		req.Header.Set(orgcontract.HeaderMachineIdentity, machine)
+		// T-656: once this machine has a registered key the server honours
+		// the name only with the key's proof.
+		c.attachMachineProof(ctx, req, enr, machine, http.MethodGet, orgcontract.AgentBudgetPath)
 	}
 	cachedETag, cachedBody, cachedHave, cachedSigner, cachedIdentity, cachedWitness := c.budget.snapshot()
 	if cachedIdentity.Binding != identity.Binding {
@@ -425,6 +433,15 @@ func (c *Client) budgetFetchRequest(ctx context.Context, enr *store.Enrolment, i
 // classifyBudgetResponse handles statuses that do not carry a new signed
 // document. It returns handled=false only for a successful 200 body.
 func (c *Client) classifyBudgetResponse(ctx context.Context, resp *http.Response, identity store.OrgBudgetIdentity, cached budgetCacheSnapshot) (BudgetFetchOutcome, bool, error) {
+	// An older server that does not serve the rail at all (its SPA page for
+	// the unknown GET, a 405 or a 501; railreply.go) is an unsigned answer:
+	// it keeps the cached body and reports no error. The fetch-state enum is
+	// closed on the org wire, so this reuses "unverified" (nothing verified
+	// was applied) rather than inventing a value. The 404 branch below keeps
+	// its own semantics.
+	if resp.StatusCode != http.StatusNotFound && c.classifyRail(budgetPolicyRail, resp) == railReplyNotSupported {
+		return budgetFetchOutcome(identity, orgcontract.BudgetFetchUnverified, cached.body, cached.have, cached.witness), true, nil
+	}
 	switch {
 	case resp.StatusCode == http.StatusNotModified:
 		if !cached.have {
@@ -433,32 +450,31 @@ func (c *Client) classifyBudgetResponse(ctx context.Context, resp *http.Response
 		}
 		return budgetFetchOutcome(identity, orgcontract.BudgetFetchOK, cached.body, true, cached.witness), true, nil
 	case resp.StatusCode == http.StatusNotFound:
-		// A 404 is an unsigned "no budget" response. It clears the prior
-		// body, but cannot make a managed node safe without a signed none.
-		c.budget.publishMu.Lock()
-		defer c.budget.publishMu.Unlock()
+		// A 404 NEVER clears (D-016, Sol A5-01). It is unsigned, so a reverse
+		// proxy error, a route mismatch, a downgraded server or anyone between
+		// this node and its org can produce it; letting it delete a verified
+		// cap would let that party lift an individual node's limits or put a
+		// managed node into the missing-budget refusal posture. The org says
+		// "no budget applies to you" with a SIGNED explicit none
+		// (orgcontract.EmptyBudgetPolicyBody), which is the only answer that
+		// may empty this cache. The server still answers 404 for a bearer that
+		// is not an active member of the org, which governs nothing here.
+		//
+		// With a verified body in hand the body stays in force; the state says
+		// it was not refreshed. The body reported is the cache AS IT IS NOW,
+		// not as this request found it: a concurrent poll may have published a
+		// newer document while this 404 was in flight, and a late 404 must not
+		// hand the sink the older one. With nothing cached there is nothing to
+		// keep, and "no budget" is the honest, benign description.
 		_, currentBody, currentHave, _, currentIdentity, currentWitness := c.budget.snapshot()
-		if currentHave != cached.have || currentWitness != cached.witness ||
-			(currentHave && currentIdentity.Binding != identity.Binding) {
-			return budgetFetchOutcome(identity, orgcontract.BudgetFetchUnverified,
-					currentBody, currentHave, currentWitness), true,
-				errors.New("orgclient.FetchBudgetPolicy: budget cache changed during request")
+		if currentIdentity.Binding != identity.Binding {
+			currentBody, currentHave, currentWitness = orgcontract.BudgetPolicyBody{}, false, cached.witness
 		}
-		witness, err := c.store.ClearOrgBudgetForIdentityWithWitness(ctx, identity)
-		if err != nil {
-			if errors.Is(err, store.ErrOrgBudgetIdentityChanged) {
-				return BudgetFetchOutcome{State: orgcontract.BudgetFetchUnverified}, true, err
-			}
-			// The old durable body is still the only document a signal-time
-			// witness can prove. Keep the matching memory body too; publishing an
-			// unsigned absence after its durable clear failed would split proxy
-			// policy from the SQLite fence.
-			return budgetFetchOutcome(identity, orgcontract.BudgetFetchUnverified,
-					cached.body, cached.have, cached.witness), true,
-				fmt.Errorf("orgclient.FetchBudgetPolicy: clear persisted document: %w", err)
+		if currentHave {
+			return budgetFetchOutcome(identity, orgcontract.BudgetFetchUnreachable, currentBody, true, currentWitness), true,
+				errors.New("orgclient.FetchBudgetPolicy: server returned 404; keeping the last verified budget (only a signed none withdraws it)")
 		}
-		c.budget.clearFor(identity.Binding)
-		return budgetFetchOutcome(identity, orgcontract.BudgetFetchNoBudget, orgcontract.BudgetPolicyBody{}, false, witness), true, nil
+		return budgetFetchOutcome(identity, orgcontract.BudgetFetchNoBudget, orgcontract.BudgetPolicyBody{}, false, currentWitness), true, nil
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return budgetFetchOutcome(identity, orgcontract.BudgetFetchAuthFailed, cached.body, cached.have, cached.witness), true,
 			fmt.Errorf("orgclient.FetchBudgetPolicy: server returned %d", resp.StatusCode)
@@ -709,7 +725,7 @@ func (c *Client) orgSigningKey(ctx context.Context) (ed25519.PublicKey, error) {
 		for _, p := range pins[1:] {
 			if p.key != key {
 				c.railPinDriftOnce.Do(func() {
-					c.logger.Warn("org distribution key: a fetch rail holds an older pin than the enrolment key — using the ENROLMENT key; the rail re-pins on its next accepted document",
+					c.logger.Warn("org distribution key: a fetch rail holds an older pin than the enrolment key - using the ENROLMENT key; the rail re-pins on its next accepted document",
 						"enrolment_key", prefix8(key), "rail", p.rail, "rail_key", prefix8(p.key))
 				})
 			}
@@ -721,7 +737,7 @@ func (c *Client) orgSigningKey(ctx context.Context) (ed25519.PublicKey, error) {
 			case key == "":
 				key = p.key
 			case key != p.key:
-				return nil, fmt.Errorf("%w (the %s rail pinned %s…, another pinned %s…) — refusing; re-enrol to rotate trust",
+				return nil, fmt.Errorf("%w (the %s rail pinned %s…, another pinned %s…) - refusing; re-enrol to rotate trust",
 					errPinMismatch, p.rail, prefix8(p.key), prefix8(key))
 			}
 		}

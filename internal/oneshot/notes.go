@@ -75,7 +75,7 @@ func Notes(caps []integration.Capability, toolsSeen []string, s State) []Note {
 		notes = append(notes, Note{
 			Code:  "no_local_token_source",
 			Tools: []string{tool},
-			Text:  fmt.Sprintf("%s: no local token source — %s", tool, c.TokenTier.Gap),
+			Text:  fmt.Sprintf("%s: no local token source - %s", tool, c.TokenTier.Gap),
 		})
 	}
 
@@ -99,9 +99,9 @@ func Notes(caps []integration.Capability, toolsSeen []string, s State) []Note {
 	if s.UnknownModelCount > 0 {
 		var text string
 		if s.UnknownModelCount == 1 {
-			text = "1 model has no pricing entry — its tokens are excluded from the dollar totals"
+			text = "1 model has no pricing entry - its tokens are excluded from the dollar totals"
 		} else {
-			text = fmt.Sprintf("%d models have no pricing entry — their tokens are excluded from the dollar totals", s.UnknownModelCount)
+			text = fmt.Sprintf("%d models have no pricing entry - their tokens are excluded from the dollar totals", s.UnknownModelCount)
 		}
 		notes = append(notes, Note{Code: "unpriced_models", Text: text})
 	}
@@ -109,7 +109,7 @@ func Notes(caps []integration.Capability, toolsSeen []string, s State) []Note {
 	if s.Partial != nil {
 		notes = append(notes, Note{
 			Code: "partial",
-			Text: fmt.Sprintf("scan stopped at the %s budget — read %d of %d session files, so totals are a partial view",
+			Text: fmt.Sprintf("scan stopped at the %s budget - read %d of %d session files, so totals are a partial view",
 				s.Partial.Budget, s.Partial.FilesWalked, s.Partial.FilesTotal),
 		})
 	}
@@ -117,7 +117,7 @@ func Notes(caps []integration.Capability, toolsSeen []string, s State) []Note {
 	if s.Empty != nil {
 		notes = append(notes, Note{
 			Code: "empty_state",
-			Text: fmt.Sprintf("no session activity found under %s across %d checked location(s) (%d adapters checked) — run an AI coding tool first, or widen --since",
+			Text: fmt.Sprintf("no session activity found under %s across %d checked location(s) (%d adapters checked) - run an AI coding tool first, or widen --since",
 				s.Empty.Home, len(s.Empty.Looked), s.Empty.AdapterCount),
 		})
 	}

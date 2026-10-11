@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "actor": {
+        "deleted": true,
+        "email": "jane@example.com",
+        "email_address": "jane@example.com",
+        "name": "Jane Smith",
+        "type": "user_actor",
+        "user_id": "user_01AbCdEfGhIjKlMnOpQrSt"
+      },
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_read_input_tokens": 3200000,
+      "claude_tag_category": "dm",
+      "claude_tag_user_id": "U0123ABCDEF",
+      "context_window": "0-200k",
+      "ending_at": "2019-12-27T18:11:19.117Z",
+      "inference_geo": "global",
+      "model": "claude-opus-5",
+      "output_tokens": 891000,
+      "product": "chat",
+      "rbac_group_id": "rbac_group_012rppKaSVsmTo6NqRDXQXNF",
+      "requests": 128,
+      "server_tool_use": {
+        "web_search_requests": 10
+      },
+      "slack_channel_id": "C0123ABCDEF",
+      "speed": "fast",
+      "starting_at": "2019-12-27T18:11:19.117Z",
+      "total_tokens": 5377000,
+      "uncached_input_tokens": 1284500
+    }
+  ],
+  "data_refreshed_at": "2019-12-27T18:11:19.117Z",
+  "has_more": true,
+  "next_page": "next_page",
+  "organization_id": "org_013FP9SaFPBg7Kw7fetjn6cF"
+}

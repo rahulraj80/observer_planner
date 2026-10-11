@@ -1,0 +1,32 @@
+{
+  "items": [
+    {
+      "date": "2025-06-01T00:00:00Z",
+      "totalLinesChanged": 2000,
+      "aiLinesChanged": 500,
+      "otherLinesChanged": 1500,
+      "aiLinesAdded": 500,
+      "otherLinesAdded": 1500,
+      "aiShareRate": 25.0,
+      "commitCount": 30
+    }
+  ],
+  "extItems": [
+    {
+      "date": "2025-06-01T00:00:00Z",
+      "fileExtension": ".go",
+      "totalLinesChanged": 800,
+      "aiLinesChanged": 300,
+      "totalLinesAdded": 800,
+      "aiLinesAdded": 300
+    }
+  ],
+  "nextItems": [
+    {
+      "date": "2025-06-01T00:00:00Z",
+      "nextSuggestedCount": 200,
+      "nextAcceptedCount": 120,
+      "nextAcceptRate": 60.0
+    }
+  ]
+}

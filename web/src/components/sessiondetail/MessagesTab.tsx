@@ -5,14 +5,13 @@ import { ChartState } from "@/components/ChartState";
 import { CopyOnClick } from "@/components/CopyOnClick";
 import { Pagination } from "@/components/DataTable";
 import { useApi } from "@/lib/useApi";
-import { fmtClock, fmtInt } from "@/lib/format";
+import { costLabel, fmtClock, fmtInt } from "@/lib/format";
 import type { SessionGuardEvent, SessionGuardEventsResponse, SessionMessages, SessionRawEvents } from "@/lib/types";
 import { guardBannersWithContext } from "@shared/lib/guardMessages";
 import { decisionTone } from "@shared/lib/guardCatalog";
 import { VocabPill } from "@shared/lib/vocabPill";
 import {
   MESSAGES_LIMIT,
-  MESSAGE_COLUMNS,
   MESSAGE_PRESETS,
   RAW_EVENTS_LIMIT,
   loadStoredMsgPreset,
@@ -111,7 +110,7 @@ function GuardVerdictsStrip({
               <CopyOnClick value={event.reason} className="block w-full basis-full text-fg-3">
                 {event.reason}
                 {event.target_excerpt && (
-                  <span className="ml-1 font-mono text-fg-4">— {event.target_excerpt}</span>
+                  <span className="ml-1 font-mono text-fg-4">- {event.target_excerpt}</span>
                 )}
               </CopyOnClick>
             )}
@@ -183,7 +182,10 @@ export function MessagesTab({
   // localStorage so the operator's pick survives closing the panel.
   const [preset, setPreset] = useState<MessageColumnPreset>(loadStoredMsgPreset);
   const columns = visibleMessageColumns(preset, sortBy);
-  const hidden = MESSAGE_COLUMNS.length - columns.length;
+  // Out of the columns this view can show at all ("All"): the org's
+  // token-usage view drops the dollar-only ones, which are not "hidden".
+  const reachable = visibleMessageColumns("all", sortBy).length;
+  const hidden = reachable - columns.length;
   // Guard-verdict feed. Keyed off the messages payload's own session_id
   // (see the file header note) rather than a new prop. Low-volume by
   // design (allow verdicts never persist), so the same live-refresh cadence
@@ -280,12 +282,12 @@ export function MessagesTab({
             <Tooltip
               content={
                 <span className="block">
-                  Which columns the timeline shows. All {MESSAGE_COLUMNS.length}{" "}
+                  Which columns the timeline shows. All {reachable}{" "}
                   columns stay one click away under “All”; the active sort
                   column is always shown, whatever the preset.
                   {MESSAGE_PRESETS.map((p) => (
                     <span key={p.id} className="mt-1 block">
-                      <b>{p.label}</b> - {p.hint}
+                      <b>{presetLabel(p)}</b> - {presetHint(p)}
                     </span>
                   ))}
                 </span>
@@ -303,7 +305,7 @@ export function MessagesTab({
                   }}
                   options={MESSAGE_PRESETS.map((p) => ({
                     value: p.id,
-                    label: p.label,
+                    label: presetLabel(p),
                   }))}
                 />
               </span>
@@ -495,4 +497,17 @@ function RawEventsPanel({
       )}
     </section>
   );
+}
+
+// The "Cost" preset's columns are the token split plus the cost total, so in
+// the org's token-usage view (format.ts cost affordances) it is the Tokens
+// preset and says so.
+function presetLabel(p: (typeof MESSAGE_PRESETS)[number]): string {
+  return p.id === "cost" ? costLabel(p.label, "Tokens") : p.label;
+}
+
+function presetHint(p: (typeof MESSAGE_PRESETS)[number]): string {
+  return p.id === "cost"
+    ? costLabel(p.hint, "the token split (in / cache read / cache write / out) beside the row's token total")
+    : p.hint;
 }

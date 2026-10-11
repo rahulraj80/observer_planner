@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && !sbo_omit_terminals_sandbox && !sbo_omit_terminals
 
 package main
 
@@ -60,7 +60,7 @@ func runSandboxHost(args []string) int {
 		if err := os.Mkdir(h.SockDir, 0o700); err != nil {
 			return helperFail("observer sandbox: create socket dir: %v", err)
 		}
-		defer func() { _ = os.RemoveAll(h.SockDir) }()
+		defer func() { _ = os.RemoveAll(h.SockDir) }() //nolint:gosec // G703: SockDir is composed by the daemon for this helper; Mkdir refuses an existing path or symlink
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

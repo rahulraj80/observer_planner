@@ -273,6 +273,9 @@ model-pricing/scripts/extract-cache/
 # The adapter-count manifest generator: writes into website/tools/,
 # which is private, and its drift test reads the committed manifest.
 /tools/toolcountgen/
+# The adapter parity doc generator: rewrites docs/adapter-parity.md
+# (private) and its test reads that doc.
+/tools/adapterparitygen/
 # Private CI + release pipelines. ci.yml stays (it is the public
 # contributor gate); ci-private.yml holds the five jobs whose inputs are
 # private-only paths.
@@ -288,7 +291,3 @@ model-pricing/scripts/extract-cache/
 # The org-plane half of the copilot harness walkthrough. Its Phase-1
 # sibling (examples/copilot-harness/README.md) stays public.
 /examples/copilot-harness/README-orgplane.md
-/cmd/observer/alignment_wire.go
-/cmd/observer/alignment_wire_test.go
-/cmd/observer/projects_judge_wire.go
-/cmd/observer/obs_wire_hostinglabel_test.go

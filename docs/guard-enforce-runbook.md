@@ -129,7 +129,17 @@ lower, and the exception register now answers to it.
   with `locked by org policy: <rule>`, and any grant you created
   BEFORE enrolment is ignored at evaluation time (the audit reason
   records `[org_locked: ...]` so the refusal is visible, not silent).
-  Ask your admin to mark the rule overridable.
+  To get past a locked rule, **request access**: the deny line links the
+  dashboard's Requests form prefilled with the rule and the session (or
+  run `observer request access --rule <rule> "<reason>"`). An approved
+  guardrail exemption reaches the machine on its next sync, is recorded
+  on every use as allowed by grant (`degraded_from=org_grant`, with the
+  grant id in the audit chain), and ends on its own. A grant reaches a
+  locked rule only when it was issued under the locked-rule approval rule
+  (a super-admin by default). See `docs/access-grants.md`.
+- The exception is the **soften** grant: under one, `observer guard
+  approve <rule> --session <id>` on a locked rule is accepted, because
+  that approval is the per-call confirmation the grant asks for.
 - **How many rules are locked depends on your node's tenancy**, not on
   the bundle alone:
   - a **managed** node (Enterprise-Managed Tenancy) is org-authoritative,

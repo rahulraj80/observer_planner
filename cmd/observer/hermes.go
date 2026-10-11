@@ -84,8 +84,8 @@ func newHermesCmd() *cobra.Command {
 			"whose base_url is the proxy's /up/<upstream>/api/v1 endpoint), then\n" +
 			"runs `hermes --provider " + hermesProviderName + "`.\n\n" +
 			"Because hermes REFUSES a `--provider` without a model on its `-z`\n" +
-			"one-shot path, the launcher also supplies `--model` — your own\n" +
-			"`model.default` from your hermes config.yaml — unless you passed a\n" +
+			"one-shot path, the launcher also supplies `--model` - your own\n" +
+			"`model.default` from your hermes config.yaml - unless you passed a\n" +
 			"model yourself (`--model`/`-m`/" + hermesEnvModel + "). If no model\n" +
 			"can be resolved, the launch runs UNROUTED with a warning rather than\n" +
 			"exec'ing an invocation hermes is guaranteed to reject.\n\n" +
@@ -95,7 +95,7 @@ func newHermesCmd() *cobra.Command {
 			"On the `chat` subcommand the two flags are placed AFTER `chat`,\n" +
 			"because chat's own parser re-declares `--model`/`--provider` and\n" +
 			"would otherwise discard top-level values.\n\n" +
-			"The provider entry is merged in ADDITIVELY — your top-level `model:`\n" +
+			"The provider entry is merged in ADDITIVELY - your top-level `model:`\n" +
 			"block and other providers are preserved. NEVER writes a secret; the " +
 			"provider's `key_env` is the NAME `" + hermesDefaultKeyEnv + "` (override\n" +
 			"with --key-env), which hermes resolves from your environment at\n" +
@@ -197,11 +197,16 @@ func newHermesCmd() *cobra.Command {
 				// the fact instead: whatever follows, THIS launch does not use
 				// the proxy.
 				fmt.Fprintf(cmd.ErrOrStderr(),
-					"observer hermes: this run is NOT proxy-routed — any proxy address named below is observer's configured proxy, not a route this launch takes\n")
+					"observer hermes: this run is NOT proxy-routed - any proxy address named below is observer's configured proxy, not a route this launch takes\n")
 			}
 			if route.ensureProvider {
 				if cfgPathErr != nil {
 					return fmt.Errorf("resolve hermes config path: %w", cfgPathErr)
+				}
+				// The chosen --upstream lane must resolve, or every routed
+				// request would be refused (Sol A5-02).
+				if err := requireLauncherLane(cfg, "hermes", upstream, "pass --upstream with a lane configured there"); err != nil {
+					return err
 				}
 				providerBase := strings.TrimRight(resolved, "/") + "/up/" + upstream + "/api/v1"
 				if err := ensureHermesObserverProvider(cfgPath, providerBase, keyEnv); err != nil {
@@ -229,7 +234,7 @@ func newHermesCmd() *cobra.Command {
 					return cerr
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(),
-					"observer hermes: TUI has no initial-prompt seed — handover written to %s\n", out.DocPath)
+					"observer hermes: TUI has no initial-prompt seed - handover written to %s\n", out.DocPath)
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"observer hermes: paste it as your first message in the TUI, or run `hermes -z \"$(cat %s)\"` for a headless one-shot\n", out.DocPath)
 				if out.Note != "" {
@@ -259,7 +264,7 @@ func newHermesCmd() *cobra.Command {
 	cmd.Flags().StringVar(&binPath, "hermes-path", "", "path to the hermes binary (default: looked up on PATH)")
 	cmd.Flags().StringVar(&upstream, "upstream", hermesDefaultUpstream, "the [proxy.upstreams] id to route through")
 	cmd.Flags().StringVar(&keyEnv, "key-env", hermesDefaultKeyEnv, "env var NAME hermes reads the provider key from (never written to disk)")
-	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "Session id to continue from: distill a handover, write it to disk, and open `hermes --tui` (doc-assisted — hermes' TUI has no initial-prompt seed). See docs/session-handoff.md.")
+	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "Session id to continue from: distill a handover, write it to disk, and open `hermes --tui` (doc-assisted - hermes' TUI has no initial-prompt seed). See docs/session-handoff.md.")
 	cmd.Flags().StringVar(&carry, "carry", "", "Carry mode for --continue-from: metadata|distilled|distilled_tail|full|full_cache (default from [handoff] config)")
 	cmd.Flags().IntVar(&fromMessage, "from-message", 0, "With --continue-from: fork after this 1-based transcript message (default: last message)")
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")
@@ -435,13 +440,13 @@ var hermesRouteRules = []hermesRouteRule{
 				// configured provider. Either way observer is not selected.
 				return hermesRoute{
 					args: in.args,
-					notice: "`--provider` supplied with no value — hermes will either reject the invocation or fall " +
+					notice: "`--provider` supplied with no value - hermes will either reject the invocation or fall " +
 						"back to your configured provider, so this run is NOT proxy-routed; drop it to route through observer",
 				}
 			}
 			return hermesRoute{
 				args: in.args,
-				notice: "--provider " + name + " supplied — leaving it alone; this run is NOT proxy-routed " +
+				notice: "--provider " + name + " supplied - leaving it alone; this run is NOT proxy-routed " +
 					"(drop --provider to route through observer)",
 			}
 		},
@@ -479,7 +484,7 @@ var hermesRouteRules = []hermesRouteRule{
 		then: func(in hermesRouteInputs) hermesRoute {
 			return hermesRoute{
 				args: in.args,
-				notice: "an EMPTY `--model`/`-m` value was supplied — hermes rejects a provider paired with a blank " +
+				notice: "an EMPTY `--model`/`-m` value was supplied - hermes rejects a provider paired with a blank " +
 					"model, and argparse's last-wins means observer cannot substitute one, so this run is NOT " +
 					"proxy-routed; drop the empty flag (or give it a real model id) to route it",
 			}
@@ -504,7 +509,7 @@ var hermesRouteRules = []hermesRouteRule{
 			return hermesRoute{
 				args: in.args,
 				notice: "could not resolve a model (no --model, no " + hermesEnvModel +
-					", no model.default in hermes' config.yaml) — hermes needs one whenever a provider is " +
+					", no model.default in hermes' config.yaml) - hermes needs one whenever a provider is " +
 					"selected, so this run is NOT proxy-routed; pass `--model <id>` (or run `hermes setup`) to route it",
 			}
 		},
@@ -996,7 +1001,7 @@ func ensureHermesObserverProvider(path, baseURL, keyEnv string) error {
 	if rerr != nil {
 		// hermes must be configured first — we don't author a fresh config
 		// (it would lack the operator's model/provider defaults).
-		return fmt.Errorf("hermes config.yaml not found (%s) — run `hermes setup` once first: %w", path, rerr)
+		return fmt.Errorf("hermes config.yaml not found (%s) - run `hermes setup` once first: %w", path, rerr)
 	}
 
 	var doc map[string]any
@@ -1026,7 +1031,7 @@ func ensureHermesObserverProvider(path, baseURL, keyEnv string) error {
 	// Back up before the rewrite (yaml reserialization is lossier than JSON;
 	// same .bak-before-overwrite discipline used elsewhere) so the
 	// operator's prior config is recoverable.
-	if err := os.WriteFile(path+".bak", data, 0o600); err != nil {
+	if err := os.WriteFile(path+".bak", data, 0o600); err != nil { //nolint:gosec // G703: the operator's own hermes config path
 		return fmt.Errorf("backup %s: %w", path, err)
 	}
 	tmp := path + ".tmp"

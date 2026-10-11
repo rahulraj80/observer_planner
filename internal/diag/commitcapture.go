@@ -25,7 +25,7 @@ func checkCommitCapture(cfg config.Config) Check {
 	if err != nil {
 		return Check{
 			Name: name, Status: StatusWarn,
-			Message: "git not found on PATH — commit-capture scanner idle; the Projects page's commit ledger and every ROI proxy that depends on it stay empty",
+			Message: "git not found on PATH - commit-capture scanner idle; the Projects page's commit ledger and every ROI proxy that depends on it stay empty",
 		}
 	}
 	return Check{Name: name, Status: StatusOK, Message: fmt.Sprintf("git found (%s)", path)}

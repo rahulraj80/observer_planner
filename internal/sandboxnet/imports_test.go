@@ -53,8 +53,10 @@ func TestPackageImports_Bounded(t *testing.T) {
 					t.Errorf("%s: forbidden import %q (sandboxnet is network code only; spawning lives in cmd)", filepath.Base(path), p)
 				}
 			}
-			if strings.HasPrefix(p, internalPrefix) {
-				t.Errorf("%s: forbidden observer-internal import %q (sandboxnet imports no internal package)", filepath.Base(path), p)
+			// internal/sandboxcidr is the neutral allow-list owner this package
+			// re-exports (modular packaging phase PB); it is pure too.
+			if strings.HasPrefix(p, internalPrefix) && p != internalPrefix+"sandboxcidr" {
+				t.Errorf("%s: forbidden observer-internal import %q (sandboxnet imports no internal package but internal/sandboxcidr)", filepath.Base(path), p)
 			}
 		}
 	}

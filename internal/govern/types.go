@@ -250,6 +250,18 @@ const (
 	AuthorityExtractScope         = "extract.scope"
 	AuthorityExtractPolicyState   = "extract.policy_state"
 	AuthorityExtractObsEgress     = "extract.obs_egress"
+
+	// AuthorityComponentsGovern lets the org govern which components a
+	// managed node runs through the node.components policy family (modular
+	// packaging plan 6.2 / 6.2.1, lane MP-GOV). Operator ruling Q9 (D-374):
+	// it is SUPER-ADMIN-to-grant, like the Agent Access admin keys, so it is
+	// in no default authority set (EnterpriseAuthoritySet,
+	// ManagedEnrolmentAuthoritySet) and the org server's mint gate refuses
+	// it unless the minting actor is the org's super admin. It is
+	// managed-only: an individual node only ever narrows itself (plan 6.1).
+	// Without it a managed node is pinned to the compiled set it runs
+	// (nodecomponents SourceUnauthorized): no widening, no narrowing.
+	AuthorityComponentsGovern = "components.govern"
 )
 
 // KnownAuthority reports whether tok is in the closed vocabulary.
@@ -272,10 +284,18 @@ func KnownAuthority(tok string) bool {
 		AuthorityExtractTraces, AuthorityExtractCache,
 		AuthorityExtractRouting, AuthorityExtractPredictions,
 		AuthorityExtractTargetActions, AuthorityExtractScope,
-		AuthorityExtractPolicyState, AuthorityExtractObsEgress:
+		AuthorityExtractPolicyState, AuthorityExtractObsEgress,
+		AuthorityComponentsGovern:
 		return true
 	}
 	return false
+}
+
+// SuperAdminAuthority reports whether tok may be offered only by the org's
+// super admin (operator ruling Q9, D-374). It is the single owner of that
+// classification: every org-server mint path consults it.
+func SuperAdminAuthority(tok string) bool {
+	return tok == AuthorityComponentsGovern
 }
 
 // ManagedAuthority reports whether tok is one of the managed-only tokens,
@@ -296,7 +316,7 @@ func ManagedAuthority(tok string) bool {
 		AuthorityExtractCache, AuthorityExtractRouting,
 		AuthorityExtractPredictions, AuthorityExtractTargetActions,
 		AuthorityExtractScope, AuthorityExtractPolicyState,
-		AuthorityExtractObsEgress:
+		AuthorityExtractObsEgress, AuthorityComponentsGovern:
 		return true
 	}
 	return false
@@ -414,6 +434,51 @@ func EnterpriseAuthoritySet() []string {
 	return set
 }
 
+// ManagedEnrolmentAuthoritySet is the authority a MANAGED (Enterprise-Managed
+// Tenancy) enrolment token offers when whoever minted it named none (T-311,
+// 2026-10-03). It is the single owner of "what a managed token carries by
+// default": the CLI (`observer-org new-enrolment-token --managed`), the
+// dashboard mint form, the setup wizard, the org assistant's mint row, the IdP
+// device-code rail and the HTTP mint route all resolve an unstated managed
+// offer through api.ManagedDefaultOffer, which reads this set and nothing
+// else.
+//
+// WHY. The standing operator ruling is that org-managed nodes are governed and
+// ship full content: managed enrolment tokens carry the full enterprise grant
+// set so raw content ships by grant. Before T-311 a managed token minted
+// without an explicit authority list offered NOTHING, so the node enrolled
+// under managed tenancy with no live grant, and nothing a managed node does
+// keys off a live grant (no managed page-visibility defaults, no
+// extract.managed, no pins) took effect.
+//
+// WHAT. EnterpriseAuthoritySet() (the three governing tokens plus the whole
+// extract.* family) PLUS the three non-managed governance tokens that let the
+// org decide what the developer can see and change on a managed machine:
+//
+//   - AuthorityDashboardVisibility: the org's hidden / read-only page and
+//     Settings choices apply (on a managed machine the managed consent already
+//     authorises them; carrying the token keeps the grant self-describing and
+//     keeps them in force on every resolver path).
+//   - AuthorityFeatureLock: force a feature subsystem on or off.
+//   - AuthorityCapturePin: lower or lock sharing (it can never raise it).
+//
+// It still omits enforce.routing / enforce.admission / enforce.egress for the
+// reason EnterpriseAuthoritySet gives (they switch the MODE of subsystems a
+// fleet may not run at all, so they stay an authored per-org act), and the
+// retired, inert capture.raise.
+//
+// A DEFAULT, never a force: an explicit authority list (CLI --authority, the
+// mint form's picker, the API's `authority` field, the assistant's
+// `authority` argument) narrows it, down to nothing. Consent stays on the
+// node: the developer is shown every token and must accept the grant.
+// Returned sorted, as a fresh slice the caller may keep.
+func ManagedEnrolmentAuthoritySet() []string {
+	set := append(EnterpriseAuthoritySet(),
+		AuthorityDashboardVisibility, AuthorityFeatureLock, AuthorityCapturePin)
+	sort.Strings(set)
+	return set
+}
+
 // ConsentMode records HOW the node came to hold this grant (spec §2).
 // ConsentInteractive is a TTY-confirmed individual enrolment (the developer
 // answered a y/N prompt themselves). ConsentManaged is a managed
@@ -486,7 +551,34 @@ type Grant struct {
 	// does not (or cannot) verify on today's behaviour — that is what makes
 	// this additive.
 	Integrity GrantIntegrity
+	// ConsentEvidence says which of the stored consent fields the verifying
+	// signature actually covered (Sol A3-03). The node records the consent
+	// it RESOLVED, and on the token rail the organization signed no consent
+	// at all, so ConsentActor (and there the mode) can be a local annotation
+	// rather than the organization's statement. Set at the same boundary as
+	// Integrity; the zero value means "not verified" and claims nothing.
+	ConsentEvidence ConsentEvidence
 }
+
+// ConsentEvidence names the consent fields a stored grant's signature
+// covers. Display-only: governance consumes ConsentMode, never the actor.
+type ConsentEvidence string
+
+const (
+	// ConsentEvidenceUnverified: the grant was not verified (unchecked or
+	// invalid), so no consent field may be presented as signed.
+	ConsentEvidenceUnverified ConsentEvidence = ""
+	// ConsentEvidenceModeAndActor: mode and actor are exactly what the
+	// organization signed.
+	ConsentEvidenceModeAndActor ConsentEvidence = "mode_actor"
+	// ConsentEvidenceMode: the organization signed the mode with no actor;
+	// the stored actor was recorded on this machine.
+	ConsentEvidenceMode ConsentEvidence = "mode"
+	// ConsentEvidenceNone: the organization signed no consent fields (the
+	// token rail); the mode follows from the enrolment's tenancy and the
+	// actor was recorded on this machine.
+	ConsentEvidenceNone ConsentEvidence = "none"
+)
 
 // GrantIntegrity is the tri-state verdict of the runtime re-verification of
 // a STORED grant. Tri-state, not a bool, because "we could not check" and
@@ -649,6 +741,16 @@ type Effective struct {
 	ReadOnlySections []string `json:"read_only_sections"`
 	HiddenSettings   []string `json:"hidden_settings"`
 	ReadOnlySettings []string `json:"read_only_settings"`
+	// VisibleSections / VisibleSettings are the org's applied EXPOSE lists
+	// (schema 3): ids shown on a managed machine despite the managed default.
+	// The resolved per-page answer is DashboardVisibility (visibility.go).
+	VisibleSections []string `json:"visible_sections"`
+	VisibleSettings []string `json:"visible_settings"`
+	// GrantedPages are the page and tab ids an honoured org page-access
+	// grant shows on this machine (T-435): NOT part of the org's body or its
+	// hash. The daemon fills it from the verified access-grant cache after
+	// Resolve; a hidden page or tab listed here resolves read-only.
+	GrantedPages []string `json:"granted_pages,omitempty"`
 
 	// Pinned is the settings.pin + feature.lock directive classes MERGED
 	// into one map — dotted config path → typed value. It is what the
@@ -860,7 +962,7 @@ func (e Effective) GrantsObsEgressExtraction() bool {
 // extract.managed umbrella. That grant is the sanctioned raise of an
 // already-enrolled teams/enterprise node to full content (L2) — Agent Access
 // rulings R9.5 / R11.10, robustness finding PR-014 — so a node enrolled
-// before `observer org enroll` wrote full_content = true for managed
+// before `observer enroll` wrote full_content = true for managed
 // enrolments is raised by the grant the org signs, never by a silent
 // rewrite of its config file.
 //
@@ -1101,20 +1203,31 @@ type Notice struct {
 	PolicyURL      string `json:"policy_url,omitempty"`
 }
 
-// IsNavSectionHidden reports whether the resolved posture hides a nav
-// section. Nil-safe on the zero value (nothing hidden).
-func (e Effective) IsNavSectionHidden(id string) bool { return contains(e.HiddenSections, id) }
+// IsNavSectionHidden reports whether a nav section is hidden ON THIS MACHINE:
+// the org's applied directives composed with the managed-node defaults
+// (NavVisibility, visibility.go). Nil-safe on the zero value (nothing hidden).
+func (e Effective) IsNavSectionHidden(id string) bool {
+	lvl, _ := e.NavVisibility(id)
+	return lvl == nodegov.VisibilityHidden
+}
 
-// IsNavSectionReadOnly reports whether the resolved posture locks a nav
-// section read-only.
-func (e Effective) IsNavSectionReadOnly(id string) bool { return contains(e.ReadOnlySections, id) }
+// IsNavSectionReadOnly reports whether a nav section is locked read-only on
+// this machine (same composition).
+func (e Effective) IsNavSectionReadOnly(id string) bool {
+	lvl, _ := e.NavVisibility(id)
+	return lvl == nodegov.VisibilityReadOnly
+}
 
 // IsSettingsSectionHidden / IsSettingsSectionReadOnly are the Settings
 // sub-section twins.
-func (e Effective) IsSettingsSectionHidden(id string) bool { return contains(e.HiddenSettings, id) }
+func (e Effective) IsSettingsSectionHidden(id string) bool {
+	lvl, _ := e.SettingsVisibility(id)
+	return lvl == nodegov.VisibilityHidden
+}
 
 func (e Effective) IsSettingsSectionReadOnly(id string) bool {
-	return contains(e.ReadOnlySettings, id)
+	lvl, _ := e.SettingsVisibility(id)
+	return lvl == nodegov.VisibilityReadOnly
 }
 
 func contains(set []string, v string) bool {

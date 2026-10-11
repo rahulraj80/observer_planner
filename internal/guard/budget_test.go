@@ -73,6 +73,9 @@ func TestBudgetLookupTTLCache(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC)
 	g := newTestGuard(t, budgetCfg("observe", false), nil)
+	// The cache ages on the guard's clock, not the event's (T-413).
+	clock := newFakeBudgetClock(now)
+	g.budgetClock = clock.Now
 	calls := 0
 	g.SetBudgetLookup(func(string) (BudgetSnapshot, bool) { calls++; return BudgetSnapshot{SessionUSD: 1.0}, true })
 
@@ -83,6 +86,7 @@ func TestBudgetLookupTTLCache(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("calls within TTL = %d, want 1", calls)
 	}
+	clock.Advance(budgetCacheTTL + time.Second)
 	g.EvaluateActions([]ActionInput{budgetIn("s1", "echo c", now.Add(budgetCacheTTL+time.Second))})
 	if calls != 2 {
 		t.Fatalf("calls after TTL = %d, want 2", calls)

@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "error": "VerifiedOfficial",
+    "error.code": "VerifiedOfficial",
+    "error.message": "Inferred",
+    "error.param": "VerifiedOfficial",
+    "error.type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "9545cfcf65b78ee70cc5443303b19e6bb9a10fef1d13a5581a24668702d6726c",
+  "http": {
+    "method": "GET",
+    "path": "/user/daily/activity",
+    "status": 401
+  },
+  "notes": "The ProxyException body shape (error.message, type, param, code); the message text is synthesized.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "LiteLLM main, ProxyException.to_dict (proxy/_types.py), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "2a5793932630ea8d0bbc37b1d1c2a15d23a6315cd1efe24e98534ec8e809eb57",
+  "source_url": "https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/proxy/_types.py",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "poolside.gateway.litellm"
+}

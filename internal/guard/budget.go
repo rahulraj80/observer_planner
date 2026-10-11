@@ -184,24 +184,169 @@ type BudgetAccountingContext struct {
 type BudgetAccountingLookup func(sessionID string, accounting BudgetAccountingContext) (BudgetSnapshot, bool)
 
 // BudgetBindingLookup returns the exact current enrollment binding. ok=false
-// means identity is unavailable and therefore cannot authorize an existing
-// managed budget snapshot.
+// means the node CONFIRMED it holds no live enrollment. A lookup that can fail
+// (a store read) must not use this shape, because it cannot say "I do not
+// know": install a BudgetIdentityLookup through SetBudgetIdentityLookup.
 type BudgetBindingLookup func() (binding string, ok bool)
+
+// BudgetIdentityState is the tri-state answer of an enrollment identity read
+// (REVIEW-4 P4-01, operator ruling D-521).
+type BudgetIdentityState uint8
+
+const (
+	// BudgetIdentityUnknown is the zero value on purpose: the read failed (a
+	// timeout, a busy pool, a checkpoint), so nothing is known about the
+	// enrollment. The node keeps enforcing the last composed engine.
+	BudgetIdentityUnknown BudgetIdentityState = iota
+	// BudgetIdentityEnrolled: a live enrollment was read; binding names it.
+	BudgetIdentityEnrolled
+	// BudgetIdentityNotEnrolled: the read succeeded and no live enrollment
+	// exists (never enrolled, unenrolled, or the generation is tombstoned).
+	// Only this confirmed answer lifts organization rules.
+	BudgetIdentityNotEnrolled
+)
+
+// BudgetIdentityLookup returns the current enrollment binding and how sure the
+// read is about it.
+type BudgetIdentityLookup func() (binding string, state BudgetIdentityState)
+
+// budgetLiveness is what the proxy admission path concludes about the
+// enrolment an org-composed engine was built for (T-718 / D-502).
+type budgetLiveness int
+
+const (
+	// budgetLiveMatch: the engine describes the live enrolment (or carries no
+	// enrolment at all, or the identity read failed); evaluate it as composed.
+	budgetLiveMatch budgetLiveness = iota
+	// budgetLiveRetired: the node confirmed it holds no live enrolment.
+	// Whatever the engine's enrolment conferred is retired; evaluate the
+	// node's own [guard.budget] numbers only (P4-02).
+	budgetLiveRetired
+	// budgetLiveReplacedOpen: a DIFFERENT live enrolment, no verified body for
+	// it yet, and the org did not opt into fail-closed; evaluate the node's
+	// own numbers only.
+	budgetLiveReplacedOpen
+	// budgetLiveReplacedClosed: as above, but the org opted into fail-closed
+	// ([guard.budget].fail_closed): B-625.
+	budgetLiveReplacedClosed
+)
+
+// budgetLivenessInput is what one admission knows about identity.
+type budgetLivenessInput struct {
+	hasLookup     bool
+	state         BudgetIdentityState
+	current       string
+	engineBinding string
+	failClosed    bool
+}
+
+// budgetLivenessRules is the ordered table orgBudgetLiveness walks (CLAUDE.md
+// #5). One test case per row (TestOrgBudgetLivenessTable).
+//
+// The rule it encodes is the B-625 fail-safe: a managed requirement whose
+// enrolment no longer exists must never block, and one whose enrolment was
+// replaced blocks only when the organization explicitly asked for that. A read
+// that could not tell is neither (D-521 "keep last budget"): the last composed
+// engine, org and local caps alike, keeps applying, as D-359 P3-11 ruled.
+var budgetLivenessRules = []struct {
+	name string
+	when func(budgetLivenessInput) bool
+	out  budgetLiveness
+}{
+	// No identity read is wired and the engine names no enrolment: a purely
+	// local engine (or a test). Nothing to check.
+	{"unbound_without_lookup", func(in budgetLivenessInput) bool { return !in.hasLookup && in.engineBinding == "" }, budgetLiveMatch},
+	// The identity read failed. Unknown is not "not enrolled": keep enforcing
+	// the last composed engine. Placed above every fail-open row so a busy
+	// store can never lift a verified, exceeded cap.
+	{"identity_unknown", func(in budgetLivenessInput) bool {
+		return in.hasLookup && in.state == BudgetIdentityUnknown
+	}, budgetLiveMatch},
+	// The identity read CONFIRMED there is no live enrolment (unenrolled or
+	// tombstoned). Never block on a requirement nobody holds.
+	{"no_live_enrolment", func(in budgetLivenessInput) bool {
+		return in.hasLookup && in.state == BudgetIdentityNotEnrolled
+	}, budgetLiveRetired},
+	// The engine was composed for exactly the live enrolment.
+	{"same_enrolment", func(in budgetLivenessInput) bool {
+		return in.state == BudgetIdentityEnrolled && in.current == in.engineBinding
+	}, budgetLiveMatch},
+	// Replaced and the org opted into fail-closed.
+	{"replaced_fail_closed", func(in budgetLivenessInput) bool { return in.failClosed }, budgetLiveReplacedClosed},
+	// Replaced, default posture: fail open onto the node's own numbers.
+	{"replaced_fail_open", func(budgetLivenessInput) bool { return true }, budgetLiveReplacedOpen},
+}
+
+// orgBudgetLiveness resolves one admission's identity facts through the table.
+func orgBudgetLiveness(hasLookup bool, state BudgetIdentityState, current, engineBinding string, failClosed bool) budgetLiveness {
+	in := budgetLivenessInput{hasLookup: hasLookup, state: state, current: current, engineBinding: engineBinding, failClosed: failClosed}
+	for _, r := range budgetLivenessRules {
+		if r.when(in) {
+			return r.out
+		}
+	}
+	return budgetLiveReplacedOpen
+}
 
 // budgetCacheTTL bounds how stale a stamped spend value may be; a
 // breach is detected at most one TTL after it happens, and the
 // underlying store query runs at most once per session per TTL.
+//
+// THE TTL IS MEASURED ON THE GUARD'S OWN CLOCK, never on the event's
+// timestamp (T-413). The lookup reads spend relative to wall-clock now
+// (the daemon computes its day / week / month starts from time.Now), so
+// the age of a cached answer is a wall-clock fact too. Keying it on
+// Event.Now made every action of a backlog replay a cache miss: a
+// transcript that fell behind replays hours of actions in one batch, each
+// more than 30 s (of TRANSCRIPT time) after the previous one, and each
+// paid a full node-wide spend read (about 1.2 s over a month of usage on
+// the 2026-10-05 node), so the watcher landed 4 actions in 10 minutes.
 const budgetCacheTTL = 30 * time.Second
 
 // maxBudgetSessions bounds the cache + dedup maps (the proxySeen
 // bound shape).
 const maxBudgetSessions = 256
 
-// budgetEntry is one cached lookup result.
+// budgetEntry is one cached lookup result. ok=false caches a FAILED
+// lookup for the same TTL: an unavailable accounting read is stamped as
+// unavailable either way, and retrying it on every action of a batch
+// turned one slow read (bounded by the caller's own timeout) into one per
+// action. A caller that needs a fresh answer (hard proxy admission, the
+// intervention pass) passes fresh=true and bypasses the entry, failed or
+// not, exactly as before.
+//
+// A failed ADVISORY lookup does NOT evict a good answer (review P3-41): when
+// the session already holds a good snapshot measured within
+// budgetKeepGoodMax, the failure keeps that snapshot (its retry clock
+// restarts, its measuredAt does not), so one slow read no longer leaves every
+// captured action of the session unmeasured for a whole TTL. An admission
+// (an API request) never takes this path and ages the entry by measuredAt. Past budgetKeepGoodMax the failure
+// is cached as before: an old number is not presented as a current one.
 type budgetEntry struct {
-	snap       BudgetSnapshot
-	at         time.Time
+	snap BudgetSnapshot
+	// at is the retry clock: when this entry was last (re)validated.
+	at time.Time
+	// measuredAt is when snap was actually read (equal to at for a fresh
+	// read; older when a failed refresh kept a good snapshot).
+	measuredAt time.Time
 	accounting BudgetAccountingContext
+	ok         bool
+}
+
+// budgetKeepGoodMax bounds how old a good snapshot a failed non-fresh lookup
+// may keep in place (review P3-41).
+const budgetKeepGoodMax = 5 * time.Minute
+
+// budgetClockFunc is the type of Guard.budgetClock.
+type budgetClockFunc func() time.Time
+
+// budgetNow is the clock the budget cache ages on: the injected test
+// clock when one is set, wall-clock time otherwise.
+func (g *Guard) budgetNow() time.Time {
+	if g.budgetClock != nil {
+		return g.budgetClock()
+	}
+	return time.Now().UTC()
 }
 
 // SetBudgetLookup wires the spend lookup. Nil keeps budget stamping
@@ -222,10 +367,38 @@ func (g *Guard) SetBudgetAccountingLookup(fn BudgetAccountingLookup) {
 	g.budgetLookup = fn
 }
 
-// SetBudgetBindingLookup wires the enrollment identity read used by proxy
-// admission. It is installed once by the org-budget composition boundary.
+// SetBudgetBindingLookup wires a TWO-state enrollment identity read, where
+// ok=false is a confirmed "no live enrollment". Kept for callers whose answer
+// cannot fail (tests, fixed fixtures); the daemon installs the tri-state
+// SetBudgetIdentityLookup.
 func (g *Guard) SetBudgetBindingLookup(fn BudgetBindingLookup) {
-	g.budgetBindingLookup = fn
+	if fn == nil {
+		g.budgetIdentityLookup = nil
+		return
+	}
+	g.budgetIdentityLookup = func() (string, BudgetIdentityState) {
+		if binding, ok := fn(); ok {
+			return binding, BudgetIdentityEnrolled
+		}
+		return "", BudgetIdentityNotEnrolled
+	}
+}
+
+// SetBudgetIdentityLookup wires the enrollment identity read used by proxy
+// admission and the intervention pass. It is installed once by the org-budget
+// composition boundary. A failed read must answer BudgetIdentityUnknown.
+func (g *Guard) SetBudgetIdentityLookup(fn BudgetIdentityLookup) {
+	g.budgetIdentityLookup = fn
+}
+
+// budgetIdentity runs the installed identity read. ok=false means none is
+// installed.
+func (g *Guard) budgetIdentity() (binding string, state BudgetIdentityState, ok bool) {
+	if g.budgetIdentityLookup == nil {
+		return "", BudgetIdentityUnknown, false
+	}
+	binding, state = g.budgetIdentityLookup()
+	return binding, state, true
 }
 
 // SetBudgetSubjectResolver wires the ONE identity rule a per-tool / per-model
@@ -347,25 +520,82 @@ func (g *Guard) stampBudgetAccounting(ev *policy.Event, fresh, managed bool, cal
 	return g.stampBudgetSnapshot(ev, fresh, BudgetAccountingContext{Managed: managed, Calendars: normalizedBudgetCalendars(calendars)})
 }
 
+// stampBudgetIfRead is the hot-path entry to stampBudgetSnapshot for the
+// watcher-ingest and proxy-admission lanes: it stamps only when the engine
+// that will evaluate ev can read a stamp at all (policy.Engine.
+// ReadsBudgetStamps, resolved once when that engine was built).
+//
+// WHY (T-418): the lookup behind the stamp is a node-wide spend AND token
+// read over the rolling windows, about 1.2 s on a month-old large node, paid
+// once per session per cache TTL. On a node with no budget cap of any kind -
+// local [guard.budget] all zero, no organization budget in force, no limit
+// threshold, no policy-file spend matcher - every one of those reads fed
+// rules that cannot match, and a backlog replay touching many sessions paid
+// it once per session. With nothing to read, the event stays unstamped,
+// which every budget row already treats as no-match.
+//
+// The posture flag noteSubjectCoverage maintains is cleared on the skip path
+// when no subject cap is published, as the stamp's own pass would have, so
+// retiring the last cap cannot leave a stale "unmatched" report behind.
+func (g *Guard) stampBudgetIfRead(es *engineSet, ev *policy.Event, fresh bool, accounting BudgetAccountingContext) *BudgetAccountingEvidence {
+	if es != nil && !es.engineFor(g, ev.ProjectRoot).ReadsBudgetStamps() {
+		if len(g.budgetSubjectCaps()) == 0 {
+			g.effBudgetSubjectUnmatched.Store(false)
+		}
+		return nil
+	}
+	return g.stampBudgetSnapshot(ev, fresh, accounting)
+}
+
 func (g *Guard) stampBudgetSnapshot(ev *policy.Event, fresh bool, accounting BudgetAccountingContext) *BudgetAccountingEvidence {
+	return g.stampBudgetSnapshotWithin(ev, fresh, 0, accounting)
+}
+
+// stampBudgetSnapshotWithin is stampBudgetSnapshot with a freshness bound
+// for a fresh caller: maxAge > 0 lets a fresh caller reuse a GOOD entry read
+// within maxAge instead of paying another read (review P3-11: the hook-path
+// admission publisher asks the node-wide decision and one per hard per-tool
+// cap every tick; they share one read per maxAge rather than 1+N per tick).
+// maxAge 0 is the old fresh rule: always read.
+func (g *Guard) stampBudgetSnapshotWithin(ev *policy.Event, fresh bool, maxAge time.Duration, accounting BudgetAccountingContext) *BudgetAccountingEvidence {
 	if g.budgetLookup == nil {
 		stampBudgetUnavailable(ev)
 		return nil
 	}
-	now := ev.Now
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
+	// The cache ages on the guard's clock, not on ev.Now (see budgetCacheTTL).
+	now := g.budgetNow()
 	g.budgetMu.Lock()
 	e, ok := g.budgetCache[ev.SessionID]
 	g.budgetMu.Unlock()
-	if fresh || !ok || e.accounting != accounting || now.Sub(e.at) > budgetCacheTTL || now.Before(e.at) {
+	reuseFresh := fresh && maxAge > 0 && ok && e.ok && e.accounting == accounting &&
+		!now.Before(e.measuredAt) && now.Sub(e.measuredAt) <= maxAge
+	// An admission (an API request) ages the entry by when its snapshot was
+	// MEASURED, so a good snapshot an advisory lane kept through a failed
+	// refresh never stands in for a read the admission needs: a hard
+	// budget's proxy admission still fails closed on a failing read
+	// (TestProxyBudgetLookupFailureAfterTTL).
+	admission := ev.Kind == policy.KindAPIRequest
+	retryAt := e.at
+	if admission {
+		retryAt = e.measuredAt
+	}
+	if (fresh && !reuseFresh) || !ok || e.accounting != accounting || now.Sub(retryAt) > budgetCacheTTL || now.Before(retryAt) {
 		snap, lok := g.budgetLookup(ev.SessionID, accounting)
-		if !lok {
+		if !lok && fresh {
+			// A fresh caller's failure never replaces a cached answer: the
+			// advisory lanes keep whatever they had, as before.
 			stampBudgetUnavailable(ev)
 			return nil
 		}
-		e = budgetEntry{snap: snap, at: now, accounting: accounting}
+		switch {
+		case !lok && !admission && ok && e.ok && e.accounting == accounting &&
+			!now.Before(e.measuredAt) && now.Sub(e.measuredAt) <= budgetKeepGoodMax:
+			// A failed refresh keeps the good snapshot it would have replaced
+			// (P3-41); only the retry clock moves.
+			e.at = now
+		default:
+			e = budgetEntry{snap: snap, at: now, measuredAt: now, accounting: accounting, ok: lok}
+		}
 		g.budgetMu.Lock()
 		if g.budgetCache == nil {
 			g.budgetCache = make(map[string]budgetEntry)
@@ -375,6 +605,10 @@ func (g *Guard) stampBudgetSnapshot(ev *policy.Event, fresh bool, accounting Bud
 		}
 		g.budgetCache[ev.SessionID] = e
 		g.budgetMu.Unlock()
+	}
+	if !e.ok {
+		stampBudgetUnavailable(ev)
+		return nil
 	}
 	ev.SessionCostUSD = e.snap.SessionUSD
 	ev.DailyCostUSD = e.snap.DailyUSD
@@ -562,16 +796,34 @@ func (g *Guard) scanBudget(es *engineSet, res *ProxyRequestResult, sessionID, ta
 		ev.Model = model[0]
 	}
 	bindingMismatch := false
-	if es.budgetBinding != "" {
-		current := ""
-		ok := false
-		if g.budgetBindingLookup != nil {
-			current, ok = g.budgetBindingLookup()
+	if es.budgetBinding != "" || es.base.BudgetRequired() {
+		current, state, hasLookup := g.budgetIdentity()
+		switch orgBudgetLiveness(hasLookup, state, current, es.budgetBinding, g.budgetConfig().FailClosed) {
+		case budgetLiveRetired, budgetLiveReplacedOpen:
+			// THE B-625 FAIL-SAFE (T-718), on the node's OWN numbers (P4-02).
+			//
+			// Retired: the engine was composed for an enrolment this node
+			// confirmed no longer exists (`observer unenroll` in another
+			// process, or the dashboard's Leave) and the daemon has not
+			// recomposed yet. Replaced-open: a DIFFERENT live enrolment with
+			// no verified body yet and no fail-closed opt-in (D-502). Either
+			// way nothing the old enrolment composed may refuse a request,
+			// least of all B-625. But "fail open" means open onto the node's
+			// own [guard.budget] caps, never onto no caps at all, so the
+			// request is evaluated against the local-only engine built from
+			// the same layers. A local engine that cannot be built admits, as
+			// before (the guard never takes a request down with it).
+			local := es.localBudgetSet(g)
+			if local == nil {
+				return
+			}
+			es = local
+		case budgetLiveReplacedClosed:
+			bindingMismatch = true
 		}
-		bindingMismatch = !ok || current != es.budgetBinding
 	}
 	if !bindingMismatch {
-		g.stampBudgetSnapshot(&ev, es.base.BudgetAdmissionRequiresFresh(), es.accountingContext(es.base.ManagedBudgetRequired()))
+		g.stampBudgetIfRead(es, &ev, es.base.BudgetAdmissionRequiresFresh(), es.accountingContext(es.base.ManagedBudgetRequired()))
 	}
 	// The all-zero early return below is the cheap "nothing to compare"
 	// shortcut, and it is exactly wrong for the one row that compares
@@ -602,9 +854,19 @@ func (g *Guard) scanBudget(es *engineSet, res *ProxyRequestResult, sessionID, ta
 		// the egress event); the budget seam only owns B-6xx records.
 		return
 	}
-	approved := false
+	if guardErr == nil {
+		if es.localBudgetOnly {
+			// The node's own cap: no organization label may claim it.
+			verdict = g.displayBudgetVerdict(verdict)
+		} else {
+			verdict = g.labelOrgBudgetVerdict(verdict)
+		}
+	}
+	var appr approvalOutcome
 	if !bindingMismatch && !es.base.BudgetRuleProtected(verdict.RuleID) {
-		verdict, approved = g.applyApprovals(verdict, &ev)
+		// Budget rules never take an org guard grant (grantEligible): a
+		// budget increase is its own grant type folded into the cap.
+		verdict, appr = g.applyApprovals(verdict, &ev, OrgGrantLaneProxy)
 	}
 
 	av := ActionVerdict{
@@ -619,9 +881,7 @@ func (g *Guard) scanBudget(es *engineSet, res *ProxyRequestResult, sessionID, ta
 		GuardError: guardErr != nil,
 	}
 	g.stampOrgOverride(es, &av)
-	if approved {
-		av.DegradedFrom = "approved"
-	}
+	appr.stamp(&av)
 	em := ResolveEmission(verdict, proxyRequestCaps)
 	if em.Permission == "deny" {
 		av.Enforced = true
@@ -634,6 +894,12 @@ func (g *Guard) scanBudget(es *engineSet, res *ProxyRequestResult, sessionID, ta
 	}
 	if g.budgetAlreadyRecorded(sessionID, verdict.RuleID) {
 		return
+	}
+	if guardErr == nil && g.hasOrgBudgetOrigin(verdict.RuleID) {
+		// The budget-warning service announces org-window crossings on
+		// every developer surface (once per period); the guard's own
+		// desktop alert for the same flag would be a duplicate.
+		av.SuppressAlert = true
 	}
 	res.Verdicts = append(res.Verdicts, av)
 }

@@ -1,0 +1,49 @@
+{
+  "entries": [
+    {
+      "insertId": "1a2b3c4d5e6f",
+      "logName": "projects/acme-gemini-prod/logs/cloudaudit.googleapis.com%2Fdata_access",
+      "protoPayload": {
+        "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+        "authenticationInfo": {
+          "principalEmail": "dev.one@example.com"
+        },
+        "methodName": "google.cloud.cloudaicompanion.v1.CodeGenerationService.CompleteCode",
+        "resourceName": "projects/acme-gemini-prod/locations/global/instances/default",
+        "serviceName": "cloudaicompanion.googleapis.com",
+        "status": {
+          "code": 0
+        }
+      },
+      "receiveTimestamp": "2026-10-06T09:15:02.1234561Z",
+      "resource": {
+        "type": "audited_resource"
+      },
+      "severity": "INFO",
+      "timestamp": "2026-10-06T09:15:02.123456Z"
+    },
+    {
+      "insertId": "7a8b9c0d1e2f",
+      "logName": "projects/acme-gemini-prod/logs/cloudaudit.googleapis.com%2Factivity",
+      "protoPayload": {
+        "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+        "authenticationInfo": {
+          "principalEmail": "indexer@acme-gemini-prod.iam.gserviceaccount.com"
+        },
+        "methodName": "google.cloud.cloudaicompanion.v1.CodeRepositoryIndexManagementService.CreateCodeRepositoryIndex",
+        "resourceName": "projects/acme-gemini-prod/locations/global/instances/default",
+        "serviceName": "cloudaicompanion.googleapis.com",
+        "status": {
+          "code": 0
+        }
+      },
+      "receiveTimestamp": "2026-10-06T09:16:44.51Z",
+      "resource": {
+        "type": "audited_resource"
+      },
+      "severity": "INFO",
+      "timestamp": "2026-10-06T09:16:44.5Z"
+    }
+  ],
+  "nextPageToken": "EAA4suKu3qnLwbUcSisKEhQIAhIQc3ludGhldGljLXRva2VuGgcIARADGgA"
+}

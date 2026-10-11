@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 )
 
 // bridgeBinaryName is the file name of the Windows-side helper
@@ -305,6 +307,13 @@ func windowsCacheDir() (string, error) {
 }
 
 func resolveWindowsCacheDir() (string, error) {
+	// This path writes under the real /mnt/c without going through
+	// crossmount.AllHomes, so it must honour the same suppression itself:
+	// the test-binary guard and OBSERVER_CROSSMOUNT_DISABLE (incident
+	// 2026-10-02).
+	if crossmount.ForeignHomesSuppressed() {
+		return "", errors.New("no writable /mnt/c destination for bridge cache: foreign-OS access is disabled")
+	}
 	candidates := []string{}
 	if entries, err := os.ReadDir("/mnt/c/Users"); err == nil {
 		for _, e := range entries {
@@ -387,7 +396,7 @@ func copyIfNewer(src, dst string) error {
 // ErrBridgeNotInstalled is returned by locateBridgeBinary when
 // the Windows-side helper isn't found. Callers should surface it
 // as an installation hint rather than an internal error.
-var ErrBridgeNotInstalled = errors.New("antigravity-bridge.exe not found — run `make build` to compile it, or set OBSERVER_ANTIGRAVITY_BRIDGE")
+var ErrBridgeNotInstalled = errors.New("antigravity-bridge.exe not found - run `make build` to compile it, or set OBSERVER_ANTIGRAVITY_BRIDGE")
 
 // ErrBridgeTransient marks bridge failures that are environmental
 // rather than per-file — e.g. PowerShell missing from PATH, the
@@ -411,12 +420,18 @@ var ErrBridgeNotInstalled = errors.New("antigravity-bridge.exe not found — run
 // retry on the next tick instead.
 var ErrBridgeTransient = errors.New("antigravity-bridge: transient environment failure")
 
+// LocateBridgeBinary is the read-only presence probe the artifact report
+// uses (`observer components artifacts`, lane MP-ART): the same search
+// order the adapter itself uses, so the report and the adapter never
+// disagree about where the helper is. It never runs the helper.
+func LocateBridgeBinary() (string, error) { return locateBridgeBinary() }
+
 // locateBridgeBinary resolves the path to the bridge helper using
 // the documented search order. Returns the first existing file or
 // ErrBridgeNotInstalled.
 func locateBridgeBinary() (string, error) {
 	if env := strings.TrimSpace(os.Getenv("OBSERVER_ANTIGRAVITY_BRIDGE")); env != "" {
-		if _, err := os.Stat(env); err == nil {
+		if _, err := os.Stat(env); err == nil { //nolint:gosec // G703: the operator's own OBSERVER_ANTIGRAVITY_BRIDGE override, stat only
 			return env, nil
 		}
 	}

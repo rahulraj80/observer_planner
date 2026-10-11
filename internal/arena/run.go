@@ -15,7 +15,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/git"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -59,6 +59,9 @@ type Options struct {
 	// and configured Arena proxy URL so cmd can apply launch policy without
 	// coupling this package to guard or configuration internals.
 	Admission func(context.Context, string, string) error
+	// CostDisplay resolves the developer cost display ("usd" or "tokens")
+	// that a kept commit's provenance footer follows (T-204). Nil is dollars.
+	CostDisplay func() string
 }
 
 // CandidateSpec names one harness slot in a run.
@@ -149,6 +152,9 @@ func (r *Runner) startRun(ctx context.Context, spec RunSpec, allowDirty bool) (*
 		return nil, err
 	}
 	if err := validateJudge(spec.JudgeTool, spec.JudgeModel); err != nil {
+		return nil, err
+	}
+	if err := resolveRunModels(&spec, r.opts.ProxyURL); err != nil {
 		return nil, err
 	}
 	contextFiles, err := normalizeContextFiles(spec.ProjectRoot, spec.ContextFiles)
@@ -257,6 +263,32 @@ func validateJudge(tool, model string) error {
 	if _, err := driveBinaryFor(tool); err != nil {
 		return fmt.Errorf("arena.StartRun: judge %q: %w", tool, err)
 	}
+	return nil
+}
+
+// resolveRunModels validates every candidate's and the judge's model
+// selection against that harness's model contract (ResolveModel) BEFORE any
+// worktree exists, and rewrites the spec to the RESOLVED values so the run
+// and candidate rows record the model each harness actually runs on - the
+// judge's included, which is what the scorecard reports as "judged by". A
+// selection the harness cannot take fails the whole start: spending on a
+// candidate that silently runs a different model is never an outcome. The
+// caller's candidate slice is copied, never mutated in place.
+func resolveRunModels(spec *RunSpec, proxyURL string) error {
+	cands := make([]CandidateSpec, len(spec.Candidates))
+	for i, c := range spec.Candidates {
+		m, err := ResolveModel(c.Tool, c.Model, proxyURL)
+		if err != nil {
+			return fmt.Errorf("arena.StartRun: candidate %q: %w", c.Tool, err)
+		}
+		cands[i] = CandidateSpec{Tool: c.Tool, Model: m}
+	}
+	judgeModel, err := ResolveModel(spec.JudgeTool, spec.JudgeModel, proxyURL)
+	if err != nil {
+		return fmt.Errorf("arena.StartRun: judge %q: %w", spec.JudgeTool, err)
+	}
+	spec.Candidates = cands
+	spec.JudgeModel = judgeModel
 	return nil
 }
 
@@ -537,7 +569,7 @@ func (r *Runner) driveOne(ctx context.Context, prep *PreparedRun, row models.Are
 	// drove the binary directly), so record the seed ourselves post-Start
 	// via the driver-reported pid when present.
 	if res.PID > 0 {
-		_ = r.opts.Store.InsertLaunchSeed(ctx, processobs.LaunchSeed{
+		_ = r.opts.Store.InsertLaunchSeed(ctx, procmodel.LaunchSeed{
 			PID: res.PID, Tool: row.Tool, CWD: row.WorktreePath,
 			StartedAt: time.Now().UTC().Add(-time.Duration(res.WallMS) * time.Millisecond),
 		})
@@ -742,12 +774,12 @@ func removeDriveArtifacts(worktree string) error {
 			return nil // unreadable entries are not worth failing a drive over
 		}
 		if d.IsDir() && d.Name() == "__pycache__" {
-			return os.RemoveAll(path)
+			return os.RemoveAll(path) //nolint:gosec // G122: WalkDir never follows symlinks and RemoveAll on a symlink removes only the link; the agent run has ended
 		}
 		if !d.IsDir() {
 			switch strings.ToLower(filepath.Ext(path)) {
 			case ".pyc", ".pyo":
-				_ = os.Remove(path)
+				_ = os.Remove(path) //nolint:gosec // G122: WalkDir never follows symlinks and Remove on a symlink removes only the link; the agent run has ended
 			}
 		}
 		return nil

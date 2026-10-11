@@ -1,0 +1,35 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "pagination": "VerifiedOfficial",
+    "pagination.hasMore": "VerifiedOfficial",
+    "pagination.nextCursor": "VerifiedOfficial",
+    "users": "VerifiedOfficial",
+    "users[]": "VerifiedOfficial",
+    "users[].createdAt": "VerifiedOfficial",
+    "users[].email": "VerifiedOfficial",
+    "users[].firstName": "VerifiedOfficial",
+    "users[].id": "VerifiedOfficial",
+    "users[].lastName": "VerifiedOfficial",
+    "users[].lastSignInAt": "VerifiedOfficial",
+    "users[].metadata": "VerifiedOfficial"
+  },
+  "fixture_sha256": "77a651a58acaa26a141944dffc81ec10145ea4c79bb9177ad49bc72d61bee1e9",
+  "http": {
+    "method": "GET",
+    "path": "/api/v0/organization/users",
+    "query": {
+      "limit": "100"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized from the listOrganizationUsers 200 schema (users required: id, email, createdAt, metadata; pagination required: hasMore, nextCursor nullable). metadata is open custom data and is left empty: the driver never decodes it.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Factory Public API OpenAPI 3.0.1 (info.version 0.1.0), openapi.json fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "175733226aee49800589391733956664b42d384051cb4d28f845c123c6968d05",
+  "source_url": "https://docs.factory.com/openapi.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "factory.api.org_users"
+}

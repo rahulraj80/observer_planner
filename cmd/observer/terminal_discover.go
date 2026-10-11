@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 // terminal_discover.go — the daemon's generic, tool-agnostic terminal-run
 // discovery sweep (Session Cockpit correlation, part C / the core).
 //
@@ -265,7 +267,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 	// sessions query.
 	runs, err := d.st.ListLiveUncorrelatedRuns(ctx, termrun.MinLinkConfidence, d.cfg.runLimit)
 	if err != nil {
-		d.logger.Debug("terminal discovery: list live uncorrelated runs failed — abstaining this tick and clearing dwell", "err", err)
+		d.logger.Debug("terminal discovery: list live uncorrelated runs failed - abstaining this tick and clearing dwell", "err", err)
 		if len(d.pending) > 0 {
 			d.pending = make(map[string]pendingDiscovery)
 		}
@@ -287,7 +289,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 	// the honest cost. The caps are therefore pure WORK bounds, never a
 	// correctness shortcut.
 	if len(runs) >= d.cfg.runLimit {
-		d.logger.Debug("terminal discovery: live uncorrelated run list at cap — abstaining this tick (possible truncation would invalidate the uniqueness proof)",
+		d.logger.Debug("terminal discovery: live uncorrelated run list at cap - abstaining this tick (possible truncation would invalidate the uniqueness proof)",
 			"runs", len(runs), "runLimit", d.cfg.runLimit)
 		if len(d.pending) > 0 {
 			d.pending = make(map[string]pendingDiscovery)
@@ -356,7 +358,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 				// in step 3, so a competitor it would have contested stays hidden and
 				// another run could look falsely exclusive. Abstain tick-wide: clear
 				// ALL pending and make no links (same shape as the cap abstains).
-				d.logger.Debug("terminal discovery: source-session project root lookup failed — abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
+				d.logger.Debug("terminal discovery: source-session project root lookup failed - abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
 					"run", run.RunID, "source", run.SourceSessionID, "err", rerr)
 				if len(d.pending) > 0 {
 					d.pending = make(map[string]pendingDiscovery)
@@ -370,7 +372,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 				// run (a tick-wide abstain on it would disable the sweep for as long as
 				// such a run lives). Its child session is left claimable by other runs,
 				// the same accepted residual as a structurally dir-less launch.
-				d.logger.Debug("terminal discovery: source session has no stored project root — skipping handoff run",
+				d.logger.Debug("terminal discovery: source session has no stored project root - skipping handoff run",
 					"run", run.RunID, "source", run.SourceSessionID)
 				continue
 			}
@@ -406,7 +408,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 			// would contest goes unseen and another run could look falsely exclusive.
 			// Abstain tick-wide (clear ALL pending, no links), the same shape as the
 			// cap abstains.
-			d.logger.Debug("terminal discovery: candidate sessions query failed — abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
+			d.logger.Debug("terminal discovery: candidate sessions query failed - abstaining this tick (an unresolved run could hide a competitor from the uniqueness check)",
 				"run", run.RunID, "err", cerr)
 			if len(d.pending) > 0 {
 				d.pending = make(map[string]pendingDiscovery)
@@ -429,7 +431,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 	// where linking would be guesswork anyway.
 	for runID, ids := range cands {
 		if len(ids) >= d.cfg.candLimit {
-			d.logger.Debug("terminal discovery: a run's candidate list is at cap — abstaining this tick (hidden candidates can invalidate cross-run exclusivity)",
+			d.logger.Debug("terminal discovery: a run's candidate list is at cap - abstaining this tick (hidden candidates can invalidate cross-run exclusivity)",
 				"run", runID, "candidates", len(ids), "candLimit", d.cfg.candLimit)
 			if len(d.pending) > 0 {
 				d.pending = make(map[string]pendingDiscovery)
@@ -471,7 +473,7 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 		if cerr := d.correlate(ctx, runID, sessionID, termrun.SourceDiscovered, d.now().UTC()); cerr != nil {
 			// Keep the pending entry and retry next tick (the pair is still unique
 			// and will re-dwell; a transient correlate failure never abandons it).
-			d.logger.Debug("terminal discovery: correlate failed — will retry next tick",
+			d.logger.Debug("terminal discovery: correlate failed - will retry next tick",
 				"run", runID, "session", sessionID, "err", cerr)
 			continue
 		}
@@ -512,25 +514,25 @@ func (d *terminalDiscoverer) tick(ctx context.Context) int {
 func (d *terminalDiscoverer) linkBlockedByRevalidation(ctx context.Context, runID, sessionID string) bool {
 	if _, live := d.handleForRun(runID); !live {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: run ended between tick start and link — skipping", "run", runID)
+		d.logger.Debug("terminal discovery: run ended between tick start and link - skipping", "run", runID)
 		return true
 	}
 	if _, _, linked := d.sessionLinkForRun(runID); linked {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: run already linked by a stronger source mid-dwell — skipping",
+		d.logger.Debug("terminal discovery: run already linked by a stronger source mid-dwell - skipping",
 			"run", runID, "session", sessionID)
 		return true
 	}
 	claimed, serr := d.st.SessionLinkedToAnyRun(ctx, sessionID, termrun.MinLinkConfidence)
 	if serr != nil {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: session-link recheck failed — dropping pending, not linking",
+		d.logger.Debug("terminal discovery: session-link recheck failed - dropping pending, not linking",
 			"run", runID, "session", sessionID, "err", serr)
 		return true
 	}
 	if claimed {
 		delete(d.pending, runID)
-		d.logger.Debug("terminal discovery: session already linked to another run mid-dwell — skipping",
+		d.logger.Debug("terminal discovery: session already linked to another run mid-dwell - skipping",
 			"run", runID, "session", sessionID)
 		return true
 	}

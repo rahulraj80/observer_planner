@@ -4,10 +4,15 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
 } from "react";
 import clsx from "clsx";
+import type { LucideIcon } from "lucide-react";
 import { X } from "lucide-react";
 import { Icon } from "./Icon";
+import { Spinner } from "./Spinner";
+import { chipIdHint } from "../lib/chipId";
+import { STABLE_SCROLL_Y } from "../lib/scroll";
 
 // EntityMultiPicker — a type-to-filter combobox for picking SEVERAL entities
 // by id, rendering each pick as a removable chip: label on top, the id as a
@@ -20,8 +25,9 @@ import { Icon } from "./Icon";
 //
 // Pure, like ComboChip: no fetch, no state beyond the popover's own
 // open/query/active-index — the caller owns `options` and `value` and reacts
-// to `onChange`. Dark/light entirely through design tokens (bg-*/fg-*/
-// line-*/accent), so it never needs its own theme branch.
+// to `onChange` (and, for a server-side search, `onQueryChange`). Dark/light
+// entirely through design tokens (bg-*/fg-*/line-*/accent), so it never needs
+// its own theme branch.
 //
 // `allowFreeId`: when a list is only PARTIAL (an admin/read gate hid part of
 // the roster, or the org has more rows than the caller fetched), typing an id
@@ -29,10 +35,25 @@ import { Icon } from "./Icon";
 // the honest replacement for the raw-id `<Input>` fallback those call sites
 // used before this primitive existed — never a silent "can't find it, too
 // bad".
+//
+// Agent Access UI lane 0b additions (all optional; every existing caller is
+// unchanged): `loading` (a spinner row instead of "No matches." while the
+// list loads), per-option `icon`, `group` (options render under a group
+// header in first-appearance order, e.g. "Teams" / "Members" in one mixed
+// subject picker) and `disabledReason` (listed, not pickable, reason shown),
+// `notice` (a muted line at the top of the list, e.g. "Showing the first 50 -
+// type to search"), and `onQueryChange` (the typed query, for a caller that
+// searches server-side).
 export interface EntityMultiPickerOption {
   id: string;
   label: string;
   sublabel?: string;
+  /** Optional leading glyph (a person, a team, a server...). */
+  icon?: LucideIcon;
+  /** Optional group header this option renders under. */
+  group?: string;
+  /** When set the option is listed but cannot be picked; the reason shows. */
+  disabledReason?: string;
 }
 
 export function EntityMultiPicker({
@@ -51,6 +72,12 @@ export function EntityMultiPicker({
   // component to maintain. Picking a new option while one is already
   // selected REPLACES it rather than adding a second chip.
   single = false,
+  loading = false,
+  loadingHint = "Loading…",
+  notice,
+  onQueryChange,
+  freeIdLabel = "Use id",
+  ariaLabel,
 }: {
   options: EntityMultiPickerOption[];
   value: string[];
@@ -60,9 +87,20 @@ export function EntityMultiPicker({
   /** Beyond this many chips, the rest collapse into one "+N more" pill. */
   maxVisibleChips?: number;
   allowFreeId?: boolean;
-  emptyHint?: string;
+  emptyHint?: ReactNode;
   className?: string;
   single?: boolean;
+  /** The option list is still loading: show a spinner row, not emptyHint. */
+  loading?: boolean;
+  loadingHint?: ReactNode;
+  /** A muted line rendered at the top of the open list. */
+  notice?: ReactNode;
+  /** Called with the typed query on every change (server-side search). */
+  onQueryChange?: (query: string) => void;
+  /** The free-id row's verb (default "Use id"). */
+  freeIdLabel?: string;
+  /** Accessible name for the search input. */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -81,11 +119,12 @@ export function EntityMultiPicker({
   // filter on label + sublabel + id substring match — the same three-field
   // search ComboChip's `searchable` convention covers, done here directly
   // since an entity option carries a fixed shape rather than a caller-built
-  // string.
+  // string. With groups, candidates are ordered group by group (first
+  // appearance), so the keyboard order matches what is drawn.
   const selected = new Set(value);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return options.filter((o) => {
+    const hits = options.filter((o) => {
       if (selected.has(o.id)) return false;
       if (!q) return true;
       return (
@@ -94,8 +133,16 @@ export function EntityMultiPicker({
         o.id.toLowerCase().includes(q)
       );
     });
+    return orderByGroup(hits);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options, query, value]);
+  // Only enabled candidates take part in keyboard navigation.
+  const pickable = useMemo(() => filtered.filter((o) => !o.disabledReason), [filtered]);
+  const pickIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    pickable.forEach((o, i) => m.set(o.id, i));
+    return m;
+  }, [pickable]);
 
   // A free id is offered only when nothing in `options` — filtered or not —
   // already carries that exact id, so allowFreeId can never shadow a real
@@ -105,7 +152,7 @@ export function EntityMultiPicker({
     allowFreeId && trimmedQuery !== "" && !byID.has(trimmedQuery) && !selected.has(trimmedQuery)
       ? trimmedQuery
       : null;
-  const rowCount = filtered.length + (freeIDCandidate ? 1 : 0);
+  const rowCount = pickable.length + (freeIDCandidate ? 1 : 0);
 
   useEffect(() => {
     if (open) {
@@ -134,6 +181,7 @@ export function EntityMultiPicker({
     if (selected.has(id)) return;
     onChange(single ? [id] : [...value, id]);
     setQuery("");
+    onQueryChange?.("");
     setActiveIdx(0);
     if (single) setOpen(false);
   }
@@ -145,11 +193,11 @@ export function EntityMultiPicker({
   }
 
   function selectRow(i: number) {
-    if (i < filtered.length) {
-      add(filtered[i].id);
+    if (i < pickable.length) {
+      add(pickable[i].id);
       return;
     }
-    if (freeIDCandidate && i === filtered.length) {
+    if (freeIDCandidate && i === pickable.length) {
       add(freeIDCandidate);
     }
   }
@@ -169,7 +217,12 @@ export function EntityMultiPicker({
       e.preventDefault();
       if (rowCount > 0) selectRow(activeIdx);
     } else if (e.key === "Escape") {
+      // An open list owns Escape: close it and mark the key handled so an
+      // enclosing SlideOver / Modal stays open (shared/lib/overlayEscape.ts).
+      // A closed picker leaves Escape to the overlay.
+      if (!open) return;
       e.preventDefault();
+      e.stopPropagation();
       setOpen(false);
     } else if (e.key === "Backspace" && query === "" && value.length > 0) {
       // Backspace on an empty input removes the last chip — the standard
@@ -183,6 +236,7 @@ export function EntityMultiPicker({
     maxVisibleChips && value.length > maxVisibleChips ? maxVisibleChips : value.length;
   const overflow = value.length - visibleCount;
 
+  let lastGroup: string | undefined;
   return (
     <div ref={rootRef} className={clsx("relative", className)}>
       <div
@@ -200,14 +254,19 @@ export function EntityMultiPicker({
       >
         {value.slice(0, visibleCount).map((id, idx) => {
           const opt = byID.get(id);
+          // The id is a muted hint: hidden when it equals the label,
+          // shortened when long; the full id is in the chip's tooltip.
+          const idHint = chipIdHint(id, opt?.label);
           return (
             <span
               key={id}
+              title={opt?.label && opt.label !== id ? `${opt.label} (${id})` : id}
               className="inline-flex max-w-full items-center gap-1 rounded-2 border border-line-2 bg-bg-1 px-1.5 py-0.5"
             >
+              {opt?.icon && <Icon icon={opt.icon} size={11} className="shrink-0 text-fg-3" />}
               <span className="min-w-0 truncate text-fg-1">{opt?.label ?? id}</span>
-              {opt?.label ? (
-                <span className="min-w-0 truncate font-mono text-[10px] text-fg-3">{id}</span>
+              {idHint ? (
+                <span className="shrink-0 font-mono text-[10px] text-fg-4">{idHint}</span>
               ) : null}
               {!disabled && (
                 <button
@@ -236,9 +295,11 @@ export function EntityMultiPicker({
             type="text"
             disabled={disabled}
             value={query}
+            aria-label={ariaLabel}
             onFocus={() => setOpen(true)}
             onChange={(e) => {
               setQuery(e.target.value);
+              onQueryChange?.(e.target.value);
               setOpen(true);
               setActiveIdx(0);
             }}
@@ -253,47 +314,100 @@ export function EntityMultiPicker({
         <div
           className="absolute left-0 top-[calc(100%+4px)] z-50 w-full min-w-[220px] overflow-hidden rounded-3 border border-line-2 bg-bg-1 shadow-drawer"
           role="listbox"
-          aria-multiselectable="true"
+          aria-multiselectable={!single}
+          aria-busy={loading || undefined}
         >
-          <div ref={listRef} className="max-h-[280px] overflow-y-auto py-1" tabIndex={-1}>
-            {rowCount === 0 ? (
-              <p className="px-3 py-3 text-[11px] text-fg-3">{emptyHint}</p>
+          <div ref={listRef} className={clsx("max-h-[280px] py-1", STABLE_SCROLL_Y)} tabIndex={-1}>
+            {notice && <p className="px-3 pb-1 pt-1.5 text-[10.5px] text-fg-3">{notice}</p>}
+            {filtered.length === 0 && !freeIDCandidate ? (
+              loading ? (
+                <p className="flex items-center gap-2 px-3 py-3 text-[11px] text-fg-3" role="status">
+                  <Spinner size={12} label="" />
+                  {loadingHint}
+                </p>
+              ) : (
+                <p className="px-3 py-3 text-[11px] text-fg-3">{emptyHint}</p>
+              )
             ) : (
               <>
-                {filtered.map((o, i) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    data-idx={i}
-                    role="option"
-                    aria-selected={false}
-                    onMouseEnter={() => setActiveIdx(i)}
-                    onClick={() => selectRow(i)}
-                    className={clsx(
-                      "flex w-full flex-col items-start px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
-                      i === activeIdx ? "bg-bg-3" : "bg-transparent",
-                    )}
-                  >
-                    <span className="w-full truncate text-fg-1">{o.label}</span>
-                    <span className="w-full truncate font-mono text-[10px] text-fg-3">
-                      {o.sublabel ? `${o.sublabel} · ${o.id}` : o.id}
-                    </span>
-                  </button>
-                ))}
+                {filtered.map((o) => {
+                  const header =
+                    o.group !== undefined && o.group !== lastGroup ? (
+                      <p
+                        key={`group:${o.group}`}
+                        className="px-2.5 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-fg-3"
+                      >
+                        {o.group}
+                      </p>
+                    ) : null;
+                  lastGroup = o.group;
+                  if (o.disabledReason) {
+                    return (
+                      <div key={o.id}>
+                        {header}
+                        <div
+                          role="option"
+                          aria-selected={false}
+                          aria-disabled
+                          title={o.disabledReason}
+                          className="flex w-full cursor-not-allowed items-start gap-2 px-2.5 py-1.5 text-left text-[11.5px] opacity-60"
+                        >
+                          {o.icon && <Icon icon={o.icon} size={12} className="mt-0.5 shrink-0 text-fg-3" />}
+                          <span className="flex min-w-0 flex-col">
+                            <span className="w-full truncate text-fg-2">{o.label}</span>
+                            <span className="w-full truncate text-[10px] text-fg-3">{o.disabledReason}</span>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  const i = pickIndex.get(o.id) ?? 0;
+                  return (
+                    <div key={o.id}>
+                      {header}
+                      <button
+                        type="button"
+                        data-idx={i}
+                        role="option"
+                        aria-selected={false}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        onClick={() => selectRow(i)}
+                        className={clsx(
+                          "flex w-full items-start gap-2 px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
+                          i === activeIdx ? "bg-bg-3" : "bg-transparent",
+                        )}
+                      >
+                        {o.icon && <Icon icon={o.icon} size={12} className="mt-0.5 shrink-0 text-fg-3" />}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="w-full truncate text-fg-1">{o.label}</span>
+                          <span className="w-full truncate font-mono text-[10px] text-fg-3">
+                            {o.sublabel ? `${o.sublabel} · ${o.id}` : o.id}
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })}
+                {loading && (
+                  <p className="flex items-center gap-2 px-3 py-1.5 text-[10.5px] text-fg-3" role="status">
+                    <Spinner size={10} label="" />
+                    {loadingHint}
+                  </p>
+                )}
                 {freeIDCandidate && (
                   <button
                     type="button"
-                    data-idx={filtered.length}
+                    data-idx={pickable.length}
                     role="option"
                     aria-selected={false}
-                    onMouseEnter={() => setActiveIdx(filtered.length)}
-                    onClick={() => selectRow(filtered.length)}
+                    onMouseEnter={() => setActiveIdx(pickable.length)}
+                    onClick={() => selectRow(pickable.length)}
                     className={clsx(
                       "flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
-                      activeIdx === filtered.length ? "bg-bg-3" : "bg-transparent",
+                      activeIdx === pickable.length ? "bg-bg-3" : "bg-transparent",
                     )}
                   >
-                    <span className="text-fg-3">Use id</span>
+                    <span className="text-fg-3">{freeIdLabel}</span>
                     <span className="truncate font-mono text-fg-1">{freeIDCandidate}</span>
                   </button>
                 )}
@@ -304,4 +418,14 @@ export function EntityMultiPicker({
       )}
     </div>
   );
+}
+
+/** orderByGroup keeps ungrouped options first (in their order), then each
+ *  group's options together in the order the group first appears. Stable. */
+function orderByGroup(opts: EntityMultiPickerOption[]): EntityMultiPickerOption[] {
+  if (!opts.some((o) => o.group !== undefined)) return opts;
+  const order: (string | undefined)[] = [];
+  for (const o of opts) if (!order.includes(o.group)) order.push(o.group);
+  order.sort((a, b) => (a === undefined ? -1 : b === undefined ? 1 : 0));
+  return order.flatMap((g) => opts.filter((o) => o.group === g));
 }

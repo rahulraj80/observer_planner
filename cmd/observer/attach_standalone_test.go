@@ -1,3 +1,5 @@
+//go:build !sbo_omit_terminals
+
 package main
 
 import (
@@ -42,7 +44,7 @@ func surfaceTestConfig(allowLaunch, attach bool) config.Config {
 // headline row is "gate off, attach on": attach must still serve (WP-A goal).
 func TestBuildTerminalSurfacesGating(t *testing.T) {
 	if !termsession.PTYSupported() {
-		t.Skip("no in-process PTY backend on this OS — buildTerminalStack returns nil")
+		t.Skip("no in-process PTY backend on this OS - buildTerminalStack returns nil")
 	}
 	cases := []struct {
 		name        string
@@ -139,7 +141,7 @@ func TestAttachDisabledNoHost(t *testing.T) {
 	}
 	t.Cleanup(surfaces.close)
 	if surfaces.attachHost != nil {
-		t.Error("attach host must be nil when [terminal.attach].enabled is off — no socket is served")
+		t.Error("attach host must be nil when [terminal.attach].enabled is off - no socket is served")
 	}
 	if surfaces.launchMgr == nil {
 		t.Error("the launch surface must be unaffected by the attach gate")
@@ -176,7 +178,7 @@ func TestTerminalStackSharesOneManager(t *testing.T) {
 		t.Fatalf("attach host mgr is %T, want *termsession.Manager", host.mgr)
 	}
 	if lm.mgr != stack.mgr || hostMgr != stack.mgr {
-		t.Errorf("Manager identity split: launch=%p attach=%p stack=%p — must all be one", lm.mgr, hostMgr, stack.mgr)
+		t.Errorf("Manager identity split: launch=%p attach=%p stack=%p - must all be one", lm.mgr, hostMgr, stack.mgr)
 	}
 
 	// One Service: same for the termsvc.Service behind both surfaces.
@@ -185,6 +187,6 @@ func TestTerminalStackSharesOneManager(t *testing.T) {
 		t.Fatalf("attach host svc is %T, want *termsvc.Service", host.svc)
 	}
 	if lm.svc != stack.svc || hostSvc != stack.svc {
-		t.Errorf("Service identity split: launch=%p attach=%p stack=%p — must all be one", lm.svc, hostSvc, stack.svc)
+		t.Errorf("Service identity split: launch=%p attach=%p stack=%p - must all be one", lm.svc, hostSvc, stack.svc)
 	}
 }

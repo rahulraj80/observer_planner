@@ -42,7 +42,7 @@ func newDroidCmd() *cobra.Command {
 		Use:   "droid [-- droid-args...]",
 		Short: "Launch Factory's droid; with --continue-from, seed a handover as droid's positional prompt",
 		Long: "Wraps Factory AI's droid CLI (`droid`). This launcher is NON-PROXIED\n" +
-			"— droid's built-in-model path has no base-URL knob and its BYOK lane\n" +
+			"- droid's built-in-model path has no base-URL knob and its BYOK lane\n" +
 			"is unprobed, so pointing it at the proxy would be a guess. Token\n" +
 			"capture happens via observer's local droid adapter (session JSONL +\n" +
 			"the settings.json sidecar's session-level cumulative counts).\n\n" +
@@ -114,7 +114,7 @@ func newDroidCmd() *cobra.Command {
 				// two-prompt check does not misread it, which makes THIS
 				// the check that owns the case.
 				if droidHeadlessScan.leads(args) {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE droid session, but you forwarded a non-interactive subcommand (e.g. `exec`) — drop it, or run the handover through `droid exec` yourself")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE droid session, but you forwarded a non-interactive subcommand (e.g. `exec`) - drop it, or run the handover through `droid exec` yourself")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer droid: %v\n", err)
 					return err
 				}

@@ -1,7 +1,7 @@
 import { Stagger, StatCard, Tooltip } from "@/components/primitives";
 import { HelpInd } from "@/components/HelpInd";
 import { TruncationBanner } from "@/components/projectdetail/TruncationBanner";
-import { fmtInt, fmtPct, fmtUSD } from "@/lib/format";
+import { costLabel, dollarsShown, fmtInt, fmtPct, fmtUSD, withoutDollars } from "@/lib/format";
 import type { ProjectDetail, ProjectRoiTile } from "@/lib/types";
 import { COMMIT_CAPTURE } from "@/lib/vocabTones";
 import { VocabPill } from "@shared/lib/vocabPill";
@@ -17,29 +17,38 @@ import { CodeCommentSplit } from "@shared/primitives/CodeCommentSplit";
 export function OverviewTab({ d }: { d: ProjectDetail }) {
   const aiLines = d.loc.ai_added + d.loc.ai_modified;
   const captureNotOk = d.capture.commits !== "ok";
+  // A dollar-denominated proxy (usd, usd_per_line, usd_per_commit) has no
+  // token form; the count / percent proxies stay.
+  const roi = withoutDollars(d.roi, (t) => t.unit.startsWith("usd"));
 
   return (
     <div className="space-y-5">
       {captureNotOk && <CaptureBanner capture={d.capture} />}
       {d.truncated && (
         <TruncationBanner>
-          Row caps hit: only the newest 10,000 prompts, 5,000 commits and 100,000 AI edits of this window feed the
-          prompt-to-commit figures (commits linked, AI-touched files, attributed spend). Spend totals and
-          per-session prompt counts are complete.
+          {costLabel(
+            "Row caps hit: only the newest 10,000 prompts, 5,000 commits and 100,000 AI edits of this window feed the prompt-to-commit figures (commits linked, AI-touched files, attributed spend). Spend totals and per-session prompt counts are complete.",
+            "Row caps hit: only the newest 10,000 prompts, 5,000 commits and 100,000 AI edits of this window feed the prompt-to-commit figures (commits linked, AI-touched files). Per-session prompt counts are complete.",
+          )}
         </TruncationBanner>
       )}
 
-      <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard
-          label="Spend"
-          icon={<MetricIcon metric="spend" />}
-          value={fmtUSD(d.spend.total_usd)}
-          sub={
-            d.spend.unpriced_turns
-              ? `over ${d.window_days}d; ${fmtInt(d.spend.unpriced_turns)} turns unpriced (unknown model), excluded`
-              : `over ${d.window_days}d`
-          }
-        />
+      {/* The project's spend has no token count on this wire: in the org's
+          token-usage view (format.ts cost affordances) the tile drops and the
+          dollar-denominated ROI proxies with it. */}
+      <Stagger className={dollarsShown() ? "grid grid-cols-2 gap-3 sm:grid-cols-4" : "grid grid-cols-2 gap-3 sm:grid-cols-3"}>
+        {dollarsShown() && (
+          <StatCard
+            label="Spend"
+            icon={<MetricIcon metric="spend" />}
+            value={fmtUSD(d.spend.total_usd)}
+            sub={
+              d.spend.unpriced_turns
+                ? `over ${d.window_days}d; ${fmtInt(d.spend.unpriced_turns)} turns unpriced (unknown model), excluded`
+                : `over ${d.window_days}d`
+            }
+          />
+        )}
         <StatCard label="Commits" icon={<MetricIcon metric="commits" />} value={fmtInt(d.commits.count)} sub={`${fmtInt(d.commits.ai_touched)} AI-touched`} />
         {/* AI code lines are code-category files only (docs/config lines are
             not code); the split below is the comment share of AI-authored
@@ -56,7 +65,7 @@ export function OverviewTab({ d }: { d: ProjectDetail }) {
           }
         />
         {d.tasks.available ? (
-          <StatCard label="Tasks" icon={<MetricIcon metric="tasks" />} value={`${fmtInt(d.tasks.done)}/${fmtInt(d.tasks.total)}`} sub={`${fmtUSD(d.tasks.cost_usd)} attributed`} />
+          <StatCard label="Tasks" icon={<MetricIcon metric="tasks" />} value={`${fmtInt(d.tasks.done)}/${fmtInt(d.tasks.total)}`} sub={dollarsShown() ? `${fmtUSD(d.tasks.cost_usd)} attributed` : "done of total"} />
         ) : (
           <StatCard label="Tasks" icon={<MetricIcon metric="tasks" />} value="unavailable" sub="task rollup could not be loaded" />
         )}
@@ -75,10 +84,10 @@ export function OverviewTab({ d }: { d: ProjectDetail }) {
           <HelpInd id="glossary.projects_roi_proxies" />
         </h3>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {d.roi.map((tile) => (
+          {roi.map((tile) => (
             <RoiTileCard key={tile.key} tile={tile} />
           ))}
-          {d.roi.length === 0 && (
+          {roi.length === 0 && (
             <p className="col-span-full text-[11.5px] text-fg-3">
               No ROI proxies computed yet for this window.
             </p>

@@ -12,7 +12,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
-func seedDB(t *testing.T) *sql.DB {
+func seedDB(t testing.TB) *sql.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "idx.db")
 	d, err := db.Open(context.Background(), db.Options{Path: path})

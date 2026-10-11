@@ -24,9 +24,15 @@ import (
 //   - no later token_usage row exists in the same session (a later row
 //     means the parse that could have proven this one already ran).
 //
-// The cursor never passes a held row, so it ships on a later tick - stamped
-// or, once Window elapses, unstamped. Rows behind it wait with it (the
-// cursor is a single id watermark). The zero value (no Tools) disables the
+// The cursor never passes a held row while it is at the TAIL of the lane, so
+// it ships on a later tick - stamped or, once Window elapses, unstamped.
+// Since 2026-10-02 (budget-latency arc, P3) the hold is scoped to the held
+// row's own session: a held row is by definition the last token row of its
+// session, so holding it could only delay OTHER sessions' rows behind the
+// single id watermark. When a ready row follows, the held rows ahead of it
+// ship with it unstamped, and the late stamp reaches the org through the
+// re-send lane (agent migration 140's token_usage trigger covers gen_ms).
+// The zero value (no Tools) disables the
 // holdback: byte-identical to the pre-136 push.
 type PushSettle struct {
 	// Tools is the transcript-timed tool set. Values are bound as SQL

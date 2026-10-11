@@ -96,7 +96,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/marmutapp/superbased-observer/internal/adapter/codex"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/scrub"
 )
@@ -417,6 +416,9 @@ func resolveToolInputUpdates(
 			continue
 		}
 		derived, derr := deriveCodexToolInputs(ctx, sc, fileRows[0].Tool, path)
+		if errors.Is(derr, errCodexAdapterNotInBuild) {
+			return nil, derr
+		}
 		if derr != nil {
 			if errors.Is(derr, context.Canceled) || errors.Is(derr, context.DeadlineExceeded) {
 				return nil, derr
@@ -544,42 +546,6 @@ func loadToolInputCandidates(ctx context.Context, db *sql.DB) ([]toolInputRow, e
 	return out, nil
 }
 
-// deriveCodexToolInputs re-reads one rollout file and returns the tool
-// inputs it can ground, keyed by the SAME source_event_id the adapter
-// writes onto the row.
-//
-// The adapter is the primary source: ParseSessionFile owns every
-// decision about what a row's input is, and whatever it produces wins.
-// scanPatchApplyChanges supplements it with the single field the
-// standalone patch path provably discards, and can only ADD keys the
-// adapter left absent — it can never override one.
-func deriveCodexToolInputs(ctx context.Context, sc *scrub.Scrubber, tool, path string) (map[string]string, error) {
-	ad := codex.NewWithOptions(sc, "")
-	if tool == models.ToolOpenInterpreter {
-		ad = codex.NewOpenInterpreterWithOptions(sc, "")
-	}
-	parsed, err := ad.ParseSessionFile(ctx, path, 0)
-	if err != nil {
-		return nil, fmt.Errorf("backfill codex-tool-input: parse %s: %w", path, err)
-	}
-	out := make(map[string]string, len(parsed.ToolEvents))
-	for _, ev := range parsed.ToolEvents {
-		if ev.SourceEventID != "" && ev.RawToolInput != "" {
-			out[ev.SourceEventID] = ev.RawToolInput
-		}
-	}
-	changes, err := scanPatchApplyChanges(ctx, sc, path)
-	if err != nil {
-		return nil, err
-	}
-	for id, v := range changes {
-		if _, seen := out[id]; !seen {
-			out[id] = v
-		}
-	}
-	return out, nil
-}
-
 // rolloutEnvelope is the outer record of a codex rollout JSONL line.
 type rolloutEnvelope struct {
 	Type    string          `json:"type"`
@@ -651,14 +617,10 @@ func scanPatchApplyChanges(ctx context.Context, sc *scrub.Scrubber, path string)
 	return out, nil
 }
 
-// scrubbedChanges renders a patch_apply_end `changes` object for storage,
-// or "" when the record carries nothing. The rendering itself is owned by
-// the adapter (codex.RenderPatchChangesInput) because the live parse path
-// writes the same column from the same bytes — a recovered row and a
-// live-captured row must be byte-identical.
-func scrubbedChanges(sc *scrub.Scrubber, raw json.RawMessage) string {
-	return codex.RenderPatchChangesInput(sc, raw)
-}
+// errCodexAdapterNotInBuild is what --codex-tool-input answers in a build
+// that compiled adapter.codex out (backfill_codex_omit.go): the pass
+// refuses instead of counting every rollout unreadable.
+var errCodexAdapterNotInBuild = adapterPassNotInBuild("--codex-tool-input", models.ToolCodex)
 
 // writeToolInputReport prints the per-bucket table. The
 // legitimately-input-free bucket is a NAMED column, not a residual: the
@@ -681,11 +643,11 @@ func writeToolInputReport(out io.Writer, res ToolInputBackfill) {
 	fmt.Fprintf(out, "  files re-read: %d (missing on disk: %d, unreadable: %d)\n",
 		res.FilesScanned, res.FilesMissing, res.FilesUnreadable)
 	fmt.Fprintf(out, "  %s: %d\n", verb, res.Updated)
-	fmt.Fprintf(out, "  unresolved — source file no longer on disk: %d\n", res.UnresolvedFileMissing)
-	fmt.Fprintf(out, "  unresolved — source record absent or carries no input: %d\n", res.UnresolvedNoSourceRecord)
-	fmt.Fprintf(out, "  skipped — this action_type legitimately has no input: %d\n", res.SkippedNoInputForActionType)
-	fmt.Fprintf(out, "  skipped — (tool, action_type) not in the grounding table: %d\n", res.SkippedUnclassified)
-	fmt.Fprintf(out, "  skipped — raw_tool_input already populated (never rewritten): %d\n", res.AlreadyPopulated)
+	fmt.Fprintf(out, "  unresolved - source file no longer on disk: %d\n", res.UnresolvedFileMissing)
+	fmt.Fprintf(out, "  unresolved - source record absent or carries no input: %d\n", res.UnresolvedNoSourceRecord)
+	fmt.Fprintf(out, "  skipped - this action_type legitimately has no input: %d\n", res.SkippedNoInputForActionType)
+	fmt.Fprintf(out, "  skipped - (tool, action_type) not in the grounding table: %d\n", res.SkippedUnclassified)
+	fmt.Fprintf(out, "  skipped - raw_tool_input already populated (never rewritten): %d\n", res.AlreadyPopulated)
 
 	if len(res.PerBucket) > 0 {
 		fmt.Fprintf(out, "  per tool × action_type:\n")
@@ -699,7 +661,7 @@ func writeToolInputReport(out io.Writer, res ToolInputBackfill) {
 		}
 	}
 	if !res.Applied && res.Updated > 0 {
-		fmt.Fprintf(out, "  nothing written (dry run) — re-run with --apply:\n    observer backfill --codex-tool-input --apply\n")
+		fmt.Fprintf(out, "  nothing written (dry run) - re-run with --apply:\n    observer backfill --codex-tool-input --apply\n")
 	}
 }
 

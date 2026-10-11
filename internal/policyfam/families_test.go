@@ -1,6 +1,9 @@
 package policyfam
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // TestSupportedFamiliesDriveDispatch is the registry contract test: every
 // family listed in SupportedFamilies must compile a minimal valid body
@@ -28,6 +31,10 @@ func TestSupportedFamiliesDriveDispatch(t *testing.T) {
 		// no grant compiles to the invariants + deny-all sentinel (a valid,
 		// meaningful "nothing is granted yet" policy).
 		FamilyMCPAccess: `{"mode":"enforce","registry":{"issuer":"https://auth.acme.superbased.app","org":"acme","gateway_base_uri":"https://mcp-gw.acme.superbased.app","policy_gen":1,"vservers":[{"id":"vs","slug":"gh","sender_constraint":"bearer"}]},"grants":[]}`,
+		// node.components' minimal body is the empty object: a strict
+		// policy that allows nothing, so every non-core component is inert
+		// (unlisted: inert, operator ruling Q5).
+		FamilyNodeComponents: `{}`,
 	}
 
 	if len(minimalBody) != len(SupportedFamilies) {
@@ -41,6 +48,18 @@ func TestSupportedFamiliesDriveDispatch(t *testing.T) {
 				t.Fatalf("no minimal body registered for family %q in this test", family)
 			}
 			spec, canon, err := CompileFamilyBody(family, []byte(body), 4096)
+			if family == FamilyMCPAccess && IsFamilyLinked(family) != mcpAccessInBuild {
+				t.Fatalf("IsFamilyLinked(%q) = %v, want %v for this build", family, !mcpAccessInBuild, mcpAccessInBuild)
+			}
+			if family == FamilyMCPAccess && !mcpAccessInBuild {
+				// The family's compiler belongs to a component this build
+				// leaves out (linked.go): the dispatch answers the named
+				// ErrFamilyNotLinked, never a silent compile (D-535).
+				if !errors.Is(err, ErrFamilyNotLinked) {
+					t.Fatalf("CompileFamilyBody(%q) in a build without its compiler: err = %v, want ErrFamilyNotLinked", family, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("CompileFamilyBody(%q): %v", family, err)
 			}

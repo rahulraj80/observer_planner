@@ -1,0 +1,29 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "download_links": "VerifiedOfficial",
+    "download_links[]": "VerifiedOfficial",
+    "report_day": "VerifiedOfficial"
+  },
+  "fixture_sha256": "f5d3a147c640d8eed1b14e3e936f8beeae3a24bbeb238918d1fbdeb1e297ed7a",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/copilot/metrics/reports/user-teams-1-day",
+    "query": {
+      "day": "2025-10-01"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /enterprises/{enterprise}/copilot/metrics/reports/user-teams-1-day (operationId copilot/copilot-enterprise-user-teams-one-day-report).",
+  "scenario": "report_link",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.copilot.metrics.ent_user_teams_1d"
+}

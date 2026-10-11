@@ -1,0 +1,11 @@
+{"sessionId":"655fdd60-68db-4734-b0fa-041f5c562a33","projectHash":"d04565136f0b568f0fdda1d74bdb5a3a772de547344d4bee83fc193adc963e73","startTime":"2026-10-05T23:24:48.905Z","lastUpdated":"2026-10-05T23:24:48.905Z","kind":"main"}
+{"$set":{"messages":[{"id":"d04923d38bb0f6017037e74183378ef4","timestamp":"2026-10-05T23:24:48.905Z","type":"user","content":[{"text":"[fixture: truncated]"}]}],"lastUpdated":"2026-10-05T23:24:48.905Z"}}
+{"id":"aedcf68d-3fe0-4ad3-a08d-b3888bd96a88","timestamp":"2026-10-05T23:24:48.939Z","type":"user","content":[{"text":"list the files here"}]}
+{"$set":{"lastUpdated":"2026-10-05T23:24:48.939Z"}}
+{"id":"f75c1371-bf81-4a1f-bd6f-6d9a5c5bfe4f","timestamp":"2026-10-05T23:24:49.140Z","type":"gemini","content":"","thoughts":[],"tokens":{"input":1234,"output":56,"cached":1000,"thoughts":16,"tool":0,"total":1306},"model":"gemini-3.5-flash"}
+{"$set":{"lastUpdated":"2026-10-05T23:24:49.141Z"}}
+{"id":"f75c1371-bf81-4a1f-bd6f-6d9a5c5bfe4f","timestamp":"2026-10-05T23:24:49.140Z","type":"gemini","content":"","thoughts":[],"tokens":{"input":1234,"output":56,"cached":1000,"thoughts":16,"tool":0,"total":1306},"model":"gemini-3.5-flash","toolCalls":[{"id":"list_directory__gcall_mock1","name":"list_directory","args":{"dir_path":"."},"result":[{"functionResponse":{"id":"list_directory__gcall_mock1","name":"list_directory","response":{"output":"Directory /home/fixture/work-g is empty."}}}],"status":"success","timestamp":"2026-10-05T23:24:49.155Z","resultDisplay":"Directory is empty.","description":".","displayName":"ReadFolder","renderOutputAsMarkdown":true}]}
+{"id":"af7a4ba0-11f8-450c-8b4c-43798f950284","timestamp":"2026-10-05T23:24:49.158Z","type":"user","content":[{"functionResponse":{"id":"list_directory__gcall_mock1","name":"list_directory","response":{"output":"Directory /home/fixture/work-g is empty."}}}]}
+{"$set":{"lastUpdated":"2026-10-05T23:24:49.158Z"}}
+{"id":"e84465e9-73f5-45d0-8bba-cf3df634c6ce","timestamp":"2026-10-05T23:24:49.174Z","type":"gemini","content":"Hello from the mock.","thoughts":[],"tokens":{"input":1234,"output":56,"cached":1000,"thoughts":16,"tool":0,"total":1306},"model":"gemini-3.5-flash"}
+{"$set":{"lastUpdated":"2026-10-05T23:24:49.174Z"}}

@@ -139,7 +139,7 @@ func (d Detection) Warning() string {
 		return ""
 	}
 	return fmt.Sprintf("could not check for the %s Claude Code plugin: %v"+
-		" — registering anyway (a plugin install would then double every event;"+
+		" - registering anyway (a plugin install would then double every event;"+
 		" run `observer doctor claude-code` once the file is readable)", Name, d.Err)
 }
 

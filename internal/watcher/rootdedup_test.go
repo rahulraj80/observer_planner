@@ -208,7 +208,7 @@ func TestApplyDetectedRootsDedupsAliasedRoots(t *testing.T) {
 	w.byRoot = map[string]adapter.Adapter{}
 	w.liveMu.Unlock()
 
-	added := w.applyDetectedRoots()
+	added := w.applyDetectedRoots(context.Background())
 	if len(added) != 1 {
 		t.Errorf("applyDetectedRoots added %d roots, want 1", len(added))
 	}
@@ -221,7 +221,7 @@ func TestApplyDetectedRootsDedupsAliasedRoots(t *testing.T) {
 	}
 
 	// Idempotent: a second apply adds nothing.
-	if again := w.applyDetectedRoots(); len(again) != 0 {
+	if again := w.applyDetectedRoots(context.Background()); len(again) != 0 {
 		t.Errorf("second applyDetectedRoots added %d roots, want 0", len(again))
 	}
 }

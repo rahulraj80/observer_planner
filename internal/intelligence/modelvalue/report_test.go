@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 var t0 = time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
@@ -32,7 +32,7 @@ func mkAction(session, actionType string, minute, sec int, success bool) ActionR
 }
 
 // flatPrice prices every model at $0.10/turn so cost assertions are easy.
-func flatPrice(string, routing.PromptUsage) (float64, bool) { return 0.10, true }
+func flatPrice(string, routingcore.PromptUsage) (float64, bool) { return 0.10, true }
 
 // TestBuild_CellAggregation pins the core per-cell math: volume, cost
 // via the injected PriceFn, latency percentiles over graded rows, error
@@ -67,10 +67,10 @@ func TestBuild_CellAggregation(t *testing.T) {
 		t.Fatalf("cells = %d, want 1 (%+v)", len(rep.Cells), rep.Cells)
 	}
 	c := rep.Cells[0]
-	if c.Model != "claude-opus-4-8" || c.TurnKind != routing.TurnReadOnly || c.ProjectID != 1 {
+	if c.Model != "claude-opus-4-8" || c.TurnKind != routingcore.TurnReadOnly || c.ProjectID != 1 {
 		t.Errorf("cell identity = (%s, %s, %d)", c.Model, c.TurnKind, c.ProjectID)
 	}
-	if c.Tier != routing.TierOpusClass {
+	if c.Tier != routingcore.TierOpusClass {
 		t.Errorf("cell tier = %s, want opus-class", c.Tier)
 	}
 	if c.Turns != 2 {
@@ -98,7 +98,7 @@ func TestBuild_CellAggregation(t *testing.T) {
 // row's stored insert-time cost.
 func TestBuild_PriceFallback(t *testing.T) {
 	t.Parallel()
-	miss := func(string, routing.PromptUsage) (float64, bool) { return 0, false }
+	miss := func(string, routingcore.PromptUsage) (float64, bool) { return 0, false }
 	f := &Facts{
 		GeneratedAt: t0,
 		Price:       miss,
@@ -130,7 +130,7 @@ func TestBuild_PhaseHintClassifiesPlan(t *testing.T) {
 		Actions:     []ActionRow{planMarker, mkAction("s1", models.ActionReadFile, -1, 30, true)},
 	}
 	rep := Build(f, Options{})
-	if len(rep.Cells) != 1 || rep.Cells[0].TurnKind != routing.TurnPlan {
+	if len(rep.Cells) != 1 || rep.Cells[0].TurnKind != routingcore.TurnPlan {
 		t.Errorf("cells = %+v, want one plan cell", rep.Cells)
 	}
 	// A later non-plan marker clears the phase.
@@ -139,7 +139,7 @@ func TestBuild_PhaseHintClassifiesPlan(t *testing.T) {
 		Timestamp: t0.Add(-30 * time.Second), Success: true, PhaseHint: "default",
 	})
 	rep = Build(f, Options{})
-	if rep.Cells[0].TurnKind == routing.TurnPlan {
+	if rep.Cells[0].TurnKind == routingcore.TurnPlan {
 		t.Error("phase not cleared by a later default marker")
 	}
 }
@@ -156,7 +156,7 @@ func TestBuild_SidechainAttribution(t *testing.T) {
 		Actions:     []ActionRow{side},
 	}
 	rep := Build(f, Options{})
-	if len(rep.Cells) != 1 || rep.Cells[0].TurnKind != routing.TurnSubagent {
+	if len(rep.Cells) != 1 || rep.Cells[0].TurnKind != routingcore.TurnSubagent {
 		t.Errorf("cells = %+v, want one subagent cell", rep.Cells)
 	}
 }

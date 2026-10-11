@@ -55,7 +55,7 @@ func TestPackageImports_Bounded(t *testing.T) {
 			p := strings.Trim(imp.Path.Value, `"`)
 			for _, bad := range forbidden {
 				if p == bad {
-					t.Errorf("%s: forbidden import %q (toolresolve is pure — inject I/O via Env)", filepath.Base(path), p)
+					t.Errorf("%s: forbidden import %q (toolresolve is pure - inject I/O via Env)", filepath.Base(path), p)
 				}
 			}
 			if strings.HasPrefix(p, "github.com/marmutapp/superbased-observer/internal/") && p != allowedInternal {

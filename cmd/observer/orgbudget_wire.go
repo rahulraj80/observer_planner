@@ -49,6 +49,10 @@ import (
 // mutated), the capability resolvers, and the last posture.
 type orgBudgetHandle struct {
 	guard *guard.Guard
+	// warn is the budget-warning service (budgetwarn_wire.go); every
+	// composition hands it the adopted org windows. nil = no warnings (a CLI
+	// one-shot, a test).
+	warn *budgetWarnService
 	// local is the node's own [guard.budget] block, captured once at wiring.
 	// It is the left operand of every composition: composing against the
 	// PREVIOUS effective value instead would ratchet a node permanently
@@ -73,6 +77,63 @@ type orgBudgetHandle struct {
 	// the configured [guard].mode - so it reports that, exactly as `observer
 	// guard status` composes from cfg.Guard.Mode. Empty = read the guard.
 	modeOverride string
+	// failClosed resolves [guard.budget].fail_closed LIVE on every
+	// composition (REVIEW-4 P4-04): the node's own value OR the CURRENT
+	// governance pin. nil means the value captured in local, which is what a
+	// one-shot CLI process (built from the config it just loaded) wants. The
+	// daemon installs it because local is captured once at start and can carry
+	// a pin from an organization this node has since left.
+	failClosed func() bool
+}
+
+// failClosedNow is the fail_closed value this composition uses.
+func (h *orgBudgetHandle) failClosedNow() bool {
+	if h.failClosed != nil {
+		return h.failClosed()
+	}
+	return h.local.FailClosed
+}
+
+// liveBudgetFailClosed builds the daemon's live fail_closed resolver: the
+// node's OWN (ungoverned) value, or the restrictive pin the organization's
+// CURRENT node.governance body carries. pinned may return nil (no governance
+// in force); a leave removes the governance state, so the pin goes with it.
+func liveBudgetFailClosed(own bool, pinned func() map[string]any) func() bool {
+	return func() bool {
+		if own {
+			return true
+		}
+		if pinned == nil {
+			return false
+		}
+		v, _ := pinned()[budgetFailClosedKey].(bool)
+		return v
+	}
+}
+
+// budgetFailClosedKey is the pinnable dotted key (config governance mirror).
+const budgetFailClosedKey = "guard.budget.fail_closed"
+
+// ownBudgetFailClosed returns the node's OWN fail_closed value: the loaded
+// config's, unless the governance overlay pinned the key at load, in which case
+// the config is re-read with the overlay disabled. A re-read failure keeps the
+// pinned (restrictive) value: never weaker than what the daemon started with.
+func ownBudgetFailClosed(configPath string, cfg config.Config, applied []string) bool {
+	pinned := false
+	for _, k := range applied {
+		if k == budgetFailClosedKey {
+			pinned = true
+			break
+		}
+	}
+	if !pinned {
+		return cfg.Guard.Budget.FailClosed
+	}
+	own, err := config.Load(config.LoadOptions{GlobalPath: configPath, GovernanceSidecar: config.NoGovernanceSidecar})
+	if err != nil {
+		return cfg.Guard.Budget.FailClosed
+	}
+	return own.Guard.Budget.FailClosed
 }
 
 // newOrgBudgetHandle wires the boundary. g may be nil (the guard is off or
@@ -85,14 +146,36 @@ func newOrgBudgetHandle(g *guard.Guard, local config.GuardBudgetConfig, authorit
 		identityStore: identityStore, logger: logger,
 	}
 	if g != nil && identityStore != nil {
-		g.SetBudgetBindingLookup(func() (string, bool) {
+		g.SetBudgetIdentityLookup(func() (string, guard.BudgetIdentityState) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			identity, active, err := orgclient.CurrentBudgetIdentity(ctx, identityStore)
-			return identity.Binding, err == nil && active && identity.Binding != ""
+			return budgetIdentityStateOf(identity.Binding, active, err)
 		})
 	}
 	return h
+}
+
+// budgetIdentityStateOf maps one CurrentBudgetIdentity answer onto the guard's
+// tri-state (REVIEW-4 P4-01, operator ruling D-521 "keep last budget"). A read
+// ERROR is unknown, never "not enrolled": the 2 s identity read on the proxy
+// hot path can fail on a busy pool, a checkpoint or its own deadline, and
+// collapsing that into "no enrolment" lifted every verified org cap and the
+// node's own caps for the request. Only a successful read that finds no live
+// enrolment (none, or a tombstoned generation) is the confirmed answer that
+// lifts organization rules. An active enrolment with an empty binding cannot
+// be compared, so it is unknown too.
+func budgetIdentityStateOf(binding string, active bool, err error) (string, guard.BudgetIdentityState) {
+	switch {
+	case err != nil:
+		return "", guard.BudgetIdentityUnknown
+	case !active:
+		return "", guard.BudgetIdentityNotEnrolled
+	case binding == "":
+		return "", guard.BudgetIdentityUnknown
+	default:
+		return binding, guard.BudgetIdentityEnrolled
+	}
 }
 
 // Prime publishes the FIRST posture, and it is deliberately NOT done at
@@ -153,6 +236,12 @@ func (h *orgBudgetHandle) onBudgetFetch(o orgclient.BudgetFetchOutcome) {
 func (h *orgBudgetHandle) apply(o orgclient.BudgetFetchOutcome) {
 	o = h.bindOutcomeToCurrentIdentity(o)
 	granted := false
+	// The composition's left operand with fail_closed resolved LIVE (P4-04):
+	// the guard's liveness table reads it back through budgetConfig(), so a
+	// pin from an organization this node left must not keep arming B-625 for
+	// the next one until a restart.
+	local := h.local
+	local.FailClosed = h.failClosedNow()
 	caps := orgbudget.Capabilities{
 		FromOrg:    h.local.FromOrg,
 		HaveBody:   o.HaveBody,
@@ -187,6 +276,8 @@ func (h *orgBudgetHandle) apply(o orgclient.BudgetFetchOutcome) {
 		caps.OrgAuthoritative = granted
 		caps.RequireOrgBudget = granted
 	}
+	// D-502: blocking on an ABSENT body is the org's explicit opt-in only.
+	caps.FailClosed = local.FailClosed
 	effective, posture := orgbudget.Compose(thresholdsOf(h.local), o.Body, caps)
 	// WHICH PRICE TABLE the caps are measured in (pricing arc §3.3). It is
 	// stamped HERE, at the boundary, rather than inside Compose: internal/
@@ -209,9 +300,17 @@ func (h *orgBudgetHandle) apply(o orgclient.BudgetFetchOutcome) {
 		h.logger.Warn("no verified organization budget on a managed node; proxied requests are refused until one arrives",
 			"fetch_state", posture.FetchState, "guard_mode", posture.Mode)
 	}
+	// The warn ladder follows the SAME composition (nil-safe): the whole-caller
+	// windows AND the per-tool / per-model caps (Sol A5-04), bucketed by the
+	// calendars the guard engine is given below.
+	h.warn.SetComposition(effective.Origins, effective.Subjects,
+		guard.BudgetCalendars{DailyTimezone: effective.DailyTimezone, MonthlyTimezone: effective.MonthlyTimezone})
 	if h.guard == nil {
 		return
 	}
+	// Label-only: a breach of an org-authored window renders in the org's
+	// terms (finding A5). No number or decision depends on it.
+	h.guard.SetBudgetOrigins(guardBudgetOriginsOf(effective.Origins))
 	// ONE COMPOSITION, ONE PUBLICATION (adversarial review of BUD-N, P2-6).
 	//
 	// The org's PER-TOOL / PER-MODEL caps and the cross-machine baseline are
@@ -229,7 +328,7 @@ func (h *orgBudgetHandle) apply(o orgclient.BudgetFetchOutcome) {
 	// published together and the engine is rebuilt once. The call is a no-op
 	// when nothing changed, so the steady state stays free.
 	if err := h.guard.ApplyOrgComposedBudget(
-		withThresholds(h.local, effective), effective.SoftWindows,
+		withThresholds(local, effective), effective.SoftWindows,
 		effective.BudgetRequired, budgetProtectionOf(effective.Protection),
 		o.Binding, guardBudgetDocumentWitness(o.Witness),
 		budgetBaselineOf(effective.Baseline), effective.Baseline.FlagOnly, subjectCapsOf(effective.Subjects),
@@ -240,6 +339,19 @@ func (h *orgBudgetHandle) apply(o orgclient.BudgetFetchOutcome) {
 		h.logger.Warn("org budget not applied; the guard kept its previous thresholds and cap table",
 			"source", posture.Source, "fetch_state", posture.FetchState, "err", err)
 	}
+}
+
+// guardBudgetOriginsOf projects the composed org-window provenance onto the
+// guard's label table.
+func guardBudgetOriginsOf(in []orgbudget.Origin) []guard.BudgetOrigin {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]guard.BudgetOrigin, 0, len(in))
+	for _, o := range in {
+		out = append(out, guard.BudgetOrigin{Window: o.Window, Unit: o.Unit, Scope: o.Scope, Enforcement: o.Enforcement})
+	}
+	return out
 }
 
 func guardBudgetDocumentWitness(w store.OrgBudgetWitness) guard.BudgetDocumentWitness {
@@ -503,6 +615,7 @@ func guardBudgetPostureLineWithGrant(ctx context.Context, cfg config.Config, dat
 		FromOrg:          cfg.Guard.Budget.FromOrg,
 		OrgAuthoritative: granted,
 		RequireOrgBudget: granted,
+		FailClosed:       cfg.Guard.Budget.FailClosed,
 		GuardMode:        cfg.Guard.Mode,
 	}
 	var (
@@ -527,6 +640,15 @@ func guardBudgetPostureLineWithGrant(ctx context.Context, cfg config.Config, dat
 		caps.FetchState = orgcontract.BudgetFetchUnreachable
 	default:
 		caps.FetchState = initialFetchState(cfg.Guard.Budget.FromOrg)
+		// U11 (FIX-UPGRADE): a node with no enrolment has nothing to fetch,
+		// so "unreachable" read as an outage on every never-enrolled
+		// individual node. A confirmed "no enrolment" answer says so; a
+		// failed identity read keeps the honest pre-poll state.
+		if !granted {
+			if _, active, ierr := orgclient.CurrentBudgetIdentity(ctx, store.New(database)); ierr == nil && !active {
+				caps.FetchState = orgcontract.BudgetFetchNotEnrolled
+			}
+		}
 	}
 	_, posture := orgbudget.Compose(thresholdsOf(cfg.Guard.Budget), cached.Body, caps)
 	return budgetPostureStatusLine(posture.Row())
@@ -598,6 +720,10 @@ func budgetPostureStatusLine(row orgcontract.BudgetPostureRow) string {
 	// deny verdicts needs the word they can search for.
 	blocked := row.Coverage == orgcontract.BudgetCoverageBudgetRequired
 	lead := "coverage=" + row.Coverage
+	if row.FetchState == orgcontract.BudgetFetchNotEnrolled {
+		// U11: say it in words first; the tokens stay for scripts.
+		lead = "not enrolled in an organization, so no organization budget applies; " + lead
+	}
 	if blocked {
 		lead += " (this node is managed and BLOCKS all proxied requests until a verified org budget arrives)"
 	}

@@ -37,6 +37,21 @@
 // (OBSERVER_CROSSMOUNT_ALL_PROFILES) to a truthy value and every
 // directory under /mnt/c/Users enumerates again.
 //
+// # Test binaries never see a real foreign home
+//
+// The foreign roots (/mnt/c/Users, \\wsl.localhost\) are fixed mount
+// points, not derived from $HOME, so a test that fakes HOME is NOT
+// isolated from them. Inside any `go test` binary the default detector
+// therefore enumerates no foreign home and WindowsUserName never execs
+// cmd.exe (testguard.go, incident 2026-10-02: a cmd/observer test
+// rewrote the operator's real Windows-side Claude Code hooks). A test
+// that needs a foreign home stages a fake one under t.TempDir() with
+// StageForeignLayoutForTest; a human who wants the live mount in a test
+// run sets OBSERVER_ALLOW_LIVE_CROSSMOUNT_IN_TEST=1 on the command line.
+// A real (non-test) observer binary honours EnvDisableForeignHomes
+// (OBSERVER_CROSSMOUNT_DISABLE) the same way, which is what e2e
+// harnesses set for the subprocesses they spawn.
+//
 // # MSIX-packaged Windows apps (Claude Desktop / Cowork)
 //
 // An MSIX-packaged Windows app redirects its Roaming AppData: what the

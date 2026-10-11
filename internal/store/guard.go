@@ -15,6 +15,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/marmutapp/superbased-observer/internal/guard"
+	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/policy"
 	"github.com/marmutapp/superbased-observer/internal/spendverdict"
 )
 
@@ -99,8 +101,17 @@ type GuardEventRow struct {
 	TargetHash    string
 	TargetExcerpt string
 	TaintOrigin   string
-	ChainPrev     string
-	ChainHash     string
+	// GrantID is the org access grant that covered this event (request-grants
+	// G3): set when a grant turned an ask/deny into an allow-by-grant or a
+	// softened ask; 0 (NULL) otherwise. Part of the chain input from
+	// version 2 on.
+	GrantID   int64
+	ChainPrev string
+	ChainHash string
+	// ChainV is the chain-input version this row was hashed under (an OUTPUT
+	// field like ChainPrev/ChainHash on insert: InsertGuardEvents always
+	// writes guardChainVersionCurrent). 0 on a loaded row reads as 1.
+	ChainV int
 
 	// tsStored is the exact string persisted in the ts column — the
 	// canonical-bytes computation and the verify walk must agree on
@@ -123,8 +134,55 @@ type GuardEventRow struct {
 // chain): ts, session_id, action_id, api_turn_id, tool, event_kind,
 // rule_id, category, severity, decision, degraded_from, enforced,
 // source, reason, target_hash, target_excerpt, taint_origin.
+//
+// CHAIN INPUT VERSIONS (guardChainInputs; request-grants G3). Version 1 is
+// exactly the 17 fields above and is what every row written before agent
+// migration 156 carries. Version 2 prefixes the tag "v2" and appends
+// grant_id (decimal, "" when NULL), so the grant that changed a verdict is
+// covered by the chain. A row's version is stored beside it (chain_v) and
+// the verifier recomputes with that row's version, so older chains verify
+// unchanged; rewriting a v2 row as v1 changes its recomputed hash.
 func (r *GuardEventRow) canonicalBytes() []byte {
-	fields := []string{
+	build, ok := guardChainInputs[r.chainVersion()]
+	if !ok {
+		// An unknown version never verifies: hash a sentinel no writer uses.
+		return []byte("unknown chain input version " + strconv.Itoa(r.ChainV))
+	}
+	return build(r)
+}
+
+// guardChainVersionCurrent is the chain-input version every new row is
+// written under.
+const guardChainVersionCurrent = 2
+
+// chainVersion reads a loaded row's version (0, the zero value of a row
+// built in memory before insert, reads as 1 only for verification of legacy
+// rows; InsertGuardEvents always stamps the current version first).
+func (r *GuardEventRow) chainVersion() int {
+	if r.ChainV == 0 {
+		return 1
+	}
+	return r.ChainV
+}
+
+// guardChainInputs is the version -> preimage table. Append-only: a version
+// once shipped is never edited, because rows hashed under it exist.
+var guardChainInputs = map[int]func(r *GuardEventRow) []byte{
+	1: func(r *GuardEventRow) []byte { return []byte(strings.Join(r.v1Fields(), "\x1f")) },
+	2: func(r *GuardEventRow) []byte {
+		fields := append([]string{"v2"}, r.v1Fields()...)
+		grant := ""
+		if r.GrantID != 0 {
+			grant = strconv.FormatInt(r.GrantID, 10)
+		}
+		fields = append(fields, grant)
+		return []byte(strings.Join(fields, "\x1f"))
+	},
+}
+
+// v1Fields is the version-1 field list (see canonicalBytes).
+func (r *GuardEventRow) v1Fields() []string {
+	return []string{
 		r.tsStored,
 		r.SessionID,
 		formatNullableID(r.ActionID),
@@ -143,7 +201,6 @@ func (r *GuardEventRow) canonicalBytes() []byte {
 		r.TargetExcerpt,
 		r.TaintOrigin,
 	}
-	return []byte(strings.Join(fields, "\x1f"))
 }
 
 // guardChainHash computes SHA-256(prev || 0x1e || canonical row bytes)
@@ -157,6 +214,14 @@ func guardChainHash(prev string, canonical []byte) string {
 	h.Write([]byte{0x1e})
 	h.Write(canonical)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// nullableGrantID stores a grant id, NULL for "no grant".
+func nullableGrantID(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
 }
 
 // formatNullableID renders a nullable row-id anchor for the canonical
@@ -184,8 +249,8 @@ INSERT INTO guard_events (
     ts, session_id, action_id, api_turn_id, tool, event_kind,
     rule_id, category, severity, decision, degraded_from, enforced,
     source, reason, target_hash, target_excerpt, taint_origin,
-    chain_prev, chain_hash
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    chain_prev, chain_hash, grant_id, chain_v
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // InsertGuardEvents appends a batch of guard_events rows inside a
 // single transaction, computing the §10.4 hash chain link for each:
@@ -239,6 +304,7 @@ func (s *Store) InsertGuardEvents(ctx context.Context, events []GuardEventRow) (
 		ev.Reason = truncateRunes(ev.Reason, guardMaxReasonRunes)
 		ev.TargetExcerpt = truncateRunes(ev.TargetExcerpt, guardMaxExcerptRunes)
 		ev.tsStored = timestamp(ev.TS)
+		ev.ChainV = guardChainVersionCurrent
 		ev.ChainPrev = prev
 		ev.ChainHash = guardChainHash(prev, ev.canonicalBytes())
 		if _, err := stmt.ExecContext(
@@ -262,6 +328,8 @@ func (s *Store) InsertGuardEvents(ctx context.Context, events []GuardEventRow) (
 			nullableString(ev.TaintOrigin),
 			ev.ChainPrev,
 			ev.ChainHash,
+			nullableGrantID(ev.GrantID),
+			ev.ChainV,
 		); err != nil {
 			return 0, fmt.Errorf("store.InsertGuardEvents: exec[%d]: %w", i, err)
 		}
@@ -352,7 +420,7 @@ func (s *Store) VerifyGuardChain(ctx context.Context) (GuardChainReport, error) 
 		       COALESCE(degraded_from,''), enforced, COALESCE(source,''),
 		       COALESCE(reason,''), COALESCE(target_hash,''),
 		       COALESCE(target_excerpt,''), COALESCE(taint_origin,''),
-		       chain_prev, chain_hash
+		       chain_prev, chain_hash, COALESCE(grant_id, 0), chain_v
 		FROM guard_events ORDER BY id ASC`)
 	if err != nil {
 		return GuardChainReport{}, fmt.Errorf("store.VerifyGuardChain: query: %w", err)
@@ -371,7 +439,7 @@ func (s *Store) VerifyGuardChain(ctx context.Context) (GuardChainReport, error) 
 			&r.DegradedFrom, &enforced, &r.Source,
 			&r.Reason, &r.TargetHash,
 			&r.TargetExcerpt, &r.TaintOrigin,
-			&r.ChainPrev, &r.ChainHash,
+			&r.ChainPrev, &r.ChainHash, &r.GrantID, &r.ChainV,
 		); err != nil {
 			return GuardChainReport{}, fmt.Errorf("store.VerifyGuardChain: scan: %w", err)
 		}
@@ -419,7 +487,7 @@ const guardEventSelectColumns = `
 	       COALESCE(degraded_from,''), enforced, COALESCE(source,''),
 	       COALESCE(reason,''), COALESCE(target_hash,''),
 	       COALESCE(target_excerpt,''), COALESCE(taint_origin,''),
-	       chain_prev, chain_hash
+	       chain_prev, chain_hash, COALESCE(grant_id, 0), chain_v
 	FROM guard_events`
 
 // LoadGuardEventsForSession returns all guard events for a session,
@@ -464,7 +532,7 @@ func (s *Store) LoadGuardEventsForSessionWithMessageAnchor(ctx context.Context, 
 		       COALESCE(ge.degraded_from,''), ge.enforced, COALESCE(ge.source,''),
 		       COALESCE(ge.reason,''), COALESCE(ge.target_hash,''),
 		       COALESCE(ge.target_excerpt,''), COALESCE(ge.taint_origin,''),
-		       ge.chain_prev, ge.chain_hash,
+		       ge.chain_prev, ge.chain_hash, COALESCE(ge.grant_id, 0), ge.chain_v,
 		       COALESCE(a.message_id, ''), a.turn_index
 		FROM guard_events ge
 		LEFT JOIN actions a ON a.id = ge.action_id
@@ -486,7 +554,7 @@ func (s *Store) LoadGuardEventsForSessionWithMessageAnchor(ctx context.Context, 
 			&r.DegradedFrom, &enforced, &r.Source,
 			&r.Reason, &r.TargetHash,
 			&r.TargetExcerpt, &r.TaintOrigin,
-			&r.ChainPrev, &r.ChainHash,
+			&r.ChainPrev, &r.ChainHash, &r.GrantID, &r.ChainV,
 			&r.MessageID, &turnIndex,
 		); err != nil {
 			return nil, fmt.Errorf("store.LoadGuardEventsForSessionWithMessageAnchor: scan: %w", err)
@@ -554,7 +622,7 @@ func loadGuardEventRows(rows *sql.Rows, caller string) ([]GuardEventRow, error) 
 			&r.DegradedFrom, &enforced, &r.Source,
 			&r.Reason, &r.TargetHash,
 			&r.TargetExcerpt, &r.TaintOrigin,
-			&r.ChainPrev, &r.ChainHash,
+			&r.ChainPrev, &r.ChainHash, &r.GrantID, &r.ChainV,
 		); err != nil {
 			return nil, fmt.Errorf("%s: scan: %w", caller, err)
 		}
@@ -1073,8 +1141,21 @@ func (s *Store) PersistGuardVerdicts(ctx context.Context, verdicts []guard.Actio
 		return 0, nil
 	}
 	rows := make([]GuardEventRow, 0, len(verdicts))
+	var markErr error
 	for i := range verdicts {
 		v := &verdicts[i]
+		if v.Kind == policy.KindUserPrompt && v.Input.ActionID == 0 && v.Input.PromptDigest != "" {
+			// A pre-send prompt lane's mark (guard_prompt_presend) rides
+			// its verdict to this one writer.
+			if err := s.RecordPromptPreSend(ctx, v.Input.SessionID, v.Input.PromptDigest, v.Input.Timestamp); err != nil && markErr == nil {
+				markErr = err
+			}
+		}
+		if v.Kind == policy.KindUserPrompt && v.Verdict.RuleID == "" {
+			// MARK-ONLY verdict (internal/hook/promptsubmit.go): nothing
+			// was found worth auditing; only the mark above is written.
+			continue
+		}
 		reason := v.Verdict.Reason
 		if v.Verdict.Advice != "" {
 			reason += " Advice: " + v.Verdict.Advice
@@ -1102,6 +1183,7 @@ func (s *Store) PersistGuardVerdicts(ctx context.Context, verdicts []guard.Actio
 			TargetHash:    sha256Hex(v.Input.Target),
 			TargetExcerpt: v.Input.Target,
 			TaintOrigin:   v.TaintOrigin,
+			GrantID:       v.GrantID,
 		}
 		if v.Input.ActionID != 0 {
 			id := v.Input.ActionID
@@ -1115,7 +1197,11 @@ func (s *Store) PersistGuardVerdicts(ctx context.Context, verdicts []guard.Actio
 		}
 		rows = append(rows, row)
 	}
-	return s.InsertGuardEvents(ctx, rows)
+	n, err := s.InsertGuardEvents(ctx, rows)
+	if err == nil && markErr != nil {
+		err = markErr
+	}
+	return n, err
 }
 
 // GuardEventSummary aggregates guard_events for the status surfaces
@@ -1164,7 +1250,7 @@ func (s *Store) SummarizeGuardEventsBetween(ctx context.Context, since, until ti
 		args = append(args, timestamp(until))
 	}
 	if len(conds) > 0 {
-		q += ` WHERE ` + strings.Join(conds, ` AND `)
+		q += ` WHERE ` + strings.Join(conds, ` AND `) //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	}
 	q += ` GROUP BY decision, severity, category, enforced`
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -1287,6 +1373,110 @@ func (s *Store) GuardEventExistsForAction(ctx context.Context, actionID int64, r
 	}
 }
 
+// GuardEventExistsForTarget reports whether a guard event with this
+// degraded_from already records this exact target (matched on the
+// pushable target_hash, the same sha256 PersistGuardVerdicts stamps).
+// It is the de-duplication gate for daemon-raised condition events
+// that must be reported once per distinct state, not once per tick:
+// the user-policy-invalid event (T-323) keys its target on the file's
+// content hash, so the same broken file reports once and an edited,
+// still-broken one reports again.
+func (s *Store) GuardEventExistsForTarget(ctx context.Context, degradedFrom, target string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM guard_events WHERE degraded_from = ? AND target_hash = ? LIMIT 1`,
+		degradedFrom, sha256Hex(target)).Scan(&one)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	default:
+		return false, fmt.Errorf("store.GuardEventExistsForTarget: %w", err)
+	}
+}
+
+// guardPromptText is the ONE rule for what the post-hoc prompt lane scans
+// (guard.ActionInput.PromptText): the stored, already-scrubbed
+// raw_tool_input of a user_prompt action — the full prompt, where target
+// is a bounded excerpt. Empty for every other action type, and empty when
+// no raw input was captured (the guard then falls back to the target).
+func guardPromptText(actionType, rawToolInput string) string {
+	if actionType != models.ActionUserPrompt {
+		return ""
+	}
+	return rawToolInput
+}
+
+// preSendPromptWindow bounds how far apart a pre-send mark and the
+// captured prompt it covers may be. Matching is on the prompt digest; the
+// window only bounds it (the same prompt resent hours later is judged
+// again). Thirty minutes is the ask-once reconsider TTL: the confirming
+// resend, which is what reaches the transcript, lands inside it.
+const preSendPromptWindow = 30 * time.Minute
+
+// preSendMarkRetention is how long guard_prompt_presend rows are kept; the
+// capture lane only ever looks back preSendPromptWindow.
+const preSendMarkRetention = 7 * 24 * time.Hour
+
+// RecordPromptPreSend records that a PRE-SEND prompt lane (hook or proxy)
+// judged the prompt whose guard.PromptCaptureDigest is digest, in
+// sessionID, at ts — the ONE writer of guard_prompt_presend (migration
+// 150). It prunes marks older than preSendMarkRetention in the same call.
+// Empty sessionID or digest is a no-op.
+func (s *Store) RecordPromptPreSend(ctx context.Context, sessionID, digest string, ts time.Time) error {
+	if sessionID == "" || digest == "" {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO guard_prompt_presend (session_id, prompt_digest, ts) VALUES (?, ?, ?)`,
+		sessionID, digest, timestamp(ts)); err != nil {
+		return fmt.Errorf("store.RecordPromptPreSend: insert: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM guard_prompt_presend WHERE ts < ?`, timestamp(ts.Add(-preSendMarkRetention))); err != nil {
+		return fmt.Errorf("store.RecordPromptPreSend: prune: %w", err)
+	}
+	return nil
+}
+
+// PreSendPromptJudged reports whether a pre-send lane left a mark for the
+// SAME prompt (sessionID + digest) within preSendPromptWindow of at — the
+// post-hoc capture lane's per-prompt dedupe (internal/guard/
+// posthocprompt.go). A different prompt in the same session has a
+// different digest and is not covered. Timestamps are compared in Go so a
+// mixed second/nanosecond RFC3339 column never mis-orders.
+func (s *Store) PreSendPromptJudged(ctx context.Context, sessionID, digest string, at time.Time) (bool, error) {
+	if sessionID == "" || digest == "" {
+		return false, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT ts FROM guard_prompt_presend
+		  WHERE session_id = ? AND prompt_digest = ?
+		  ORDER BY id DESC LIMIT 50`, sessionID, digest)
+	if err != nil {
+		return false, fmt.Errorf("store.PreSendPromptJudged: query: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ts string
+		if err := rows.Scan(&ts); err != nil {
+			return false, fmt.Errorf("store.PreSendPromptJudged: scan: %w", err)
+		}
+		d := parseStamp(ts).Sub(at)
+		if d < 0 {
+			d = -d
+		}
+		if d <= preSendPromptWindow {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("store.PreSendPromptJudged: rows: %w", err)
+	}
+	return false, nil
+}
+
 // LoadGuardReplayInputs loads historical actions as guard evaluation
 // inputs for `observer guard simulate` / `observer guard rescan`
 // (§11.1: replay history against CURRENT policy — possible only
@@ -1299,10 +1489,14 @@ func (s *Store) LoadGuardReplayInputs(ctx context.Context, since time.Time, limi
 	if limit <= 0 {
 		limit = 50000
 	}
+	// raw_tool_input is selected ONLY for user_prompt rows (the post-hoc
+	// prompt lane's full prompt text — already scrubbed at capture); every
+	// other action type replays on its target exactly as before.
 	const q = `
 		SELECT a.id, a.session_id, COALESCE(p.root_path, ''), a.tool,
 		       a.action_type, COALESCE(a.target, ''), a.timestamp,
-		       COALESCE(a.turn_index, 0), COALESCE(a.success, 1)
+		       COALESCE(a.turn_index, 0), COALESCE(a.success, 1),
+		       CASE WHEN a.action_type = 'user_prompt' THEN COALESCE(a.raw_tool_input, '') ELSE '' END
 		FROM actions a
 		LEFT JOIN projects p ON a.project_id = p.id
 		WHERE a.timestamp >= ?
@@ -1316,14 +1510,15 @@ func (s *Store) LoadGuardReplayInputs(ctx context.Context, since time.Time, limi
 	var out []guard.ActionInput
 	for rows.Next() {
 		var in guard.ActionInput
-		var ts string
+		var ts, rawInput string
 		var success int
 		if err := rows.Scan(&in.ActionID, &in.SessionID, &in.ProjectRoot, &in.Tool,
-			&in.ActionType, &in.Target, &ts, &in.TurnIndex, &success); err != nil {
+			&in.ActionType, &in.Target, &ts, &in.TurnIndex, &success, &rawInput); err != nil {
 			return nil, fmt.Errorf("store.LoadGuardReplayInputs: scan: %w", err)
 		}
 		in.Timestamp = parseStamp(ts)
 		in.Success = success != 0
+		in.PromptText = guardPromptText(in.ActionType, rawInput)
 		out = append(out, in)
 	}
 	if err := rows.Err(); err != nil {
@@ -1550,4 +1745,42 @@ func (s *Store) LoadGuardPolicyStates(ctx context.Context) ([]GuardPolicyStateRo
 		return nil, fmt.Errorf("store.LoadGuardPolicyStates: rows: %w", err)
 	}
 	return out, nil
+}
+
+// GuardBlockDay is one (rule, decision, UTC day) aggregate of ENFORCED guard
+// denials and asks: what the node notification bell reports (D-323).
+type GuardBlockDay struct {
+	RuleID   string
+	Decision string // "deny" | "ask"
+	Day      string // YYYY-MM-DD (UTC)
+	Count    int
+	Last     time.Time
+}
+
+// GuardBlocksSince aggregates the enforced deny / ask verdicts recorded since
+// `since`, one row per (rule, decision, day), newest first, at most 50 rows.
+// Only enforced rows count: an observe-mode verdict blocked nothing.
+func (s *Store) GuardBlocksSince(ctx context.Context, since time.Time) ([]GuardBlockDay, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT rule_id, decision, substr(ts, 1, 10) AS day, COUNT(*), MAX(ts)
+		  FROM guard_events
+		 WHERE ts >= ? AND enforced = 1 AND decision IN ('deny', 'ask')
+		 GROUP BY rule_id, decision, day
+		 ORDER BY MAX(ts) DESC
+		 LIMIT 50`, timestamp(since))
+	if err != nil {
+		return nil, fmt.Errorf("store.GuardBlocksSince: %w", err)
+	}
+	defer rows.Close()
+	var out []GuardBlockDay
+	for rows.Next() {
+		var g GuardBlockDay
+		var last string
+		if err := rows.Scan(&g.RuleID, &g.Decision, &g.Day, &g.Count, &last); err != nil {
+			return nil, fmt.Errorf("store.GuardBlocksSince: scan: %w", err)
+		}
+		g.Last = parseStamp(last)
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }

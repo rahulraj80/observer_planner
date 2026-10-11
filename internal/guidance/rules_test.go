@@ -1,6 +1,7 @@
 package guidance
 
 import (
+	"path"
 	"strings"
 	"testing"
 
@@ -167,5 +168,33 @@ func TestSkillKeyJoinsAScannedFile(t *testing.T) {
 	f := find(t, res, "claude-code", ".claude/skills/foo/SKILL.md")
 	if a, b := SkillKey(f.Tool, f.Kind, f.Name), SkillKey("claude-code", KindSkill, "Foo-Skill"); a != b {
 		t.Errorf("scan key %q != transcript key %q", a, b)
+	}
+}
+
+// TestLocalOverlaysArePersonal: a project-scope file named "*.local.*" is a
+// per-developer overlay the vendor keeps out of git, so the rule must say so
+// (and only a project-scope rule may: a user-scope file is personal by
+// where it lives, not by a flag).
+func TestLocalOverlaysArePersonal(t *testing.T) {
+	for _, r := range Rules() {
+		base := path.Base(r.Glob)
+		local := strings.Contains(base, ".local.")
+		switch {
+		case r.Scope == ScopeProject && local && !r.Personal:
+			t.Errorf("%s %s: a .local. overlay must be Personal", r.Tool, r.Glob)
+		case r.Personal && r.Scope != ScopeProject:
+			t.Errorf("%s %s: Personal is only meaningful on a project-scope rule", r.Tool, r.Glob)
+		case r.Personal && !local:
+			t.Errorf("%s %s: Personal without a .local. name; extend this test with the vendor's grounding if that is intended", r.Tool, r.Glob)
+		}
+	}
+	var sawClaudeLocal bool
+	for _, r := range Rules() {
+		if r.Tool == "claude-code" && r.Glob == "CLAUDE.local.md" {
+			sawClaudeLocal = r.Personal
+		}
+	}
+	if !sawClaudeLocal {
+		t.Fatal("claude-code CLAUDE.local.md must be a Personal rule")
 	}
 }

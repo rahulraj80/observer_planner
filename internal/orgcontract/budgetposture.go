@@ -284,8 +284,11 @@ const (
 	// BudgetFetchAuthFailed — 401/403: the server answered, our credential
 	// was refused.
 	BudgetFetchAuthFailed = "auth_failed"
-	// BudgetFetchNoBudget — 404: the org has no budget applicable to this
-	// member. An explicit NONE, never a cap of zero.
+	// BudgetFetchNoBudget — 404 with NO verified body cached: the server
+	// governs no budget for this caller (not an active member, or a server
+	// that predates the rail). Never a cap of zero. A 404 never clears a
+	// cached body (D-016): with one cached the state is unreachable and the
+	// body stays in force; the org withdraws a cap with a SIGNED none.
 	BudgetFetchNoBudget = "no_budget"
 	// BudgetFetchChannelOff — 409: the org has published no signing key, so
 	// the rail cannot serve a trustworthy body.

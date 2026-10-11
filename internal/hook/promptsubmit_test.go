@@ -976,3 +976,118 @@ func TestHandlePromptSubmitGuarded_CommandCode(t *testing.T) {
 		}
 	})
 }
+
+// TestHandlePromptSubmitGuarded_PreSendMark pins the capture lane's
+// per-prompt dedupe key (guard/posthocprompt.go): a record-worthy verdict
+// carries the prompt's capture digest; an ALLOWED prompt whose stored form
+// will hold a typed redaction marker (an allow-listed fixture) still gets a
+// mark-only persist (no rule id), so the capture lane does not flag it
+// afterwards; a plain allowed prompt gets nothing.
+func TestHandlePromptSubmitGuarded_PreSendMark(t *testing.T) {
+	t.Parallel()
+	fixture := "github_pat_11" + strings.Repeat("Fx9_", 6)
+	cases := []struct {
+		name       string
+		prompt     string
+		verdict    guard.PromptVerdict
+		wantAfter  bool
+		wantRuleID string
+	}{
+		{"record-worthy carries the digest", "card 4532015112830366", askVerdict("detected credit_card×1 in the prompt text"), true, "R-190"},
+		{"allowed fixture gets a mark-only persist", "use " + fixture + " in the test", allowVerdict(), true, ""},
+		{"plain allowed prompt gets nothing", "refactor the parser", allowVerdict(), false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"session_id": "s1", "user_prompt": tc.prompt})
+			var got guard.PromptVerdict
+			_, after, _ := HandlePromptSubmitGuarded(models.ToolClaudeCode, PromptDialectClaudeCode, "UserPromptSubmit",
+				body, false, &stubPromptEvaluator{verdict: tc.verdict},
+				func(pv guard.PromptVerdict, _ guard.Emission, _ string) { got = pv }, io.Discard, io.Discard)
+			if (after != nil) != tc.wantAfter {
+				t.Fatalf("after callback present = %v, want %v", after != nil, tc.wantAfter)
+			}
+			if after == nil {
+				return
+			}
+			after()
+			if got.Verdict.RuleID != tc.wantRuleID {
+				t.Errorf("persisted RuleID = %q, want %q", got.Verdict.RuleID, tc.wantRuleID)
+			}
+			if got.CaptureDigest != guard.PromptCaptureDigest(tc.prompt) {
+				t.Errorf("CaptureDigest = %q, want the prompt's capture digest", got.CaptureDigest)
+			}
+		})
+	}
+}
+
+// TestHandlePromptSubmitGuarded_DecisionActions pins the hook lane's use
+// of the one decision x capability table (guard/promptaction.go): a flag
+// is a VISIBLE warning where the dialect documents a developer-facing
+// notice (Claude Code / Codex systemMessage), is recorded and toasted
+// (flag-after) where it does not (Cursor), and an ask re-enters.
+func TestHandlePromptSubmitGuarded_DecisionActions(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		tool       string
+		dialect    string
+		body       map[string]string
+		verdict    guard.PromptVerdict
+		wantAction guard.PromptAction
+		wantStdout string
+		wantExit   int
+		wantToast  bool
+	}{
+		{
+			"claude-code flag warns via systemMessage", models.ToolClaudeCode, PromptDialectClaudeCode,
+			map[string]string{"session_id": "s1", "user_prompt": "x"},
+			warnVerdict("detected github_pat_fine"),
+			guard.PromptActionWarn, `"systemMessage":"observer: detected github_pat_fine`, 0, false,
+		},
+		{
+			"codex flag warns via systemMessage", models.ToolCodex, PromptDialectTopLevelBlock,
+			map[string]string{"session_id": "s1", "prompt": "x"},
+			warnVerdict("detected github_pat_fine"),
+			guard.PromptActionWarn, `"systemMessage":"observer: detected github_pat_fine`, 0, false,
+		},
+		{
+			"cursor flag has no notice field: flag-after", models.ToolCursor, PromptDialectCursor,
+			map[string]string{"conversation_id": "c1", "prompt": "x"},
+			warnVerdict("detected github_pat_fine"),
+			guard.PromptActionFlagAfter, `{"continue":true}`, 0, true,
+		},
+		{
+			"claude-code ask re-enters", models.ToolClaudeCode, PromptDialectClaudeCode,
+			map[string]string{"session_id": "s1", "user_prompt": "x"},
+			askVerdict("detected github_pat_fine"),
+			guard.PromptActionReenter, "", 2, false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(tc.body)
+			var got guard.PromptVerdict
+			var stdout bytes.Buffer
+			_, after, exit := HandlePromptSubmitGuarded(tc.tool, tc.dialect, "UserPromptSubmit",
+				body, false, &stubPromptEvaluator{verdict: tc.verdict},
+				func(pv guard.PromptVerdict, _ guard.Emission, _ string) { got = pv }, &stdout, io.Discard)
+			if after == nil {
+				t.Fatal("record-worthy verdict must persist")
+			}
+			after()
+			if got.Action != tc.wantAction || got.Lane != "hook" {
+				t.Fatalf("action = %q lane = %q, want %q hook", got.Action, got.Lane, tc.wantAction)
+			}
+			if exit != tc.wantExit {
+				t.Errorf("exit = %d, want %d", exit, tc.wantExit)
+			}
+			if tc.wantStdout != "" && !strings.Contains(stdout.String(), tc.wantStdout) {
+				t.Errorf("stdout = %q, want it to contain %q", stdout.String(), tc.wantStdout)
+			}
+			if got.Action.SuppressesToast() == tc.wantToast {
+				t.Errorf("toast = %v, want %v", !got.Action.SuppressesToast(), tc.wantToast)
+			}
+		})
+	}
+}

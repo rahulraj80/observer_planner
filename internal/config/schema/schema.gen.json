@@ -38,7 +38,8 @@
     "remote",
     "cloud",
     "pricing",
-    "experiments"
+    "experiments",
+    "components"
   ],
   "tables": [
     {
@@ -494,7 +495,7 @@
       "field_path": "CodeIntel",
       "owner": "github.com/marmutapp/superbased-observer/internal/config.CodeIntelConfig",
       "block": "codeintel",
-      "doc": "CodeIntelConfig is the [codeintel] surface — the in-process code-\nintelligence module (docs/codeintel/). LOCAL-ONLY, never distributed\nto an org (same posture as [routing]/[predict]/[cachewarm]). Same\npartial-merge invariant as CacheTrackConfig: an install with no\n[codeintel] section gets Enabled=true (Default() seeds it); a partial\nsection keeps unset fields at their Default() values.\n\nDefaults are conservative: indexing is read-only on the repo; the\nonly model-visible change (compression.code_aggressive) is OFF and\nopt-in per project AND language."
+      "doc": "CodeIntelConfig is the [codeintel] surface — the in-process code-\nintelligence module (docs/codeintel/). LOCAL-ONLY, never distributed\nto an org (same posture as [routing]/[predict]/[cachewarm]). Same\npartial-merge invariant as CacheTrackConfig: Default() seeds every\nfield, a TOML section only overrides the keys it names. The module is\nOPT-IN (operator ruling D-307, 2026-10-05: indexing is CPU and disk\nheavy, so it runs only when the user asks): an install with no\n[codeintel] section, or a partial section that does not name\n`enabled`, gets Enabled=false; an explicit `enabled = true` turns it on.\n\nDefaults are conservative: indexing is read-only on the repo; the\nonly model-visible change (compression.code_aggressive) is OFF and\nopt-in per project AND language."
     },
     {
       "path": "codeintel.index",
@@ -523,6 +524,13 @@
       "owner": "github.com/marmutapp/superbased-observer/internal/config.ShellWrapConfig",
       "block": "shell_wrap",
       "doc": "ShellWrapConfig is the [shell_wrap] block — the \"wrapped command\" shell\nintegration (backlog item 7, docs/proxy-wrappers.md \"Command wrapping\"):\nshims that make typing `claude` run `observer claude`, put first on PATH by\na marked block in each selected shell's start-up file.\n\nOPT-IN and LOCAL-ONLY: the zero value (enabled = false, nothing selected)\nwrites nothing, and the block is never distributed to an org. The keys are\nthe operator's RECORDED choice; the files are written only by `observer\nshell-wrap enable|disable` or the Settings → Terminal \"Command wrapping\"\ncard (POST /api/shell-wrap/apply), which write this block and the files\ntogether. Editing the keys by hand changes nothing until one of those runs\n(`observer shell-wrap status` reports the drift). The daemon never touches\na shell start-up file on its own."
+    },
+    {
+      "path": "shell_wrap.windows",
+      "field_path": "ShellWrap.Windows",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ShellWrapTargetConfig",
+      "block": "shell_wrap",
+      "doc": "ShellWrapTargetConfig is one shell-wrap target's recorded choice. The\nnative target's keys live directly in [shell_wrap] (ShellWrapConfig.Native);\nthe WSL bridge target's in [shell_wrap.windows]."
     },
     {
       "path": "archive",
@@ -730,16 +738,16 @@
     {
       "path": "email",
       "field_path": "Email",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "block": "email",
-      "doc": "Config is the [email] block: the SMTP settings + default recipients shared by\nevery consumer (the node alert loop and the org-server evaluators). It is the\nSINGLE owner of the email-config shape — both config packages\n(internal/config and internal/orgserver/config) embed this type as their\n[email] surface, so the shape and its validation live in one place.\n\nLOCAL-ONLY: like every other credential-bearing block it is never distributed\nover the org wire. Zero value = disabled (Enabled=false).\n\nThe credential field (TOML key \"password\") is named Cred in Go; it is\nredacted from String/Redacted and must never be logged. Prefer CredEnv or\nCredFile so no secret lives on disk."
+      "doc": "EmailConfig is the [email] block: the SMTP settings + default recipients shared by\nevery consumer (the node alert loop and the org-server evaluators). It is the\nSINGLE owner of the email-config shape - both config packages\n(internal/config and internal/orgserver/config) embed this type as their\n[email] surface, so the shape and its validation live in one place.\n\nLOCAL-ONLY: like every other credential-bearing block it is never distributed\nover the org wire. Zero value = disabled (Enabled=false).\n\nThe credential field (TOML key \"password\") is named Cred in Go; it is\nredacted from String/Redacted and must never be logged. Prefer CredEnv or\nCredFile so no secret lives on disk."
     },
     {
       "path": "digest",
       "field_path": "Digest",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/digest.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.DigestConfig",
       "block": "digest",
-      "doc": "Config is the [digest] block shared by the node (~/.observer/config.toml) and\nthe org server (/etc/observer-org/config.toml). Like email.Config it is the\nSINGLE owner of the [digest] shape — both config packages embed this type as\ntheir [digest] surface, so the shape and its validation live in one place.\n\nLOCAL-ONLY, never distributed over the org wire. Zero value = disabled: a\ndefault install schedules no digest and makes no SMTP connection. A digest\nsend additionally requires [email].enabled — the digest rides the same\nfail-soft email channel the alert evaluators use."
+      "doc": "DigestConfig is the [digest] block shared by the node (~/.observer/config.toml) and\nthe org server (/etc/observer-org/config.toml). Like EmailConfig it is the\nSINGLE owner of the [digest] shape - both config packages embed this type as\ntheir [digest] surface, so the shape and its validation live in one place.\n\nLOCAL-ONLY, never distributed over the org wire. Zero value = disabled: a\ndefault install schedules no digest and makes no SMTP connection. A digest\nsend additionally requires [email].enabled - the digest rides the same\nfail-soft email channel the alert evaluators use."
     },
     {
       "path": "observability",
@@ -851,6 +859,13 @@
       "owner": "github.com/marmutapp/superbased-observer/internal/config.PricingFeedConfig",
       "block": "pricing",
       "doc": "PricingFeedConfig is the [pricing.feed] surface — the pricing feed client for\na STANDALONE (non-enrolled) node (plan §C.3). It is the case that needs a new\nnode->internet path, and it is ON by default (operator decision 2026-09-20,\nreversing the former zero-egress-by-default invariant D3): with this Default()\nseed the node fetches prices from the public feed so its costing tracks the\nTokenomics source without a per-node opt-in. A standalone operator who wants\nzero egress opts OUT with `[pricing.feed] enabled = false`.\n\nAn ENROLLED node (individual or managed) ignores this block entirely — it\nreceives prices through the org rail, which is the one authority per enrolled\nnode (§C.3/D8); the standalone-vs-enrolled resolution lives next to\norgpricing.Mode (Wave N), not here.\n\nSame partial-merge invariant as CacheTrackConfig/PredictConfig: an install\nwith no [pricing.feed] section gets the Default() seed (URL/interval set,\nEnabled=true), NOT a zero-valued struct, because Load() starts from\nDefault() and unmarshals TOML on top. LOCAL-ONLY, never distributed."
+    },
+    {
+      "path": "components",
+      "field_path": "Components",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ComponentsConfig",
+      "block": "components",
+      "doc": "ComponentsConfig is the [components] block: the node operator's component\nselection (modular packaging plan section 6.1, phase P1, lane MP-GATE). It\nsays which catalogued components (internal/components) are active on this\nnode. A component that is not active is L2 inert: Observer starts none of\nits goroutines or listeners, makes none of its outbound calls and writes\nnone of its files or other tools' config, whatever its own config switch\nsays.\n\nLOCAL-ONLY and never distributed to an org. The block is written only\nthrough the components service (internal/componentsvc: `observer\ncomponents select|add|remove`, `observer init --components`, and the\ndashboard's Settings > Components page), which runs the teardown of a\nremoved component and audits the change. Hand edits are honoured at the\nnext start; nothing is torn down for them.\n\nTHE ZERO VALUE IS TODAY'S BEHAVIOUR. An install with no [components] block\n(every install before this phase) keeps every component this binary was\nbuilt with active, byte-identical to the product before the block existed;\neach feature's own config switch still decides whether it runs.\n\nThe selection is stored as a DELTA from a base (plan 5.8) so a later\nrelease that adds a component does not silently change what runs:\n\n  - Distro names the base. \"\" (default) means every component this build\n    contains is active, as today. A prebuilt distro name (\"minimal\",\n    \"developer\", \"managed\", \"full\") starts from that distro's\n    default-active set instead (docs/components.md lists the cells).\n  - Add lists component ids to activate on top of the base.\n  - Remove lists component ids to make inactive. Remove wins over Add.\n\nAn unknown id or an unknown distro name is reported (`observer components\nstatus`) and otherwise ignored: an unknown distro falls\nback to the empty base, so a typo never switches capture off."
     }
   ],
   "leaves": [
@@ -2160,6 +2175,22 @@
       "doc": "Upstreams maps a routing id to an upstream base URL, selected\nper-request via a `/up/<id>/` path prefix (Phase C per-provider\nupstream selection). A routed tool whose traffic must reach a\nnon-default host — e.g. hermes → OpenRouter — points its base URL at\nhttp://127.0.0.1:<port>/up/<id>/v1 and the proxy strips the prefix\nand forwards to the mapped host. The value is the host root WITHOUT\nthe version suffix (the client's base URL keeps `/v1`), exactly like\nthe fixed upstreams: e.g. openrouter = \"https://openrouter.ai/api\".\nEmpty/unset → only the fixed three upstreams exist (current\nbehavior; fail-open). Locally authored here; an org may ALSO\ndistribute lane entries via the signed `gateway.providers` policy\nfamily (installed through SetLaneTable, never written back into\nthis file) — the two sources merge at the live lane table, and\nthis TOML block remains the node-local layer."
     },
     {
+      "path": "proxy.agent_upstreams",
+      "field_path": "Proxy.AgentUpstreams",
+      "kind": "string_map",
+      "go_type": "map[string]string",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ProxyConfig",
+      "field": "AgentUpstreams",
+      "block": "proxy",
+      "table": "proxy",
+      "tier": "plain",
+      "restart": "restart",
+      "section": "proxy",
+      "prominence": "primary",
+      "secret": false,
+      "doc": "AgentUpstreams maps a lane id to the upstream host of a local CODING\nAGENT's own provider (Plane B), selected by the same `/up/<id>/`\nprefix but kept OUT of the Upstreams lane table: an agent lane only\npicks the upstream host, the request keeps pid-derived session\nattribution, gets no hosted-app admission or obs-trace synthesis,\nand is not part of the gateway.providers lane policy (so a node\nwith only the default agent lane still reports no local lane\npolicy). A same-id [proxy.upstreams] lane wins. Default:\nOpenCodeZenLane -> https://opencode.ai/zen (OpenCode's built-in Zen\nprovider; `observer opencode` points it here). The loader merges map\nkeys over the default."
+    },
+    {
       "path": "proxy.auto_default_lane",
       "field_path": "Proxy.AutoDefaultLane",
       "kind": "string",
@@ -2334,7 +2365,8 @@
       "restart": "restart",
       "section": "compression",
       "prominence": "advanced",
-      "secret": false
+      "secret": false,
+      "doc": "Enabled is the one switch for every writer of action_excerpts: the\nwatcher and the hook processes both obey it (T-420). Off skips only the\nFTS5 excerpt insert; capture is unchanged, and search_past_outputs and\nthe dashboard search find only excerpts indexed while it was on."
     },
     {
       "path": "compression.indexing.max_excerpt_bytes",
@@ -3065,7 +3097,7 @@
       "section": "org",
       "prominence": "primary",
       "secret": false,
-      "owned_by": "`observer org enroll` / `observer org unenroll` (enrolment identity)",
+      "owned_by": "`observer enroll` / `observer unenroll` (enrolment identity)",
       "doc": "Enabled gates the entire push loop. When false (the default), the\nagent behaves byte-identically to a non-org build."
     },
     {
@@ -3082,7 +3114,7 @@
       "section": "org",
       "prominence": "primary",
       "secret": false,
-      "owned_by": "`observer org enroll` / `observer org unenroll` (enrolment identity)",
+      "owned_by": "`observer enroll` / `observer unenroll` (enrolment identity)",
       "doc": "OrgServerURL is the base URL of the customer's org server, e.g.\n\"https://observer-org.acme.example\". Required when Enabled."
     },
     {
@@ -3179,7 +3211,7 @@
       "section": "org",
       "prominence": "primary",
       "secret": false,
-      "owned_by": "`observer org enroll` / `observer org unenroll` (enrolment identity)",
+      "owned_by": "`observer enroll` / `observer unenroll` (enrolment identity)",
       "doc": "KeychainID is the OS-keychain service/account handle under which the\nbearer (and the agent's Ed25519 signing key) are stored."
     },
     {
@@ -5194,7 +5226,7 @@
       "block": "terminal",
       "table": "terminal.launch",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5210,7 +5242,7 @@
       "block": "terminal",
       "table": "terminal.launch",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5226,7 +5258,7 @@
       "block": "terminal",
       "table": "terminal.launch",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5242,7 +5274,7 @@
       "block": "terminal",
       "table": "terminal.launch",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5258,7 +5290,7 @@
       "block": "terminal",
       "table": "terminal.launch",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5642,7 +5674,7 @@
       "block": "terminal",
       "table": "terminal.ssh",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5658,7 +5690,7 @@
       "block": "terminal",
       "table": "terminal.ssh",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5674,7 +5706,7 @@
       "block": "terminal",
       "table": "terminal.ssh",
       "tier": "sensitive",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
@@ -5690,11 +5722,11 @@
       "block": "terminal",
       "table": "terminal.ssh",
       "tier": "owner_elsewhere",
-      "restart": "restart",
+      "restart": "next_spawn",
       "section": "terminal",
       "prominence": "primary",
       "secret": false,
-      "owned_by": "config.toml [[terminal.ssh.profiles]] (the dashboard profile editor is plan item P0-6, not yet shipped)",
+      "owned_by": "the Terminals > Settings > Remote systems editor (PUT /api/terminal/ssh/profiles) / config.toml [[terminal.ssh.profiles]]",
       "doc": "Profiles is the operator-authored list of remote systems, written as\nrepeated [[terminal.ssh.profiles]] blocks. Empty (the default) means no\nsystem can be reached even when Enabled is true."
     },
     {
@@ -5744,7 +5776,7 @@
       "section": "intelligence",
       "prominence": "primary",
       "secret": false,
-      "doc": "Enabled gates the whole module. When false the indexer doesn't\nrun, the native provider reports unavailable, and the CLI/MCP\nsurfaces stay empty."
+      "doc": "Enabled gates the whole module. Default false (opt-in). When false\nthe indexer doesn't run, the native provider reports unavailable,\nthe MCP symbol tools answer with the codeintel_disabled warning, and\nbody-collapse compression is a no-op. Turn it on from Settings >\nIntelligence > Code intelligence, or set it to true here."
     },
     {
       "path": "codeintel.languages",
@@ -6069,6 +6101,74 @@
       "secret": false,
       "owned_by": "`observer shell-wrap enable|disable` / the Settings → Terminal \"Command wrapping\" card (writes these keys AND the shell files together)",
       "doc": "ShimDir overrides the shim directory. Empty (default) =\n~/.observer/shims."
+    },
+    {
+      "path": "shell_wrap.windows.enabled",
+      "field_path": "ShellWrap.Windows.Enabled",
+      "kind": "bool",
+      "go_type": "bool",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ShellWrapTargetConfig",
+      "field": "Enabled",
+      "block": "shell_wrap",
+      "table": "shell_wrap.windows",
+      "tier": "owner_elsewhere",
+      "restart": "next_spawn",
+      "section": "terminal",
+      "prominence": "advanced",
+      "secret": false,
+      "owned_by": "`observer shell-wrap enable|disable` / the Settings → Terminal \"Command wrapping\" card (writes these keys AND the shell files together)",
+      "doc": "Enabled records that the wrap is applied on this target."
+    },
+    {
+      "path": "shell_wrap.windows.tools",
+      "field_path": "ShellWrap.Windows.Tools",
+      "kind": "table",
+      "go_type": "map[string]bool",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ShellWrapTargetConfig",
+      "field": "Tools",
+      "block": "shell_wrap",
+      "table": "shell_wrap.windows",
+      "tier": "owner_elsewhere",
+      "restart": "next_spawn",
+      "section": "terminal",
+      "prominence": "advanced",
+      "secret": false,
+      "owned_by": "`observer shell-wrap enable|disable` / the Settings → Terminal \"Command wrapping\" card (writes these keys AND the shell files together)",
+      "doc": "Tools maps a registry tool key or IDE launch id to whether its command\nis wrapped on this target."
+    },
+    {
+      "path": "shell_wrap.windows.shells",
+      "field_path": "ShellWrap.Windows.Shells",
+      "kind": "table",
+      "go_type": "map[string]bool",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ShellWrapTargetConfig",
+      "field": "Shells",
+      "block": "shell_wrap",
+      "table": "shell_wrap.windows",
+      "tier": "owner_elsewhere",
+      "restart": "next_spawn",
+      "section": "terminal",
+      "prominence": "advanced",
+      "secret": false,
+      "owned_by": "`observer shell-wrap enable|disable` / the Settings → Terminal \"Command wrapping\" card (writes these keys AND the shell files together)",
+      "doc": "Shells maps a shell name to whether its start-up file is managed.\nEmpty = auto-detect."
+    },
+    {
+      "path": "shell_wrap.windows.shim_dir",
+      "field_path": "ShellWrap.Windows.ShimDir",
+      "kind": "string",
+      "go_type": "string",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ShellWrapTargetConfig",
+      "field": "ShimDir",
+      "block": "shell_wrap",
+      "table": "shell_wrap.windows",
+      "tier": "owner_elsewhere",
+      "restart": "next_spawn",
+      "section": "terminal",
+      "prominence": "advanced",
+      "secret": false,
+      "owned_by": "`observer shell-wrap enable|disable` / the Settings → Terminal \"Command wrapping\" card (writes these keys AND the shell files together)",
+      "doc": "ShimDir overrides this target's shim directory (in the target OS's own\npath notation). Empty = <home>/.observer/shims on that target."
     },
     {
       "path": "archive.enabled",
@@ -7292,6 +7392,22 @@
       "doc": "FromOrg opts this node into applying the ORGANIZATION's budget, fetched\nper caller from GET /api/agent/budget (org-budget plan §3.3c). Default\nTRUE (operator decision 2026-09-20): an enrolled node applies its org's\npricing/budget by default — the node-side companion to the default-on\npricing feed. Set it false to opt OUT, which makes the node behave\nbyte-identically to a build that never had this feature.\n\nWith it on, the composition is capability-branched, never\nsource-branched: on an INDIVIDUAL node the org's numbers may only LOWER\nthe four thresholds above (govern.LowerFloat / LowerInt — min with the\n\"0 means unset\" rule); on a MANAGED node whose grant carries\ngovern.AuthorityEnforceBudget the org's numbers and enforcement mode are\nauthoritative. Both this key and Hard are pinnable through node\ngovernance (internal/policyfam/nodegov.PinnableKeys) so an org can set\nthe fleet's POSTURE; the NUMBERS never ride the pin rail, because a pin\nis one value for a whole fleet and a cap is per developer.\n\nThe node-side fetch/compose/enforce half is wave W3b; this key exists in\nW3a because the governance vocabulary row must resolve against a real\nconfig key (TestEveryPinnableKeyResolvesInConfig)."
     },
     {
+      "path": "guard.budget.fail_closed",
+      "field_path": "Guard.Budget.FailClosed",
+      "kind": "bool",
+      "go_type": "bool",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.GuardBudgetConfig",
+      "field": "FailClosed",
+      "block": "guard",
+      "table": "guard.budget",
+      "tier": "plain",
+      "restart": "restart",
+      "section": "guard",
+      "prominence": "primary",
+      "secret": false,
+      "doc": "FailClosed is the ORGANIZATION's explicit opt-in to refusing proxied\nrequests (rule B-625) while a managed node that holds enforce.budget has\nno verified org budget in hand: before the first pull after an\nenrolment, while the org server has never been reached, or when the\nsigned document did not verify. Default FALSE (operator ruling D-502,\n2026-10-09): such a node FAILS OPEN on its own [guard.budget] numbers and\nsays so loudly, because a requirement this node cannot currently satisfy\nfor reasons outside the request must never stop a developer's session.\nA node with NO live enrolment never fails closed, whatever this says.\n\nIt is pinnable through node governance (restrictive-only, Safe=true) so\nthe org opts a fleet in through its signed node.governance body; a\ndeveloper may also set it locally to be stricter. Unlike the other\npinned keys it is NOT restart-bound in the daemon: the org-budget\ncomposition resolves it live on every cycle from the node's own value\nand the CURRENT governance pin (REVIEW-4 P4-04), so a left\norganization's pin does not outlive its governance. The launcher reads\nit from the config it loads for each launch."
+    },
+    {
       "path": "guard.budget.max_document_age",
       "field_path": "Guard.Budget.MaxDocumentAge",
       "kind": "string",
@@ -7824,7 +7940,7 @@
       "field_path": "Email.Enabled",
       "kind": "bool",
       "go_type": "bool",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "Enabled",
       "block": "email",
       "table": "email",
@@ -7833,14 +7949,14 @@
       "section": "observer",
       "prominence": "primary",
       "secret": false,
-      "doc": "Enabled gates the whole channel. Default false — a fired alert makes an\noutbound SMTP call, so email is explicit opt-in and a default install\nstays egress-free."
+      "doc": "Enabled gates the whole channel. Default false - a fired alert makes an\noutbound SMTP call, so email is explicit opt-in and a default install\nstays egress-free."
     },
     {
       "path": "email.host",
       "field_path": "Email.Host",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "Host",
       "block": "email",
       "table": "email",
@@ -7856,7 +7972,7 @@
       "field_path": "Email.Port",
       "kind": "int",
       "go_type": "int",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "Port",
       "block": "email",
       "table": "email",
@@ -7872,7 +7988,7 @@
       "field_path": "Email.Username",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "Username",
       "block": "email",
       "table": "email",
@@ -7888,7 +8004,7 @@
       "field_path": "Email.Cred",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "Cred",
       "block": "email",
       "table": "email",
@@ -7897,14 +8013,14 @@
       "section": "observer",
       "prominence": "primary",
       "secret": true,
-      "doc": "Cred is the SMTP AUTH password (TOML key \"password\"). DISCOURAGED in a\nconfig file — prefer CredEnv or CredFile so no secret lives on disk. It\nis redacted from String/Redacted and must never be logged."
+      "doc": "Cred is the SMTP AUTH password (TOML key \"password\"). DISCOURAGED in a\nconfig file - prefer CredEnv or CredFile so no secret lives on disk. It\nis redacted from String/Redacted and must never be logged."
     },
     {
       "path": "email.password_env",
       "field_path": "Email.CredEnv",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "CredEnv",
       "block": "email",
       "table": "email",
@@ -7920,7 +8036,7 @@
       "field_path": "Email.CredFile",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "CredFile",
       "block": "email",
       "table": "email",
@@ -7936,7 +8052,7 @@
       "field_path": "Email.From",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "From",
       "block": "email",
       "table": "email",
@@ -7952,7 +8068,7 @@
       "field_path": "Email.To",
       "kind": "string_list",
       "go_type": "[]string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "To",
       "block": "email",
       "table": "email",
@@ -7968,7 +8084,7 @@
       "field_path": "Email.TLSMode",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "TLSMode",
       "block": "email",
       "table": "email",
@@ -7990,7 +8106,7 @@
       "field_path": "Email.Auth",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "Auth",
       "block": "email",
       "table": "email",
@@ -8011,7 +8127,7 @@
       "field_path": "Email.TimeoutSeconds",
       "kind": "int",
       "go_type": "int",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/email.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.EmailConfig",
       "field": "TimeoutSeconds",
       "block": "email",
       "table": "email",
@@ -8027,7 +8143,7 @@
       "field_path": "Digest.Enabled",
       "kind": "bool",
       "go_type": "bool",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/digest.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.DigestConfig",
       "field": "Enabled",
       "block": "digest",
       "table": "digest",
@@ -8043,7 +8159,7 @@
       "field_path": "Digest.Frequency",
       "kind": "string",
       "go_type": "string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/digest.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.DigestConfig",
       "field": "Frequency",
       "block": "digest",
       "table": "digest",
@@ -8064,7 +8180,7 @@
       "field_path": "Digest.SendHour",
       "kind": "int",
       "go_type": "int",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/digest.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.DigestConfig",
       "field": "SendHour",
       "block": "digest",
       "table": "digest",
@@ -8075,14 +8191,14 @@
       "secret": false,
       "min": 0,
       "max": 23,
-      "doc": "SendHour is the UTC hour (0–23) at/after which a due digest is sent on the\nfirst tick of a new period. Default 8."
+      "doc": "SendHour is the UTC hour (0-23) at/after which a due digest is sent on the\nfirst tick of a new period. Default 8."
     },
     {
       "path": "digest.to",
       "field_path": "Digest.To",
       "kind": "string_list",
       "go_type": "[]string",
-      "owner": "github.com/marmutapp/superbased-observer/internal/notify/digest.Config",
+      "owner": "github.com/marmutapp/superbased-observer/internal/notifycfg.DigestConfig",
       "field": "To",
       "block": "digest",
       "table": "digest",
@@ -9559,7 +9675,7 @@
       "section": "cloud",
       "prominence": "primary",
       "secret": false,
-      "doc": "AutoSyncIntervalMinutes is how often the background sync service (R2a)\nspawns `observer cloud sync`. 0 means \"use the built-in default\"\n(cloudAutoSyncDefaultMinutes, 60). Read only when AutoSync is true;\nmust be 0 or >= cloudAutoSyncMinMinutes (5) — see validateCloud."
+      "doc": "AutoSyncIntervalMinutes is how often the background sync service (R2a)\nspawns `observer cloud sync`. 0 means \"use the built-in default\"\n(CloudAutoSyncDefaultMinutes, 15). Read only when AutoSync is true;\nmust be 0 or >= cloudAutoSyncMinMinutes (5) — see validateCloud."
     },
     {
       "path": "cloud.auto_enrich",
@@ -9705,6 +9821,57 @@
       "secret": false,
       "owned_by": "`observer experiment` (the [[experiments]] list)",
       "doc": "Experiments is the [[experiments]] list — productized profile\nA/B runs (usability arc P6.4). See experiments.go."
+    },
+    {
+      "path": "components.distro",
+      "field_path": "Components.Distro",
+      "kind": "string",
+      "go_type": "string",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ComponentsConfig",
+      "field": "Distro",
+      "block": "components",
+      "table": "components",
+      "tier": "owner_elsewhere",
+      "restart": "restart",
+      "section": "observer",
+      "prominence": "advanced",
+      "secret": false,
+      "owned_by": "`observer components select|add|remove` / `observer init --components` / Settings > Components (writes these keys AND runs the teardown of a removed component)",
+      "doc": "Distro is the base selection. \"\" (default) = everything this build\ncontains; or one of minimal, developer, managed, full."
+    },
+    {
+      "path": "components.add",
+      "field_path": "Components.Add",
+      "kind": "string_list",
+      "go_type": "[]string",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ComponentsConfig",
+      "field": "Add",
+      "block": "components",
+      "table": "components",
+      "tier": "owner_elsewhere",
+      "restart": "restart",
+      "section": "observer",
+      "prominence": "advanced",
+      "secret": false,
+      "owned_by": "`observer components select|add|remove` / `observer init --components` / Settings > Components (writes these keys AND runs the teardown of a removed component)",
+      "doc": "Add lists component ids activated on top of the base."
+    },
+    {
+      "path": "components.remove",
+      "field_path": "Components.Remove",
+      "kind": "string_list",
+      "go_type": "[]string",
+      "owner": "github.com/marmutapp/superbased-observer/internal/config.ComponentsConfig",
+      "field": "Remove",
+      "block": "components",
+      "table": "components",
+      "tier": "owner_elsewhere",
+      "restart": "restart",
+      "section": "observer",
+      "prominence": "advanced",
+      "secret": false,
+      "owned_by": "`observer components select|add|remove` / `observer init --components` / Settings > Components (writes these keys AND runs the teardown of a removed component)",
+      "doc": "Remove lists component ids made inactive. Remove wins over Add."
     }
   ]
 }

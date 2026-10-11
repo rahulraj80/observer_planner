@@ -1,3 +1,5 @@
+//go:build !sbo_omit_integration_shell_wrap
+
 // shellwrap.go — `observer shell-wrap status|preview|enable|disable`: the
 // CLI face of the command-wrapping shell integration (backlog item 7). Typing
 // a vendor command (`claude`, `codex`, `code`) runs its observer-wrapped form
@@ -60,8 +62,9 @@ func shellWrapInstalledSeam(configPath string, env func() toolresolve.Env) func(
 // seam use.
 func newShellWrapService(configPath string, env func() toolresolve.Env) *shellwrapsvc.Service {
 	return &shellwrapsvc.Service{
-		ConfigPath: configPath,
-		Installed:  shellWrapInstalledSeam(configPath, env),
+		ConfigPath:       configPath,
+		Installed:        shellWrapInstalledSeam(configPath, env),
+		WindowsInstalled: shellWrapWindowsInstalledSeam(env),
 	}
 }
 
@@ -79,18 +82,28 @@ func refreshShellWrapShims(ctx context.Context, stdout, stderr io.Writer, config
 		fmt.Fprintf(stderr, "shell-wrap: shim refresh skipped: %v\n", err)
 		return
 	}
-	out, err := newShellWrapService(resolved, resolveEnv).RefreshStale(ctx)
-	for _, r := range out.Rewritten {
-		fmt.Fprintf(stdout, "shell-wrap: re-pointed %s at %s (was %s)\n", r.Path, out.ObserverPath, r.OldObserverPath)
-	}
-	for _, r := range out.Plan.Shims {
-		if r.Action == shellwrap.RefreshSkip && r.Reason == shellwrap.ReasonObserverNotRunnable {
-			fmt.Fprintf(stderr, "shell-wrap: shim refresh skipped for %s (observer %q): %s\n", r.Path, out.ObserverPath, r.Reason)
+	svc := newShellWrapService(resolved, resolveEnv)
+	report := func(out shellwrapsvc.RefreshOutcome, err error, enable string) {
+		for _, r := range out.Rewritten {
+			fmt.Fprintf(stdout, "shell-wrap: re-pointed %s at %s (was %s)\n", r.Path, out.ObserverPath, r.OldObserverPath)
+		}
+		for _, r := range out.Plan.Shims {
+			if r.Action == shellwrap.RefreshSkip && r.Reason == shellwrap.ReasonObserverNotRunnable {
+				fmt.Fprintf(stderr, "shell-wrap: shim refresh skipped for %s (observer %q): %s\n", r.Path, out.ObserverPath, r.Reason)
+			}
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "shell-wrap: shim refresh incomplete (startup continues; `%s` re-applies): %v\n", enable, err)
 		}
 	}
-	if err != nil {
-		fmt.Fprintf(stderr, "shell-wrap: shim refresh incomplete (startup continues; `observer shell-wrap enable` re-applies): %v\n", err)
-	}
+	out, err := svc.RefreshStale(ctx)
+	report(out, err, "observer shell-wrap enable")
+	// The WSL bridge target's shims bake the in-distro observer too. The
+	// refresh reads nothing beyond config.toml unless [shell_wrap.windows] is
+	// recorded as enabled, so a daemon that never wrapped Windows shells pays
+	// no Windows-home detection here.
+	out, err = svc.RefreshStaleFor(ctx, shellwrapsvc.TargetWindows)
+	report(out, err, "observer shell-wrap enable --target windows")
 }
 
 func newShellWrapCmd() *cobra.Command {
@@ -104,6 +117,10 @@ func newShellWrapCmd() *cobra.Command {
 			"conf.d, PowerShell profile). Each shim runs `observer <tool> -- <your args>`;\n" +
 			"if observer is missing it runs the real command, and SBO_SHIM_BYPASS=1 always\n" +
 			"runs the real command. OFF by default - nothing is written until you enable it.\n\n" +
+			"Inside WSL, --target windows manages the WINDOWS shells instead: .cmd shims\n" +
+			"under your Windows home and a PowerShell profile block. A tool with a Windows\n" +
+			"build keeps running as Windows with the routing observer applies (asked from\n" +
+			"this daemon through wsl.exe); a tool with no Windows build runs inside WSL.\n\n" +
 			"What wrapping buys differs per tool and is shown honestly:\n" +
 			"  routed through the observer proxy   a live turn has been proven through it\n" +
 			"  wrapped, live proof owed            it injects routing, not yet proven live\n" +
@@ -113,10 +130,14 @@ func newShellWrapCmd() *cobra.Command {
 			"    observer shell-wrap preview claude-code codex     # show exactly what would be written\n" +
 			"    observer shell-wrap enable claude-code codex\n" +
 			"    observer shell-wrap enable all --shell zsh        # every installed CLI tool\n" +
-			"    observer shell-wrap disable                       # restore every file byte-for-byte",
+			"    observer shell-wrap disable                       # restore every file byte-for-byte\n" +
+			"    observer shell-wrap preview claude-code --target windows   # from WSL: the Windows shells",
 	}
+	var targetName string
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "observer config.toml path (default ~/.observer/config.toml)")
+	cmd.PersistentFlags().StringVar(&targetName, "target", "", "whose shells to manage: native (default) or windows (from inside WSL: the Windows shells on this machine)")
 	svc := func() *shellwrapsvc.Service { return newShellWrapService(configPath, resolveEnv) }
+	target := func() (shellwrapsvc.Target, error) { return shellwrapsvc.ParseTarget(targetName) }
 
 	var statusJSON bool
 	status := &cobra.Command{
@@ -124,7 +145,11 @@ func newShellWrapCmd() *cobra.Command {
 		Short: "Show the wrappable commands, what is applied, and what wrapping buys per tool",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			st, err := svc().Status(cmd.Context())
+			t, err := target()
+			if err != nil {
+				return err
+			}
+			st, err := svc().StatusFor(cmdContext(cmd), t)
 			if err != nil {
 				return err
 			}
@@ -132,6 +157,10 @@ func newShellWrapCmd() *cobra.Command {
 				return writeShellWrapJSON(cmd.OutOrStdout(), st)
 			}
 			renderShellWrapStatus(cmd.OutOrStdout(), st)
+			if t == shellwrapsvc.TargetNative {
+				targets, _ := svc().Targets(cmdContext(cmd))
+				renderShellWrapOtherTargets(cmd.OutOrStdout(), targets)
+			}
 			return nil
 		},
 	}
@@ -148,11 +177,15 @@ func newShellWrapCmd() *cobra.Command {
 			Short: short,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				s := svc()
+				t, err := target()
+				if err != nil {
+					return err
+				}
 				tools := args
 				if len(tools) == 0 {
 					// Re-apply the recorded choice (e.g. after an upgrade
 					// moved the observer binary).
-					st, err := s.Status(cmd.Context())
+					st, err := s.StatusFor(cmdContext(cmd), t)
 					if err != nil {
 						return err
 					}
@@ -165,7 +198,7 @@ func newShellWrapCmd() *cobra.Command {
 						return fmt.Errorf("observer shell-wrap %s: name the tools to wrap (see `observer shell-wrap status`), or `all`", use)
 					}
 				}
-				out, err := s.Apply(cmdContext(cmd), shellwrapsvc.Request{Tools: tools, Shells: shells, DryRun: dryRun || forceDry})
+				out, err := s.Apply(cmdContext(cmd), shellwrapsvc.Request{Target: t, Tools: tools, Shells: shells, DryRun: dryRun || forceDry})
 				if err != nil {
 					return err
 				}
@@ -190,7 +223,11 @@ func newShellWrapCmd() *cobra.Command {
 		Short: "Remove every shim and every marked block (start-up files restored byte-for-byte)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			out, err := svc().Disable(cmdContext(cmd), disableDry)
+			t, err := target()
+			if err != nil {
+				return err
+			}
+			out, err := svc().DisableFor(cmdContext(cmd), t, disableDry)
 			if err != nil {
 				return err
 			}
@@ -208,15 +245,9 @@ func newShellWrapCmd() *cobra.Command {
 		applyCmd("preview", "Show exactly what `enable` would write, without writing anything", true),
 		applyCmd("enable", "Wrap the named tools' commands (or `all` installed CLI tools)", false),
 		disable,
+		newShellWrapLaunchEnvCmd(&configPath),
 	)
 	return cmd
-}
-
-func cmdContext(cmd *cobra.Command) context.Context {
-	if ctx := cmd.Context(); ctx != nil {
-		return ctx
-	}
-	return context.Background()
 }
 
 func writeShellWrapJSON(w io.Writer, v any) error {
@@ -249,6 +280,9 @@ func renderShellWrapStatus(w io.Writer, st shellwrap.Status) {
 		state = "off - but shims or blocks are still installed (run `observer shell-wrap disable`)"
 	}
 	fmt.Fprintf(w, "Command wrapping: %s\n", state)
+	if st.Bridge != nil {
+		fmt.Fprintf(w, "Target:           Windows shells, through WSL (%s)\n", st.Bridge.Distro)
+	}
 	fmt.Fprintf(w, "Shim dir:         %s\n", st.ShimDir)
 	fmt.Fprintf(w, "Shells detected:  %s\n", joinShells(st.DetectedShells, "none"))
 	if len(st.RC) > 0 {
@@ -270,14 +304,49 @@ func renderShellWrapStatus(w io.Writer, st shellwrap.Status) {
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tCOMMANDS\tWRAPPED AS\tSTATE\tWHAT IT BUYS")
 	for _, t := range st.Tools {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", t.ID, strings.Join(t.Commands, ","), t.Wrapped, shellWrapToolState(t), t.HonestyText)
+		wrapped := t.Wrapped
+		if t.Side == shellwrap.SideWSL {
+			wrapped += " (in WSL)"
+		} else if st.Bridge != nil {
+			wrapped = "the Windows " + strings.Join(t.Commands, ",") + " (routing from WSL)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", t.ID, strings.Join(t.Commands, ","), wrapped, shellWrapToolState(t), t.HonestyText)
 	}
 	_ = tw.Flush()
+	if st.Bridge != nil {
+		fmt.Fprintln(w, "PowerShell picks the shims up through the profile block; for cmd.exe add the shim dir to your PATH yourself.")
+	}
+	if len(st.Unavailable) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Not wrappable here:")
+		for _, u := range st.Unavailable {
+			line := fmt.Sprintf("  %s (%s): %s", u.ID, u.Label, u.Reason)
+			if u.Hint != "" {
+				line += "; " + u.Hint
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
 	for _, o := range st.Orphans {
 		fmt.Fprintf(w, "note: %s is a shim for %q, which is no longer wrappable here - `disable` or `enable` removes it\n", o.Path, o.ToolID)
 	}
 	for _, warn := range st.Warnings {
 		fmt.Fprintf(w, "warning: %s\n", warn)
+	}
+}
+
+// renderShellWrapOtherTargets points at a target other than the one shown
+// (from inside WSL: the Windows shells).
+func renderShellWrapOtherTargets(w io.Writer, targets []shellwrapsvc.TargetInfo) {
+	for _, t := range targets {
+		if t.ID == shellwrapsvc.TargetNative {
+			continue
+		}
+		if t.Available {
+			fmt.Fprintf(w, "\n%s shells can be wrapped too: observer shell-wrap status --target %s\n", t.Label, t.ID)
+			continue
+		}
+		fmt.Fprintf(w, "\n%s shells: not available here (%s)\n", t.Label, t.Reason)
 	}
 }
 

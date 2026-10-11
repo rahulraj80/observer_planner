@@ -56,7 +56,9 @@ type GuardBudgetTokenWindows struct {
 // the stored dedup verdicts count (see the file header). What is marked
 // unavailable is what is genuinely unreadable: negative or NULL counters, an
 // unreliable source, and — under a managed read — an invalid captured
-// timestamp.
+// timestamp on a row written since the window opened (T-422: the check is
+// bounded by insertion order, see guardBudgetMalformedFloorSQL, so its cost
+// follows the window and not the node's whole history).
 //
 // WHERE THE PER-SUBJECT TOKEN TOTALS LIVE, and why not here (bundle BUD-N):
 // the organization's per-tool / per-model caps need the same windows in both
@@ -87,43 +89,10 @@ func (s *Store) GuardBudgetTokens(ctx context.Context, sessionID string, dayStar
 	var sessionBad, dayBad, weekBad, monthBad int
 	var weeklyFirst string
 	managed := managedBudgetRead(options)
-	//nolint:gosec // G202: the WHERE fragments are compile-time constant SQL; every value binds via args.
+	//nolint:gosec // G202: guardBudgetTokensSQL is compile-time constant SQL; every value binds via args.
 	err = s.db.QueryRowContext(
-		ctx, `
-		WITH params AS (SELECT ? managed), raw AS (
-		  SELECT COALESCE(session_id,'') sid, timestamp, `+guardBudgetTimestampOrderSQL+` ordered_at,
-		         COALESCE(input_tokens,0) i, `+spendverdict.ProxyOutputOf("api_turns")+` o,
-		         input_tokens IS NULL OR output_tokens IS NULL incomplete
-		  FROM api_turns `+guardBudgetUsageWhere(managed, spendverdict.CountedProxyRowOf("api_turns"))+`
-		  UNION ALL
-		  SELECT session_id sid, timestamp, `+guardBudgetTimestampOrderSQL+` ordered_at,
-		         COALESCE(input_tokens,0) i, COALESCE(output_tokens,0) o,
-		         input_tokens IS NULL OR output_tokens IS NULL OR
-		         COALESCE(reliability,'') NOT IN ('accurate','approximate') OR
-		         source NOT IN ('jsonl','otel','hook','proxy') incomplete
-		  FROM token_usage `+guardBudgetUsageWhere(managed, spendverdict.CountedTokenRow("token_usage"))+`
-		), normalized AS (
-		  SELECT sid,ordered_at,CASE WHEN i < 0 OR o < 0 THEN 0 ELSE i+o END amount,
-		         CASE WHEN i < 0 OR o < 0 OR (managed AND (incomplete OR `+guardBudgetInvalidTimestampSQL+`)) THEN 1 ELSE 0 END bad,
-		         managed AND (`+guardBudgetInvalidTimestampSQL+`) bad_time
-		  FROM raw CROSS JOIN params
-		)
-		SELECT COALESCE(SUM(CASE WHEN sid = ? AND ? <> '' THEN amount ELSE 0 END),0),
-		       COALESCE(SUM(CASE WHEN ordered_at >= ? THEN amount ELSE 0 END),0),
-		       COALESCE(SUM(CASE WHEN ordered_at >= ? THEN amount ELSE 0 END),0),
-		       COALESCE(SUM(CASE WHEN ordered_at >= ? THEN amount ELSE 0 END),0),
-		       COALESCE(MAX(CASE WHEN sid = ? AND ? <> '' THEN bad ELSE 0 END),0),
-		       COALESCE(MAX(CASE WHEN ordered_at >= ? OR bad_time THEN bad ELSE 0 END),0),
-		       COALESCE(MAX(CASE WHEN ordered_at >= ? OR bad_time THEN bad ELSE 0 END),0),
-		       COALESCE(MAX(CASE WHEN ordered_at >= ? OR bad_time THEN bad ELSE 0 END),0),
-		       COALESCE(MIN(CASE WHEN ordered_at >= ? AND amount > 0 THEN ordered_at END),'')
-		FROM normalized`,
-		managed,
-		sessionID, sessionID, earliest.UTC().Format("2006-01-02T15:04:05"), guardBudgetWindowStamp(earliest),
-		sessionID, sessionID, earliest.UTC().Format("2006-01-02T15:04:05"), guardBudgetWindowStamp(earliest),
-		sessionID, sessionID, guardBudgetWindowStamp(dayStart), guardBudgetWindowStamp(weekStart), guardBudgetWindowStamp(monthStart),
-		sessionID, sessionID, guardBudgetWindowStamp(dayStart), guardBudgetWindowStamp(weekStart), guardBudgetWindowStamp(monthStart),
-		guardBudgetWindowStamp(weekStart),
+		ctx, guardBudgetTokensSQL(managed),
+		guardBudgetTokensArgs(managed, sessionID, dayStart, weekStart, monthStart, earliest, time.Now())...,
 	).Scan(&tok.SessionTokens, &tok.DailyTokens, &tok.WeeklyTokens, &tok.MonthlyTokens,
 		&sessionBad, &dayBad, &weekBad, &monthBad, &weeklyFirst)
 	if err != nil {
@@ -134,4 +103,97 @@ func (s *Store) GuardBudgetTokens(ctx context.Context, sessionID string, dayStar
 		tok.WeeklyExpiresAt = at.Add(7 * 24 * time.Hour)
 	}
 	return tok, nil
+}
+
+// The two read shapes of GuardBudgetTokens, built once. They differ ONLY in
+// whether the managed-only validity checks are compiled into the statement.
+//
+// WHY TWO STATEMENTS, not one with a bound `managed` flag (T-418): SQLite
+// evaluates both operands of AND in a value context, so `? AND (<invalid
+// timestamp checks>)` ran the julianday/strftime validation twice per row on
+// EVERY advisory read, where the flag is false and the answer is discarded.
+// Over a rolling week of usage on a large node (about 68k rows) that was
+// roughly 70% of the statement's cost. guardBudgetUsageWhere already keeps the
+// managed OR branch out of the advisory WHERE for the same reason; this keeps
+// it out of the projection too. (T-422 later bounded the managed statement's
+// malformed-row check by insertion order; see guardBudgetMalformedFloorSQL.)
+var (
+	guardBudgetTokensAdvisorySQL = buildGuardBudgetTokensSQL(false)
+	guardBudgetTokensManagedSQL  = buildGuardBudgetTokensSQL(true)
+)
+
+// guardBudgetTokensArgs binds guardBudgetTokensSQL(managed), in order: the
+// two usage arms, then the session and window stamps of the projection.
+func guardBudgetTokensArgs(managed bool, sessionID string, dayStart, weekStart, monthStart, earliest, now time.Time) []any {
+	args := guardBudgetUsageArgs(managed, sessionID, earliest, now)
+	args = append(args, guardBudgetUsageArgs(managed, sessionID, earliest, now)...)
+	return append(args,
+		sessionID, sessionID, guardBudgetWindowStamp(dayStart), guardBudgetWindowStamp(weekStart), guardBudgetWindowStamp(monthStart),
+		sessionID, sessionID, guardBudgetWindowStamp(dayStart), guardBudgetWindowStamp(weekStart), guardBudgetWindowStamp(monthStart),
+		guardBudgetWindowStamp(weekStart),
+	)
+}
+
+// guardBudgetTokensSQL returns the token-window statement for one read mode.
+func guardBudgetTokensSQL(managed bool) string {
+	if managed {
+		return guardBudgetTokensManagedSQL
+	}
+	return guardBudgetTokensAdvisorySQL
+}
+
+// buildGuardBudgetTokensSQL assembles the statement. bad marks a row whose
+// counts cannot be trusted (negative always; incomplete or a malformed
+// timestamp only under a managed read); bad_time marks a malformed timestamp,
+// which a managed read assigns to every window because it cannot be placed in
+// one. In the advisory shape bad_time is the constant 0.
+//
+// The validity check is computed ONCE per row, as raw's bt column (T-422).
+// raw is a compound query, so SQLite materializes it as a co-routine and bt
+// is evaluated once; normalized is flattened into the aggregate, so an
+// expression written there is re-evaluated by every SUM / MAX that names its
+// column (bad four times, bad_time three), which made the julianday/strftime
+// check run about seven times per window row.
+func buildGuardBudgetTokensSQL(managed bool) string {
+	badTimeExpr := `0`
+	if managed {
+		badTimeExpr = `(` + guardBudgetInvalidTimestampSQL + `)`
+	}
+	bad := `CASE WHEN i < 0 OR o < 0 THEN 1 ELSE 0 END`
+	badTime := `0`
+	if managed {
+		bad = `CASE WHEN i < 0 OR o < 0 OR incomplete OR bt THEN 1 ELSE 0 END`
+		badTime = `bt`
+	}
+	return `
+		WITH raw AS (
+		  SELECT COALESCE(session_id,'') sid, timestamp, ` + guardBudgetTimestampOrderSQL + ` ordered_at,
+		         COALESCE(input_tokens,0) i, ` + spendverdict.ProxyOutputOf("api_turns") + ` o,
+		         input_tokens IS NULL OR output_tokens IS NULL incomplete,
+		         ` + badTimeExpr + ` bt
+		  FROM api_turns ` + guardBudgetUsageWhere(managed, "api_turns", spendverdict.CountedProxyRowOf("api_turns")) + `
+		  UNION ALL
+		  SELECT session_id sid, timestamp, ` + guardBudgetTimestampOrderSQL + ` ordered_at,
+		         COALESCE(input_tokens,0) i, COALESCE(output_tokens,0) o,
+		         input_tokens IS NULL OR output_tokens IS NULL OR
+		         COALESCE(reliability,'') NOT IN ('accurate','approximate') OR
+		         source NOT IN ('jsonl','otel','hook','proxy') incomplete,
+		         ` + badTimeExpr + ` bt
+		  FROM token_usage ` + guardBudgetUsageWhere(managed, "token_usage", spendverdict.CountedTokenRow("token_usage")) + `
+		), normalized AS (
+		  SELECT sid,ordered_at,CASE WHEN i < 0 OR o < 0 THEN 0 ELSE i+o END amount,
+		         ` + bad + ` bad,
+		         ` + badTime + ` bad_time
+		  FROM raw
+		)
+		SELECT COALESCE(SUM(CASE WHEN sid = ? AND ? <> '' THEN amount ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN ordered_at >= ? THEN amount ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN ordered_at >= ? THEN amount ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN ordered_at >= ? THEN amount ELSE 0 END),0),
+		       COALESCE(MAX(CASE WHEN sid = ? AND ? <> '' THEN bad ELSE 0 END),0),
+		       COALESCE(MAX(CASE WHEN ordered_at >= ? OR bad_time THEN bad ELSE 0 END),0),
+		       COALESCE(MAX(CASE WHEN ordered_at >= ? OR bad_time THEN bad ELSE 0 END),0),
+		       COALESCE(MAX(CASE WHEN ordered_at >= ? OR bad_time THEN bad ELSE 0 END),0),
+		       COALESCE(MIN(CASE WHEN ordered_at >= ? AND amount > 0 THEN ordered_at END),'')
+		FROM normalized`
 }

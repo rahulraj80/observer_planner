@@ -44,6 +44,35 @@ export type ConfigKeysResponse = {
   config_etag: string;
 };
 
+/**
+ * ConfigKeysDryRun is PUT /api/config/keys with `dry_run: true`: every check
+ * runs and the masked diff of what the save would write comes back; nothing
+ * is written (adapter-config plan section 5.5).
+ */
+export type ConfigKeysDryRun = {
+  dry_run: true;
+  would_write: boolean;
+  changed_keys: string[];
+  restart_required: boolean;
+  restart_required_keys: string[];
+  applied_live_keys: string[];
+  next_spawn_keys: string[];
+  comments_preserved: boolean;
+  write_mode: "surgical" | "reserialize";
+  write_mode_reason?: string;
+  config_path: string;
+  config_etag: string;
+  diff: string;
+  diff_stats: { added: number; removed: number };
+  needs_confirm: boolean;
+  secret_warnings: { key: string; message: string }[];
+};
+
+/** patchFingerprint identifies a batch so a preview is only used for the edits it checked. */
+export function patchFingerprint(etag: string, patches: readonly ConfigKeyPatch[]): string {
+  return JSON.stringify([etag, patches.map((p) => [p.key, p.value])]);
+}
+
 export type ConfigKeysError = {
   error: string;
   message?: string;

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/localipc"
 )
 
 // dialTimeout bounds a client's connect to the attach socket.
@@ -43,7 +45,7 @@ var ErrConnLost = errors.New("attachsock: connection to the daemon was lost befo
 // keystrokes to the PTY failed (a stdin data-frame write errored/timed out) so
 // the session was detached. Surfaced explicitly rather than swallowed (A2-2) so
 // the operator learns their input stopped reaching the session.
-var ErrInputStalled = errors.New("attachsock: stdin forwarding stalled — detached")
+var ErrInputStalled = errors.New("attachsock: stdin forwarding stalled - detached")
 
 // Dial connects to the attach endpoint (an AF_UNIX socket path on unix, a
 // named-pipe name on Windows — whatever Endpoint returned for the daemon's DB
@@ -51,7 +53,7 @@ var ErrInputStalled = errors.New("attachsock: stdin forwarding stalled — detac
 // ErrDaemonUnreachable so callers keep their single "daemon not running" hint,
 // whichever transport is compiled in.
 func Dial(endpoint string) (net.Conn, error) {
-	c, err := defaultTransport.Dial(context.Background(), endpoint, dialTimeout)
+	c, err := localipc.DefaultTransport().Dial(context.Background(), endpoint, dialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("attachsock.Dial: %w: %w", ErrDaemonUnreachable, err)
 	}

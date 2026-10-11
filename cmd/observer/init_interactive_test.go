@@ -30,6 +30,9 @@ func interactiveHome(t *testing.T) string {
 // default — never pre-selected) → NOT written; route accepted →
 // written. Each answer maps to exactly one write.
 func TestRunInteractiveInit_OneConsentPerWrite(t *testing.T) {
+	requireComponents(t, "integration.hooks", "integration.mcp-server", "integration.proxy-route")
+	requireActiveAdapters(t, "claude-code")
+	requireAdapter(t, "claude-code")
 	home := interactiveHome(t)
 	var out strings.Builder
 	// hooks: enter (default yes) · mcp: enter (default NO) · route: y.
@@ -80,6 +83,9 @@ func TestRunInteractiveInit_OneConsentPerWrite(t *testing.T) {
 // run answering no to everything leaves the tool config untouched and
 // prints the claude routing hint (the declined-route fallback).
 func TestRunInteractiveInit_DeclineWritesNothing(t *testing.T) {
+	requireComponents(t, "integration.hooks", "integration.mcp-server", "integration.proxy-route")
+	requireActiveAdapters(t, "claude-code")
+	requireAdapter(t, "claude-code")
 	home := interactiveHome(t)
 	var out strings.Builder
 	in := strings.NewReader(strings.Repeat("n\n", 15))
@@ -108,6 +114,9 @@ func TestRunInteractiveInit_DeclineWritesNothing(t *testing.T) {
 // TestRunInteractiveInit_EOFAborts pins the closed-stdin contract:
 // the flow stops with an error and performs no further writes.
 func TestRunInteractiveInit_EOFAborts(t *testing.T) {
+	requireComponents(t, "integration.hooks", "integration.mcp-server", "integration.proxy-route")
+	requireActiveAdapters(t, "claude-code")
+	requireAdapter(t, "claude-code")
 	home := interactiveHome(t)
 	var out strings.Builder
 	in := strings.NewReader("") // immediate EOF at the first prompt
@@ -319,6 +328,9 @@ func TestRunWindowsRouteDisambiguation_NoCandidatesIsNoOp(t *testing.T) {
 // in <path>" (false: the path holds nothing) and the skipped MCP preview
 // as a pending consent item.
 func TestRunInteractiveInit_PluginWiredOffersNoConsent(t *testing.T) {
+	requireComponents(t, "integration.hooks", "integration.mcp-server", "integration.proxy-route")
+	requireActiveAdapters(t, "claude-code")
+	requireAdapter(t, "claude-code")
 	home := interactiveHome(t)
 	// Install the plugin, exactly as `/plugin install` records it.
 	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"),
@@ -348,7 +360,7 @@ func TestRunInteractiveInit_PluginWiredOffersNoConsent(t *testing.T) {
 		t.Errorf("mcp line does not report plugin wiring:\n%s", text)
 	}
 	if strings.Contains(text, "hooks: already set") {
-		t.Errorf("skipped hooks rendered as 'already set' — nothing is in that file:\n%s", text)
+		t.Errorf("skipped hooks rendered as 'already set' - nothing is in that file:\n%s", text)
 	}
 	// The two consent questions must not have been asked at all.
 	if strings.Contains(text, "register hooks for claude-code?") {

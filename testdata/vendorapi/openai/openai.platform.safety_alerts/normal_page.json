@@ -1,0 +1,11 @@
+{
+  "id": "alert_0123456789abcdef0123456789abcdef",
+  "object": "safety.alert",
+  "created_at": 1787659200,
+  "request_id": "req_123",
+  "response_id": "resp_123",
+  "model": "gpt-6-astra",
+  "request_paused": true,
+  "error_type": "potentially_unintended_data_access",
+  "reason": "Potentially unintended data access."
+}

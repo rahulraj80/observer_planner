@@ -150,7 +150,7 @@ table, and deletes the database again.
 
 Zero configuration, zero network calls: pricing is embedded in the
 binary, nothing is fetched at runtime. Nothing is written outside the
-scratch directory — in particular this command never creates or reads
+scratch directory - in particular this command never creates or reads
 ~/.observer, never writes any AI tool's config, and never binds a port.
 By default it also IGNORES ~/.observer/config.toml (so the numbers are
 reproducible on any machine); pass --config <path> to honor a real
@@ -163,7 +163,7 @@ expiry the table still prints, with an honest "partial" footer.
 
 Sibling commands, so the split is clear:
 
-  observer usage   one-shot on a throwaway DB — what you're reading now
+  observer usage   one-shot on a throwaway DB - what you're reading now
   observer scan    ingest into the DB at ~/.observer/observer.db
   observer cost    query the DB you've been capturing into (and, once
                    you run ` + "`observer start`" + `, the wire-accurate
@@ -605,7 +605,7 @@ func keepScratchDB(src, dest string) (string, error) {
 	if cerr == nil {
 		return kept, nil
 	}
-	return "", fmt.Errorf("usage: --keep-db %q: %w (the scratch database was NOT moved — it survives at %s until this process exits; copy it out before then)", dest, cerr, src)
+	return "", fmt.Errorf("usage: --keep-db %q: %w (the scratch database was NOT moved - it survives at %s until this process exits; copy it out before then)", dest, cerr, src)
 }
 
 // keepScratchDBByCopy is keepScratchDB's cross-device fallback: stream-copy
@@ -945,7 +945,7 @@ func (p *usageProgress) done(tool string, files int) {
 	if p.quiet {
 		return
 	}
-	msg := fmt.Sprintf("scanned %s — %d file(s)", tool, files)
+	msg := fmt.Sprintf("scanned %s - %d file(s)", tool, files)
 	if p.tty {
 		p.line(msg)
 		return
@@ -1108,7 +1108,7 @@ func oneShotExtraNotes(in oneShotExtraNoteInput) []oneshot.Note {
 	if in.ignoredConfig != "" {
 		notes = append(notes, oneshot.Note{
 			Code: "config_ignored",
-			Text: fmt.Sprintf("%s was NOT read — any [intelligence.pricing] overrides in it are ignored; rerun with --config %s to honor it",
+			Text: fmt.Sprintf("%s was NOT read - any [intelligence.pricing] overrides in it are ignored; rerun with --config %s to honor it",
 				in.ignoredConfig, in.ignoredConfig),
 		})
 	}
@@ -1344,7 +1344,7 @@ func runBareRoot(cmd *cobra.Command, deps usageDeps) error {
 		return printWelcome(cmd)
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(),
-		"no local SuperBased state found — showing a one-shot usage report (`%s usage`); nothing is written outside a temp dir. `%s --help` for everything else, OBSERVER_ONESHOT=off to disable.\n",
+		"no local SuperBased state found - showing a one-shot usage report (`%s usage`); nothing is written outside a temp dir. `%s --help` for everything else, OBSERVER_ONESHOT=off to disable.\n",
 		invocationName(), invocationName())
 	return runUsage(cmd, defaultUsageOptions(), deps)
 }

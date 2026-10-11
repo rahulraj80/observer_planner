@@ -297,6 +297,21 @@ type kept struct {
 	at   time.Time
 }
 
+// Clone returns an independent copy of the tracker's emission state, so a
+// caller can resume from a saved tracker without the saved one observing
+// what the resumed one records. Snapshots are values the tracker never
+// mutates in place, so sharing their Windows slices is safe.
+func (t *Tracker) Clone() Tracker {
+	if t == nil || t.last == nil {
+		return Tracker{}
+	}
+	last := make(map[string]kept, len(t.last))
+	for k, v := range t.last {
+		last[k] = v
+	}
+	return Tracker{last: last}
+}
+
 // Observe decides whether cur (observed at `at`) should be emitted as a
 // rate-limit row for key, and records it as the new baseline when it is.
 // reason is ReasonFirst, a change reason, ReasonHeartbeat, or "" (skip).

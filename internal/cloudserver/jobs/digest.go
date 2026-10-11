@@ -32,7 +32,7 @@ STRICT RULES:
 - Never invent a session, a cost figure, or an error class the evidence does not support. When the evidence is thin (for example, only titles and tags with no descriptions), say so plainly in limitations rather than filling in a confident-sounding gap.
 - Keep every text field concise and free of control characters.
 
-HOW TO READ THE EVIDENCE. Each entry in "sessions" is one already-enriched session for this project: its own title, description (may be absent), taxonomy_tags, limitations, and a content-free metrics snapshot (tokens, cost, error_rate, duration, an activity_mix histogram, and outcomes) — never raw prompts, excerpts, file paths, or command text.
+HOW TO READ THE EVIDENCE. Each entry in "sessions" is one already-enriched session for this project: its own title, description (may be absent), taxonomy_tags, limitations, and a content-free metrics snapshot (tokens, cost, error_rate, duration, an activity_mix histogram, and outcomes) - never raw prompts, excerpts, file paths, or command text.
 
 HOW TO WRITE THE RESULT.
 - headline: name the single most important thing that happened on this project this week, grounded in the sessions shown.
@@ -254,7 +254,7 @@ func (e *DigestExecutor) Execute(ctx context.Context, lj *store.LeasedJob, route
 
 	cleaned, rejection := ProcessDigestCompletion(res.Content, len(ev.Sessions), ev.PeriodStart, ev.PeriodEnd)
 	if rejection != "" {
-		return ExecResult{Outcome: ExecInvalidOutput, TokensIn: tokensIn, TokensOut: tokensOut, Detail: rejection}, nil
+		return ExecResult{Outcome: ExecInvalidOutput, TokensIn: tokensIn, TokensOut: tokensOut, Detail: InvalidOutputDetail(res, rejection)}, nil
 	}
 
 	resultJSON, err := json.Marshal(cleaned)

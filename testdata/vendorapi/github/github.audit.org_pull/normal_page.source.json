@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "[]": "VerifiedOfficial",
+    "[].@timestamp": "VerifiedOfficial",
+    "[]._document_id": "VerifiedOfficial",
+    "[].action": "VerifiedOfficial",
+    "[].actor": "VerifiedOfficial",
+    "[].created_at": "VerifiedOfficial",
+    "[].org": "VerifiedOfficial",
+    "[].repo": "VerifiedOfficial",
+    "[].team": "VerifiedOfficial",
+    "[].user": "VerifiedOfficial",
+    "[].visibility": "VerifiedOfficial"
+  },
+  "fixture_sha256": "c10968081f9851df1684f7ebc0be2af4a657cb0ab80f8af9c6710e59715b59a9",
+  "http": {
+    "method": "GET",
+    "path": "/orgs/{org}/audit-log",
+    "query": {
+      "per_page": "30"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim components/examples/audit-log. Event fields beyond the envelope vary by action.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.audit.org_pull"
+}

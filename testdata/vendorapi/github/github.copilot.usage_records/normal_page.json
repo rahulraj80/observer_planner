@@ -1,0 +1,20 @@
+[
+  {
+    "type": "request",
+    "user_id": 12345,
+    "enterprise_id": 1,
+    "github_request_id": "req-abc-123",
+    "endpoint": "/chat/completions",
+    "body": "{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}",
+    "@timestamp": 1719600000000
+  },
+  {
+    "type": "response",
+    "user_id": 12345,
+    "enterprise_id": 1,
+    "github_request_id": "req-abc-123",
+    "endpoint": "/chat/completions",
+    "body": "{\"choices\":[{\"message\":{\"content\":\"Hi there!\"}}]}",
+    "@timestamp": 1719600000500
+  }
+]

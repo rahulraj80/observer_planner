@@ -1,5 +1,15 @@
 import { ApiError, apiReason } from "@/lib/api";
 import type { ToolPreflight } from "@/lib/types";
+import { preflightFacts } from "@/lib/preflightFacts";
+import { launchRuntimeRemedy } from "@/lib/runtimeCheck";
+
+export {
+  installRuntimeAdvisory,
+  installRuntimeParts,
+  installRuntimeRemedy,
+  launchRuntimeParts,
+  launchRuntimeRemedy,
+} from "@/lib/runtimeCheck";
 
 // Pure copy + decision helpers for the New-Terminal dialog's tool-availability
 // half (audit DI-03 / DI-05 / DI-17). Everything here is a PURE function over
@@ -28,23 +38,22 @@ export const INSTALL_UNAVAILABLE_MSG =
 // allow_terminal gate, the project-root denial) because this route is
 // Local-only and its own opt-in owns the refusal.
 export const INSTALL_DISABLED_MSG =
-  "Guided install is switched off. Set [terminal.launch].allow_install = true in ~/.observer/config.toml and restart SuperBased, or run the install command above yourself in a terminal.";
+  "Guided install is switched off. Turn on \"Allow guided install and uninstall\" in Terminals > Settings > Fresh-agent launch policy (no restart needed), or run the install command above yourself in a terminal.";
 
 // INSTALL_NO_COMMAND_MSG maps the install route's 400. The server reaches it
 // when the capability registry carries no grounded install argv for the tool on
 // this OS — the same honest zero toolresolve.NoGroundedInstallMsg states for
 // the launcher and `observer doctor`.
 export const INSTALL_NO_COMMAND_MSG =
-  "SuperBased has no grounded install command for this tool on this OS — see the vendor's docs and install it by hand, then re-check.";
+  "There's no one-step install for this tool on this system. Install it from the vendor's site, then press Re-check.";
 
-// NO_GROUNDED_INSTALL_MSG is the SPA mirror of
-// internal/toolresolve.NoGroundedInstallMsg ("no grounded install command —
-// see the vendor's docs"). It is the last-resort fallback for the dialog's
-// not-installed branch when the server sends neither an install_command nor an
-// install_note (an older daemon predating DI-03's wire field), so the branch
-// can never dead-end with only "X is not installed."
+// NO_GROUNDED_INSTALL_MSG is the user-facing sentence for the dialog's
+// not-installed branch when the server sends no install_command (the plain
+// wording of internal/toolresolve.NoGroundedInstallMsg), so the branch can
+// never dead-end with only "X is not installed." It also stands in for the
+// server's install_note, which is not rendered (see installGuidanceFor).
 export const NO_GROUNDED_INSTALL_MSG =
-  "No grounded install command — see the vendor's docs.";
+  "There's no one-step install for this tool here. Install it from the vendor's site, then press Re-check.";
 
 // installErrorMessage turns a thrown POST /api/terminal/install failure into
 // actionable copy. Dispatch is on HTTP STATUS, which is correct HERE and only
@@ -66,7 +75,7 @@ export const NO_GROUNDED_INSTALL_MSG =
 // confirm token is missing or no longer matches (the dashboard was restarted or
 // the panel outlived its token). The fix is a reload, not a config change.
 export const INSTALL_TOKEN_STALE_MSG =
-  "The dashboard's confirm token for this panel is stale — reload the page and try the install again.";
+  "The dashboard's confirm token for this panel is stale - reload the page and try the install again.";
 
 // isConfirmTokenReason recognises requireConfirmToken's plain-text 403 body
 // ("forbidden: missing or mismatched confirm token — reload the panel").
@@ -98,10 +107,11 @@ export function installErrorMessage(e: unknown): string {
 // ---------------------------------------------------------------------------
 
 // installGuidanceFor returns the sentence the not-installed branch shows when
-// there is NO runnable install command — the `install_note` the server sends
-// (audit DI-03: the grounded REASON this tool has no guided install on this OS,
-// e.g. "muse is WSL-only"), falling back to the shared no-grounded-install
-// sentence for an older daemon that predates the field.
+// there is NO runnable install command (audit DI-03: never a dead end).
+// The server's `install_note` is deliberately NOT rendered: it is the
+// integration registry's engineering record of why no install channel was
+// grounded ("no grounded Linux channel: ... a single argv would be a guess
+// ..."), not product copy. It stays on the wire for `observer doctor`.
 //
 // Returns null when an install_command IS present: the command itself is the
 // guidance, and the server fills install_note only in the absent case, so
@@ -110,8 +120,11 @@ export function installErrorMessage(e: unknown): string {
 export function installGuidanceFor(preflight: ToolPreflight | null): string | null {
   if (!preflight) return null;
   if (preflight.install_command) return null;
-  const note = preflight.install_note?.trim();
-  if (note) return note;
+  // The registry's optional plain-language hint ("available for Windows and
+  // macOS only") is product copy by contract (integration.UserInstallHint,
+  // pinned plain by a registry test), so it may be shown as-is.
+  const hint = preflight.user_install_hint?.trim();
+  if (hint) return `${hint} ${NO_GROUNDED_INSTALL_MSG}`;
   return NO_GROUNDED_INSTALL_MSG;
 }
 
@@ -147,10 +160,20 @@ export type PreflightStrip = {
   tone: PreflightTone;
   /** One verdict-specific sentence. Never empty. */
   headline: string;
-  /** The server's notes, verbatim and in order (never truncated here). */
+  /**
+   * Secondary lines phrased from the preflight's STRUCTURED facts
+   * (preflightFacts) — never the server's `notes` verbatim, which are the
+   * resolver's engineering sentences and stay on the wire for doctor.
+   */
   notes: string[];
   /** True when this verdict means the daemon cannot launch the tool. */
   blocking: boolean;
+  /**
+   * True when the block is "not installed here" (so the install command and
+   * the Install button belong under it). False for a tool that IS installed
+   * but cannot start (a too-old runtime): reinstalling would not help.
+   */
+  offerInstall: boolean;
 };
 
 // VERDICT_COPY is the closed verdict vocabulary of
@@ -171,23 +194,26 @@ const VERDICT_COPY: Record<
     tone: "info",
     blocking: false,
     headline: (tool, bin) =>
+      // Plain words: "SuperBased" (the product the user runs), never "the
+      // daemon". An empty bin is a launch target with no PATH spelling - in
+      // practice a Windows app a WSL SuperBased opens across the boundary.
       bin
-        ? `${tool}: not on PATH — the daemon will use ${bin}.`
-        : `${tool}: not on PATH — the daemon resolved it elsewhere.`,
+        ? `${tool}: not on PATH - SuperBased will use ${bin}.`
+        : `${tool}: found outside PATH - SuperBased will open it from where it's installed.`,
   },
   shadowed: {
     tone: "info",
     blocking: false,
     headline: (tool, bin) =>
       bin
-        ? `${tool}: a Windows interop shim shadows the native install on PATH — the daemon will use the native ${bin} instead.`
-        : `${tool}: a Windows interop shim shadows the native install on PATH — the daemon will use the native install instead.`,
+        ? `${tool}: a Windows copy comes first on PATH - SuperBased will use the Linux install at ${bin} instead.`
+        : `${tool}: a Windows copy comes first on PATH - SuperBased will use the Linux install instead.`,
   },
   foreign_only: {
     tone: "warn",
     blocking: true,
     headline: (tool) =>
-      `${tool} is installed on Windows, not in WSL — the daemon can't launch it.`,
+      `${tool} is installed on Windows, not in WSL - SuperBased can't launch it from here.`,
   },
   not_found: {
     tone: "warn",
@@ -201,8 +227,10 @@ const VERDICT_COPY: Record<
 // were hand-rolled in two drifting places (the strip and the Start button's
 // tooltip), and three of the five verdicts rendered nothing at all.
 //
-// Notes are returned for EVERY verdict, not just ok_off_path/shadowed — the
-// PATH-shim explanation (DI-04b) arrives on a plain "ok" and must stay visible.
+// Secondary lines are returned for EVERY verdict, not just ok_off_path /
+// shadowed — a fact that matters (a missing interpreter, DI-04b) can arrive on
+// a plain "ok" and must stay visible. They come from preflightFacts (structured
+// fields), not the server's free-text notes.
 // An unrecognised verdict gets a default arm that NAMES it (mirroring
 // FormatVerdict's default) rather than an empty div.
 export function preflightStripCopy(
@@ -211,7 +239,7 @@ export function preflightStripCopy(
 ): PreflightStrip | null {
   if (!preflight) return null;
   const verdict = preflight.verdict ?? "";
-  const notes = preflight.notes ?? [];
+  const notes = preflightFacts(tool, preflight);
   const row = VERDICT_COPY[verdict];
   if (!row) {
     return {
@@ -220,18 +248,30 @@ export function preflightStripCopy(
       render: true,
       tone: "info",
       blocking: false,
-      headline: `${tool}: ${verdict || "no verdict"} — SuperBased doesn't recognise this availability verdict, so it is not blocking the launch. The launch itself stays the authority.`,
+      offerInstall: false,
+      headline: `${tool}: ${verdict || "no verdict"} - SuperBased doesn't recognise this availability verdict, so it is not blocking the launch. The launch itself stays the authority.`,
       notes,
     };
   }
+  // Installed, but on a runtime older than the vendor's floor: the launcher
+  // refuses it (it would crash at startup), so Start is blocked and the
+  // server's sentence names the fix. Never an install offer.
+  const runtimeRemedy = row.blocking ? null : launchRuntimeRemedy(preflight);
+  if (runtimeRemedy) {
+    return { render: true, tone: "warn", blocking: true, offerInstall: false, headline: runtimeRemedy, notes };
+  }
   return {
     render: verdict !== "ok" || notes.length > 0,
-    tone: row.tone,
+    // T-685: a launch the org's hard budget will refuse is a warning, not a
+    // blocker; the launcher stays the authority and prints the same remedy.
+    tone: preflight.budget_launch && !row.blocking ? "warn" : row.tone,
     blocking: row.blocking,
+    offerInstall: row.blocking,
     headline: row.headline(tool, preflight.bin ?? ""),
     notes,
   };
 }
+
 
 // PREFLIGHT_NOTE_CAP is how many notes render before the "+N more" expander.
 // The server sends them in priority order, so the first few are the ones that
@@ -249,7 +289,7 @@ export function preflightErrorCopy(tool: string, reason: string): string {
     ? `Couldn't check whether ${who} is installed: ${detail}`
     : `Couldn't check whether ${who} is installed`;
   const dot = /[.!?]$/.test(head) ? "" : ".";
-  return `${head}${dot} Start is disabled until the check succeeds — use Re-check, or install and launch this tool from a normal terminal.`;
+  return `${head}${dot} Start is disabled until the check succeeds - use Re-check, or install and launch this tool from a normal terminal.`;
 }
 
 // launchBlockedFor is the ONE predicate for "the Start button must be disabled
@@ -272,9 +312,13 @@ export function launchBlockedFor(
   state: PreflightState,
   verdict: string,
   allowed = true,
+  runtimeTooOld = false,
 ): boolean {
   if (state === "error") return true;
   if (!allowed) return true;
+  // A fourth cause: the tool is installed but its runtime is older than the
+  // vendor's floor (launchRuntimeRemedy); the launcher would refuse it.
+  if (runtimeTooOld) return true;
   const row = VERDICT_COPY[verdict];
   return row ? row.blocking : false;
 }
@@ -294,9 +338,12 @@ export function launchBlockedReason(
   preflight: ToolPreflight | null,
   errorReason: string,
   allowed = true,
+  // name is what the availability sentences call the tool (a GUI row's
+  // label, T-333); the allow-list sentence keeps the id, its config value.
+  name = tool,
 ): string | null {
-  if (state === "error") return preflightErrorCopy(tool, errorReason);
-  const strip = preflightStripCopy(tool, preflight);
+  if (state === "error") return preflightErrorCopy(name, errorReason);
+  const strip = preflightStripCopy(name, preflight);
   if (strip && strip.blocking) return strip.headline;
   if (!allowed) return toolNotAllowedReason(tool);
   return null;
@@ -314,14 +361,14 @@ export function launchBlockedReason(
 // selection must stay open (the guided install is ungated by this allow-list on
 // purpose, so a deny-all fresh install must still be able to reach it).
 export const TOOL_NOT_ALLOWED_MSG =
-  "not in [terminal.launch].allowed_tools — enable it under Terminals › Fresh-agent launch policy";
+  "not in [terminal.launch].allowed_tools - enable it under Terminals › Fresh-agent launch policy";
 
 // toolNotAllowedReason is the Start-button / warn-line sentence for a tool the
 // launch allow-list refuses. It names the key, the fix, AND the fact that
 // installing does not require the allow-list — otherwise a fresh-install
 // operator reads a disabled Start as "I can't do anything with this tool".
 export function toolNotAllowedReason(tool: string): string {
-  return `${tool} is ${TOOL_NOT_ALLOWED_MSG}. A fresh launch will be refused until then — installing it from here does not need the allow-list.`;
+  return `${tool} is ${TOOL_NOT_ALLOWED_MSG}. A fresh launch will be refused until then - installing it from here does not need the allow-list.`;
 }
 
 // TOOL_NOT_WATCHED_MSG is the honest copy for a tool the CAPTURE gate omits
@@ -329,7 +376,7 @@ export function toolNotAllowedReason(tool: string): string {
 // launch works perfectly, it simply records nothing — a completely different
 // failure from "you may not launch this".
 export const TOOL_NOT_WATCHED_MSG =
-  "not watched — [observer.watch].enabled_adapters omits it; sessions will not be captured";
+  "not watched - [observer.watch].enabled_adapters omits it; sessions will not be captured";
 
 // ToolAnnotation is the resolved per-option state for one entry of the picker.
 // `known` is false when the daemon sent no launchable_tool_info for this tool
@@ -347,10 +394,6 @@ export type ToolAnnotation = {
   known: boolean;
   allowed: boolean;
   watched: boolean;
-  /** Honest hover reason for the option, or null when there is nothing to say. */
-  title: string | null;
-  /** Inline suffix appended to the option label, or "". */
-  labelSuffix: string;
 };
 
 // LaunchableToolInfo mirrors ONE element of GET /api/terminal/sessions'
@@ -371,8 +414,6 @@ export function annotateTool(
       known: false,
       allowed: true,
       watched: true,
-      title: null,
-      labelSuffix: "",
     };
   }
   // The launch gate is reported first because it is the one that stops Start;
@@ -383,8 +424,6 @@ export function annotateTool(
       known: true,
       allowed: false,
       watched: info.watched,
-      title: TOOL_NOT_ALLOWED_MSG,
-      labelSuffix: " · not allow-listed",
     };
   }
   if (!info.watched) {
@@ -393,8 +432,6 @@ export function annotateTool(
       known: true,
       allowed: true,
       watched: false,
-      title: TOOL_NOT_WATCHED_MSG,
-      labelSuffix: " · not watched",
     };
   }
   return {
@@ -402,8 +439,6 @@ export function annotateTool(
     known: true,
     allowed: true,
     watched: true,
-    title: null,
-    labelSuffix: "",
   };
 }
 
@@ -437,5 +472,5 @@ export function pickerLegend(annotations: ToolAnnotation[]): string | null {
 export function unwatchedAllowedToolsMsg(tools: string[] | undefined): string | null {
   const list = (tools ?? []).filter((t) => t.trim() !== "");
   if (list.length === 0) return null;
-  return `${list.length} allow-listed ${list.length === 1 ? "tool is" : "tools are"} not watched: ${list.join(", ")} — add ${list.length === 1 ? "it" : "them"} to [observer.watch].enabled_adapters or delete the key to watch every adapter.`;
+  return `${list.length} allow-listed ${list.length === 1 ? "tool is" : "tools are"} not watched: ${list.join(", ")} - add ${list.length === 1 ? "it" : "them"} to [observer.watch].enabled_adapters or delete the key to watch every adapter.`;
 }

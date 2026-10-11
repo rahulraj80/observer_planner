@@ -27,7 +27,7 @@ func newRestoreSuppressCmd() *cobra.Command {
 		Long: "Reads the deletion journal (SBCI_DELETION_JOURNAL_PATH) and, for every\n" +
 			"account it records as deleted that is NOT currently tombstoned in the\n" +
 			"connected database, re-runs the complete deletion. Run this against the\n" +
-			"restored database BEFORE it reopens to traffic — see\n" +
+			"restored database BEFORE it reopens to traffic - see\n" +
 			"docs/cloud-intelligence-staging-launch-runbook.md §14.3. Idempotent: an\n" +
 			"account still tombstoned is skipped, so re-running after a partial\n" +
 			"failure is safe. Requires --yes (this writes to the restored database).",

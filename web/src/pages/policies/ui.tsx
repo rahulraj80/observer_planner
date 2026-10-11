@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Pill } from "@/components/primitives";
+import { Pill, buttonDisabledLook } from "@/components/primitives";
 import { type LintIssue } from "./types";
 
 // Shared form primitives for the Policies module tabs (Guardrails,
@@ -9,8 +9,7 @@ import { type LintIssue } from "./types";
 
 export const inputClass =
   "rounded-2 border border-line-2 bg-bg-3 px-2 py-1 text-small text-fg-1 outline-none focus:border-accent";
-export const btnPrimary =
-  "rounded-2 bg-accent px-3 py-1.5 text-small font-medium text-accent-on transition-opacity hover:opacity-90 disabled:opacity-50";
+export const btnPrimary = `rounded-2 bg-accent px-3 py-1.5 text-small font-medium text-accent-on transition-opacity hover:opacity-90 ${buttonDisabledLook}`;
 export const btnSecondary =
   "rounded-2 border border-line-2 bg-bg-3 px-3 py-1.5 text-small font-medium text-fg-1 transition-colors hover:border-line-3 disabled:opacity-50";
 export const btnGhost =
@@ -23,17 +22,22 @@ export function Labeled({
   children,
   stacked,
   className,
+  group,
 }: {
   label: string;
   children: ReactNode;
   stacked?: boolean;
   className?: string;
+  /** Render a <div> instead of a <label>: a picker must never sit in a label,
+   *  which forwards clicks to its first control (a chip's remove button). */
+  group?: boolean;
 }) {
+  const Tag = group ? "div" : "label";
   return (
-    <label className={(stacked ? "block" : "inline-flex items-center gap-2") + " " + (className ?? "")}>
+    <Tag className={(stacked ? "block" : "inline-flex items-center gap-2") + " " + (className ?? "")}>
       <span className={"text-[10.5px] uppercase tracking-[0.05em] text-fg-3 " + (stacked ? "mb-1 block" : "")}>{label}</span>
       {children}
-    </label>
+    </Tag>
   );
 }
 

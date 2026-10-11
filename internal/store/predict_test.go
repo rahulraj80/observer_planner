@@ -10,7 +10,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
-func newPredictTestStore(t *testing.T) *Store {
+func newPredictTestStore(t testing.TB) *Store {
 	t.Helper()
 	database, err := dbtemplate.Open(context.Background(), db.Options{Path: t.TempDir() + "/p.db"})
 	if err != nil {

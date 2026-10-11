@@ -309,10 +309,14 @@ func TestFetchBudgetPolicyLateSameMember404CannotClearNewDocument(t *testing.T) 
 	if _, err := c.FetchBudgetPolicy(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	late := make(chan error, 1)
+	type lateResult struct {
+		out BudgetFetchOutcome
+		err error
+	}
+	late := make(chan lateResult, 1)
 	go func() {
-		_, err := c.FetchBudgetPolicy(context.Background())
-		late <- err
+		out, err := c.FetchBudgetPolicy(context.Background())
+		late <- lateResult{out, err}
 	}()
 	<-oldRequestStarted
 	newOutcome, err := c.FetchBudgetPolicy(context.Background())
@@ -320,8 +324,15 @@ func TestFetchBudgetPolicyLateSameMember404CannotClearNewDocument(t *testing.T) 
 		t.Fatalf("new publication=%+v err=%v", newOutcome, err)
 	}
 	close(releaseOld404)
-	if err := <-late; err == nil || !strings.Contains(err.Error(), "cache changed during request") {
-		t.Fatalf("late same-member 404 error=%v", err)
+	// A 404 never clears (D-016), and a LATE one must not hand the sink the
+	// document its request started from either: the outcome carries the cache
+	// as it is now.
+	lr := <-late
+	if lr.err == nil || !strings.Contains(lr.err.Error(), "404") {
+		t.Fatalf("late same-member 404 error=%v", lr.err)
+	}
+	if !lr.out.HaveBody || lr.out.Body.CapTokens != 1_000 || lr.out.Witness != newOutcome.Witness {
+		t.Fatalf("late 404 outcome = %+v, want the current 1000 cap", lr.out)
 	}
 	persisted, err := st.LoadOrgBudget(context.Background())
 	if err != nil || !persisted.Have || persisted.Body.CapTokens != 1_000 || persisted.Witness != newOutcome.Witness {

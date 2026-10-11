@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { fmtUSD } from "@/lib/format";
+import { dollarsShown } from "@/lib/format";
+import { savedMilestoneCopy } from "@/lib/costSurfaces";
 import { shareOrCopy } from "@/lib/share";
 import {
   getOrCreateUsageAnchor,
@@ -151,7 +152,9 @@ export function MilestonesCard({ sessions }: { sessions: number | null }) {
   useEffect(() => {
     if (sessions == null || sessions === 0 || !anchor) return;
 
-    if (savedUSD != null && !fired("saved10")) {
+    // The savings milestone is dollar-only: in the org's token-usage view it
+    // neither fires nor records a baseline (Sol A4-04).
+    if (savedUSD != null && dollarsShown() && !fired("saved10")) {
       // First time we can see savings: record the baseline so a
       // crossing BEFORE we watched retires and one AFTER fires.
       if (anchor.saved_at_anchor == null) {
@@ -178,7 +181,8 @@ export function MilestonesCard({ sessions }: { sessions: number | null }) {
   // No milestone due right now: fall through to the (independently
   // gated, once-only) star prompt rather than rendering nothing —
   // it uses the same usage anchor this file maintains.
-  if (!visible || fired(visible)) {
+  const saved = visible === "saved10" && savedUSD != null ? savedMilestoneCopy(savedUSD) : null;
+  if (!visible || fired(visible) || (visible === "saved10" && !dollarsShown())) {
     return <StarPrompt sessions={sessions} />;
   }
   const copy = COPY[visible];
@@ -189,20 +193,14 @@ export function MilestonesCard({ sessions }: { sessions: number | null }) {
   // The body uses the exact fmtUSD figure so it matches the Compression
   // page's "Dollars saved" KPI (same saved_usd_est sum); the chip
   // rounds down to whole dollars for the celebratory badge.
-  const chip =
-    visible === "saved10" && savedUSD != null
-      ? `★ $${Math.floor(savedUSD).toLocaleString()} SAVED ★`
-      : copy.chip;
-  const text =
-    visible === "saved10" && savedUSD != null
-      ? `Compression has paid for its config: ${fmtUSD(savedUSD)} saved so far.`
-      : copy.text;
+  const chip = saved ? saved.chip : copy.chip;
+  const text = saved ? saved.text : copy.text;
   // Share text states the milestone plainly + the site — same honesty
   // gate as CommunityCard (quantified only from a real figure already
   // shown on-screen; no compression %-savings framing).
   const shareText =
-    visible === "saved10" && savedUSD != null
-      ? `SuperBased has saved me ${fmtUSD(savedUSD)} in AI coding costs so far - superbased.app`
+    saved
+      ? saved.share
       : visible === "sessions100"
         ? "100 AI coding sessions tracked with SuperBased - superbased.app"
         : "One full week of AI coding sessions tracked with SuperBased - superbased.app";

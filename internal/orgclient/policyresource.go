@@ -19,6 +19,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 	"github.com/marmutapp/superbased-observer/internal/policyfam"
 	"github.com/marmutapp/superbased-observer/internal/policyfam/admission"
+	"github.com/marmutapp/superbased-observer/internal/policyfam/nodegov"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -59,7 +60,7 @@ func NormalizeOrgURL(url string) string {
 
 // OrgKey returns the plan §6.2 enrolment-identity key:
 // hex(SHA256(normalizedOrgURL + "\x00" + OrgID)). This is deliberately NOT
-// just the server URL — two organisations enrolled through one
+// just the server URL — two organizations enrolled through one
 // control-plane URL must never share replay floors, cached envelopes, or
 // ETags.
 func OrgKey(orgURL, orgID string) string {
@@ -87,7 +88,8 @@ const (
 	// with an identical signing-message digest (no reinstall needed).
 	PRUnchanged PolicyResourceStatus = "unchanged"
 	// PRNone — 404: no resource published for this family (or a pre-P0-5
-	// server).
+	// server). It is UNSIGNED, so it never clears an installed layer or the
+	// durable cache (D-016); only a newer signed version replaces one.
 	PRNone PolicyResourceStatus = "none"
 	// PRDeliveredUnaccepted — gates 1-5 (signature, pin, closed envelope,
 	// decode/compile, capabilities) passed, but the family is not in
@@ -99,6 +101,13 @@ const (
 	// concurrent identity/floor change. The previous cache/state is
 	// untouched.
 	PRRejected PolicyResourceStatus = "rejected"
+	// PRWithdrawn — the org answered with a SIGNED withdrawal
+	// (orgcontract.IsPolicyResourceTombstone) addressed to this node's
+	// subject, at or above the durable floor, and it passed the signature
+	// and key-pin gates. The tombstone is the durable cache and floor now;
+	// the caller removes the family's org layer. The one verified way an
+	// installed layer is withdrawn (D-016); PRNone never is.
+	PRWithdrawn PolicyResourceStatus = "withdrawn"
 )
 
 // PolicyResourceRejectCode is the typed reason a delivered policy resource
@@ -374,7 +383,8 @@ func (c *Client) receivePolicyResource(ctx context.Context, orgURL, family, bear
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	switch resp.StatusCode {
+	// An older server's page answers as 404 (railreply.go).
+	switch c.railStatus(policyResourceRail, resp) {
 	case http.StatusOK:
 		// fall through to body decode below
 	case http.StatusNotModified:
@@ -425,7 +435,7 @@ func (c *Client) receivePolicyResource(ctx context.Context, orgURL, family, bear
 // compiled spec plus preauthorization posture for the CAS install.
 func (c *Client) acceptPolicyResourceGates(
 	ctx context.Context, enr *store.Enrolment, family string,
-	resource orgcontract.SignedPolicyResource, opts PolicyResourceOptions,
+	resource orgcontract.SignedPolicyResource, cachePath string, opts PolicyResourceOptions,
 ) (spec any, enforceAllowed bool, inertReason string, early PolicyResourceResult, hasEarly bool, err error) {
 	pub, verr := orgcontract.VerifyPolicyResource(resource)
 	if verr != nil {
@@ -490,6 +500,30 @@ func (c *Client) acceptPolicyResourceGates(
 			Detail: detail,
 		}, true, nil
 	}
+	// Gate 2b, the v2 BINDING (pass-2 review C156-14, orgcontract/
+	// policybinding.go). A bound envelope must be bound to THIS node's org,
+	// member and advertised target: another member's composed body, or a
+	// projection onto a lower target someone else requested, is refused even
+	// though the org signed it. An unbound envelope is refused once this node
+	// holds a bound one for the family (an on-path party stripping the
+	// binding back off); before that it is accepted, which is what keeps an
+	// older server working.
+	if rej, refused := checkPolicyResourceBinding(enr, family, resource, cachePath); refused {
+		return nil, false, "", rej, true, nil
+	}
+	// A signed WITHDRAWAL (D-016) has its own closed envelope: no body to
+	// compile, no selectors or capabilities, and bound to this node's
+	// subject so another node's tombstone cannot be replayed here. The
+	// signature and key pin above already passed.
+	if orgcontract.IsPolicyResourceTombstone(resource) {
+		if terr := orgcontract.CheckPolicyResourceTombstone(resource, "default", family, enr.UserID); terr != nil {
+			return nil, false, "", PolicyResourceResult{
+				Status: PRRejected, Version: resource.Version, RejectCode: PRRejectClosedEnvelope,
+				Detail: terr.Error(),
+			}, true, nil
+		}
+		return nil, false, "", PolicyResourceResult{}, false, nil
+	}
 	if resource.ID != "default" || resource.Family != family ||
 		resource.Version <= 0 || resource.CompilerVersion != "v1" {
 		return nil, false, "", PolicyResourceResult{
@@ -526,16 +560,21 @@ func (c *Client) acceptPolicyResourceGates(
 			"family", family, "version", resource.Version, "selectors", resource.SelectorsJSON,
 			"uncorroborated_attrs", strings.Join(uncorroborated, ","))
 	}
-	maxBytes := opts.MaxBodyBytes
-	if maxBytes <= 0 {
-		maxBytes = DefaultMaxPolicyResourceBodyBytes
-	}
+	maxBytes := maxPolicyResourceBodyBytes(opts)
 	spec, _, cerr := policyfam.CompileFamilyBody(family, []byte(resource.Body), maxBytes)
 	if cerr != nil {
 		return nil, false, "", PolicyResourceResult{
 			Status: PRRejected, Version: resource.Version, RejectCode: PRRejectDecodeFailed,
 			Detail: fmt.Sprintf("body failed to decode/compile: %v", cerr),
 		}, true, nil
+	}
+	if ignored := policyfam.IgnoredDirectives(family, spec); len(ignored) > 0 {
+		// A newer org server named section ids this build does not have.
+		// They are dropped, not fatal: a page this node lacks cannot be
+		// shown, hidden or locked here, and failing the whole body would
+		// cost the node every other directive in it.
+		c.logger.Info("org policy resource: ignoring directives this build does not know",
+			"family", family, "version", resource.Version, "ignored", strings.Join(ignored, ","))
 	}
 	if adm, ok := spec.(admission.PolicySpec); ok {
 		if vcap := admission.ValidateRuntimeCaps(adm, stringInSet("judge", opts.LiveCapabilities)); vcap != nil {
@@ -555,7 +594,7 @@ func (c *Client) acceptPolicyResourceGates(
 		return nil, false, "", PolicyResourceResult{
 			Status: PRDeliveredUnaccepted, Version: resource.Version,
 			RejectCode: PRRejectFamilyNotAccepted,
-			Detail:     "family verified but not in [org_client.policy].accept_families — not installed",
+			Detail:     "family verified but not in [org_client.policy].accept_families - not installed",
 		}, true, nil
 	}
 	enforceAllowed = true
@@ -575,7 +614,7 @@ func (c *Client) acceptPolicyResource(
 	ctx context.Context, enr *store.Enrolment, orgKey string, capturedGeneration int64, family string,
 	resource orgcontract.SignedPolicyResource, rawBody []byte, respETag, cachePath string, opts PolicyResourceOptions,
 ) (PolicyResourceResult, error) {
-	spec, enforceAllowed, inertReason, early, hasEarly, err := c.acceptPolicyResourceGates(ctx, enr, family, resource, opts)
+	spec, enforceAllowed, inertReason, early, hasEarly, err := c.acceptPolicyResourceGates(ctx, enr, family, resource, cachePath, opts)
 	if err != nil {
 		return PolicyResourceResult{}, err
 	}
@@ -588,7 +627,9 @@ func (c *Client) acceptPolicyResource(
 		return PolicyResourceResult{}, fmt.Errorf("orgclient.FetchAndAcceptPolicyResource: digest: %w: %w", errPolicyResourceIndeterminate, derr)
 	}
 
+	withdrawal := orgcontract.IsPolicyResourceTombstone(resource)
 	var result PolicyResourceResult
+	bindingUpgrade := false
 	fenceErr := c.store.WithPolicyResourceFence(ctx, orgKey, family, func(_ context.Context, fence store.PolicyResourceFence) (*store.PolicyResourceCommit, error) {
 		if fence.Tombstoned || fence.Generation != capturedGeneration {
 			result = PolicyResourceResult{
@@ -604,18 +645,27 @@ func (c *Client) acceptPolicyResource(
 			}
 			return nil, nil
 		}
-		if resource.Version == fence.FloorVersion && fence.HasState {
+		atFloor := resource.Version == fence.FloorVersion
+		replacesFloor := atFloor && floorReplaceable(withdrawal, digest, fence, func() bool {
+			return heldIsProjectionOf(cachePath, fence.MsgDigest, family, resource.Body, maxPolicyResourceBodyBytes(opts))
+		})
+		if atFloor && fence.HasState && !replacesFloor {
 			if digest != fence.MsgDigest {
 				result = PolicyResourceResult{
 					Status: PRRejected, Version: resource.Version, RejectCode: PRRejectVersionReplay,
-					Detail: fmt.Sprintf("version replay: served version %d with a signing-message digest differing from the durable one (non-monotonic republish — bump the version to change content)", resource.Version),
+					Detail: fmt.Sprintf("version replay: served version %d with a signing-message digest differing from the durable one (non-monotonic republish - bump the version to change content)", resource.Version),
 				}
 				return nil, nil
 			}
 			// Plan §6.5 / R5-B2: equal-floor + matching digest must still
 			// rematerialize a missing on-disk cache (floor-without-cache is
-			// not permanently non-executable).
-			if _, statErr := os.Stat(cachePath); statErr != nil {
+			// not permanently non-executable). The same content arriving
+			// BOUND over an unbound cache (the first poll after the server
+			// learned to bind) is written too, with its ETag below, so the
+			// binding sticks from this version on and the next poll is a 304.
+			_, statErr := os.Stat(cachePath)
+			bindingUpgrade = statErr == nil && resource.Binding != nil && !heldEnvelopeBound(cachePath)
+			if statErr != nil || bindingUpgrade {
 				if err := writeFileAtomicFsync(cachePath, rawBody); err != nil {
 					return nil, fmt.Errorf("rematerialize cache: %w", err)
 				}
@@ -623,6 +673,10 @@ func (c *Client) acceptPolicyResource(
 			result = PolicyResourceResult{
 				Status: PRUnchanged, Version: resource.Version, CachePath: cachePath,
 				Spec: spec, BodyHash: resource.BodyHash, EnforceAllowed: enforceAllowed, InertReason: inertReason,
+			}
+			if withdrawal {
+				// Still withdrawn: the caller's clear is idempotent.
+				result = PolicyResourceResult{Status: PRWithdrawn, Version: resource.Version, CachePath: cachePath, BodyHash: resource.BodyHash}
 			}
 			return nil, nil
 		}
@@ -640,6 +694,9 @@ func (c *Client) acceptPolicyResource(
 			InertReason: inertReason, CachePath: cachePath,
 			Spec: spec, BodyHash: resource.BodyHash,
 		}
+		if withdrawal {
+			result = PolicyResourceResult{Status: PRWithdrawn, Version: resource.Version, CachePath: cachePath, BodyHash: resource.BodyHash}
+		}
 		return &store.PolicyResourceCommit{
 			Generation: fence.Generation, FloorVersion: resource.Version, LastVersion: resource.Version,
 			BodyHash: resource.BodyHash, MsgDigest: digest,
@@ -655,14 +712,133 @@ func (c *Client) acceptPolicyResource(
 		return PolicyResourceResult{}, fmt.Errorf("orgclient.FetchAndAcceptPolicyResource: %w: %w", errPolicyResourceIndeterminate, fenceErr)
 	}
 
-	if result.Status == PRApplied || result.Status == PRAppliedInert {
-		if err := c.store.SavePolicyResourceETag(ctx, orgKey, capturedGeneration, family, respETag); err != nil {
+	c.recordPolicyResourceOutcome(ctx, orgKey, capturedGeneration, family, respETag, result, bindingUpgrade)
+	return result, nil
+}
+
+// recordPolicyResourceOutcome saves the delivery ETag and logs the outcome
+// once the fenced install committed: a binding upgrade at the floor, a
+// withdrawal, or an apply. Every other outcome saves nothing.
+func (c *Client) recordPolicyResourceOutcome(ctx context.Context, orgKey string, generation int64, family, respETag string, result PolicyResourceResult, bindingUpgrade bool) {
+	if bindingUpgrade && respETag != "" {
+		if err := c.store.SavePolicyResourceETag(ctx, orgKey, generation, family, respETag); err != nil {
 			c.logger.Warn("org policy resource: etag save failed (next poll re-downloads)", "err", err, "family", family)
 		}
-		c.logger.Info("org policy resource: applied", "family", family, "version", resource.Version,
-			"enforce_allowed", enforceAllowed, "inert_reason", inertReason)
+		c.logger.Info("org policy resource: now bound to this org and member", "family", family, "version", result.Version)
 	}
-	return result, nil
+	if result.Status == PRWithdrawn {
+		// The tombstone's ETag is what tells the server this node is already
+		// withdrawn (it answers 304 without signing).
+		if err := c.store.SavePolicyResourceETag(ctx, orgKey, generation, family, respETag); err != nil {
+			c.logger.Warn("org policy resource: etag save failed (next poll re-downloads)", "err", err, "family", family)
+		}
+		c.logger.Info("org policy resource: withdrawn by a signed tombstone", "family", family, "version", result.Version)
+	}
+	if result.Status == PRApplied || result.Status == PRAppliedInert {
+		if err := c.store.SavePolicyResourceETag(ctx, orgKey, generation, family, respETag); err != nil {
+			c.logger.Warn("org policy resource: etag save failed (next poll re-downloads)", "err", err, "family", family)
+		}
+		c.logger.Info("org policy resource: applied", "family", family, "version", result.Version,
+			"enforce_allowed", result.EnforceAllowed, "inert_reason", result.InertReason)
+	}
+}
+
+// floorReplaceable reports whether an envelope served at the fence's OWN
+// version may replace the body held there instead of being refused as a
+// version_replay (a non-monotonic republish). Exactly two deliveries may:
+//
+//   - a verified withdrawal: its signed message is bound to this subject and
+//     says "nothing at this version is yours". The floor never moves down.
+//   - a vocabulary upgrade: the server projected this version onto an older
+//     section vocabulary for this node (nodegov vocabulary levels), the node
+//     upgraded, and the same version now arrives with the ids it used to
+//     lack. isProjection checks that the held body is the durable one and
+//     exactly a projection of the served body; it runs only when needed.
+//
+// The same bytes (equal digest) never "replace": that is the unchanged path.
+func floorReplaceable(withdrawal bool, digest string, fence store.PolicyResourceFence, isProjection func() bool) bool {
+	switch {
+	case digest == fence.MsgDigest:
+		return false
+	case withdrawal:
+		return true
+	default:
+		return fence.HasState && isProjection()
+	}
+}
+
+// expectedPolicyBinding is the binding a v2 delivery of family to this node
+// must carry: its enrolment's org and member, and for node.governance the
+// target this build advertises (nodegov.BindingTarget over the same tokens
+// policyResourceFetchURL sends).
+func expectedPolicyBinding(enr *store.Enrolment, family string) orgcontract.PolicyBinding {
+	b := orgcontract.PolicyBinding{OrgID: enr.OrgID, Subject: enr.UserID}
+	if family == policyfam.FamilyNodeGovernance {
+		b.Target = nodegov.BindingTarget(nodegov.CapabilityTokens())
+	}
+	return b
+}
+
+// checkPolicyResourceBinding is gate 2b (see acceptPolicyResourceGates). The
+// codes are existing ones on purpose: a reject code rides the policy-state
+// wire, whose reason vocabulary an older server validates as a closed set.
+func checkPolicyResourceBinding(enr *store.Enrolment, family string, resource orgcontract.SignedPolicyResource, cachePath string) (PolicyResourceResult, bool) {
+	if resource.Binding != nil {
+		if *resource.Binding != expectedPolicyBinding(enr, family) {
+			return PolicyResourceResult{
+				Status: PRRejected, Version: resource.Version, RejectCode: PRRejectClosedEnvelope,
+				Detail: "the envelope is signed for a different org, member or target than this node",
+			}, true
+		}
+		return PolicyResourceResult{}, false
+	}
+	if heldEnvelopeBound(cachePath) {
+		return PolicyResourceResult{
+			Status: PRRejected, Version: resource.Version, RejectCode: PRRejectSigInvalid,
+			Detail: "an unbound (v1) envelope after this node held a bound (v2) one: refused as a signature downgrade",
+		}, true
+	}
+	return PolicyResourceResult{}, false
+}
+
+// heldEnvelopeBound reports whether the envelope cached at path carries a v2
+// binding. Any read or decode failure answers false (no binding to keep).
+func heldEnvelopeBound(path string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var held struct {
+		Binding *orgcontract.PolicyBinding `json:"binding"`
+	}
+	return json.Unmarshal(raw, &held) == nil && held.Binding != nil
+}
+
+// maxPolicyResourceBodyBytes is the body cap the accept gates apply.
+func maxPolicyResourceBodyBytes(opts PolicyResourceOptions) int64 {
+	if opts.MaxBodyBytes > 0 {
+		return opts.MaxBodyBytes
+	}
+	return DefaultMaxPolicyResourceBodyBytes
+}
+
+// heldIsProjectionOf reports whether the envelope cached at cachePath is the
+// one the fence records (its signing-message digest equals heldDigest) and its
+// body is the server's vocabulary projection of servedBody. Any read, decode
+// or digest failure answers false, which leaves the replay rule in force.
+func heldIsProjectionOf(cachePath, heldDigest, family, servedBody string, maxBytes int64) bool {
+	raw, err := os.ReadFile(cachePath)
+	if err != nil {
+		return false
+	}
+	var held orgcontract.SignedPolicyResource
+	if err := json.Unmarshal(raw, &held); err != nil {
+		return false
+	}
+	if d, err := orgcontract.PolicyResourceMessageDigest(held); err != nil || d != heldDigest {
+		return false
+	}
+	return policyfam.IsServeTimeProjection(family, []byte(servedBody), []byte(held.Body), maxBytes)
 }
 
 // capabilitiesSubset reports whether every token in required also appears

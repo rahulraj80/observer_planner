@@ -4,6 +4,1009 @@ All notable changes to SuperBased Observer are documented here.
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-10-10
+
+Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code
+Marketplace and Open VSX). 1.36.0 is one combined release (D-400): it supersedes the held 1.35.0, which
+never shipped as a stable release, so everything below is new since 1.34.0. Where a note says "1.35",
+it means the 1.35.0 release candidates that went out on `edge` and every build after them, this one
+included. On top of the 1.35 work it carries modular packaging (components, prebuilt editions, custom
+builds, distro-aware updates), the enterprise vendor API connections (synthetic, awaiting live
+validation), the post-1.35 correctness and security rounds, and the move to Go 1.26. It is
+`v1.36.0-rc.5` plus the two dashboard fixes from the rc.5 roll (T-762, T-763); how the release
+candidates got here is at the end of this section ("What changed during the release candidates").
+
+Price snapshot: 2026-09-17 (aws us-east-1, azure eastus2, gcp us-central1)
+
+### Read this before upgrading (1.36.0)
+
+The first nine items need a decision or an action from you; the rest describe behaviour that changed.
+
+- **Leaving an organization no longer blocks your AI tools, and a managed node now fails open by
+  default when its organization's budget cannot be verified.** After `observer unenroll` a managed
+  node used to keep refusing every proxied request with `B-625` ("the organization requires a budget
+  on this managed node and none has been verified") until a re-enrol or a daemon restart. Now B-625
+  never fires without a live enrolment, the running daemon recomposes onto your own `[guard.budget]`
+  numbers without a restart, and a managed node whose org budget is not verified yet (right after
+  enrolling, the org unreachable since start, a document that did not verify) runs on its own numbers
+  and logs it. An organization that wants the old blocking answer pins the new
+  `guard.budget.fail_closed = true` through node governance. `observer unenroll` is now an ordered,
+  structured leave (`observer unenroll --plan` previews it; the dashboard's Leave dialog lists the same
+  steps) that tells the organization it left (a `node_left` audit row, best effort) and ends as a plain
+  individual node with your local data and config kept. Re-enrolling from the dashboard with an
+  enrolment link works again on estates whose front end answers `/healthz` itself, and every refusal on
+  that page now says what the server actually answered.
+
+- **The leave fail-safe never drops your budgets on a slow read, and still applies your own caps.**
+  (REVIEW-4, D-521.) A managed node no longer treats a failed enrolment read (a busy database, a
+  checkpoint, a 2 s timeout) as "not enrolled": the last composed budget, the organization's caps and
+  yours, keeps applying until the node confirms it left. After a confirmed leave, or a re-enrol whose
+  budget has not arrived yet, requests are checked against your own `[guard.budget]` caps instead of
+  no caps at all. `observer <tool>` and the dashboard's New Terminal now agree with the proxy: a leave
+  that stopped partway does not block launches, and an expired or unverifiable managed grant starts the
+  tool with a warning unless the organization set `guard.budget.fail_closed`. That setting now follows
+  the organization you belong to without a daemon restart. A leave whose credentials step fails can be
+  run again, and your AI tools' proxy routes are only removed once the leave has completed. The
+  dashboard's live budget stream accepts at most 16 viewers at a time (the banner falls back to
+  polling).
+
+- **Only the org's super admin can publish the node components policy (D-524).** Publishing, rolling
+  out (create, approve, stage, promote), rolling back or waiving `node.components` now needs the super
+  admin as well as `write:policy`, matching the rule for granting `components.govern`. Anyone else gets
+  `403 super_admin_required` with the reason (audited), the assistant's proposals for it need the super
+  admin to approve, and Organization > Node components keeps Publish disabled with the reason while Check
+  still works. Halting a rollout and every other policy family are unchanged. A `node.components` version
+  a plain policy admin published before this release stays published: review the family's history.
+
+- **Republish any `node.governance` feature.lock (MODPKG-16).** Before this release a published
+  feature.lock was dropped from the signed `node.governance` body, so it never reached a node: a lock you
+  published looked in force on the org dashboard while every node ignored it. After upgrading the org
+  server, publish each existing feature.lock again so nodes receive it. A lock that forces on a feature
+  whose component the `node.components` policy blocks is now refused at publish (`409 cross_rail_error`).
+
+- **Proxy route and Claude Code settings.** The daemon is the proxy on `:8820`: take the proxy route off
+  before stopping the old daemon and put it back after the new one is up (`scripts/restart-daemon.sh` does
+  this in one step), or a session pointed at the proxy gets `ConnectionRefused`. On its first start the new
+  daemon's hook auto-registration (`[observer.hooks] auto_register`, default on) rewrites an Observer hook
+  or MCP command written by an older binary once, to the command this release registers: the npm or pip
+  launcher (`<prefix>/bin/observer`) when Observer was installed that way, so the next package upgrade no
+  longer breaks it. `observer init` and the auto-registration now render that command and its
+  `--config` argument the same way, so they no longer rewrite each other's entries (T-725); keep a copy
+  of `settings.json` if you compare it byte for byte. Leaving an organization removes a proxy route
+  (Claude Code `ANTHROPIC_BASE_URL`, Codex `base_url`) only when the enrolment wrote it, and only after
+  the leave has completed.
+
+- **New hook events, and Codex asks you to trust them.** This release registers two more Claude Code
+  hook events (`TaskCreated`, `TaskCompleted`) and three more Codex events (`SessionEnd`,
+  `SubagentStart`, `SubagentStop`). Codex holds a newly registered hook until you trust it: open Codex
+  once and run `/hooks` to mark every Observer entry trusted (`observer init` prints the count). Until
+  then Codex runs the hooks it already trusted and skips the new ones.
+
+- **The first start migrates the database, and on a large one that takes a while.** The new daemon
+  applies the schema changes on its first start, before the dashboard and the proxy answer. Measured on a
+  2 vCPU machine it takes about 7 seconds per 500,000 token rows, mostly migration 151's index builds.
+  Keep the proxy route off until the new daemon is up (the item above). While the old daemon still runs,
+  `observer status`, `doctor` and other commands from the new binary read the database without migrating
+  it and say the running daemon is older; restarting the daemon finishes the upgrade.
+
+- **The minimal edition compiles the proxy out; the dashboard can be compiled out too.** The prebuilt
+  `minimal` node edition (staged artifact, not published to npm, PyPI or the Marketplace) is built
+  without `capture.proxy` (34 omit tags in all): it captures through hooks and the watcher, has no
+  accurate proxy token tier and no conversation compression, and its launchers say the build has no proxy
+  instead of routing to a dead port. It keeps the local dashboard. The dashboard (`ui.dashboard`) can now
+  be compiled out as well, through a custom build (`sbo-components build --manifest`); such a build
+  starts headless with one reason and every pointer at Settings > Components names the CLI instead. The
+  `developer` and `managed` editions keep both; the published channels still ship the `full` product.
+  `observer doctor <tool>` for an adapter an edition leaves out now says "not in this build" (T-726).
+
+- **Go 1.26 to build from source.** Every binary is built with Go 1.26.9, `golang.org/x/crypto`
+  v0.57.0 and `golang.org/x/net` v0.60.0; building from source needs Go 1.26 or later, and CI lints with golangci-lint v2 (see Security
+  below).
+
+- **Code intelligence is now opt-in.** The in-process code index (`[codeintel]`: symbols, imports,
+  call graph) is heavy on CPU and disk, so it now runs only when you turn it on: one click under
+  **Settings > Intelligence > Code intelligence**, or `[codeintel].enabled = true`. A config that never
+  set `[codeintel].enabled` used to inherit "on" and is now off; if that install already has an index,
+  `observer start` prints a one-line note, the index is kept and ages out through
+  `[codeintel].retention_days`. A config that sets `enabled` either way is untouched; set it to `true`
+  to keep the old behaviour. While it is off, the MCP symbol tools (`search_symbols`, `get_symbols`,
+  `get_relations`) stay registered and answer `degraded` with a `codeintel_disabled` warning
+  (`get_symbols` still returns its regex fallback), `observer index` declines, body-collapse
+  compression does nothing, and `observer doctor` reports `codeintel: off by choice` as a pass. On an
+  org-managed machine an org pin of `codeintel.enabled` still wins either way. Org Code intelligence
+  panels stay empty for machines that have not opted in or been pinned on.
+- **Roll order for orgs: developer machines first, then the org server (or together).** Nodes on
+  1.34.0-rc.7 to rc.11 that newly enrol by token into a 1.35.0 org server show "Governance: ALTERED"
+  (a known node-side signature bug, GRANT-INTEG-2, fixed in this release; a stored grant verifies again
+  after the node upgrades, with no re-enrolment). Default managed enrolment tokens now carry a
+  governance grant, so every new token enrolment of an old node hits it.
+- **Older nodes and node.governance.** Released nodes from v1.31 to v1.34.0 (every release candidate
+  included) reject a whole node.governance body that names a section, schema or key they do not know,
+  and then keep their old body. The org server now projects each node's body to what that build
+  compiles (section vocabulary, body schema and key generation, judged by full version precedence, so
+  a release candidate counts as older than its release) and re-signs it at the same version. Residual
+  limit: a v1.33 node that upgrades to v1.34 can lack the `projects` section until the org's next
+  publish.
+- **Org server rollbacks now have hazards; run the preflight first.** `observer-org upgrade preflight
+  --rollback-to <version>` refuses a rollback while any of these is in use, and you should not roll
+  back around it:
+  - **Binding v2 signatures.** Policy and guard-bundle deliveries to new nodes are now signed bound to
+    the org, the developer and the node's advertised target. Rolling the org server back below this
+    build makes those nodes refuse every policy delivery (they keep their last body) until it rolls
+    forward again.
+  - **Developer-dashboard tab overrides.** Ship dashboard overrides and per-tab hiding in the same roll,
+    and never roll the org server back to a build without per-tab vocabulary while overrides carry tabs.
+  - **Budget rail versions.** Rolling back below this build makes nodes refuse the lower budget-rail
+    versions until the counter catches up.
+  - Also guard fallbacks, lock-override grants and AI tool settings policies in force (other live
+    grants warn).
+- **Compound model budgets are now enforced at the AI gateway.** `member_model` and `team_model`
+  budgets were shown on the node and the Budgets page but never projected to the gateway; from this
+  release the gateway enforces them.
+- **About 14 launch verbs now honour an org-disallowed tool.** The org's disallowed-tool gate moved onto
+  the shared launcher helpers, so seeded `observer <tool>` launchers that never refused an
+  org-disallowed tool now do (a closed hole). A tool grant still launches it.
+- **Distinct approvers are always required.** `require_distinct_approver` is fixed on: nobody approves
+  their own request, direct grant or extension, except a solo super-admin who is the only holder of the
+  key (audited as `self_approved`). A PUT of `false` is accepted with a warning so older admin pages keep
+  working.
+- **Budget ids and grant fields follow a capability, not a version (T-505, T-625).** The org server puts
+  the named `budget_id` and the request-grant fields (the offline revert) on the signed budget rail only
+  for a budget fetch that advertises `?policy_caps=budget_grants.v1`, which every 1.35 build sends,
+  release candidates and demo builds included. So 1.35.0-rc.14 and later rc nodes DO receive budget ids
+  and the banner and Requests links name the budget. A node that does not send the token (any build
+  before 1.35) keeps the id-less body and still receives the granted amount in its cap. No version is
+  compared, so a `dev` build of 1.35 is treated the same; release-runbook step 3d is retired.
+- **Budget requests and the new request types need a 1.35 org server (T-538, D-342).** A budget
+  increase request without a budget id, and the new request types `page_access` and `config_edit`, are
+  accepted only by a 1.35 org server: a released server still requires `budget_id` and answers 400 to
+  the new types. Roll the org server and the nodes together.
+- **A node OTLP receiver opened beyond loopback now needs a token (T-538, D-343).** With
+  `[ingest.otel].allow_non_loopback = true`, every exporter must send the `X-Observer-Edge-Token` header
+  (gRPC `x-observer-edge-token`) holding the value in the `otlp-ingest-token` file beside the node
+  database; a request without it gets 401, and if the token cannot be resolved the receiver does not
+  start. Loopback-only receivers (the default) are unchanged. While the receiver requires the token,
+  Observer refuses to wire a tool's own exporter at it (no token is ever written into a vendor file).
+- **Enforce-mode org budgets now stop tools that do not route through the proxy (T-519, D-332).**
+  The daemon publishes its own budget decision and each tool's pre-send hook denies at the cap (the next
+  prompt where the tool has a prompt hook, else the next tool call). Tools that used to keep running past
+  a hard cap (Cursor among them) are now stopped; tools with no pre-send seam are flagged after send.
+  The per-tool answer is the "Budget hook stop" column in `docs/adapter-parity.md`.
+- **Recover dropped prompts after upgrading.** Codex 0.148 and later (Codex Desktop, `codex exec`) wrote
+  each user prompt in a record Observer did not read, so most prompts were missing; run
+  `observer backfill --codex-rescan` once to recover them. Codex subagent rollouts already stored under a
+  file-name id keep it until a rescan that is tracked on its own (T-583). Qwen Code counted reasoning tokens twice: run
+  `observer backfill --qwen-code-rescan`.
+- **Managed enrolment tokens.** A managed token now defaults to the full managed authority set (23
+  authorities, narrowable). Managed tokens minted earlier with no authority stay ungoverned and must be
+  re-minted.
+- **Cost display.** The org admin dashboard always shows dollars. Settings > Display holds one choice,
+  "Developer dashboards show: Dollar costs (default) / Token usage only". The previous admin-facing
+  setting is retired and NOT carried over; an org that wants developers on token usage selects it once.
+  A node that cannot verify the org's display policy shows tokens, not dollars.
+- **Security: org enrichment of individual-tenancy members (INTEL-7).** In `observer-org` v1.33.0
+  through v1.34.0 org enrichment could enrich an individual-tenancy member's sessions without opt-in
+  (latent unless an admin enabled org enrichment, which is off by default). Until you run this build,
+  do not enable org enrichment on an org with individual-tenancy members. After upgrading, purge the
+  hidden results under Intelligence > Session enrichment or with
+  `observer-org intel purge-individual --confirm`.
+- **Cloud Intelligence plans (hosted service).** Plan v3 and the GPT-6 Luna route ship inactive until
+  the service is deployed and attested. When it is rolled, `SBCI_PADDLE_PRICES` must move to
+  `plus_beta:3` together with cloud migration 0041, or Plus sells fewer enrichments than Free.
+- **Components and distros (modular packaging).** Nothing changes for an existing install: every
+  channel still ships the full product, and a node with no `[components]` block runs everything it ran
+  before. New: `observer components` and Settings > Components choose what runs (inactive components
+  start nothing and their routes answer `component_not_installed`); an org can govern a managed node's
+  components with a `node.components` policy, which needs the new `components.govern` authority
+  (super-admin only to grant); a developer can ask the org for a missing component on the Requests page
+  (new request type `component_enable`). On a managed enrolment the local `[components]` block cannot
+  narrow the node (it is ignored with a warning); the OS-pinned local ceiling stays the one local limit.
+  The Projects alignment judge tier is in the public source tree (`internal/judgeclient`). The
+  minimal, developer and managed editions are published as GitHub release archives with an edition
+  installer (`install.sh` / `install.ps1`, see Added); npm, PyPI and the VS Code extension still ship
+  the full build.
+- **Migrations.** Node 148 to 161 (158 component purge plans, 159 the enrolment grant's signed initial
+  component set, 160 the local ceiling's last-known set, 161 the update state's distro columns; all
+  node-local); org server 192 to 231; PostgreSQL 0058 to 0098 (0063 is a PostgreSQL-only type fix; 206 /
+  0073 add the vendor export tables; 231 / 0098 the org signing key history); cloud 0041. On the org
+  server run `observer-org upgrade preflight` and then `observer-org migrate` before starting the new
+  image. Take an org database backup before upgrading; the PostgreSQL
+  model-filter index build holds writes on the token tables for about 18 seconds, before the server
+  serves traffic.
+
+### Added
+
+- **Edition installer (T-729).** `scripts/install.sh` (Linux and macOS, x64 and arm64) and
+  `scripts/install.ps1` (Windows) install the minimal, developer, managed or full edition: `--edition`
+  (a menu on a terminal; `developer` otherwise), `--version` (default the latest final release; a
+  pre-release only when named), `--prefix` (default `/usr/local/bin` when root or writable, else
+  `~/.local/bin`; `%LOCALAPPDATA%\SuperBased\Observer\bin` on Windows), `--from-dir` for air-gapped
+  installs, `--dry-run`, `--uninstall` (runs `observer uninstall --all` first and keeps the binary if
+  that fails) and, on Linux with systemd, an offer to turn on `integration.service` and run `observer
+  service install --now`. The archive must match the release's `SHA256SUMS`, and its vendor
+  signature (`<archive>.sig`, the raw Ed25519 signature the update system already verifies) must
+  verify against the vendor key compiled into the installer; a mismatch or a bad signature is refused,
+  an unsigned archive or a machine with no Ed25519 verifier is a warning unless
+  `--require-signature`. Every `v*` tag now publishes the minimal, developer and managed edition
+  archives for the five platforms (`observer-<tag>-<edition>-<os>-<arch>.tar.gz`, `.zip` on Windows;
+  the full edition keeps today's names), their `.sig` files, the signed `release-index.json` and both
+  installers as release assets, all in `SHA256SUMS`. No telemetry; curl or wget.
+- **Distro-aware updates (manifest v2).** Publishing a release on the org server now also writes a
+  distro-aware v2 document beside the unchanged v1 one, served at `/api/agent/update/manifest/v2`
+  with the vendor-signed release index. Nodes built as `minimal`, `developer` or `managed` update
+  within their distro, and move to another distro only when the org's signed component policy names
+  it, the local ceiling allows it and the channel's distro epoch has advanced. An older node or an
+  older org server keeps working exactly as before. Agent migration 161 adds the distro columns to
+  `update_state`; org server migration 220 (PostgreSQL 0087) adds `distro` and `components_digest`
+  to `org_update_artifacts` and the `org_update_release_indexes` and `org_update_publications`
+  tables. See `docs/enterprise-updates.md` "Distro-aware updates".
+
+- **Modular packaging, governance round 3 (MODPKG, lane MP-GOV3).** The org dashboard has a
+  **Node components** page (Organization > Node components) to compose, check and publish the
+  `node.components` policy: it shows the stranding estimate and the cross-rail findings and asks for
+  the stranded-count acknowledgement before publishing. A `node.governance` feature.lock that forces on
+  a feature whose component the `node.components` policy blocks is now an error and refuses the publish
+  (`409 cross_rail_error`, either order). Fixed: a published feature.lock was dropped from the signed
+  `node.governance` body and never reached a node (ledger MODPKG-16); republish an existing lock to
+  deliver it. A teams-to-enterprise grant replacement now carries the managed initial component set
+  under a second signature, so older nodes accept it unchanged and newer nodes verify the set (org
+  server migration 227, PostgreSQL 0094). Settings > Components shows the separately installed artifacts
+  (browser and VS Code extensions, plugin shims, helpers), also on `GET /api/components` as
+  `artifact_states`.
+- **Scheduled component purges in the org audit log (MODPKG, lane MP-GOV4).** A node now reports, on
+  the component posture it already pushes, the state and due date of each purge a `node.components`
+  policy scheduled on it (enum values only; no counts or plan ids), and the org server writes an audit
+  row (`node_component_purges_changed`) each time a node's list changes: scheduled, eligible, ran,
+  expired or cancelled. Updates > Fleet versions carries the list per node and counts the nodes with an
+  open purge. Optional both ways: older nodes and older servers keep working. Org server migration 228
+  (PostgreSQL 0095) adds one column to `org_node_component_posture`.
+- **Custom builds from a component manifest, staged (modular packaging P7, lane MP-CUST).** A
+  `sbo-distro.v1` manifest names a prebuilt base (minimal, developer, managed or full) and adds or
+  omits components; `sbo-components build --manifest` resolves it to one compiled set, builds with the
+  matching omit tags and stamps the binary as distro `custom` with its components digest and custom
+  distro id, and `sbo-components proof` checks it like a prebuilt distro. A custom build updates only
+  from its own manifest's build named in the vendor-signed release index; `vendorsign index` carries
+  custom archives, and `go run ./web/compgen -manifest` leaves the pages of omitted components out of
+  its web bundle. The vendor build job (`custom-build.yml`) is manual-dispatch only with an ephemeral
+  key and publishes nothing; there is no hosted build service and no org-signed custom build yet. No
+  migrations. See `docs/custom-builds.md`.
+
+- **Prebuilt distros, staged (modular packaging P3).** `scripts/build-distro.sh <minimal|developer|managed|full>`
+  (and `make distro-build`, `make distro-all`) builds one distro with tags read from the component
+  catalog, plus its `go version -m` buildinfo, a CycloneDX SBOM and a proof record. The proof gate
+  (`sbo-components proof`) reads the tags back out of the binary, checks with `go list -deps` that every
+  excluded component claiming compile-out is absent, that the linked modules equal the closure, and that
+  the binary reports its own distro. A distro binary started with no `[components]` block runs its
+  distro's default set; a component the distro excludes whose code this release still carries is inert
+  and not selectable and is listed as `distro_out`. CI builds, proves and smoke-tests the four distros
+  on every pull request and vets and tests every omit-tag variant; `distro-staging.yml` builds all
+  platforms on demand as workflow artifacts. Nothing is published, signed or tagged by any of it.
+- **Download this build's SBOM.** `GET /api/components/sbom` returns the CycloneDX SBOM of the running
+  binary (the same document the release pipeline renders per artifact).
+- **Local component ceiling keeps its last valid set.** When the OS-pinned ceiling source fails a check
+  after a valid read, the last valid set stays in force (node migration 160) instead of falling to core
+  only.
+- **Model filter.** The node dashboard top bar filters by model, with the list narrowed by the chosen
+  tool, project and window (a selected model outside the selection stays selected and says "no data in
+  this selection"). Spend pages narrow to that model's own turns; session and action pages keep whole
+  sessions that used it. The org dashboard gains a global Tool / Project / Model filter row, kept in the
+  URL only. New indexes make model filtering about 100x faster for rare models.
+- **Join and manage an organization from the node dashboard.** Settings > Enrolment joins by code, link
+  or IdP sign-in, shows the consent and the org's grant, the status, Push now, re-enrol and Leave.
+  Leave removes a proxy route (Claude Code `ANTHROPIC_BASE_URL`, Codex `base_url`) only when the
+  enrolment wrote it, and the confirm names exactly what goes and what stays. **Share history** sends
+  activity captured before enrolment (the twin of `observer org backfill --all --confirm`) and warns when
+  older sessions came from a previous enrolment. **Re-send changed rows** is the twin of
+  `observer org resync`, and the page shows `observer org push-status`'s push cadence. The CLI and the
+  page run one enrolment sequence. AI tool settings > Organization and the org dashboard's invite
+  screens point at the page. (T-642)
+- **AI tool settings.** A new node dashboard page and `observer agent-config` read and edit each AI
+  tool's own settings and instruction files: By tool, Projects, All AI tools, Instructions, Coverage and
+  History tabs plus a raw editor. Every save is checked and previewed first, then written atomically
+  under a lock and read back; secrets show only as present or absent; Observer-owned entries are
+  refused; settings stored inside editor apps are read-only with a note. A per-adapter catalogue of about
+  4,700 settings and a 21-key common vocabulary sit underneath it, and `docs/adapter-settings-reference.md`
+  is generated from them. `observer config set` gains the same checks (`--dry-run`, `--yes`), and saving
+  `config.toml` from the dashboard runs the same sanity check.
+- **Org AI tool settings policies.** Org admins author AI tool settings for the org, a team or a member,
+  by tool and project, in web2 (Coding-agent policies > AI tool settings), with a pre-publish check and a
+  team-conflict gate. Managed machines apply and lock them (form, raw editor and CLI refuse, naming the
+  policy), re-assert drift twice and then back off within the hour, and report `config_drift` to Fleet
+  State. An empty signed body withdraws the locks and keeps the written values. Individual machines are
+  never touched. Re-enrolling into another org clears the previous org's policy first.
+- **Access requests and grants.** A developer can request an exception, a budget increase, or tool,
+  model or feature access from the node (form, CLI `observer request access`, or the "request access"
+  link every org block now carries). Admins decide in the Requests page and the Approvals inbox; a
+  grant has an expiry (perpetual grants are super-admin only and flagged for re-review after 90 days),
+  reaches the machine over a signed rail, and is shown as Issued until a machine confirms it. Grants
+  change real enforcement on the tool hook, the prompt gate, the proxy, the launchers and New Terminal,
+  the org AI gateway, and the node-feature and pinned-setting gates. Requests made offline wait in an
+  outbox. See `docs/access-grants.md`.
+- **Hook parity across AI tools.** Claude Code's hook model now reaches the other tools:
+  - **Tool-call gates** (deny, and ask where the host supports it) for Codex (shell, `apply_patch` per
+    file and MCP), Cursor, Qoder, Antigravity, Grok Build, Goose, Cline CLI, Qwen Code, Factory Droid,
+    Gemini CLI (BeforeTool, plus a BeforeAgent prompt gate), Copilot CLI (preToolUse) and Muse
+    (PreToolUse, plus a UserPromptSubmit prompt gate), each live-verified and auto-registered by
+    `observer start`. Gates for Poolside, zcode, Command Code, Windsurf / Devin Desktop, the Devin CLI
+    (new writer for `~/.config/devin/config.json`), Mistral vibe, Cline, Junie, Crush and Open
+    Interpreter are written by `observer init` only until each is verified on a real install.
+  - **A plugin shim** gates OpenCode, Kilo CLI and pi tool calls (and Command Code mods), and shows a
+    withheld or rewritten prompt to the developer in the tool's own UI. Hermes gains a blocking
+    `pre_tool_call` gate.
+  - **Deny-only hosts** turn an enforced ask into a deny whose reason says how to proceed.
+  - **Failure modes.** Gate hooks fail closed on Observer's own timeout or crash only while enforcement
+    is in force, with a plain reason; observe-only hooks stay fail-open; every failure is recorded.
+  - **Lifecycle and tasks.** Session start and end, compaction (Claude Code and Cursor) and Claude Code
+    task events are recorded; Cursor retries of one turn fold into one row.
+  - **Health.** `observer adapters --hooks`, `observer doctor --hooks` and `--probe-hook`, and a coverage
+    card on the Security page show every binding as registered, trusted, current or not. Codex hook
+    trust is detected and explained (Observer never trusts its own hooks for you). A vendor switch that
+    turns hooks off (for example Claude Code `disableAllHooks`) raises a doctor warning and a guard event.
+- **Prompt guard coverage.** Tools with no pre-send seam (Freebuff, Kilo Code CLI, Mistral vibe, Kimi
+  Code unrouted, Pi, Prime Agent) get a post-hoc flag and a desktop toast, and every coverage
+  surface names the reason. OpenCode Zen is routed through the proxy.
+- **Dashboard controls for former CLI-only flows.** Each runs the CLI's own code:
+  - Settings > Connected tools: Set up and **Remove Observer's wiring** (hooks, MCP server, proxy route)
+    for every adapter with a hook or MCP surface, with a preview and a refusal when the file changed
+    since Observer wrote it; a per-adapter **Run checks** (the `observer doctor <tool>` report); and,
+    with the daemon in WSL, a Windows-side home picker (`observer init --windows-*-home`).
+  - Settings > Health: each doctor finding links to the control that fixes it, and `observer doctor
+    --json` gains an optional `Remediations` field.
+  - Settings > Profiles: per-tool and per-project profile assignment with a change preview.
+  - A forced database integrity check (above `integrity_check_max_gb`) as a cancelable background job.
+  - Security: test a command, re-judge history, check or write native permission rules, MCP scan and
+    compliance summary.
+  - Proxy-route undo, egress lint, score, patterns, calibration, summarize, pricing sync, MCP
+    wrap / relay / doctor, adopt-defaults, update history, benchmark dry run, spend and delete, and the
+    resolved profile view.
+  - The MCP access card names the relay's Turn on control instead of a command.
+- **Command wrapping for Windows shells with a WSL daemon.** `observer shell-wrap enable --target
+  windows` (or the target switch on Settings > Terminal) installs `.cmd` shims in
+  `%USERPROFILE%\.observer\shims` and a marked, removable PowerShell profile block. A tool with a
+  Windows build runs on Windows with its routing taken from the WSL daemon (which also applies the org
+  disallow gate and managed budget admission); a Unix-only tool runs `observer <verb>` in WSL; anything
+  that cannot route runs unrouted with a notice. The Windows user PATH is never edited (cmd.exe users
+  add the folder themselves). Copilot CLI, Gemini CLI, Grok and Codex launch without routing on this
+  target and say so.
+- **Cursor Cloud Agent capture.** Cloud Agent (`bc-`) chats viewed in the Cursor IDE are captured again,
+  under the `[cursor]` placeholder project: session start and end, and the agent's reasoning as a
+  harness row. Tokens stay honestly absent. For Cloud Agents that ran before this release, run
+  `observer backfill --cursor-hook-usage`.
+- **Budget warnings.** Org-governed warnings at 75%, 90% and 100% of a cap, for the admin and the
+  developer, on by default, including per-tool and per-model caps. The banner's level is the current
+  reading (a raised cap clears "exceeded"), its label names the state ("Budget exceeded: requests
+  blocked", "(warning only)", "(report only)", "Approaching budget"), and every banner state offers
+  **Ask for a budget increase**, prefilled with the budget that ran out.
+- **Org changes reach active machines in seconds.** An active node holds a policy-version probe open
+  (it asks for 20 s, the server caps it at 25 s and answers the moment a version moves), so an org
+  policy, budget or grant change is picked up in about 1 to 3 seconds instead of 30; idle nodes keep
+  the push cadence.
+- **Org Cloud Intelligence parity.** Managed and individual machines get the same enrichment
+  experience: consent for individual-tenancy members (which an org can make a condition of membership,
+  never switched on silently), node-built evidence over a signed rail, per-session Preview and Enrich,
+  the org's full control set per org, team and member, weekly project digests, and purges that stick and
+  reach the node even while the feature is off.
+- **Developer dashboards (managed machines).** Managed machines hide the org-level pages by default;
+  admins choose Hidden, Read-only or Visible per page, Settings section and tab, org-wide or per team or
+  member.
+- **Guard bundles for individual members** and **Remove from audience**, with need-to-know headers.
+- **Org guard fallbacks** for managed machines: block guarded calls while a developer's guard policy is
+  invalid, and refuse a New Terminal launch of a proxied tool when no sandbox is available.
+- **New Terminal** lists Junie, Poolside, Crush and Aider, and Zed has a GUI launch row (Homebrew, winget,
+  install script).
+- **Arena** has a model picker per harness; agent step limits and the assistant's per-turn budget are
+  free numeric fields.
+- **Uninstall** tools that were installed from the dashboard.
+- **Node.js runtime check** before guided install and launch of npm-distributed CLIs, with a copyable
+  install command; `observer doctor` reports the same.
+- **Compound budget scopes** (developer, team or project by tool or model, and "every developer,
+  separately") and service accounts.
+- **Docs.** `docs/adapter-parity.md` (the one living adapter parity record) and the generated
+  `docs/adapter-settings-reference.md`, both drift-checked in CI.
+- **Ask for a budget increase without knowing a budget id.** The Requests page offers a picker of the
+  budgets your machine knows (whose budget, period, cap and current use, defaulting to the one that ran
+  out); the org server settles the request against your own budgets. The guard's budget deny line points
+  at `/requests?new=budget`. New request types: access to a page the org hid (`page_access`), a time-limited
+  config edit (`config_edit`, at most 30 days) and "Something else". Org admins pick members, budgets,
+  pages and settings from lists in web2 instead of typing ids.
+- **OpenTelemetry from every AI tool.** The node receiver ingests any vendor's own OTLP export (JSON or
+  protobuf), not only Claude Code's, under the same capture and scrub rules; where a tool also routes
+  through the proxy, the proxy owns its token counts. `observer init --otlp-export <tools>` and Connected
+  tools > Set up > Telemetry export point Claude Code, Codex, Gemini CLI or Qwen Code's own exporter at
+  the node (opt-in per tool, removable; a collector of your own is never touched).
+- **Vendor team usage on the org server (unverified live).** Settings > Vendor exports receives Cursor
+  Enterprise and Claude Cowork team-wide OTLP exports, or polls the Cursor Admin API, with one source per
+  tool, a scoped machine credential, held unmatched identities and an audited read. Vendor rows are shown,
+  not counted in spend. See `docs/teams-operations.md` section 15.
+- **Machine identities in web2.** Settings > Machine identities creates service accounts and mints,
+  rotates and revokes ingest credentials (secret shown once); deactivating an account revokes its
+  credentials.
+- **Member deactivation.** An org admin can deactivate a member (bearers and sessions revoked by default,
+  reversible, never self, the super admin or the last admin) from web2 or `observer-org users deactivate`.
+- **Server maintenance from web2.** Support bundle, scrub content, log requeue, import archive, purge
+  subject, update sync, resolve projects, digest send and seven Agent Access verbs run from the org
+  dashboard as audited background jobs (the CLI's own code); entity ids are picked from lists.
+- **Weekly project digests on developer machines.** A developer sees the org's weekly digest, read-only,
+  for projects they pushed sessions in before that week ended; cost, provider, model and tokens are left
+  out.
+- **Administrator-managed AI tool settings (MDM).** The org AI tool policy renders into each vendor's
+  managed layer (a file, a `.mobileconfig` or an HKLM `.reg`) with an honest per-value hold, from web2
+  (Device management) or `observer-org agent-config mdm`.
+- **Closed date ranges.** Both dashboards take a custom from / to range, not only "last N days".
+- **Node dashboard parity.** A model filter, a notification bell (budget, requests, guard, cache, update
+  and org notices; read and dismiss per item), Projects filters, the request-class split in session
+  detail and a top-bar Export.
+- **Remote systems and launch policy from the dashboard.** Terminals > Settings edits SSH profiles and
+  the launch policy (both previewed and saved through the config save pipeline) instead of telling you
+  to edit `config.toml`; a remote machine's host name is shown.
+- **MCP server reputation** has a control on the Security page (the same code as
+  `observer guard mcp reputation`).
+- **AI tool settings, round 2.** Instruction blocks, the org view of each managed machine's settings
+  inventory (audited, needs `read:content`), secret-shaped values scrubbed instead of withheld, project
+  common values, pickers instead of typed ids, and enforcement of tracked instruction files.
+
+### Changed
+
+- **Organization > Node components is picked, not typed (D-571).** Require, Allow, Deny and "Deny, a
+  grant may override" are multi-select pickers over the node component catalog: single components by
+  title under their class, and whole groups (a class, an id group such as `adapter.*`, a stability
+  level) with how many components each matches. A choice already in another list, or a Require choice
+  that matches a component a Deny choice also matches (or the reverse), is listed greyed out with the
+  reason. The options come from `GET /api/org/policy-resource/node.components/vocab`, built from the
+  same catalog the publish check uses. The stranding estimate, Check and Publish work as before.
+- **The org dashboard offers lists instead of text boxes wherever the options are known (D-571).**
+  Policy rollout target version, egress provider and effort, the model fields (egress, routing rules,
+  pricing, reprice, intelligence providers, enrichment and overrides) with model suggestions, node
+  feature tool lists, the governance action allowlist, update ring manifests, members and timezone,
+  project rule groups, grant rules and targets (tools, models, features, components), invite emails,
+  client labels, sign-in domains, scopes, claims and IdP groups, Agent Access environments, workspaces,
+  groups, issuers and rule versions, control-write budgets, machine identity scopes, mirror versions,
+  AI gateway upstreams, machine ids, observability filters and annotation keys. Fields whose list is
+  only a suggestion keep free entry. `observer-org` maintenance actions now refuse a release channel
+  other than stable, lts or edge, and an MCP rollback mode other than observe or enforce. The audit of
+  every field is `docs/audits/pickers-audit-2026-10-10.md`.
+- **`observer obs admission setup` picks the judge hosting and the local server from numbered menus.**
+  An answer outside the menu asks again instead of silently leaving the judge unchanged.
+- **Node dashboard: known values are picked, not typed (D-571).** Every field whose valid values the
+  daemon already knows is a picker fed by the endpoint that owns the set: the Actions and Security
+  session filters (recent sessions), the request rule, tool, model, component and feature, the rule
+  editor's override rule and MCP server, the Policies routing criterion, cohort, content class, model,
+  user and cohort map, the guardrail topics and judge model, the Terminals allowed project root, the
+  Remote tailnet host, the experiment tool, the MCP package lookup, the SSH jump host, the Arena context
+  files, AI tool setting string values, and in Settings the enabled adapters, compress types,
+  per-action allowlist, project allow and deny lists, disabled rule ids, dialect targets, MCP retrieval
+  tools, summary models, profile keys and the reprice model. A genuinely open field keeps a "use what I
+  typed" row, and a value set by hand in config.toml stays visible.
+- **Cloud portal: session correction tags are picked (D-571).** Taxonomy tags come from the curated
+  vocabulary grouped Activity / Area / Outcome; suggested tags stay free-form with the session's own
+  offered back.
+- **CLI: interactive prompts pick from a list (D-571).** `observer obs admission setup` picks the local
+  judge model from the server's `/v1/models`, searches the priced models for a hosted provider, and
+  adopts starter templates from one checklist; `observer init` picks the browser extension id from the
+  unpacked SuperBased extensions found in the browser profiles (paste stays an option), and its
+  component chooser shows the feature groups as one checklist (numbers toggle, enter accepts, b steps
+  back) instead of one question per group.
+- **Cloud Intelligence allowances (Signed-in Free and Plus).** Signed-in Free rises to 100 enrichments a
+  day and 3,000 a month; Plus to 500 a day and 15,000 a month (plan v3). Both plans enrich on GPT-6 Luna
+  with a 1,024-token output ceiling (a truncated answer is retried, then refunded, never stored). Open
+  assignments move to v3, and renewals can no longer schedule a v3 subscriber back onto an older
+  version.
+- **One indexing switch.** `[compression.indexing].enabled = false` now also stops the hook path from
+  writing tool-output excerpts (before, only the watcher obeyed it).
+- **Copilot CLI launches** unrouted on a GitHub-subscription sign-in with a plain one-line note; it is
+  routed only when a BYOK key and a model are set (a key without a model is refused, and a non-OpenAI
+  provider type launches unrouted). `observer gemini` routes only API-key sessions.
+- **`observer pi`** always gives pi a model and never switches yours: a default on another provider
+  launches unrouted with a notice.
+- **Antigravity (agy) prompt hook is warn-only.** On agy 1.3.0 the PreInvocation hook fires before every
+  model call and Observer reads the prompt from `transcript_full.jsonl`, so it is registered again beside
+  PreToolUse; it can warn, not block, and a tool-less side request carrying the prompt is seen by no hook.
+- **Guard: an unresolved directory before a recursive delete asks instead of blocking.** A delete that
+  resolves to a root, home, root-depth wildcard or a path outside the project is still denied (R-101);
+  a relative recursive delete after a directory change Observer cannot resolve now asks (new R-102 row),
+  so ordinary cleanups such as `cd $PROJECT_DIR && rm -rf build` are no longer hard-blocked.
+- **A malformed `guard-policy.toml`** keeps the built-in rules and the org bundle in force and is
+  reported loudly (doctor, a guard event, a Security banner); the dashboard editor refuses to save one.
+  Managed machines follow the org's fallback setting.
+- **Guided installs** run from your home folder, show the exact package-manager command when a program
+  the vendor script needs is missing, and never stop at an interactive prompt (Goose installs
+  non-interactively). Observer never runs `sudo`, except the Tailscale guided setup, where you type the
+  password yourself.
+- **Platform tabs restructure.** Long pages in both dashboards are deep-linkable tabs; old URLs
+  redirect. The node session drawer keeps its tab in `?dtab=`.
+- **Terminals** keep their original colours in light and dark mode. The New Terminal picker no longer
+  overflows. IntelliJ IDEA installs the unified product.
+- **Org admin writes are audited atomically.** Every org admin write route records its audit row in the
+  same transaction (or before the change on split stores); a failed audit answers `audit_failed` and
+  changes nothing. Publishes take a two-step confirm, and a stale editor gets `409 version_conflict`
+  (Policies, setup wizard, guard bundles, developer dashboards).
+- **Enrolment push cadence.** Enrolment leaves `push_interval_seconds` unset; the documented default
+  applies.
+- **Every dashboard config write goes through one save pipeline.** Section forms, SSH profiles, launch
+  policy, pricing, process capture, profile assignments, sandbox settings and experiments all preview
+  (`?dry_run=1`), refuse a file changed since you loaded it (`409 config_changed`), validate, read back
+  and audit. `observer config set` refuses to save when the org posture cannot be read.
+- **Token usage mode reaches every surface.** An org that shows developers token usage only now gets it
+  in exports, server prose, the CLI and the statusline too, not only the dashboard pages.
+- **Spend keeps counting what developer machines report.** Whatever vendor source an org picks, node
+  rows still count for spend, budgets and alerts (operator ruling D-359); vendor rows are shown, not
+  counted, until a live comparison approves them.
+- **Analytics pollers follow current vendor docs (unverified live).** Claude Code Enterprise Analytics
+  for `api_kind = enterprise`, local and remote rows summed per user-day; Codex and OpenAI Platform usage
+  paged at the documented limits and Platform usage shown as its own entry, never as Codex; Copilot
+  metrics from the current report and billing from AI credits, one day at a time; the Cursor Admin API
+  asks for all usage.
+- **The capture pill says what it means.** "Active", "No Claude Code", "Not routed" or "Checking"
+  instead of "Paused" whenever Claude Code was not routed. The sidebar watcher line follows the watcher,
+  not the Claude Code route, and Cursor's chat `store.db` no longer counts as misrouted.
+- **Daemon restarts are safe.** The daemon exits promptly on SIGTERM (a second SIGTERM is honoured, a 20 s
+  watchdog dumps stacks), and `scripts/restart-daemon.sh` waits for every daemon holding the database,
+  including one that already released its port, before relaunching.
+- **Hook writers are byte-idempotent.** Re-registering an unchanged hook leaves the file's bytes and line
+  endings alone.
+- **Command wrapping carries its config.** A shim enabled under a non-default `--config` runs observer
+  with that config; on an org-governed machine a broken `config.toml` refuses the launch instead of
+  running it unrouted.
+
+### Fixed
+
+- **Hooks and MCP entries survive an npm or pip upgrade (D-590 U1).** They used to name the binary
+  inside `node_modules/@superbased/observer-<platform>/` or `site-packages/observer/_bin/`, a path the
+  next `npm install -g` or `pip install -U` moves or deletes, so every hook failed after an upgrade.
+  `observer init`, `observer start`'s auto-registration and the hook probe now register the package
+  manager's own launcher (`<prefix>/bin/observer` for npm, the console script for pip) when one on PATH,
+  or in its usual place, runs this binary; otherwise the real path as before. On Windows npm keeps the
+  real path, because a `.cmd` shim cannot be an MCP stdio command.
+- **A stale Observer MCP entry is repaired without `--force` (D-590 U2).** An `observer serve` entry
+  whose command no longer exists (the binary an upgrade removed), or that runs this same install, is now
+  treated as Observer's own and rewritten by `observer init`; `observer start` repairs such an entry in
+  place (it never adds one). `observer doctor` names the exact command to run, with `--force` only where
+  init would really refuse.
+- **Commands from a newly installed binary no longer migrate the database under the running daemon
+  (D-590 U3).** After an npm or pip upgrade, `observer status`, `doctor`, `components status` and every
+  other command except `start`/`watch`/`proxy`/`update` and the capture paths (hooks, `serve`,
+  launchers) read the database without migrating it while another observer process holds it, and print
+  "the running daemon is vX (schema N); restart it to finish the upgrade". The daemon's lockfile now
+  records its version, and `observer doctor` gains a `daemon.version` check comparing it with the CLI.
+- **install.sh and install.ps1 no longer install a second copy over an npm or pip install (D-590 U4).**
+  They now look first: another `observer` on PATH (npm, pip or another copy) or a daemon running another
+  binary is listed with its version, the installer says which copy a shell runs now and after the next
+  login, and offers the package manager's own upgrade command. A second copy is installed only on an
+  explicit menu answer or `--force` (`-Force`); `--yes` or a pipe without `--force` stops with the
+  explanation. The edition defaults to the existing install's (npm and pip ship `full`), and with a
+  daemon from another install running, Next steps never start a second one and no service is offered.
+- **`observer init` and the auto-registration render one command (D-590 U5).** `--config` is written
+  only when it names a config other than `~/.observer/config.toml`, in both, so neither rewrites the
+  other's entries.
+- **A busy database no longer logs a spend-verdict WARN (D-590 U6).** The spend-verdict refresh retries
+  `SQLITE_BUSY` with a short backoff (250 ms to 2 s); a lock that outlasts the retries is logged at debug.
+- **Upgrade hints name the command that applies (D-590 U7).** The npm postinstall prints the
+  `observer service upgrade` line only for a daemon running under the systemd unit and the
+  route-off, stop, `observer start` order otherwise. `observer service upgrade` with no unit explains that
+  restart path, and `upgrade` is listed in `observer service --help`.
+- **The Codex trust hint counts the hooks it registered (D-590 U8)** instead of a fixed number, in
+  `observer init` and the enrolment's client wiring.
+- **`observer doctor` flags a proxy route on another port (D-590 U9).** A Claude Code or Codex route to a
+  loopback port other than `[proxy].port` is a `proxy.route_port` warning naming the `observer init`
+  command that rewrites it.
+- **`observer init` routes to the configured proxy port (D-591).** It wrote every Claude Code and Codex
+  proxy route on 8820, the `--proxy-port` default, even when `[proxy].port` named another port, so those
+  routes reached no proxy. The route port is now `--proxy-port` when given, else `[proxy].port`, else
+  8820, the order `observer org enroll --wire-clients` already used.
+- **The Cursor watcher reads only your own CLI log directory (D-590 U10).** It used to glob every
+  `/tmp/cursor-agent-logs-*`, including other users' on a shared machine. It now reads only
+  `cursor-agent-logs-<uid>` or `-<username>`, and only when that directory is owned by you.
+- **`observer guard status` on a node that never enrolled says "not enrolled" (D-590 U11)** instead of
+  reporting the organization's budget as unreachable.
+- **`/api/components` reports how the binary was installed (D-590 U12):** a `binary_install` object
+  (channel `npm` / `pip` / `other`, version, and whether hooks register the launcher; no path, because a
+  remote viewer can read the route). `observer components status` prints the binary's path, version and
+  channel.
+- **The antigravity bridge is described honestly on Linux (D-590 U13).** Outside WSL its component state
+  now says it ships for a daemon running under WSL and is not used here, instead of a generic "not
+  applicable"; the Linux packages keep shipping it for WSL2.
+- **An in-place upgrade no longer leaves the old daemon running behind a "started" message (T-753).**
+  Re-running install.sh, or `npm install -g` over an older version, replaced the binary underneath the
+  running daemon, offered the background service again, and `observer service install --now` then
+  printed "Service enabled + started." because `systemctl start` on a running unit does nothing; the
+  old process kept running the deleted binary. install.sh now says "Upgraded X -> Y", does not offer
+  the service again, and hands a unit that runs this install to the new `observer service upgrade`:
+  it rewrites the unit for the new binary (keeping its `--config` / `--recipe` / `--port`, refreshing
+  its Description) and restarts the daemon with `systemctl try-restart` only when nothing can be
+  routed through it (no proxy listener, or no proxy route present and no open proxy connection).
+  Otherwise it leaves the daemon running and prints the safe order, because the daemon is the proxy.
+  `observer service install --now` on a running unit applies the same rule, and plain `install` no
+  longer calls a running unit "not started". install.ps1 renames a running `observer.exe` aside
+  instead of failing, says "Upgraded X -> Y" and names the still-running pid with the safe order; the
+  npm package's new print-only postinstall names a daemon still running the replaced binary. Neither
+  installer nor npm restarts anything itself. The "integration.service is off in every edition" next
+  step now says it is off by default and that the command turns it on.
+- **The npm restart hint now fires on a real npm 10 global upgrade (T-756).** npm 10 renames the old
+  package directory aside to `@superbased/.observer-<platform>-<random>/` and runs postinstall before it
+  deletes that directory, so the running daemon's executable did not read "(deleted)" yet and the hint
+  stayed silent (rc.4 roll, node 5). The postinstall now also counts a daemon whose `@superbased`
+  observer binary lives under such a retired dot-directory, or is any binary other than the one this
+  install put in place. It still only prints.
+- **Every `observer` command group refuses an unknown subcommand (T-757).** `observer service instal`
+  (and the same typo under any other group) printed help and exited 0. A group now fails with exit 1,
+  names the unknown word, suggests the nearest subcommand when there is one and points at the group's
+  `--help`; a bare group still prints its help. One helper covers the whole command tree, extending
+  the T-746 fix for `observer org`; groups that take a positional value keep their own rule.
+- **Security > Rules > "+ Add override" lets you pick the rule again (T-762).** The node dashboard's
+  override editor locked its Rule picker whenever it was handed a starting row, and "+ Add override"
+  always handed it a blank one, so it opened as "Edit override -" with an empty, disabled picker and no
+  override could be added (rc.5 roll). Each opener now says how it opens the editor: "+ Add override"
+  lets you pick the rule, "Override" on an effective rule opens a new override locked to that rule, and
+  "Edit" on an existing override keeps its rule and saves in place.
+- **"Grant an exception" no longer greets you with an error (T-763).** The org dashboard's proactive
+  grant dialog sent the empty form to the server's preview at once and showed its reply, "user_id and
+  type are required", in red before any input. The dialog now checks the member and the grant type
+  itself, keeps Grant disabled until both are chosen, says what to choose in plain words ("Choose a
+  member.") only after you have used the form, and asks the server for its decision once the form is
+  complete.
+- **The Agent Access doctors pass on the compose and Helm shape (T-751).** There the agentgateway
+  sidecar runs the stock image, whose own binary is a different build from the upstream release asset
+  the binary pin names, so `observer-mcpgw doctor` D12 could only skip (no binary in the companion's
+  container) and, pointed at the image's binary, failed G7. The image digest is now the pin on that
+  shape: `--agentgateway-image` (default `$OBSERVER_MCPGW_AGENTGATEWAY_IMAGE`, which the production
+  compose and the Helm chart now set from the sidecar image) passes D12 on the release digest and
+  fails another digest or a tag-only reference; with `--agentgateway-bin` the binary's `--version` must
+  still be v1.6.0. `observer-org doctor agent-access` and `upgrade preflight` take the same flag.
+- **The Fleet versions skew banner names the newest release candidate.** It read "to 1.36.0-rc.1"
+  while three nodes ran 1.36.0-rc.3: the board compared versions by their X.Y.Z core only, so two
+  release candidates of one release tied and map order picked one. The board's oldest and newest
+  versions now use full SemVer precedence (rc.3 above rc.1, rc.10 above rc.9, a release above its
+  candidates), with a stable tie-break for versions that differ only in build metadata.
+- **A machine that left and re-enrolled with a new machine key is no longer refused (T-747).** After a
+  structured leave and a reinstall that dropped `~/.observer`, the re-enrolled node's new machine key
+  was a `409 machine_key_conflict` and its machine-scoped grants were withheld until an admin reset
+  the key. A managed node's leave notice now carries its machine key's proof and the org server
+  retires that key (audited `machine_key_retire`); when the leave could not do that (an older node,
+  an unreachable server), the bearer of a fresh admin-minted enrolment of the same member replaces
+  the key (`replaced`, audited with the enrolment token). A bearer alone, an older bearer, and a
+  self-minted or IdP device-code enrolment still cannot move a key.
+- **The installers name real commands, and `observer org <unknown>` fails (T-746).** install.sh and
+  install.ps1 printed `observer org enroll <link>` and `observer org unenroll`, which did not exist,
+  and `observer org` with an unknown word printed help and exited 0, so the enrolment silently did
+  not happen. They now print `observer enroll --link <enrolment link>` and `observer unenroll`;
+  `observer org <unknown>` exits 1 naming the real commands; `observer org enroll` and `observer org
+  unenroll` run the top-level commands (hidden aliases); the enrolment's config.toml comment, the
+  config editor and `observer mcp doctor` name `observer enroll`. A test checks every command the
+  installers print against the command tree.
+- **Uninstall from a root-owned prefix changes nothing; no-proxy wording; `init --all` with no tool
+  (T-744).** `install.sh --uninstall` from a directory you cannot write (a root-owned
+  `/usr/local/bin`) stopped the service and removed every hook before failing to delete the binary;
+  it now checks first, changes nothing and prints the per-user commands plus the one `sudo rm -f`.
+  The minimal edition's next steps no longer promise a proxy, the systemd unit's Description names
+  what `observer start` runs on the node (`watcher + dashboard` without capture.proxy), and
+  `observer init --all` on a machine with no AI tool says so after any component note instead of
+  printing only `mcp skipped`.
+- **Accepting the installer's service offer no longer skips the component chooser (T-745).** The offer
+  writes `[components] add = ["integration.service"]` before the first `observer init`, and any
+  `[components]` block skipped the chooser, so the documented install, yes, init flow never showed it
+  and recorded no edition. An add-only block (no `distro`, no `remove`) now runs the chooser with
+  those components shown as already on and records the edition base; a block naming a distro or a
+  remove is still a recorded choice.
+- **The component chooser asks about browser chat capture (D-561).** It never did, so capture.browser
+  stayed on unless you ran `observer components remove capture.browser`. "Browser chat capture" is
+  now a feature group carrying the five browser-chat adapters bundled with it, asked where the build
+  includes it and shown unavailable where it does not; "capture only the detected tools" no longer
+  turns those adapters off behind it.
+- **`observer init` and `observer enroll` wire only the components you chose, and only tools you have
+  (T-730, T-742).** Without `--config`, init and the enrolment's `--wire-clients` step treated every
+  component as active, so they wired hooks, MCP entries and proxy routes for adapters you had removed
+  (on a fresh full install, ~20 tools you never installed, including a new `~/.claude/settings.json`
+  route) and skipped adapters you had added on a minimal or managed build. They now read the default
+  config and its governance like the daemon does. A component teardown also no longer creates an empty
+  config directory for every tool it checks (that is what made those tools look installed), and
+  removing the deepseek or openclaw plugin shim on a machine that never had one is quiet instead of an
+  error.
+- **The first components choice on a fresh install writes a minimal config.toml (T-741).** With no
+  `config.toml` yet, the first `[components]` write (the init chooser, `observer components select`,
+  Settings > Components) re-serialized every default: a 665-line file with no comments that also
+  pinned a disabled, empty `[org_client]` block, so a later enrolment left pushing off. A save to a
+  missing file now writes only the keys it set.
+- **An individual enrolment in an enterprise-posture org is offered an individual grant (T-740).** The
+  enterprise auto-grant (every extract.* token, `settings.pin`, the enforce tokens and a managed consent
+  class) was signed into every enrolment under the enterprise posture, individual ones included, so the
+  node listed 22 managed-only authorities and then refused the grant. It now applies to managed
+  enrolments only (one table, `enrolGrantShapes`); an individual token carries exactly what it was minted
+  with, and the Invite form sends an individual token's selection as shown, so nothing ticked offers
+  nothing.
+- **The install-time component chooser starts from your build and adds only what you pick (T-731, T-733,
+  T-737, T-734).** It always wrote `distro = "developer"`, even from a minimal binary (which then warned
+  about ten components that build lacks); it now writes the binary's own distro. Accepting every default
+  now writes exactly that distro's defaults: a "yes" to a group used to add every id in it (developer
+  defaults turned on routing, remote access, the sandbox, the MCP relay and update management) and the
+  `add` list repeated ids that were already on. On a minimal build a detected AI tool can be turned on in
+  step 1, the summary counts every component the result leaves off, and unavailable groups print with
+  step 2. On an org-managed node the chooser writes no distro and offers only what a local choice may
+  add, saying so before it asks, instead of refusing your answers at the summary. Start at login (the
+  system service) is now offered as its own group.
+- **`observer service install` offers to turn the system service on instead of only refusing (T-734).**
+  `integration.service` is off in every distro, so the documented `observer service install --now`
+  refused on a fresh machine. On a terminal it now explains why and asks to turn it on (the same as
+  `observer components add integration.service`), then installs; piped runs, org-managed nodes and
+  builds without the service keep the one-line refusal.
+- **`observer enroll` warns about a stopped proxy only for routes it left in place (T-736).** It told a
+  node with no `~/.claude` that Claude Code now routes through the proxy via `~/.claude/settings.json`
+  although nothing had been written. The warning now names the tools whose route points at the proxy
+  and prints nothing when there are none.
+- **The org Fleet marks nodes that left, and the posture page labels exclusions by their reason (T-738).**
+  A node that ran `observer unenroll` (or whose member was deactivated) stayed an ordinary row that slid
+  to "offline / no contact"; Fleet versions now marks it "left", from the node's structured leave at or
+  after its last contact or from the directory, and says how many rows left. Collection & posture
+  labelled every structural exclusion "excluded (service account)", including an ordinary developer
+  whose grant was only wider than the live document; each row now names its reason (holds authority the
+  fleet document cannot carry, excluded until the next re-issue, or excluded by an admin). Its Excluded
+  tile counts the rows it lists and no longer counts up from 0: in a background tab the browser runs no
+  animation frame, so the tile stayed at 0.
+- **Component status, doctor and service wording say what is true (T-732, T-739).** With no
+  `[components]` block, `observer components status` and `observer doctor` said every component was
+  active on distro and managed builds too, then listed the inactive ones; they now say the build's
+  defaults (or the organization's selection) are active, with the count. On a managed node doctor
+  printed "(policy source unauthorized)"; it now says in words what decides. The leftovers check
+  ignores components the build does not contain (capture.browser warned on a minimal build),
+  `observer components --help` no longer calls the feature read-only, and `observer service install` no
+  longer says the service is the proxy on a node where the proxy is not active.
+- **A node that is not enrolled no longer warns about the org bearer keychain (T-735).** `observer proxy
+  start` opened the org bearer store on every node and, on a machine without an OS keychain, warned
+  about a fallback it would never use. It now opens it quietly when `[org_client]` is not enabled; the
+  warning stays armed for the first enrolment. The one goose `FOREIGN KEY constraint failed` on a first
+  scan after the upgrade (node 3, data complete afterwards) is recorded in `docs/goose-adapter.md`; its
+  writer was not pinned.
+- **`observer uninstall --all` and `observer init --all` on a machine with no AI tool say so (D-553).**
+  They printed "no tools selected and none auto-detected - pass ... --all" even though `--all` was
+  passed; they now say `--all` found no supported AI tool installed and there is nothing to do.
+- **`observer start` no longer rewrites an equivalent Claude Code hook (T-725).** A daemon started from a
+  different binary path (say `observer.135`) replaced every existing `.../bin/observer hook claude-code
+  <event>` entry in `~/.claude/settings.json` with its own path plus `--config`, so each relaunch changed
+  the user's file. Startup auto-registration now keeps an existing observer hook that is equivalent (same
+  tool and event, same native or WSL-bridge shape, a binary that still runs, the same effective config
+  file) and leaves the file byte-identical; it rewrites only a missing or broken hook and logs each
+  rewrite with its reason. `observer init` still points every hook at the binary you run it from.
+- **`observer update status` agrees with the daemon on auto-apply (T-727).** On a managed node whose
+  enrolment grant puts it on the managed-fleet default, the CLI said "auto-apply off - the default for a
+  BYO node" while the daemon log and the org Fleet row said on: the CLI read only `admin_managed` from
+  the config. It now resolves the enrolment grant the way the daemon does and goes through the daemon's
+  one auto-apply resolver.
+- **Leaving an organization turns sharing off in config.toml; re-enrolling rewrites the address (T-728).**
+  After Leave, `config.toml` still said `[org_client] enabled = true` with the address of the organization
+  just left (on the operator's node, a retired server), and a re-enrol never rewrote an existing block.
+  Leave now sets `enabled = false` once the leave has completed, as a one-line edit that keeps every comment
+  and every other setting, and says so; a re-enrol sets it back to `true` and writes the new
+  `org_server_url` the same way. The leave plan now also names the per-organization machine key as kept:
+  it is the machine's identity, grants nothing without the org credentials Leave removes, and keeping it
+  lets a return to the same organization reuse its registration instead of a 409 that needs an admin reset.
+- **WebSocket upgrade passthrough off the deprecated `ReverseProxy.Director` (LINT-126-2).** The proxy's
+  upgrade passthrough now uses `Rewrite` (Go 1.26) and sends the upstream the same headers as before:
+  the client's `Forwarded` / `X-Forwarded-*` values are kept (Rewrite would strip them), the client address
+  is appended to `X-Forwarded-For`, and no `X-Forwarded-Host` / `X-Forwarded-Proto` is added that was not
+  sent. No change for clients or upstreams.
+- **Builds without a component say so everywhere (T-726).** `observer doctor <tool>` for an adapter the
+  build leaves out answers "not in this build" and names the builds that include it (it used to say
+  "active - no adapter"); a teardown step whose undo verb the build lacks says to run it from a build
+  that includes the component; the OpAMP routes of an org image without `org.opamp` answer
+  `not_in_image` from every binary that links the org server package; and the session MCP-call panel of
+  a build without the relay returns the session id and an empty `calls` list, the full build's shape.
+- **The minimal edition passes its proof again.** A build with `sbo_omit_ui_export_xlsx` left the
+  spreadsheet export out but did not report it, so the binary listed `ui.export-xlsx` as inert instead of
+  compiled out and `sbo-components proof` refused the `minimal` edition. The binary now reports it.
+- **`observer update apply` / `rollback` no longer run under a daemon that has no dashboard.** A build
+  without the dashboard (or `observer start --no-dashboard`) answers no update endpoint, and the CLI used
+  to apply, or restore a database snapshot, underneath the running daemon. It now reads the daemon's start
+  lock and refuses with the reason and the fix: let the daemon's update loop apply it, or stop the daemon
+  (proxy route off first) and run the verb again. `--dry-run` still runs.
+- **Builds without the API proxy or the dashboard stop describing them.** `observer privacy` no longer lists
+  a proxy listener such a build never binds, the bare `observer` greeting describes what `observer start`
+  runs in this build and sees a headless daemon, OTLP exports keep their token rows when this node serves no
+  proxy, and the Components pointers name the CLI verb when there is no Settings page.
+- **Release tooling:** the omit-tag test files whose code a tag compiles out now carry that tag, and the
+  public-tree obs sweep matches obs build lines with extra conjuncts.
+- **`observer enroll` no longer moves a running daemon's hooks.** Its AI tool wiring step registered
+  hooks and MCP against whichever binary ran the enrol, so an enrol from a second build pointed Claude
+  Code's hooks away from the running daemon. It now uses the running daemon's binary and says so;
+  `observer init` still points them at the binary you run it from. `observer org push-status` also
+  stops printing a stale 900 s fallback interval. (T-642)
+
+- **Ingestion stalls on large machines.** Several causes, all fixed:
+  - Replacing a tool-output excerpt scanned the whole full-text table (about one second per tool result
+    at 500,000 rows) on both the watcher and the hook path; it is now an index seek (0.67 ms).
+  - The initial scan ran before the watcher started, so one slow tree starved every other tool; it now
+    runs in the background, round-robin across adapters.
+  - The guard's budget cache aged on transcript time, so a replayed backlog paid two slow budget queries
+    per action even with no budget configured; the cache uses the guard's own clock, and no lookup runs
+    when nothing reads a budget.
+  - Files whose unread tail exceeded `max_file_size_mb` were skipped forever; they are now read in
+    capped windows.
+  - The cross-OS process sweep, root registration and the Codex poller no longer repeat full passes.
+  - The managed (org budget) token read is bounded to the budget window (from about 3 to 4.6 seconds to
+    under 1 second on a large database), so a large managed machine no longer times out its budget
+    lookup.
+- **Sessions that never reached the org.** After the startup orphan sweep, SQLite could reuse session
+  row ids at or below the push cursor, so new sessions never shipped. The cursor is now clamped in the
+  same transaction, `observer org status` shows a real "eligible" count, and leaving an org clears the
+  push history.
+- **Lost lifecycle events.** Compaction and session-end events that arrive before the watcher has
+  ingested the session are held and retried instead of failing on a missing session.
+- **Droid hooks never fired:** Observer wrote `hooks.json` under a wrapper Droid ignores. It now writes
+  the root-level shape and repairs older files.
+- **Per-project profile writer** wrote a zero-valued `[compression]` block that turned compression off
+  for the project, followed a symlinked `.observer`, and accepted the home directory.
+- **Quickstart dev sign-in** failed its CSRF check (403).
+- Connected tools showed hooks "off" right after registration, and probed only Claude Code, Cursor and
+  Codex; it now probes every registered hook.
+- Governed machines logged 404 console errors for hidden sections; Fleet State showed `node.features` as
+  local-only even when published.
+- Managed machines now consent to `node.features`, including machines enrolled before this fix (added
+  once at `observer start`), so org feature locks apply.
+- Mistral vibe 2.25's unified session store is captured.
+- A grant minted on the enrolment-token rail no longer reads as tampered; an org's first policy publish
+  reaches nodes within seconds.
+- A member on two or more teams can reserve at the AI gateway again.
+- **Codex prompts dropped on Codex 0.148 and later** (see the upgrade notes); a forced rescan now reads a
+  file over the size cap whole, window by window, instead of only its first window.
+- **Codex subagent lineage.** A subagent rollout whose `session_meta.source` is an object lost its whole
+  `session_meta` (real id, `thread_source`, `parent_thread_id`); it decodes now.
+- **One prompt, counted once.** A Codex prompt both the hook and the rollout recorded is counted once in
+  the Messages tab, the Projects prompt counts, the cost predictor and the Cloud Intelligence prompt
+  sample.
+- **Devin was stopped on every launch** under a managed hard USD cap, because the budget walk treated
+  Devin's in-store `_versions/current` symlink as unreadable; links inside the store are walked now.
+- **A policy stop inside a New Terminal** is explained at the terminal for wrapped launches too, instead
+  of a bare `EXITED (255)`.
+- **Qwen Code reasoning counted twice** and **Gemini CLI duplicate events** (see the upgrade notes for
+  the Qwen rescan; Gemini needs none).
+- **Split control / data org deployments.** About fifteen org dashboard handler families answered 404
+  "no org", and the machine identity routes failed, when control and data lived in different databases.
+- **`observer-healthcheck -print`** exists, so a roll can read the Agent Access hop state from inside the
+  distroless image; an idle or zero-vserver hop counts as healthy.
+- **Ingestion stalls, second round.** Five more full-text excerpt reads (the MCP `get_action_details`
+  tool, retention, the reasoning backfill) seek by index instead of scanning the table
+  (`get_action_details` for 25 ids: 14.3 s to 18 ms), and the initial scan serves whichever adapter lane
+  is ready instead of waiting on a stuck one.
+
+### Security
+
+- **`golang.org/x/net` v0.60.0 (HTTP/2 advisories).** `golang.org/x/net` moves from v0.58.0 to v0.60.0
+  and closes five advisories in its `http2` package that `govulncheck` found reachable from Observer code
+  (the proxy, the org server, the AI gateway and `observer-mcpgw`): GO-2026-6612 (double flow-control
+  refund on server streams), GO-2026-6603 (server memory exhaustion through Trailer headers),
+  GO-2026-6610 (malformed framing headers forwarded by a reverse proxy), GO-2026-6611 (CPU exhaustion
+  through repeated initial window changes) and GO-2026-6617 (server crash through an HPACK encoder race).
+  The image CVE gate for `observer-mcpgw` would otherwise have blocked the release. Minimum version
+  selection moves `golang.org/x/crypto` to v0.57.0, `x/sys` v0.48.0, `x/text` v0.42.0, `x/term` v0.46.0,
+  `x/sync` v0.23.0, and the indirect `x/mod` v0.41.0 / `x/tools` v0.49.0. No code changed; the stdlib
+  half of these advisories was already fixed by Go 1.26.9.
+
+- **Agent Access sidecar: stock agentgateway v1.6.0 (glibc CVE-2026-19499).** The digest-pinned agentgateway
+  sidecar moves from v1.5.0 to the stable v1.6.0 (the upstream `agentgateway/agentgateway` image,
+  tag `v1.6.0`, digest `sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c`; the
+  full image reference is in the Agent Access compose files and `docs/agent-access-cve-patch-runbook.md`),
+  whose image carries Wolfi glibc 2.44-r7. That closes CVE-2026-19499 (High, glibc `strfmon` overflow), whose dated
+  exception expired today and would have failed the Agent Access image CVE gate, and two High `hickory-resolver`
+  advisories in v1.5.0's lockfile (ledger AA-45). v1.6.0's breaking changes concern LLM routes only; the MCP hop
+  config is unchanged. If you mirror the sidecar yourself, mirror the new digest and set `AGENTGATEWAY_IMAGE`
+  (compose / OpenTofu) or let the chart's new `agentAccess.sidecar.image` default take it (Helm);
+  `observer-mcpgw doctor` now expects agentgateway 1.6.0.
+
+- **Signed-rail and component governance fixes from the fourth adversarial review.** The org server's
+  boot re-sign of routing policies, announcements and update manifests now verifies a stored document
+  only against keys the server has itself served (a new org signing key history, server migration 231 /
+  PostgreSQL 0098), never against the key the document's own row names, so a forged row can no longer be
+  re-signed under the org key; rotating the key file keeps working (ledger SIGN-2). A managed node keeps
+  an initial component set it inherited from an earlier grant together with the grant that signed it, so
+  an edited set no longer re-verifies (MODPKG-17 (1)). A fleet grant replacement the super admin issues
+  now carries `components.govern` and the managed initial component set; anyone else's names those
+  members as excluded with the reason (MODPKG-17 (4)). A scheduled component purge waits instead of
+  deleting while the node runs on a last-known-good `node.components` policy, and records its request
+  before the delete (MODPKG-17 (3), (4)). The `distro-staging` workflow no longer expands its dispatch
+  version into shell (CI-INPUT-1).
+
+- **A member can no longer lock a colleague out of their machine-scoped grants (REVIEW-4, ledger
+  GRANT-16 / GRANT-17 / GRANT-18).** Machine keys now bind the (member, machine) pair (org server
+  migration 229 / PostgreSQL 0096, existing keys copied in), so registering someone else's machine id
+  only ever affects your own grants. Key registration is audited in the same transaction as the write
+  and a concurrent registration is a 409 instead of a silent replacement. The admin reset takes an
+  optional member. A node now keeps one machine key per organization, so leaving an organization and
+  coming back no longer ends in a permanent key conflict.
+- **Audit and retention fixes on the org server (REVIEW-4, ledger AUDITSTORE-1, VCONN-14, VCONN-15).**
+  The node scheduled-purge audit row is written to the org database before the change (it was lost on
+  split control / data deployments); three vendor connection tables declared as aging out are now
+  pruned; and unlinking a vendor identity restores all of the held call's identities (migration 230 /
+  PostgreSQL 0097).
+
+- **Go 1.26 toolchain and `golang.org/x/crypto` v0.56.0.** Every binary is now built with Go 1.26.9
+  (`go 1.26.0`, `toolchain go1.26.9`), which lets `golang.org/x/crypto` move to v0.56.0 and closes
+  GO-2026-6354 and GO-2026-6355 (`x/crypto/ssh` denial of service; never reachable from Observer code, but
+  carried in every binary). The org server, MCP gateway, cloud and deploy images build on `golang:1.26`;
+  the two dated image-scan exceptions for those advisories (ledger AA-47) are removed. Building from
+  source now needs Go 1.26 or later. CI lints with golangci-lint v2.12.2 (the v1 linter cannot read a
+  Go 1.26 module); `.golangci.yml` moved to the v2 schema with the same rule set.
+- **Guard rule holes closed:** a leading shell keyword (`{`, `if ... then`, `do`, `!`) hid a command from
+  every rule (for example `{ rm -rf /; }` was allowed under enforce); directory changes and links made in
+  the same command (`cd`, `pushd`, `ln -s`, `mklink` and more) could steer a recursive delete around
+  R-101; a HOME under `/tmp` exempted `rm -rf ~`; Cline CLI's `run_commands` batches were never judged.
+  Interpreter one-liners (`python -c`, `node -e` and others) that read or delete a protected or secret
+  path are now judged by the same rules as shell commands.
+- **Signed rails bound to the org and the developer (binding v2),** sticky once a node has held a bound
+  envelope; a 404 or an unsigned answer never clears a node's cached policy; a withdrawal is a signed
+  tombstone. Re-enrolling clears every identity-bound signed cache, so one org's policy cannot survive
+  into another.
+- **Hook posture file** is signed by the daemon and expires after 3 minutes, so a forged or stale
+  posture cannot open or wrongly close a gate.
+- **No credential reaches the wrong provider:** a proxied request for an unknown `/up/<id>` lane is
+  refused (502) and a malformed lane address answers 400 before any upstream request.
+- **Credential-bearing vendor files** (zcode, Junie, Qwen, Hermes and every MCP config Observer writes)
+  are edited only inside Observer's own entries, keep their file mode, and are never backed up or
+  checksummed by Observer.
+- **Self-approval of grants is refused** (see the upgrade notes), rule severity and lock status are
+  resolved on the server, and a grant on a shared budget row is refused.
+- **Need-to-know:** a composed guard bundle names only the developer's own teams, and a member or team
+  bundle's free-text note no longer reaches every recipient. A hidden settings section reveals nothing,
+  not even which secrets exist.
+- **INTEL-7** (see the upgrade notes).
+- **Third adversarial review (REVIEW-3) folded.** The machine inventory filter could skip the
+  `read:content` gate (`state=observed%20`); a dashboard ops job ran as the host user, so its launcher
+  could approve their own Agent Access rollback; a deactivated service account's credentials still
+  authenticated; the vendor usage read was not audited; the OTLP token file was accepted with any mode or
+  owner; a pushed project hash opened another project's digest history; purge-subject could sign out a
+  member without `admin:members`. All fixed. See `docs/security.md` (REVIEW3-* rows).
+- **Vendor export credentials are exclusive at every request,** not only when minted (EA-F10), and every
+  org route reads the org from the control store.
+- **Guard: sensitive paths follow `cd`, PowerShell script blocks are judged.** A protected path reached
+  through an earlier directory change is judged like the full path, and a recursive delete inside a
+  PowerShell script block is judged (a pipeline `$_` target and an uncalled function definition ask;
+  everything else keeps its verdict).
+- **Hook-path budget stops are fresh.** A stop older than 2 minutes is ignored, the file is removed on
+  unenrol and rewritten when damaged, and a transient spend read failure stops tools only after three
+  failed ticks (an operator ruling; structural failures still stop at once).
+- **The notification state write** needs the dashboard's confirm token and is audited.
+
+### What changed during the release candidates
+
+None of the five 1.36.0 release candidates was tagged or published: each was built locally and rolled
+to the demo org server and nodes, and the notes above stayed one list throughout. What each candidate
+added:
+
+rc.2 replaces rc.1, which was built and rolled to the demo but never tagged or published, so this
+section carries rc.1's notes and what changed after it as one list. New since rc.1: the edition
+installer (`scripts/install.sh`, `scripts/install.ps1`) and the edition archives as release assets
+(T-729), the follow-ups found during the rc.1 roll (T-725, T-727, T-728, LINT-126-2) and the
+install and enrolment fixes from the fresh-install check on the demo nodes (T-730 to T-742).
+
+rc.3 replaces rc.2, which was rolled to the demo org server and nodes 1 to 5 but never tagged or
+published; this section stays one list. New since rc.2: `golang.org/x/net` 0.60.0 for four `http2`
+advisories (lane XNET), the agentgateway sidecar re-pinned to v1.6.0, closing AA-45 (lane AGW16),
+the fixes from the rc.2 roll (T-744 to T-747 and the browser capture question, lane FIX-RC2), and
+release clean-ups: the Antigravity HTTP/2 clients moved off the deprecated `x/net` `http2.Transport`
+with no behaviour change, the installer scripts executable again, and the Agent Access task-grant
+refusal re-grounded on agentgateway v1.6.0 (T-749).
+
+rc.4 replaces rc.3, which was pushed to `origin` and rolled to the demo org server and nodes 1 to 5
+but never tagged or published; this section stays one list. New since rc.3: the fixes from the rc.3
+roll (lane FIX-RC3). An in-place upgrade no longer leaves the old daemon running behind a "started"
+message: install.sh hands a running unit to the new `observer service upgrade`, which restarts the
+daemon only when nothing can be routed through it and otherwise prints the safe restart order, and
+install.ps1 and the npm package name a daemon still running the replaced binary without restarting
+anything (T-753). The Agent Access doctors check the compose and Helm sidecar by its image digest
+(T-751), and the Fleet versions skew banner orders release candidates by full SemVer precedence.
+
+rc.5 replaces rc.4, which was pushed to `origin` and rolled to the demo org server and nodes 1 to 5
+but never tagged or published; this section stays one list. New since rc.4: the fixes from the rc.4
+roll (lane FIX-RC4): the npm restart hint now fires on an npm 10 global upgrade, which moves the old
+package aside before the new postinstall runs (T-756), and every `observer` command group refuses an
+unknown subcommand with exit 1 and a hint instead of printing its help and exiting 0 (T-757). And
+the pickers rule (lanes PICKERS and PICKERS-2, D-571): wherever the valid values are a known set, the
+org dashboard, the node dashboard, the cloud portal and the interactive CLI prompts offer a list to
+pick from instead of a text box, starting with Organization > Node components, and a choice that
+cannot be used is listed greyed out with the reason (the `### Changed` entries).
+
+1.36.0 replaces rc.5, which was pushed to `origin` and rolled to the demo org server and nodes 1 to 5
+but never tagged or published. New since rc.5: the two dashboard fixes from the rc.5 roll (lane
+FIX-RC5): Security > Rules > "+ Add override" lets you pick the rule again (T-762), and the org
+dashboard's "Grant an exception" dialog no longer shows a server error before any input (T-763).
+
 ## [1.34.0] — 2026-10-01
 
 Stable release on the `stable` channel (npm dist-tags `latest` + `stable`, PyPI, VS Code Marketplace and

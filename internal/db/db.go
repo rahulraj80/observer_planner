@@ -282,6 +282,11 @@ func Open(ctx context.Context, opts Options) (*sql.DB, error) {
 		_ = database.Close()
 		return nil, err
 	}
+	// U3: a CLI process whose database another observer process holds
+	// leaves the schema to that process (migratedefer.go).
+	if deferMigrations(ctx, database, opts.Path) {
+		return database, nil
+	}
 	if err := runMigrations(ctx, database); err != nil {
 		_ = database.Close()
 		return nil, err

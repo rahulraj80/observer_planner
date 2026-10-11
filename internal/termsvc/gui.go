@@ -82,6 +82,10 @@ type GUISpawnResult struct {
 	// WrapNote is the grounded reason for that verdict, or the caveat that
 	// qualifies an applied wrap.
 	WrapNote string
+	// WrapReason is the structured cause when WrapApplied is false (the
+	// guilaunch.WrapReason closed vocabulary, carried as a plain string so
+	// termsvc never imports the composition package). Empty when applied.
+	WrapReason string
 	// Notes are launch-composition advisories unrelated to the wrap.
 	Notes []string
 	// Bin is the resolved launch target, for the operator-facing response
@@ -116,6 +120,7 @@ type GUILaunchResult struct {
 	PID         int
 	WrapApplied bool
 	WrapNote    string
+	WrapReason  string
 	Notes       []string
 	Bin         string
 }
@@ -184,10 +189,11 @@ func (s *Service) LaunchGUI(ctx context.Context, req GUIRequest) (GUILaunchResul
 	if s.guiLauncher == nil {
 		return GUILaunchResult{}, ErrGUIUnsupported
 	}
-	if !s.policy.AllowFresh {
+	pol := s.currentPolicy()
+	if !pol.AllowFresh {
 		return GUILaunchResult{}, ErrFreshLaunchDisabled
 	}
-	if !s.policy.toolAllowed(req.ID) {
+	if !pol.toolAllowed(req.ID) {
 		return GUILaunchResult{}, fmt.Errorf("%w: %q", ErrToolNotAllowed, req.ID)
 	}
 	row, ok := integration.GUILaunchFor(req.ID)
@@ -199,7 +205,7 @@ func (s *Service) LaunchGUI(ctx context.Context, req GUIRequest) (GUILaunchResul
 	// empty request is already its "no directory" answer ("", nil) — a bare
 	// launch is legitimate for every GUI row, since most desktop apps take no
 	// directory at all.
-	dir, err := ValidateProjectRoot(req.ProjectRoot, s.policy.AllowedProjectRoots)
+	dir, err := ValidateProjectRoot(req.ProjectRoot, pol.AllowedProjectRoots)
 	if err != nil {
 		return GUILaunchResult{}, err
 	}
@@ -276,6 +282,7 @@ func (s *Service) LaunchGUI(ctx context.Context, req GUIRequest) (GUILaunchResul
 		PID:         res.PID,
 		WrapApplied: res.WrapApplied,
 		WrapNote:    res.WrapNote,
+		WrapReason:  res.WrapReason,
 		Notes:       res.Notes,
 		Bin:         res.Bin,
 	}, nil

@@ -60,7 +60,7 @@ func TestCursorProcessCutoffCoversManagedBudget(t *testing.T) {
 		t.Fatalf("fixture surface = %+v", row)
 	}
 	if !row.Spec.NativeUsage.Available() {
-		t.Fatal("cursor/cli's registry row does not declare a native usage source — the spike's premise is false, this test should not exist")
+		t.Fatal("cursor/cli's registry row does not declare a native usage source - the spike's premise is false, this test should not exist")
 	}
 
 	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
@@ -113,6 +113,6 @@ func TestCursorProcessCutoffCoversManagedBudget(t *testing.T) {
 	// per-invocation admission, not a blanket grant to the binary.
 	statusEvidence := budgetLaunchEvidence{Route: budgetLaunchRouteUnknown, Executable: bin, Arguments: []string{"status"}}
 	if nodeProcessCutoffCoversLaunch(ctx, cfg, st, "cursor", statusEvidence) {
-		t.Fatal("process cutoff covered a declared non-billable cursor invocation (status) — coverage is not scoped correctly")
+		t.Fatal("process cutoff covered a declared non-billable cursor invocation (status) - coverage is not scoped correctly")
 	}
 }

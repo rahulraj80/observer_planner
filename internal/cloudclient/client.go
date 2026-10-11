@@ -50,7 +50,7 @@ var (
 	// mint a replacement — the refresh failed, or the fresh token was rejected
 	// too. The only recovery is a new sign-in. Every later authenticated call
 	// on this Client fails fast with the same error (no retry storm).
-	ErrSignInExpired = errors.New("cloudclient: sign-in expired — run `observer cloud login`")
+	ErrSignInExpired = errors.New("cloudclient: sign-in expired - run `observer cloud login`")
 	// ErrInvalidID means a caller-supplied id cannot be used as a URL path
 	// segment: empty, a dot-segment ("." / ".."), or containing a character
 	// ("/", "?", "#", "%", or whitespace) that could reshape the request path

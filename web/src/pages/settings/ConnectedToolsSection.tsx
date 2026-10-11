@@ -4,14 +4,18 @@ import {
   RefreshCw,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { Summary } from "@/components/Summary";
-import { Button, ChartShell, Pill, Table, Tooltip } from "@/components/primitives";
+import { Button, ChartShell, ConfirmButton, Pill, Table, Tooltip } from "@/components/primitives";
+import { markRestartPending } from "@/lib/restartPending";
 import { ChartState } from "@/components/ChartState";
 import { useApi } from "@/lib/useApi";
+import { localConfirmHeaders } from "@/lib/api";
 import { fmtInt } from "@/lib/format";
+import { probeLabel } from "@/lib/toolProbe";
+import { hasWizard } from "@/lib/wizardSteps";
 import type {
   ToolLaunchResponse,
   ToolProbe,
@@ -19,10 +23,9 @@ import type {
   ToolStatusRow,
 } from "@/lib/types";
 import { SetupWizard } from "./SetupWizard";
-
-// Tools the P4.2 wizard can set up (the hook/MCP/route registries'
-// management set).
-const WIZARD_TOOLS = new Set(["claude-code", "cursor", "codex"]);
+import { WindowsHomesCard } from "./WindowsHomesCard";
+import { DashboardInstallsList } from "./DashboardInstallsList";
+import { ToolDoctorPanel } from "./ToolDoctorPanel";
 
 // Tools the P4.6 launch endpoint can open a terminal for (the
 // server-side hardcoded allow-list, mirrored for button placement).
@@ -31,12 +34,20 @@ const LAUNCH_TOOLS = new Set(["claude-code", "codex"]);
 // ConnectedToolsSection — the per-tool status matrix (usability arc
 // P4.1 / review row B1): every supported tool with its detected /
 // capturing / hooks / MCP / proxied state, from GET /api/tools/status.
-// All server probes are read-only; the write paths stay where they
-// are (routing buttons on the Compression page, hooks/MCP via
-// `observer init` until the P4.2 wizard lands).
+// All server probes are read-only. Writes go through the per-row Set up
+// wizard, offered for every tool whose row carries server-computed `wiring`
+// (T-421: the registry's hook mechanisms, MCP formats and persisted routes).
 // `icon` is the section glyph from the Settings SECTIONS table.
 export function ConnectedToolsSection({ icon }: { icon?: LucideIcon }) {
   const status = useApi<ToolsStatusResponse>("/api/tools/status");
+  // A Health remediation deep link (T-421): `?section=tools&tool=<t>&open=
+  // setup|remove|doctor` opens that tool's wizard (and its Remove panel) or
+  // its Run checks panel.
+  const [params] = useSearchParams();
+  const linkTool = params.get("tool");
+  const linkOpen = params.get("open");
+  const deepLink: ToolDeepLink | null =
+    linkTool && (linkOpen === "setup" || linkOpen === "remove" || linkOpen === "doctor") ? { tool: linkTool, mode: linkOpen } : null;
   const rows = status.data?.tools ?? [];
   const detected = rows.filter((r) => r.detected || r.action_count > 0);
   const others = rows.filter((r) => !r.detected && r.action_count === 0);
@@ -60,27 +71,24 @@ export function ConnectedToolsSection({ icon }: { icon?: LucideIcon }) {
         emptyHint="No tool catalog - daemon restart may be required after upgrading."
       >
         {missingDefaults.length > 0 && (
-          <div className="mb-3 rounded-2 border border-warn/40 bg-warn-soft px-3 py-2 text-[11.5px] text-warn">
-            <strong className="font-semibold">
-              {missingDefaults.length} default{" "}
-              {missingDefaults.length === 1 ? "adapter is" : "adapters are"} not enabled
-            </strong>{" "}
-            in config.toml ({missingDefaults.join(", ")}) - sessions from{" "}
-            {missingDefaults.length === 1 ? "it" : "them"} are not captured at all. Fix:{" "}
-            <code className="font-mono text-fg-1">
-              {status.data?.missing_default_remediation ?? "observer config adopt-defaults --write"}
-            </code>
-            , then restart the daemon.
-          </div>
+          <AdoptDefaultsBanner missing={missingDefaults} onAdopted={status.reload} />
         )}
-        <ToolsTable rows={detected} missingDefaults={missingDefaultsSet} onChanged={status.reload} />
+        <ToolsTable rows={detected} missingDefaults={missingDefaultsSet} onChanged={status.reload} deepLink={deepLink} />
+        {/* WSL daemon only (T-421 item 4): choose the Windows-side home an
+            AI tool's config lives in; renders nothing elsewhere. */}
+        <WindowsHomesCard focusTarget={linkOpen === "windows-home" ? params.get("target") : null} />
+        {/* Tools THIS dashboard installed, with their Uninstall (owner-local;
+            renders nothing when there are none or the read is refused). */}
+        <div className="mt-3">
+          <DashboardInstallsList />
+        </div>
         {others.length > 0 && (
-          <details className="mt-3">
+          <details className="mt-3" open={deepLink !== null && others.some((r) => r.tool === deepLink.tool) ? true : undefined}>
             <Summary className="w-fit text-[11.5px] text-fg-3 hover:text-fg-2">
               {others.length} supported tools not detected on this machine
             </Summary>
             <div className="mt-2">
-              <ToolsTable rows={others} missingDefaults={missingDefaultsSet} onChanged={status.reload} />
+              <ToolsTable rows={others} missingDefaults={missingDefaultsSet} onChanged={status.reload} deepLink={deepLink} />
             </div>
           </details>
         )}
@@ -103,16 +111,98 @@ export function ConnectedToolsSection({ icon }: { icon?: LucideIcon }) {
   );
 }
 
+type AdoptDefaultsResponse = {
+  missing: string[];
+  written: boolean;
+  restart_required: boolean;
+  error?: string;
+};
+
+// AdoptDefaultsBanner: `observer config adopt-defaults --write` from the
+// dashboard (backlog item 6, sweep row 19). The list shown IS the preview
+// (the same pure diff the CLI previews); the confirm posts exactly that list
+// and the server refuses it (409) if the file changed in between. The write
+// only appends names (comments and order kept, config.toml.bak first), and
+// a new adapter captures from the next daemon start.
+function AdoptDefaultsBanner({ missing, onAdopted }: { missing: string[]; onAdopted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const many = missing.length !== 1;
+
+  async function adopt() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/config/adopt-defaults", {
+        method: "POST",
+        headers: await localConfirmHeaders(),
+        body: JSON.stringify({ adapters: missing }),
+      });
+      const out = (await res.json().catch(() => null)) as AdoptDefaultsResponse | null;
+      if (!res.ok) throw new Error(out?.error || `HTTP ${res.status}`);
+      if (out?.restart_required) markRestartPending("observer", ["observer.watch.enabled_adapters"]);
+      setDone(true);
+      onAdopted();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      onAdopted();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mb-3 rounded-2 border border-warn/40 bg-warn-soft px-3 py-2 text-[11.5px] text-warn">
+      <strong className="font-semibold">
+        {missing.length} default {many ? "adapters are" : "adapter is"} not enabled
+      </strong>{" "}
+      in config.toml ({missing.join(", ")}) - sessions from {many ? "them" : "it"} are not captured at all.
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <ConfirmButton
+          variant="secondary"
+          armedVariant="primary"
+          size="sm"
+          onConfirm={() => void adopt()}
+          disabled={busy || done}
+          confirmLabel={missing.length === 1 ? `Add ${missing[0]}?` : `Add these ${missing.length} adapters?`}
+          armedNote="Appends only these names to [observer.watch] enabled_adapters; your other entries and comments stay. A backup goes to config.toml.bak."
+        >
+          {busy ? "Adding…" : `Enable ${many ? "them" : "it"}`}
+        </ConfirmButton>
+        {done && <span className="text-fg-2">Added. Restart the daemon to start capturing.</span>}
+        {err && <span className="text-danger">{err}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** ToolDeepLink is the Connected tools part of a remediation link. */
+type ToolDeepLink = { tool: string; mode: "setup" | "remove" | "doctor" };
+
 function ToolsTable({
   rows,
   missingDefaults,
   onChanged,
+  deepLink,
 }: {
   rows: ToolStatusRow[];
   missingDefaults: Set<string>;
   onChanged: () => void;
+  deepLink: ToolDeepLink | null;
 }) {
-  const [openWizard, setOpenWizard] = useState<string | null>(null);
+  const linked = deepLink !== null && deepLink.mode !== "doctor" && rows.some((r) => r.tool === deepLink.tool && hasWizard(r.wiring));
+  const linkedTool = linked ? deepLink.tool : null;
+  const [openWizard, setOpenWizard] = useState<string | null>(linkedTool);
+  // The rows can arrive after the first render: honour the deep link once,
+  // when its row first shows up.
+  const applied = useRef(linkedTool !== null);
+  useEffect(() => {
+    if (linkedTool !== null && !applied.current) {
+      applied.current = true;
+      setOpenWizard(linkedTool);
+    }
+  }, [linkedTool]);
   if (rows.length === 0) {
     return (
       <p className="rounded-2 border border-dashed border-line-2 bg-bg-3/40 px-3 py-2 text-[11.5px] text-fg-3">
@@ -141,6 +231,8 @@ function ToolsTable({
           row={r}
           missingDefault={missingDefaults.has(r.tool)}
           wizardOpen={openWizard === r.tool}
+          removeOpen={deepLink !== null && deepLink.mode === "remove" && deepLink.tool === r.tool}
+          checksLinked={deepLink !== null && deepLink.mode === "doctor" && deepLink.tool === r.tool}
           onToggleWizard={() =>
             setOpenWizard(openWizard === r.tool ? null : r.tool)
           }
@@ -155,10 +247,16 @@ function ToolRow({
   row: r,
   missingDefault,
   wizardOpen,
+  removeOpen,
+  checksLinked,
   onToggleWizard,
   onChanged,
 }: {
   row: ToolStatusRow;
+  /** Open the wizard's Remove panel (a Health remediation deep link). */
+  removeOpen: boolean;
+  /** Open the Run checks panel (a Health remediation deep link). */
+  checksLinked: boolean;
   // True when this tool is a compiled-in default adapter absent from
   // the operator's explicit enabled_adapters list (ToolsStatusResponse
   // .missing_default_adapters) — distinct from a tool the operator
@@ -172,6 +270,8 @@ function ToolRow({
   onChanged: () => void;
 }) {
   const [launch, setLaunch] = useState<ToolLaunchResponse | null>(null);
+  // Per-tool doctor (T-421 item 3): `observer doctor <tool>` for this row.
+  const [checksOpen, setChecksOpen] = useState(checksLinked);
   return (
     <>
       <tr className="border-t border-line-1">
@@ -198,7 +298,7 @@ function ToolRow({
             <Pill
               variant="warn"
               className="ml-2"
-              title="A compiled-in default adapter is missing from your enabled_adapters list - run `observer config adopt-defaults --write`, then restart the daemon."
+              title="A compiled-in default adapter is missing from your enabled_adapters list. Add it with the banner above, then restart the daemon."
             >
               not enabled (new default)
             </Pill>
@@ -241,7 +341,15 @@ function ToolRow({
             {LAUNCH_TOOLS.has(r.tool) && (
               <LaunchButton tool={r.tool} onResult={setLaunch} />
             )}
-            {WIZARD_TOOLS.has(r.tool) && (
+            <Button
+              variant={checksOpen ? "soft" : "secondary"}
+              size="sm"
+              onClick={() => setChecksOpen(!checksOpen)}
+              title={`Run the ${r.tool} checks (observer doctor ${r.tool})`}
+            >
+              {checksOpen ? "Hide checks" : "Run checks"}
+            </Button>
+            {hasWizard(r.wiring) && (
               <Button
                 variant={wizardOpen ? "soft" : "secondary"}
                 size="sm"
@@ -260,10 +368,17 @@ function ToolRow({
           </td>
         </tr>
       )}
+      {checksOpen && (
+        <tr>
+          <td colSpan={7}>
+            <ToolDoctorPanel tool={r.tool} onClose={() => setChecksOpen(false)} />
+          </td>
+        </tr>
+      )}
       {wizardOpen && (
         <tr>
           <td colSpan={7}>
-            <SetupWizard tool={r.tool} onChanged={onChanged} />
+            <SetupWizard tool={r.tool} wiring={r.wiring} onChanged={onChanged} initialRemoveOpen={removeOpen} />
           </td>
         </tr>
       )}
@@ -393,18 +508,14 @@ function LaunchResult({
 
 // ProbePill - one integration state. Absent probe = the integration
 // doesn't exist for the tool (honest n/a). The probe detail (counts,
-// conflicts, status words) lives in the tooltip.
+// conflicts, status words, or why a tool has no hooks) lives in the
+// tooltip. The label rules are lib/toolProbe's table.
 function ProbePill({ probe }: { probe?: ToolProbe }) {
   if (!probe) {
     return <span className="text-fg-4">n/a</span>;
   }
-  const pill = probe.registered ? (
-    <Pill variant="success">on</Pill>
-  ) : probe.partial ? (
-    <Pill variant="warn">partial</Pill>
-  ) : (
-    <Pill variant="neutral">off</Pill>
-  );
+  const { label, variant } = probeLabel(probe);
+  const pill = <Pill variant={variant}>{label}</Pill>;
   if (!probe.detail) return pill;
   return (
     <Tooltip content={probe.detail} maxWidth={380}>

@@ -117,6 +117,9 @@ func TestCopilotCLIUnknownFlagIsForwarded(t *testing.T) {
 	envPath := filepath.Join(dir, "env.out")
 	stub := writeArgvEnvRecorderStub(t, dir, argvPath, envPath)
 	t.Setenv("COPILOT_PROVIDER_API_KEY", "test-key-not-a-secret")
+	// A routed BYOK launch needs an explicit model (copilot help providers);
+	// without one the launcher refuses before copilot starts.
+	t.Setenv("COPILOT_MODEL", "gpt-4o")
 
 	cmd := newCopilotCLICmd()
 	var out bytes.Buffer

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -82,7 +84,12 @@ func defaultCloudSyncSpawner(ctx context.Context, configPath string) ([]byte, er
 	if configPath != "" {
 		args = append(args, "--config", configPath)
 	}
-	return exec.CommandContext(ctx, self, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, self, args...)
+	// T-553: on a daemon stop CommandContext kills only the direct child;
+	// WaitDelay stops Wait from blocking on a grandchild that inherited the
+	// output pipe.
+	cmd.WaitDelay = 2 * time.Second
+	return cmd.CombinedOutput()
 }
 
 // runCloudAutoSyncFromConfig is the daemon entry point (called from a fail-soft
@@ -116,7 +123,7 @@ func runCloudAutoSync(ctx context.Context, cfg config.Config, st *store.Store, c
 	// no "idle — no base URL" state to announce anymore; sync stays consent-gated,
 	// so a schedule with no live grant is a no-op, not an egress.
 	interval := time.Duration(cfg.Cloud.ResolvedCloudAutoSyncMinutes()) * time.Minute
-	fmt.Fprintf(out, "  cloud auto-sync → every %s (spawns `observer cloud sync`; consent-gated — nothing is sent without a live grant)\n", interval)
+	fmt.Fprintf(out, "  cloud auto-sync → every %s (spawns `observer cloud sync`; consent-gated - nothing is sent without a live grant)\n", interval)
 	cloudAutoSyncLoop(ctx, cfg, st, configPath, interval, errOut, spawn)
 }
 

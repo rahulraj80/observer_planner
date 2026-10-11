@@ -1,3 +1,5 @@
+//go:build !sbo_omit_archive
+
 package main
 
 import (
@@ -16,10 +18,9 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/archive"
 	"github.com/marmutapp/superbased-observer/internal/archivestore"
 	"github.com/marmutapp/superbased-observer/internal/archivesvc"
-	"github.com/marmutapp/superbased-observer/internal/codeintel"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/db"
-	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -38,10 +39,10 @@ func newArchiveCmd() *cobra.Command {
 		Long: "Cold storage (~/.observer/archive.db) holds data that is not garbage but\n" +
 			"is no longer part of the hot working set: code indexes for projects you\n" +
 			"have not touched in a while, and process capture past [observer.process]\n" +
-			"archive_days. Nothing here is lost — it is one rehydrate (code index) or\n" +
+			"archive_days. Nothing here is lost - it is one rehydrate (code index) or\n" +
 			"one page load (process trail) away.",
 	}
-	cmd.AddCommand(newArchiveStatusCmd(), newArchiveRehydrateCmd(), newArchiveReclaimCmd())
+	cmd.AddCommand(newArchiveStatusCmd(), newArchiveRehydrateCmd(), newArchiveReclaimCmd(), newArchiveReclaimCleanupCmd())
 	return cmd
 }
 
@@ -79,16 +80,17 @@ func newArchiveReclaimCmd() *cobra.Command {
 		Use:   "reclaim",
 		Short: "Report reclaimable space, and (with --run) compact the database via VACUUM INTO",
 		Long: "Archival and retention move rows OUT of the database, but SQLite does not\n" +
-			"shrink the file when rows leave — the freed pages sit on the freelist and\n" +
+			"shrink the file when rows leave - the freed pages sit on the freelist and\n" +
 			"the file stays the size it grew to. This is the step that turns those\n" +
 			"pages back into free disk.\n\n" +
 			"With no flags it only MEASURES: how much is on the freelist, what the file\n" +
 			"would shrink to, and whether the preconditions for running it hold. The\n" +
-			"measurement is three O(1) pragma reads — safe on a database of any size.\n\n" +
+			"measurement is three O(1) pragma reads - safe on a database of any size.\n\n" +
 			"With --run it writes a fresh compacted copy via VACUUM INTO, verifies that\n" +
 			"copy, renames the original aside, and puts the copy in its place. Nothing\n" +
 			"is deleted: the original stays on disk under a .pre-reclaim name until you\n" +
-			"remove it. Requires the daemon to be stopped\n" +
+			"remove it (`observer archive reclaim-cleanup --delete` verifies the new\n" +
+			"database, then deletes it). Requires the daemon to be stopped\n" +
 			"(docs/daemon-restart-runbook.md).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -231,7 +233,7 @@ func performReclaim(cmd *cobra.Command, cfg config.Config, database *sql.DB, clo
 	}
 	if srcFP.QuickCheck != "ok" {
 		return fmt.Errorf(
-			"archive reclaim: the SOURCE database fails quick_check (%q) — compaction would faithfully copy the damage.\n"+
+			"archive reclaim: the SOURCE database fails quick_check (%q) - compaction would faithfully copy the damage.\n"+
 				"Investigate with `observer db check` before reclaiming", srcFP.QuickCheck,
 		)
 	}
@@ -264,7 +266,7 @@ func performReclaim(cmd *cobra.Command, cfg config.Config, database *sql.DB, clo
 	}
 	if copyFP != srcFP {
 		return fmt.Errorf(
-			"archive reclaim: the compacted copy does not match the source (source %+v, copy %+v) — NOTHING was swapped, "+
+			"archive reclaim: the compacted copy does not match the source (source %+v, copy %+v) - NOTHING was swapped, "+
 				"the original is untouched, and %s can be deleted", srcFP, copyFP, copyPath,
 		)
 	}
@@ -326,7 +328,8 @@ func emitReclaimReport(cmd *cobra.Command, rep reclaimReport, jsonOut bool) erro
 	case rep.Ran:
 		fmt.Fprintf(out, "\nreclaimed %s: %s → %s\n",
 			humanBytes(rep.BytesFreed), humanBytes(rep.BytesBefore), humanBytes(rep.BytesAfter))
-		fmt.Fprintf(out, "the original is preserved at %s — start the daemon, confirm it is healthy, then delete it.\n",
+		fmt.Fprintf(out, "the original is preserved at %s - start the daemon, confirm it is healthy, then delete it:\n"+
+			"`observer archive reclaim-cleanup --delete` (it checks the new database first) or Settings > Storage.\n",
 			rep.BackupPath)
 	case rep.Plan.OK():
 		fmt.Fprintf(out, "\nReady. Run `observer archive reclaim --run` to compact (daemon must stay stopped).\n")
@@ -346,7 +349,7 @@ func newArchiveStatusCmd() *cobra.Command {
 		Short: "Show what is in cold storage",
 		Long: "An explicitly AGGREGATE view: how many code-intelligence projects and\n" +
 			"how many days of process capture have moved to cold storage, and how\n" +
-			"many rows that is. Answered from the hot marker tables alone — it never\n" +
+			"many rows that is. Answered from the hot marker tables alone - it never\n" +
 			"joins across the two databases and never enumerates archived rows.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -462,7 +465,7 @@ func newArchiveRehydrateCmd() *cobra.Command {
 			"derived search index, and clears the archived marker.\n\n" +
 			"If the cold copy is missing, incomplete, or was produced by a parser\n" +
 			"this build no longer accepts, it says so and tells you to run\n" +
-			"`observer index <path>` instead — the floor that always works, because\n" +
+			"`observer index <path>` instead - the floor that always works, because\n" +
 			"a code index is derived from the repository on disk.\n\n" +
 			"Process capture needs no equivalent: its archived rows are read straight\n" +
 			"from cold storage by the dashboard, with nothing copied back.",
@@ -478,7 +481,7 @@ func newArchiveRehydrateCmd() *cobra.Command {
 			}
 			defer cleanup()
 			if cfg.Archive.Path == "" {
-				return fmt.Errorf("[archive].path is empty — nothing to rehydrate from")
+				return fmt.Errorf("[archive].path is empty - nothing to rehydrate from")
 			}
 			cold, err := archivestore.Open(cmd.Context(), archivestore.Options{Path: cfg.Archive.Path})
 			if err != nil {
@@ -490,7 +493,7 @@ func newArchiveRehydrateCmd() *cobra.Command {
 				Hot:          store.New(database),
 				Cold:         cold,
 				BatchRows:    cfg.Archive.BatchRows,
-				AcceptParser: codeintel.ParserReplayable,
+				AcceptParser: codeIntelParserReplayable,
 			}
 			out, err := mover.RehydrateCodeIntelProject(cmd.Context(), project)
 			if err != nil {
@@ -500,7 +503,7 @@ func newArchiveRehydrateCmd() *cobra.Command {
 			case archivesvc.RehydrateRestored:
 				fmt.Fprintf(cmd.OutOrStdout(), "restored %s (%d rows)\n", project, out.RowsRestored)
 			case archivesvc.RehydrateNotArchived:
-				fmt.Fprintf(cmd.OutOrStdout(), "%s is not archived — nothing to do\n", project)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s is not archived - nothing to do\n", project)
 			case archivesvc.RehydrateAlreadyHot:
 				fmt.Fprintf(cmd.OutOrStdout(),
 					"%s was re-indexed after it was archived, so its live index is newer than the\n"+
@@ -531,7 +534,7 @@ func newArchiveRehydrateCmd() *cobra.Command {
 // poll would be the wrong trade — but its pool is small (4) for exactly the
 // reason the archive is a separate file: it must not become another idle
 // connection holder on the hot path.
-func openProcessArchiveReader(ctx context.Context, cfg config.Config) (dashboard.ProcessArchiveReader, func()) {
+func openProcessArchiveReader(ctx context.Context, cfg config.Config) (dashapi.ProcessArchiveReader, func()) {
 	noop := func() {}
 	if !cfg.Archive.Enabled || cfg.Archive.Path == "" {
 		return nil, noop

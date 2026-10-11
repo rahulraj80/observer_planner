@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // fakeSink records inserted APITurns in memory for test assertions.
@@ -47,25 +47,25 @@ func (f *fakeSink) all() []models.APITurn {
 
 type fakeNetworkSink struct {
 	mu     sync.Mutex
-	events []processobs.ProcessEvent
+	events []procmodel.ProcessEvent
 }
 
-func (f *fakeNetworkSink) PersistProcessEvents(_ context.Context, events []processobs.ProcessEvent) (int, error) {
+func (f *fakeNetworkSink) PersistProcessEvents(_ context.Context, events []procmodel.ProcessEvent) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.events = append(f.events, events...)
 	return len(events), nil
 }
 
-func (f *fakeNetworkSink) all() []processobs.ProcessEvent {
+func (f *fakeNetworkSink) all() []procmodel.ProcessEvent {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make([]processobs.ProcessEvent, len(f.events))
+	out := make([]procmodel.ProcessEvent, len(f.events))
 	copy(out, f.events)
 	return out
 }
 
-func (f *fakeNetworkSink) waitForCount(n int) []processobs.ProcessEvent {
+func (f *fakeNetworkSink) waitForCount(n int) []procmodel.ProcessEvent {
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for {
 		events := f.all()
@@ -1132,7 +1132,7 @@ func TestProxy_ProcessNetworkCapturesTransportFailure(t *testing.T) {
 		t.Fatalf("network events: got %d want 1", len(events))
 	}
 	ev := events[0]
-	if ev.Type != processobs.EventNetworkConnect {
+	if ev.Type != procmodel.EventNetworkConnect {
 		t.Fatalf("event type: got %q", ev.Type)
 	}
 	if ev.TargetKind != "url" || ev.Target == "" {
@@ -2337,6 +2337,49 @@ func TestProxy_OrdinaryResolvedSessionRejectedOnHostedLane(t *testing.T) {
 	}
 	if resolver.callCount() != 1 {
 		t.Errorf("SessionResolver calls = %d, want 1 prefix check", resolver.callCount())
+	}
+}
+
+// TestProxy_AgentLaneKeepsCodingAgentSession pins Options.AgentLanes: a
+// lane that carries a local coding agent's own traffic (OpenCode's Zen
+// provider through /up/opencode-zen) only picks the upstream host; the
+// request keeps the pid-derived Plane-B session, unlike a hosted lane.
+func TestProxy_AgentLaneKeepsCodingAgentSession(t *testing.T) {
+	const requestBody = `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`
+	const responseBody = `{"id":"msg_abc","model":"claude-sonnet-4","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	hits := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer up.Close()
+	sink := &fakeSink{}
+	p, err := New(Options{
+		AnthropicUpstream: "https://unused.example",
+		OpenAIUpstream:    "https://unused.example",
+		AgentUpstreams:    map[string]string{"opencode-zen": up.URL},
+		Sink:              sink,
+		SessionResolver:   &fakeResolver{sessionID: "ses_opencode", ok: true},
+	})
+	if err != nil {
+		t.Fatalf("proxy.New: %v", err)
+	}
+	ts := httptest.NewServer(p.Handler())
+	defer ts.Close()
+	req, _ := http.NewRequest("POST", ts.URL+"/up/opencode-zen/v1/messages", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request: %v", err)
+	}
+	resp.Body.Close()
+	if hits != 1 {
+		t.Fatalf("lane upstream hits = %d, want 1", hits)
+	}
+	turns := sink.all()
+	if len(turns) != 1 || turns[0].SessionID != "ses_opencode" {
+		t.Fatalf("turns = %+v, want one turn attributed to the coding-agent session", turns)
 	}
 }
 

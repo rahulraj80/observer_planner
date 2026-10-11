@@ -25,7 +25,7 @@ import (
 
 	"github.com/marmutapp/superbased-observer/internal/cachetrack"
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 // Sink is the write side of the proxy — the store layer implements this so
@@ -263,14 +263,21 @@ type Options struct {
 	// fixed upstreams). Empty/unset → only the fixed three upstreams exist
 	// (fail-open). LOCAL-ONLY config; never distributed.
 	Upstreams map[string]string
+	// AgentUpstreams maps a `/up/<id>/` lane id to the upstream host of a
+	// local CODING AGENT's own provider (Plane B), e.g. OpenCode's built-in
+	// Zen provider. Kept apart from Upstreams (the hosted-app lane table):
+	// an agent lane only picks its upstream host, while attribution,
+	// admission and obs synthesis treat the request like fixed-upstream
+	// coding-agent traffic. A same-id Upstreams lane wins.
+	AgentUpstreams map[string]string
 	// AutoDefaultLane names the [proxy.upstreams] lane id the virtual
 	// "auto" /up/auto/<path> lane (Phase 2, gateway config plane spec)
 	// forwards to when the request's top-level model carries no matching
 	// lane-id prefix (no "/", no match, or an empty/unparseable model —
 	// e.g. a GET). Config: [proxy].auto_default_lane, validated to name a
 	// configured upstream when set. Empty means no default: an
-	// unresolvable auto-lane request falls through exactly like an
-	// unknown /up/<id> id (fixed upstream, warn-once). See resolveAutoLane.
+	// unresolvable auto-lane request is refused exactly like an unknown
+	// /up/<id> id (never forwarded, warn-once; Sol A5-02). See resolveAutoLane.
 	AutoDefaultLane string
 	// ForceChatGPTHTTP rejects ChatGPT backend websocket upgrades so Codex falls
 	// back to HTTPS POST, which is the path Observer can currently compress.
@@ -394,7 +401,7 @@ type Options struct {
 	// node-local process network event for each proxied upstream call. This is
 	// the plaintext capture source for process observability network bodies;
 	// nil leaves proxy behavior byte-identical except for a nil check.
-	NetworkSink processobs.EventSink
+	NetworkSink procmodel.EventSink
 	// NetworkCapture controls optional process-network metadata/body capture
 	// from the proxy path. Default zero value disables capture.
 	NetworkCapture NetworkCaptureOptions
@@ -410,6 +417,13 @@ type Options struct {
 	// value changes nothing (doWithRetry's single transport retry is
 	// pre-existing behavior). See reliability.go.
 	Reliability ReliabilityOptions
+	// Activity, when non-nil, is called (non-blocking) on every proxied
+	// request (ActivityRequest) and every committed api_turn
+	// (ActivityTurn). See activity.go. Nil = no callback.
+	Activity func(kind string)
+	// BudgetWarning, when non-nil, returns the X-SBO-Budget-Warning value
+	// stamped on proxied responses ("" = none). See activity.go.
+	BudgetWarning func() string
 	// LocalUpstreams maps model ids to local OpenAI-shape endpoint
 	// base URLs (§R11.7 — Ollama / LM Studio / vLLM). A request whose
 	// (possibly routed) model matches forwards to that endpoint
@@ -592,8 +606,12 @@ type Proxy struct {
 	// limitSink, when non-nil, receives a models.LimitSnapshot for each
 	// upstream response carrying rate-limit headers (predictor limit half).
 	limitSink LimitSink
+	// activity / budgetWarning are Options.Activity / Options.BudgetWarning
+	// (activity.go); nil = off.
+	activity      func(kind string)
+	budgetWarning func() string
 	// networkSink receives optional proxy-observed process network events.
-	networkSink    processobs.EventSink
+	networkSink    procmodel.EventSink
 	networkCapture NetworkCaptureOptions
 	// guard, when non-nil, is the guard layer's proxy seam (spec §8).
 	// See Options.Guard.
@@ -612,6 +630,8 @@ type Proxy struct {
 	reliability ReliabilityOptions
 	// localUpstreams maps model ids to parsed §R11.7 local endpoints.
 	localUpstreams map[string]*url.URL
+	// agentUpstreams is Options.AgentUpstreams parsed (immutable after New).
+	agentUpstreams map[string]*url.URL
 	// keyPools holds the §R12.4 per-provider rotating key rings.
 	keyPools map[string]*keyPool
 	// codexVariantWarned is the per-session dedup map for the V7-2
@@ -699,7 +719,7 @@ func (p *Proxy) maybeWarnCodexVariantModel(sid, model string) {
 		})
 	}
 	p.logger.Warn(
-		"proxy: codex-variant model paired with non-empty compress_types — "+
+		"proxy: codex-variant model paired with non-empty compress_types - "+
 			"the codex-variant family re-derives data on compressed tool_results, "+
 			"inflating cost; recommend `[compression.conversation] compress_types = []` "+
 			"or `observer start --recipe codex-variant`; see docs/codex-compression-recipe.md",
@@ -806,6 +826,17 @@ func New(opts Options) (*Proxy, error) {
 		}
 		explicitUpstreams[id] = u
 	}
+	var agentUpstreams map[string]*url.URL
+	for id, raw := range opts.AgentUpstreams {
+		u, err := parseUpstream("agent_upstream:"+id, raw, "")
+		if err != nil {
+			return nil, err
+		}
+		if agentUpstreams == nil {
+			agentUpstreams = map[string]*url.URL{}
+		}
+		agentUpstreams[id] = u
+	}
 	prewarm := opts.PrewarmTargets
 	if prewarm == nil {
 		// nil → use defaults. Empty slice (non-nil) → operator explicitly
@@ -839,12 +870,15 @@ func New(opts Options) (*Proxy, error) {
 		cacheEngine:         opts.CacheEngine,
 		cacheSink:           opts.CacheSink,
 		limitSink:           opts.LimitSink,
+		activity:            opts.Activity,
+		budgetWarning:       opts.BudgetWarning,
 		networkSink:         opts.NetworkSink,
 		networkCapture:      opts.NetworkCapture,
 		router:              opts.ModelRouter,
 		toolsAllowlist:      opts.ToolsAllowlist,
 		reliability:         opts.Reliability,
 		localUpstreams:      localUpstreams,
+		agentUpstreams:      agentUpstreams,
 		keyPools:            buildKeyPools(opts.KeyPools),
 		guard:               opts.Guard,
 		obsSink:             opts.ObsSink,
@@ -1244,10 +1278,15 @@ func hostIsLoopback(host string) bool {
 	return false
 }
 
+// proxyShutdownGrace is how long ListenAndServe lets in-flight requests
+// finish after ctx is cancelled before it closes their connections. A var
+// for tests.
+var proxyShutdownGrace = 5 * time.Second
+
 func (p *Proxy) ListenAndServe(ctx context.Context, addr string) error {
 	p.requireLoopbackHost.Store(hostIsLoopback(hostnameOnly(addr)))
 	if host := hostnameOnly(addr); host != "" && !hostIsLoopback(host) {
-		p.logger.Warn("proxy bound to a non-loopback address — the listener has no client auth and, when a routing key_pool is configured, will substitute the operator's own API keys on a 429; anything that can reach it can drive requests upstream", "addr", addr)
+		p.logger.Warn("proxy bound to a non-loopback address - the listener has no client auth and, when a routing key_pool is configured, will substitute the operator's own API keys on a 429; anything that can reach it can drive requests upstream", "addr", addr)
 	}
 	srv := &http.Server{
 		Addr:              addr,
@@ -1264,10 +1303,19 @@ func (p *Proxy) ListenAndServe(ctx context.Context, addr string) error {
 	go p.Prewarm(ctx, p.prewarmTargets)
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), proxyShutdownGrace)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("proxy shutdown: %w", err)
+			// T-553: the grace ran out with requests still in flight (a
+			// long streamed turn). Shutdown never cancels them, so they
+			// would run on, writing to the DB, while the daemon tries to
+			// stop. Close drops their connections, which cancels each
+			// request's context and with it the upstream call. Not an
+			// error: the listener is stopped as asked, and returning one
+			// here used to take the whole daemon down when an in-place
+			// update released the listeners (update_wire.go ApplyDetached).
+			_ = srv.Close()
+			p.logger.Warn("proxy: in-flight requests outlived the shutdown grace; closed them", "grace", proxyShutdownGrace)
 		}
 		return nil
 	case err := <-errCh:
@@ -1331,6 +1379,16 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		writeBrowserRefusal(w, reason)
 		return
 	}
+	// Local lane introspection for launcher preflight (T-308, laneinfo.go).
+	// After the browser-provenance refusal so a web page cannot enumerate
+	// lanes; before any routing so it can never be forwarded.
+	if r.URL.Path == lanesPath {
+		p.serveLanes(w, r)
+		return
+	}
+	// Node activity (activity.go): a proxied request is the cheapest
+	// "the developer is working" signal - one non-blocking callback.
+	p.noteActivity(ActivityRequest)
 
 	// Bounded drain (enterprise-update-management plan §3.7 step 4a, R9/R13).
 	// Placed here, immediately AFTER the liveness probe and BEFORE any
@@ -1360,9 +1418,27 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	// its base URL at .../up/<id>/v1; stripUpstreamPrefix rewrites r.URL.Path
 	// to drop the /up/<id> segment (so all downstream path/provider logic
 	// sees the canonical path) and returns the mapped upstream. Returns nil
-	// when there's no prefix or the id is unknown → the fixed-upstream path
-	// below runs unchanged (fail-open).
-	explicitUpstream, upstreamLaneID := p.stripUpstreamPrefix(r)
+	// when there's no prefix → the fixed-upstream path below runs unchanged.
+	// A prefix naming a lane this node cannot route is REFUSED here, before
+	// any upstream request exists (Sol A5-02): the caller's credential is
+	// for that lane's provider, not for a fixed upstream.
+	prefix := p.resolveUpstreamPrefix(r)
+	if prefix.malformed {
+		writeMalformedLaneRefusal(w, providerForPath(r.URL.Path))
+		return
+	}
+	if prefix.unresolved != "" {
+		writeUnknownLaneRefusal(w, providerForPath(r.URL.Path), prefix.unresolved)
+		return
+	}
+	explicitUpstream, upstreamLaneID, agentLane := prefix.up, prefix.id, prefix.agent
+	if agentLane {
+		// A coding-agent lane (Options.AgentUpstreams) only selects the
+		// upstream host: it is not a hosted-app lane, so the rest of the
+		// request runs exactly as fixed-upstream coding-agent traffic
+		// (Plane-B attribution, no hosted-app admission or obs synthesis).
+		upstreamLaneID = ""
+	}
 	if upstreamLaneID != "" {
 		// Stamp the lane id on the request context: the gateway rail's
 		// Plane-A/Plane-B discriminator (obsLaneCtxKey doc). Reassigned
@@ -1476,12 +1552,15 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		if upstreamLaneID == autoLaneID {
 			lanes := p.laneSnapshot()
 			resolved, resolvedLane, _, _ := p.resolveAutoLane(lanes, "", nil)
-			upstreamLaneID = resolvedLane
-			if resolved != nil {
-				upstream = resolved
-			} else {
+			if resolved == nil {
+				// Unresolvable: refuse, never dial the placeholder fixed
+				// upstream with this lane's credential (Sol A5-02).
 				p.warnUnknownUpstreamOnce(autoLaneID, r.URL.Path, len(lanes.upstreams))
+				writeUnknownLaneRefusal(w, provider, autoLaneID)
+				return
 			}
+			upstreamLaneID = resolvedLane
+			upstream = resolved
 			r = r.WithContext(context.WithValue(r.Context(), obsLaneCtxKey{}, upstreamLaneID))
 		}
 		p.serveUpgradePassthrough(w, r, upstream)
@@ -1530,7 +1609,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		// must classify gzip traffic need a bounded gzip parity path first
 		// (docs §9 deferred); until then the app must not gzip requests to
 		// the proxy.
-		p.logger.Debug("proxy: gzip request body not decoded — admission/egress skip this request (§3.5)")
+		p.logger.Debug("proxy: gzip request body not decoded - admission/egress skip this request (§3.5)")
 	}
 	// bodyMutated tracks whether reqShapeBody diverged from the bytes
 	// the client sent (compression, post-compact injection, or guard
@@ -1567,19 +1646,21 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		// an upstream map that no longer (or doesn't yet) contain it.
 		lanes := p.laneSnapshot()
 		resolved, resolvedLane, rewrittenBody, rewrote := p.resolveAutoLane(lanes, topModel, reqShapeBody)
-		upstreamLaneID = resolvedLane
-		if resolved != nil {
-			upstream = resolved
-			if rewrote {
-				reqShapeBody = rewrittenBody
-				bodyMutated = true
-			}
-		} else {
+		if resolved == nil {
 			// Unresolvable (no prefix match and no usable default lane):
-			// fall through exactly like an unknown /up/<id> today — the
-			// placeholder `upstream` computed above (p.upstreamForPath)
-			// keeps serving, body untouched, warn-once.
+			// refuse exactly like an unknown /up/<id> (Sol A5-02). The
+			// placeholder `upstream` computed above (p.upstreamForPath) is a
+			// fixed provider this request was never addressed to; forwarding
+			// there would hand it the lane's credential.
 			p.warnUnknownUpstreamOnce(autoLaneID, r.URL.Path, len(lanes.upstreams))
+			writeUnknownLaneRefusal(w, provider, autoLaneID)
+			return
+		}
+		upstreamLaneID = resolvedLane
+		upstream = resolved
+		if rewrote {
+			reqShapeBody = rewrittenBody
+			bodyMutated = true
 		}
 		r = r.WithContext(context.WithValue(r.Context(), obsLaneCtxKey{}, upstreamLaneID))
 	}
@@ -1653,7 +1734,13 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		promptAPISessionID = p.resolveAPITurnSessionID(r, provider, reqShapeBody)
 		promptSID = resolvePromptGuardScopeID(r, promptAPISessionID,
 			promptGuardUpstreamID(upstreamLaneID, provider), provider)
-		pr := promptPhase.ScanPrompt(r.Context(), provider, reqShapeBody, promptSID)
+		// Audit P9: resolve the CLIENT tool here, at the boundary, so a
+		// prompt-lane verdict names the tool the prompt was typed into
+		// (it used to persist with an empty tool). Same resolver the
+		// routing tiers use (pid bridge, then the header signatures);
+		// "" when neither knows.
+		promptCtx := WithGuardClientTool(r.Context(), p.requestClass(r, provider).Tool)
+		pr := promptPhase.ScanPrompt(promptCtx, provider, reqShapeBody, promptSID)
 		switch pr.Action {
 		case "prompt_deny":
 			p.serveGuardPromptDeny(w, r, provider, pr, reqShapeBody, promptAPISessionID)
@@ -1780,7 +1867,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 			// pre-compression bytes (the post-compact-injected form when
 			// injected, else the untouched original). A config that turns
 			// conversation compression on can no longer corrupt requests.
-			p.logger.Warn("proxy: compressor emitted invalid JSON — forwarding pre-compression body (compression skipped for this request)",
+			p.logger.Warn("proxy: compressor emitted invalid JSON - forwarding pre-compression body (compression skipped for this request)",
 				"provider", provider,
 				"input_bytes", len(compressionInput),
 				"output_bytes", len(compression.Body))
@@ -2280,6 +2367,12 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 
 	// Copy upstream headers and status to the client.
 	copyResponseHeaders(w.Header(), resp.Header)
+	// The node's soft-budget warning (activity.go), in the AI gateway's
+	// spelling. Stamped on every proxied response while a warn rung is
+	// reached; it never changes the status or the body.
+	if v := p.budgetWarningValue(); v != "" {
+		w.Header().Set(HeaderBudgetWarning, v)
+	}
 	// Limit-snapshot capture (predictor limit half). resp.Header is live
 	// here for EVERY response shape — streaming, non-streaming, error/429 —
 	// so one graft covers all four R2 cases uniformly. Additive: not
@@ -2564,6 +2657,9 @@ func (p *Proxy) insertTurnDetached(turn models.APITurn, routerToken int64, label
 		return 0
 	}
 	p.recordServedSafe(routerToken, id, turn.Model)
+	// A committed, priced turn: spend moved (warning ladder) and there is
+	// something new to push (activity-driven push).
+	p.noteActivity(ActivityTurn)
 	return id
 }
 
@@ -2598,6 +2694,7 @@ func (p *Proxy) insertTurnAndCacheDetached(turn models.APITurn, reqShape request
 		return 0
 	}
 	p.recordServedSafe(routerToken, apiTurnID, turn.Model)
+	p.noteActivity(ActivityTurn)
 	if p.cacheEngine == nil {
 		return apiTurnID
 	}
@@ -3444,7 +3541,7 @@ func (p *Proxy) warnUnknownUpstreamOnce(id, path string, configuredCount int) {
 		return
 	}
 	if _, seen := p.unknownUpstreamWarned.LoadOrStore(id, struct{}{}); !seen {
-		p.logger.Warn("proxy: unknown /up/ upstream id — not routed, falling back to the fixed upstream",
+		p.logger.Warn("proxy: unknown /up/ upstream id - not routed; the request is refused and never forwarded",
 			"id", id, "path", path, "configured", configuredCount)
 	}
 }
@@ -3468,36 +3565,100 @@ func (p *Proxy) warnUnknownUpstreamOnce(id, path string, configuredCount int) {
 // this function runs before. It returns (nil, autoLaneID) so serve() knows
 // to call resolveAutoLane once the body is buffered.
 func (p *Proxy) stripUpstreamPrefix(r *http.Request) (*url.URL, string) {
+	res := p.resolveUpstreamPrefix(r)
+	return res.up, res.id
+}
+
+// upstreamPrefix is resolveUpstreamPrefix's result.
+type upstreamPrefix struct {
+	// up is the resolved explicit upstream (nil for no prefix, the virtual
+	// "auto" lane before body resolution, or an unresolved id).
+	up *url.URL
+	// id is the routing id that matched ("" when none did).
+	id string
+	// agent is true for a coding-agent lane (Options.AgentUpstreams) rather
+	// than a hosted-app lane.
+	agent bool
+	// unresolved is the id of a syntactically valid `/up/<id>/` prefix that
+	// names NO lane this node can route (Sol A5-02). The request must be
+	// refused locally: it was addressed to a specific provider, and the fixed
+	// upstream it would otherwise fall through to is not that provider.
+	unresolved string
+	// malformed is true for a lane address with no id or no path after the
+	// id (`/up//v1/...`, `/up/<id>`, `/up/`, `/up`; pass-2 review C156-18).
+	// It is refused locally for the same reason as unresolved: the caller
+	// addressed a lane, so its credential is not for a fixed upstream.
+	malformed bool
+}
+
+// malformedLaneWarnKey is the dedup key warnUnknownUpstreamOnce uses for
+// every malformed lane address, so they log once per daemon in total.
+const malformedLaneWarnKey = "(malformed /up/ address)"
+
+// resolveUpstreamPrefix is stripUpstreamPrefix plus whether the lane is a
+// coding-agent lane (Options.AgentUpstreams) rather than a hosted-app lane,
+// and whether the request named a lane this node cannot resolve.
+//
+// FAIL CLOSED on an unresolvable lane (Sol A5-02, D-032). A `/up/<id>/`
+// prefix is the caller saying which provider it means; the credential it
+// carries (Authorization, X-Api-Key, X-Goog-Api-Key, Api-Key, ?key=) belongs
+// to THAT provider. This used to fail open: the prefix was left in place and
+// the fixed-upstream selection forwarded the request, credential included,
+// to whichever fixed provider the path shape matched (OpenAI for any
+// /chat/completions). That is a credential disclosure to a host the request
+// was never meant for, even when the host then answers 404. It applies
+// whether or not any lanes are configured: an older config, a typo or a
+// removed entry are all the same unresolvable address.
+//
+// FAIL CLOSED on a MALFORMED lane address too (pass-2 review C156-18). The
+// first segment of the path decides whether the request is a lane request:
+// `up` (after any run of leading slashes, which a base URL with a trailing
+// slash produces) makes it one. A lane request with no id (`/up//v1/...`,
+// `/up/`, `/up`) or no path after its id (`/up/openrouter`) used to return
+// "no prefix" and fall through to the fixed upstream its path shape matched,
+// credential included: isOpenAIPath matches `/chat/completions` anywhere, so
+// `/up//v1/chat/completions` reached the fixed OpenAI upstream. It is now
+// refused before any upstream request exists.
+func (p *Proxy) resolveUpstreamPrefix(r *http.Request) upstreamPrefix {
 	const marker = "/up/"
-	upstreams := p.upstreamsSnapshot()
-	if len(upstreams) == 0 || !strings.HasPrefix(r.URL.Path, marker) {
-		return nil, ""
+	path := "/" + strings.TrimLeft(r.URL.Path, "/")
+	if path != "/up" && !strings.HasPrefix(path, marker) {
+		return upstreamPrefix{}
 	}
-	rest := r.URL.Path[len(marker):]
+	upstreams := p.upstreamsSnapshot()
+	rest := strings.TrimPrefix(path, "/up")
+	rest = strings.TrimPrefix(rest, "/")
 	slash := strings.IndexByte(rest, '/')
 	if slash <= 0 {
-		return nil, "" // no id, or id with no trailing path segment
+		p.warnUnknownUpstreamOnce(malformedLaneWarnKey, r.URL.Path, len(upstreams))
+		return upstreamPrefix{malformed: true}
 	}
 	id := rest[:slash]
 	if id == autoLaneID {
+		if len(upstreams) == 0 {
+			p.warnUnknownUpstreamOnce(id, r.URL.Path, 0)
+			return upstreamPrefix{unresolved: autoLaneID}
+		}
 		r.URL.Path = rest[slash:]
 		r.URL.RawPath = ""
-		return nil, autoLaneID
+		return upstreamPrefix{id: autoLaneID}
 	}
 	up, ok := upstreams[id]
 	if !ok {
-		// Fail-open (unchanged): the request keeps its unstripped `/up/<id>/…`
-		// path and goes to the fixed upstream, where it dies as an opaque
-		// 404/401 that names nothing. Say it ONCE per unknown id (mirrors
-		// codexVariantWarned) so a typo'd/missing `[proxy.upstreams]` entry is
-		// diagnosable instead of silent — this is exactly how a launcher's
-		// `--upstream` typo presents. Routing behaviour is untouched.
+		if agentUp, isAgent := p.agentUpstreams[id]; isAgent {
+			r.URL.Path = rest[slash:]
+			r.URL.RawPath = ""
+			return upstreamPrefix{up: agentUp, id: id, agent: true}
+		}
+		// Say it ONCE per unknown id (mirrors codexVariantWarned) so a
+		// typo'd/missing `[proxy.upstreams]` entry is diagnosable in the log
+		// as well as in the refusal the caller writes.
 		p.warnUnknownUpstreamOnce(id, r.URL.Path, len(upstreams))
-		return nil, ""
+		return upstreamPrefix{unresolved: id}
 	}
 	r.URL.Path = rest[slash:] // keep the leading slash of the canonical path
 	r.URL.RawPath = ""        // force net/url to re-derive the escaped form
-	return up, id
+	return upstreamPrefix{up: up, id: id}
 }
 
 // isEmptyUsage reports whether a parsed turn carries no usable token
@@ -3763,7 +3924,7 @@ func (p *Proxy) buildStreamTurn(
 // errors (TLS handshake failure, dial failure mid-handshake), or on
 // any HTTP-level response (a 5xx is the upstream's job to surface).
 func (p *Proxy) doWithRetry(req *http.Request, body []byte) (*http.Response, error) {
-	resp, err := p.client.Do(req)
+	resp, err := p.client.Do(req) //nolint:gosec // G704: the upstream URL was chosen by the proxy from its configured upstream table
 	if err == nil {
 		return resp, nil
 	}
@@ -3776,14 +3937,14 @@ func (p *Proxy) doWithRetry(req *http.Request, body []byte) (*http.Response, err
 	if rt, ok := p.client.Transport.(*http.Transport); ok {
 		rt.CloseIdleConnections()
 	}
-	retryReq, rerr := http.NewRequestWithContext(req.Context(), req.Method, req.URL.String(), bytes.NewReader(body))
+	retryReq, rerr := http.NewRequestWithContext(req.Context(), req.Method, req.URL.String(), bytes.NewReader(body)) //nolint:gosec // G704: the retry reuses the URL the proxy chose from its configured upstream table
 	if rerr != nil {
 		return nil, err
 	}
 	retryReq.Header = req.Header.Clone()
 	retryReq.Host = req.Host
 	retryReq.ContentLength = int64(len(body))
-	resp, retryErr := p.client.Do(retryReq)
+	resp, retryErr := p.client.Do(retryReq) //nolint:gosec // G704: the retry reuses the URL the proxy chose from its configured upstream table
 	if retryErr != nil {
 		// Surface the retry error, not the original — it's the most
 		// recent signal of upstream state.
@@ -3818,29 +3979,78 @@ func isRetryableTransportError(err error) bool {
 
 func (p *Proxy) serveUpgradePassthrough(w http.ResponseWriter, r *http.Request, upstream *url.URL) {
 	target := *upstream
-	proxy := httputil.NewSingleHostReverseProxy(&target)
+	// Rewrite, not the deprecated Director (Go 1.26, ledger LINT-126-2,
+	// resolved). The upstream sees exactly what the Director version sent:
+	// Rewrite strips the inbound Forwarded / X-Forwarded-* headers before it
+	// runs and appends no client address, so keepDirectorForwarding restores
+	// the inbound values and appendDirectorXForwardedFor adds the client
+	// address the Director path appended. pr.Out.Header is a fresh clone of
+	// r.Header (req.Clone), so the deletes never touch the inbound request,
+	// the same non-mutation guarantee as copyRequestHeaders below.
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(&target)
+			pr.Out.URL.Path = joinPath(upstream.Path, r.URL.Path)
+			pr.Out.URL.RawQuery = stripHostedIdentityQueryParams(r.URL.RawQuery)
+			pr.Out.Host = upstream.Host
+			keepDirectorForwarding(pr)
+			pr.Out.Header.Del("X-Session-Id")
+			for k := range pr.Out.Header {
+				if isHostedIdentityHeader(k, p.admissionUserHeader) {
+					pr.Out.Header.Del(k)
+				}
+			}
+			appendDirectorXForwardedFor(pr)
+		},
+	}
 	if p.client != nil {
 		proxy.Transport = p.client.Transport
 	}
-	originalDirector := proxy.Director
-	proxy.Director = func(outReq *http.Request) {
-		originalDirector(outReq)
-		outReq.URL.Path = joinPath(upstream.Path, r.URL.Path)
-		outReq.URL.RawQuery = stripHostedIdentityQueryParams(r.URL.RawQuery)
-		outReq.Host = upstream.Host
-		outReq.Header.Del("X-Session-Id")
-		// outReq.Header is a fresh clone of r.Header made by
-		// httputil.ReverseProxy before Director runs (req.Clone), so
-		// deleting here never touches the original inbound request —
-		// same non-mutation guarantee as copyRequestHeaders below.
-		for k := range outReq.Header {
-			if isHostedIdentityHeader(k, p.admissionUserHeader) {
-				outReq.Header.Del(k)
-			}
-		}
-	}
 	proxy.ErrorLog = slog.NewLogLogger(p.logger.Handler(), slog.LevelWarn)
 	proxy.ServeHTTP(w, r)
+}
+
+// directorForwardingHeaders are the headers httputil.ReverseProxy strips
+// from the outbound request before a Rewrite func runs, and which the
+// Director path passed through as the client sent them.
+var directorForwardingHeaders = []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"}
+
+// keepDirectorForwarding copies the inbound forwarding headers back onto the
+// outbound request, except one the inbound Connection header names (the
+// Director path dropped those as hop-by-hop).
+func keepDirectorForwarding(pr *httputil.ProxyRequest) {
+	for _, name := range directorForwardingHeaders {
+		if connectionNames(pr.In.Header, name) {
+			continue
+		}
+		if v := pr.In.Header.Values(name); len(v) > 0 {
+			pr.Out.Header[http.CanonicalHeaderKey(name)] = append([]string(nil), v...)
+		}
+	}
+}
+
+// appendDirectorXForwardedFor appends the client address to X-Forwarded-For
+// as the Director path did: prior values folded into one comma+space list,
+// the header left as it is when RemoteAddr has no host:port.
+func appendDirectorXForwardedFor(pr *httputil.ProxyRequest) {
+	clientIP, _, err := net.SplitHostPort(pr.In.RemoteAddr)
+	if err != nil {
+		return
+	}
+	if prior := pr.Out.Header.Values("X-Forwarded-For"); len(prior) > 0 {
+		clientIP = strings.Join(prior, ", ") + ", " + clientIP
+	}
+	pr.Out.Header.Set("X-Forwarded-For", clientIP)
+}
+
+// connectionNames reports whether the Connection header lists name.
+func connectionNames(h http.Header, name string) bool {
+	for _, v := range h.Values("Connection") {
+		if headerHasToken(v, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func isWebSocketUpgrade(r *http.Request) bool {

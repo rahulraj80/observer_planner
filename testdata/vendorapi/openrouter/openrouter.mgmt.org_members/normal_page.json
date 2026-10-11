@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "email": "jane.doe@example.com",
+      "first_name": "Jane",
+      "id": "user_2dHFtVWx2n56w6HkM0000000000",
+      "last_name": "Doe",
+      "role": "org:member"
+    },
+    {
+      "email": "sam.admin@example.com",
+      "first_name": null,
+      "id": "user_synth0000000000000000002",
+      "last_name": null,
+      "role": "org:admin"
+    }
+  ],
+  "total_count": 3
+}

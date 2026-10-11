@@ -48,6 +48,13 @@ const rowCases: Array<{
     want: { project: "/home/me/repo" },
     junk: "?proj=%0Abad",
   },
+  {
+    param: "model",
+    good: "openrouter/qwen/qwen3-coder:free",
+    search: "?model=openrouter%2Fqwen%2Fqwen3-coder%3Afree",
+    want: { model: "openrouter/qwen/qwen3-coder:free" },
+    junk: "?model=%0Abad",
+  },
   { param: "search", good: "abc", search: "?search=abc", want: { query: "abc" }, junk: "?search=%20%20" },
   { param: "gran", good: "1h", search: "?gran=1h", want: { gran: "1h" }, junk: "?gran=2h" },
 ];
@@ -105,6 +112,8 @@ const roundTrips: UrlFilters[] = [
   f({ win: "custom", customRange: RANGE, project: "/srv/a b&c", query: "fix bug" }),
   f({ win: "custom", customRange: { since: RANGE.since, until: "" } }),
   f({ tool: "cursor", project: "/x", query: "a=b&c" }),
+  f({ win: "7d", tool: "claude-code", model: "claude-opus-4-7" }),
+  f({ model: "openrouter/qwen/qwen3-coder:free" }),
 ];
 for (const s of roundTrips) {
   test(`round-trip ${JSON.stringify(s)}`, () => {
@@ -143,4 +152,14 @@ test("reconcile push: URL fields win, absent fields follow the user", () => {
   const cur = f({ win: "7d", tool: "codex" });
   assert.deepEqual(reconcileFromUrl(cur, "?session=abc", "push"), cur);
   assert.deepEqual(reconcileFromUrl(cur, "?tool=cursor", "push"), f({ win: "7d", tool: "cursor" }));
+});
+
+test("model: a deep link sets it, all/absent is the unfiltered default", () => {
+  assert.deepEqual(reconcileFromUrl(f(), "?model=gpt-5.1", "pop"), f({ model: "gpt-5.1" }));
+  // "all" is the default, so it is never written back to the URL.
+  assert.equal(applyFilterParams("", f({ model: "all" })), "");
+  assert.equal(applyFilterParams("", f({ model: "gpt-5.1" })), "?model=gpt-5.1");
+  // An in-app navigation carries the active model filter along.
+  const cur = f({ model: "claude-opus-4-7" });
+  assert.deepEqual(reconcileFromUrl(cur, "?session=abc", "push"), cur);
 });

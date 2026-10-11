@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 )
 
 // Report is the full discover output.
@@ -14,6 +16,7 @@ type Report struct {
 	Project          string             `json:"project,omitempty"`
 	Days             int                `json:"days,omitempty"`
 	Since            string             `json:"since,omitempty"`
+	Until            string             `json:"until,omitempty"`
 	StaleReads       []StaleReadFile    `json:"stale_reads"`
 	RepeatedCommands []RepeatedCommand  `json:"repeated_commands"`
 	CrossToolFiles   []CrossToolFile    `json:"cross_tool_files"`
@@ -107,10 +110,18 @@ type Options struct {
 	// tools. Honored by Run + WastedTokens so dashboard tiles scope
 	// to the active global Tool dropdown.
 	Tool string
+	// Model filters to the actions of sessions that used one model
+	// (internal/modelfilter.SessionsUsing; session grain, like Tool).
+	// Empty means all models. Mirrors the dashboard's global Model filter.
+	Model string
 	// Days restricts to the last N days. Zero disables.
 	Days int
 	// Since overrides Days when non-zero.
 	Since time.Time
+	// Until, when non-zero, closes the window: no action at or after it is
+	// counted (the dashboard's closed custom range, REVIEW-3 P3-19). Zero
+	// leaves the window open-ended (until now).
+	Until time.Time
 	// Limit caps each section's row count (stale reads, repeats, cross-tool).
 	// Zero means 20.
 	Limit int
@@ -140,15 +151,12 @@ func (d *Discoverer) WastedTokens(ctx context.Context, opts Options) (int64, err
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	since := opts.Since
-	if since.IsZero() && opts.Days > 0 {
-		since = opts.Now().Add(-time.Duration(opts.Days) * 24 * time.Hour)
-	}
+	win := spanOf(opts)
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 500
 	}
-	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, since, limit)
+	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -167,26 +175,26 @@ func (d *Discoverer) Run(ctx context.Context, opts Options) (Report, error) {
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	since := opts.Since
-	if since.IsZero() && opts.Days > 0 {
-		since = opts.Now().Add(-time.Duration(opts.Days) * 24 * time.Hour)
-	}
+	win := spanOf(opts)
 
 	report := Report{
 		Project: opts.ProjectRoot,
 		Days:    opts.Days,
 	}
-	if !since.IsZero() {
-		report.Since = since.UTC().Format(time.RFC3339)
+	if !win.since.IsZero() {
+		report.Since = win.since.UTC().Format(time.RFC3339)
+	}
+	if !win.until.IsZero() {
+		report.Until = win.until.UTC().Format(time.RFC3339)
 	}
 
-	total, err := d.totalActions(ctx, opts.ProjectRoot, opts.Tool, since)
+	total, err := d.totalActions(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win)
 	if err != nil {
 		return Report{}, err
 	}
 	report.Summary.TotalActions = total
 
-	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, since, opts.Limit)
+	stale, err := d.staleReads(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, opts.Limit)
 	if err != nil {
 		return Report{}, err
 	}
@@ -200,21 +208,21 @@ func (d *Discoverer) Run(ctx context.Context, opts Options) (Report, error) {
 		return report, nil
 	}
 
-	reps, err := d.repeatedCommands(ctx, opts.ProjectRoot, opts.Tool, since, opts.Limit)
+	reps, err := d.repeatedCommands(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, opts.Limit)
 	if err != nil {
 		return Report{}, err
 	}
 	report.RepeatedCommands = reps
 	report.Summary.RepeatedCmdGroups = len(reps)
 
-	cross, err := d.crossToolFiles(ctx, opts.ProjectRoot, opts.Tool, since, opts.Limit)
+	cross, err := d.crossToolFiles(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win, opts.Limit)
 	if err != nil {
 		return Report{}, err
 	}
 	report.CrossToolFiles = cross
 	report.Summary.CrossToolFileCount = len(cross)
 
-	nb, err := d.nativeVsBash(ctx, opts.ProjectRoot, opts.Tool, since)
+	nb, err := d.nativeVsBash(ctx, opts.ProjectRoot, opts.Tool, opts.Model, win)
 	if err != nil {
 		return Report{}, err
 	}
@@ -229,7 +237,7 @@ func (d *Discoverer) Run(ctx context.Context, opts Options) (Report, error) {
 	return report, nil
 }
 
-func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool string, since time.Time) (int, error) {
+func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool, model string, since span) (int, error) {
 	q := `SELECT COUNT(*) FROM actions a
 	      LEFT JOIN projects p ON p.id = a.project_id`
 	var where []string
@@ -242,9 +250,13 @@ func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool string,
 		where = append(where, "a.tool = ?")
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		where = append(where, "a.timestamp >= ?")
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	if frag, margs := modelfilter.SessionsUsing("a.session_id", model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
+	if frags, wargs := since.conds("a.timestamp"); len(frags) > 0 {
+		where = append(where, frags...)
+		args = append(args, wargs...)
 	}
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -256,7 +268,7 @@ func (d *Discoverer) totalActions(ctx context.Context, projectRoot, tool string,
 	return n, nil
 }
 
-func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool string, since time.Time, limit int) ([]StaleReadFile, error) {
+func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool, model string, since span, limit int) ([]StaleReadFile, error) {
 	// Join actions to file_state for sizes. The heuristic for wasted tokens
 	// is stale_count * ceil(file_size / 4) — Claude's tokenizer averages
 	// ~4 bytes/token for typical source code. When file_size is unknown,
@@ -307,9 +319,12 @@ func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool string, s
 		q += " AND a.tool = ?"
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	mq, margs := modelfilter.AndSessionsUsing("a.session_id", model)
+	q += mq
+	args = append(args, margs...)
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += ` GROUP BY a.target, a.project_id
 	       HAVING stale_count > 0
@@ -338,7 +353,7 @@ func (d *Discoverer) staleReads(ctx context.Context, projectRoot, tool string, s
 	return out, rows.Err()
 }
 
-func (d *Discoverer) repeatedCommands(ctx context.Context, projectRoot, tool string, since time.Time, limit int) ([]RepeatedCommand, error) {
+func (d *Discoverer) repeatedCommands(ctx context.Context, projectRoot, tool, model string, since span, limit int) ([]RepeatedCommand, error) {
 	// Group run_command actions by (project, target). Pull success mix from
 	// the actions themselves. "No-change reruns" are intervals between two
 	// consecutive runs of the same command where no edit_file / write_file
@@ -360,9 +375,12 @@ func (d *Discoverer) repeatedCommands(ctx context.Context, projectRoot, tool str
 		q += " AND a.tool = ?"
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	mq, margs := modelfilter.AndSessionsUsing("a.session_id", model)
+	q += mq
+	args = append(args, margs...)
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += ` GROUP BY a.target, a.project_id
 	       HAVING total_runs > 1
@@ -435,7 +453,7 @@ type noChangeKey struct {
 // lower bound because prev_ts is itself >= since, so the interval can
 // never reach below the window. TestNoChangeRerunCountsMatchesReference
 // pins byte-identical output against the old correlated form.
-func (d *Discoverer) noChangeRerunCounts(ctx context.Context, projectRoot string, since time.Time) (map[noChangeKey]int, error) {
+func (d *Discoverer) noChangeRerunCounts(ctx context.Context, projectRoot string, since span) (map[noChangeKey]int, error) {
 	q := `WITH ev AS (
 		SELECT a.session_id, a.target, a.project_id, a.timestamp,
 		       CASE WHEN a.action_type = 'run_command' THEN 1 ELSE 0 END AS is_run,
@@ -444,9 +462,9 @@ func (d *Discoverer) noChangeRerunCounts(ctx context.Context, projectRoot string
 		WHERE ((a.action_type = 'run_command' AND a.target != '')
 		       OR a.action_type IN ('edit_file', 'write_file'))`
 	var args []any
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += `
 	),
@@ -490,7 +508,7 @@ func (d *Discoverer) noChangeRerunCounts(ctx context.Context, projectRoot string
 	return out, rows.Err()
 }
 
-func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool string, since time.Time, limit int) ([]CrossToolFile, error) {
+func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool, model string, since span, limit int) ([]CrossToolFile, error) {
 	// Cross-tool is intentionally a multi-tool signal. When the operator
 	// scopes the dashboard to a single tool the question becomes
 	// degenerate (a single tool can't be "cross-tool"); return early
@@ -513,9 +531,12 @@ func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool strin
 		q += " AND p.root_path = ?"
 		args = append(args, projectRoot)
 	}
-	if !since.IsZero() {
-		q += " AND a.timestamp >= ?"
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	mq, margs := modelfilter.AndSessionsUsing("a.session_id", model)
+	q += mq
+	args = append(args, margs...)
+	if frag, wargs := since.and("a.timestamp"); frag != "" {
+		q += frag //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
+		args = append(args, wargs...)
 	}
 	q += ` GROUP BY a.target, a.project_id
 	       HAVING tool_count > 1
@@ -542,7 +563,7 @@ func (d *Discoverer) crossToolFiles(ctx context.Context, projectRoot, tool strin
 	return out, rows.Err()
 }
 
-func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool string, since time.Time) ([]NativeBashBucket, error) {
+func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool, model string, since span) ([]NativeBashBucket, error) {
 	q := `SELECT a.action_type, COALESCE(a.is_native_tool, 0), COUNT(*)
 	      FROM actions a
 	      LEFT JOIN projects p ON p.id = a.project_id`
@@ -556,12 +577,16 @@ func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool string,
 		where = append(where, "a.tool = ?")
 		args = append(args, tool)
 	}
-	if !since.IsZero() {
-		where = append(where, "a.timestamp >= ?")
-		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	if frag, margs := modelfilter.SessionsUsing("a.session_id", model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
+	}
+	if frags, wargs := since.conds("a.timestamp"); len(frags) > 0 {
+		where = append(where, frags...)
+		args = append(args, wargs...)
 	}
 	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
+		q += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // G202: the concatenated fragments are fixed SQL with ? placeholders; values bind as args
 	}
 	// `+a.action_type` (a no-op on the value) stops the planner from
 	// walking idx_actions_type in full just to get groups pre-sorted: with
@@ -590,6 +615,41 @@ func (d *Discoverer) nativeVsBash(ctx context.Context, projectRoot, tool string,
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// span is one query window: since inclusive, until exclusive; a zero bound
+// is open.
+type span struct{ since, until time.Time }
+
+// spanOf resolves Options to a span (Since wins over Days).
+func spanOf(opts Options) span {
+	since := opts.Since
+	if since.IsZero() && opts.Days > 0 {
+		since = opts.Now().Add(-time.Duration(opts.Days) * 24 * time.Hour)
+	}
+	return span{since: since, until: opts.Until}
+}
+
+// conds renders the span as SQL conditions on col with their bound args.
+func (w span) conds(col string) (frags []string, args []any) {
+	if !w.since.IsZero() {
+		frags = append(frags, col+" >= ?")
+		args = append(args, w.since.UTC().Format(time.RFC3339Nano))
+	}
+	if !w.until.IsZero() {
+		frags = append(frags, col+" < ?")
+		args = append(args, w.until.UTC().Format(time.RFC3339Nano))
+	}
+	return frags, args
+}
+
+// and renders the span as " AND ..." conditions on col.
+func (w span) and(col string) (string, []any) {
+	frags, args := w.conds(col)
+	if len(frags) == 0 {
+		return "", nil
+	}
+	return " AND " + strings.Join(frags, " AND "), args
 }
 
 func splitAndSort(csv string) []string {

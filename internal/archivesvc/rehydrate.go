@@ -230,7 +230,7 @@ func (m *Mover) replay(ctx context.Context, project string, marker archive.Marke
 	// both sides of that digest are read after the fact.
 	if marker.RowsArchived > 0 && coldDigest.TotalRows() != marker.RowsArchived {
 		out.Result = RehydrateReindexRequired
-		out.Reason = fmt.Sprintf("cold copy holds %d rows but %d were archived — it is incomplete",
+		out.Reason = fmt.Sprintf("cold copy holds %d rows but %d were archived - it is incomplete",
 			coldDigest.TotalRows(), marker.RowsArchived)
 		return out, nil
 	}

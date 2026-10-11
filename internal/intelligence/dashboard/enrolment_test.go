@@ -86,11 +86,12 @@ func TestEnrolmentStatus_OrgModeOff(t *testing.T) {
 		t.Errorf("last-payload (off) = %q, want null", got)
 	}
 
-	// unenroll is a no-op.
+	// unenroll is the leave alias: refused without the confirm token
+	// (Sol A3-02; the token path is TestLegacyUnenrollRunsTheSharedLeave).
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/enrolment/unenroll", nil))
-	if rec.Code != http.StatusOK {
-		t.Errorf("unenroll (off) code=%d", rec.Code)
+	if rec.Code != http.StatusUnsupportedMediaType && rec.Code != http.StatusForbidden {
+		t.Errorf("unenroll without confirm token code=%d, want 415/403", rec.Code)
 	}
 }
 
@@ -125,11 +126,12 @@ func TestEnrolmentStatus_Enrolled(t *testing.T) {
 		t.Errorf("last-payload = %q, want %q", got, fake.payload)
 	}
 
-	// unenroll calls through.
+	// unenroll no longer reaches OrgClient.Unenroll directly (Sol A3-02):
+	// without the confirm token it is refused and nothing is unenrolled.
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/enrolment/unenroll", nil))
-	if rec.Code != http.StatusOK || !fake.unenrolled {
-		t.Errorf("unenroll code=%d unenrolled=%v", rec.Code, fake.unenrolled)
+	if rec.Code == http.StatusOK || fake.unenrolled {
+		t.Errorf("unenroll without confirm token code=%d unenrolled=%v, want refused", rec.Code, fake.unenrolled)
 	}
 }
 
@@ -300,7 +302,7 @@ func TestEnrolmentStatus_PushPausedSurfacesBreaker(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.PushPaused == nil {
-		t.Fatal("push_paused missing while the circuit is open — the UI would show a healthy push loop")
+		t.Fatal("push_paused missing while the circuit is open - the UI would show a healthy push loop")
 	}
 	if resp.PushPaused.Until != until.Format(time.RFC3339) {
 		t.Errorf("until = %q, want %q", resp.PushPaused.Until, until.Format(time.RFC3339))

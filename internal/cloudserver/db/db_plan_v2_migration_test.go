@@ -115,9 +115,11 @@ func TestPopulatedMigration38To39MovesPlusSubscribersToV2(t *testing.T) {
 		t.Fatalf("insert scheduled downgrade: %v", err)
 	}
 
-	// 3) Migrate 38 → head over the populated table.
-	if err := Migrate(ctx, pool); err != nil {
-		t.Fatalf("migrate 38 -> head over populated account_plans: %v", err)
+	// 3) Migrate 38 → 39 over the populated table. Stops at 39 on purpose:
+	// 0041 moves these same subscribers on to v3, which
+	// db_plan_v3_migration_test.go pins.
+	if err := migratePrefix(ctx, pool, 39); err != nil {
+		t.Fatalf("migrate 38 -> 39 over populated account_plans: %v", err)
 	}
 
 	// The v2 rows exist with the ruled caps and the route pin.

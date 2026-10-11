@@ -73,7 +73,7 @@ func TestHandoffTargetsLaunchableFlagFollowsLifecycle(t *testing.T) {
 	for _, c := range integration.Capabilities() {
 		tgt, ok := byTool[c.Tool]
 		if !ok {
-			t.Errorf("handoffTargets() dropped %q — every row stays listed, only the launch flag moves", c.Tool)
+			t.Errorf("handoffTargets() dropped %q - every row stays listed, only the launch flag moves", c.Tool)
 			continue
 		}
 		if want := integration.TerminalLaunchable(c); tgt.Launchable != want {

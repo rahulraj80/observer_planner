@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 // Package dashboard — Phase-4 session-attach review regression tests (F1–F4).
 package dashboard
 

@@ -96,9 +96,9 @@ func captureUnavailableReason(err error) string {
 	case err == nil:
 		return ""
 	case errors.Is(err, ErrNeedsElevation):
-		return "not elevated — " + err.Error()
+		return "not elevated - " + err.Error()
 	case errors.Is(err, ErrUnsupportedOS):
-		return "unsupported OS — " + err.Error()
+		return "unsupported OS - " + err.Error()
 	default:
 		return err.Error()
 	}

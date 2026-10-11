@@ -1,0 +1,34 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "end_cursor": "VerifiedOfficial",
+    "has_next_page": "VerifiedOfficial",
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].deleted_at": "VerifiedOfficial",
+    "items[].expires_at": "VerifiedOfficial",
+    "items[].name": "VerifiedOfficial",
+    "items[].role_assignments": "VerifiedOfficial",
+    "items[].service_user_id": "VerifiedOfficial",
+    "total": "VerifiedOfficial"
+  },
+  "fixture_sha256": "ed283e904dbe65135a942d8588e39c453bf5151c069b621c7d296df36b8b929e",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/members/service-users",
+    "query": {
+      "first": "200",
+      "after": "synthserviceusers0002"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized terminal page: has_next_page false and end_cursor null, as the paginated schema documents.",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.service_users"
+}

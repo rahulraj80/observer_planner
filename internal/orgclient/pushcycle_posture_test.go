@@ -168,7 +168,7 @@ func TestPushCycleCarriesThisCyclesBudgetFetch(t *testing.T) {
 			c, _ := wirePostureFixture(t, ps.srv.URL, pub, sink)
 
 			state := &pushCycleState{}
-			if err := c.pushCycle(context.Background(), state); err != nil {
+			if _, err := c.pushCycle(context.Background(), state, cycleKind{rails: true}); err != nil {
 				t.Fatalf("pushCycle: %v", err)
 			}
 

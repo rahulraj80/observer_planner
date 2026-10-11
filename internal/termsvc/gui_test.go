@@ -74,6 +74,25 @@ func guiTestService(t *testing.T, id string, launcher GUILauncher) (*Service, *f
 	return svc, rec
 }
 
+// TestLaunchGUICarriesTheStructuredWrapReason pins that an unapplied wrap's
+// structured cause reaches the dashboard result verbatim beside the boolean.
+func TestLaunchGUICarriesTheStructuredWrapReason(t *testing.T) {
+	t.Parallel()
+	row := anyAdvertisedGUIRow(t)
+	gl := &fakeGUILauncher{result: GUISpawnResult{
+		PID: 4243, WrapApplied: false, WrapReason: "interop_env_not_propagated",
+		WrapNote: "interop launch: environment is not propagated across the WSL boundary (WSLENV not set)",
+	}}
+	svc, _ := guiTestService(t, row.Spec.ID, gl)
+	res, err := svc.LaunchGUI(context.Background(), GUIRequest{ID: row.Spec.ID})
+	if err != nil {
+		t.Fatalf("LaunchGUI: %v", err)
+	}
+	if res.WrapApplied || res.WrapReason != "interop_env_not_propagated" {
+		t.Errorf("wrap = (%v, %q), want (false, interop_env_not_propagated)", res.WrapApplied, res.WrapReason)
+	}
+}
+
 func TestLaunchGUIRecordsRunAndStampsSpawnFacts(t *testing.T) {
 	t.Parallel()
 	row := anyAdvertisedGUIRow(t)
@@ -91,6 +110,9 @@ func TestLaunchGUIRecordsRunAndStampsSpawnFacts(t *testing.T) {
 	}
 	if !res.WrapApplied || res.WrapNote != "cold-start only" {
 		t.Errorf("wrap = (%v,%q), want the launcher's verdict carried verbatim", res.WrapApplied, res.WrapNote)
+	}
+	if res.WrapReason != "" {
+		t.Errorf("WrapReason = %q, want empty for an applied wrap", res.WrapReason)
 	}
 
 	// The run is recorded BEFORE the spawn, with the GUI kind and no

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -251,7 +253,7 @@ func TestAnalyticsCacheRefreshLosesToInvalidate(t *testing.T) {
 	s.analytics.bg.Wait()
 	got := analyticsGet(h, "/api/cost")
 	if got.state != "fresh" || !strings.Contains(got.body, `"call":3`) {
-		t.Fatalf("after the stale refresh finished: state %q body %s — the pre-mutation call 2 must not have been stored", got.state, got.body)
+		t.Fatalf("after the stale refresh finished: state %q body %s - the pre-mutation call 2 must not have been stored", got.state, got.body)
 	}
 }
 
@@ -511,7 +513,7 @@ func TestAnalyticsCacheGuardRejectedNeverServedCached(t *testing.T) {
 		} {
 			rr := serve(r)
 			if rr.Code == http.StatusOK || rr.Header().Get(analyticsCacheHeader) != "" || rr.Body.String() == cached {
-				t.Fatalf("%s: guard-refused request got %d, cache header %q — it was answered from the cache", name, rr.Code, rr.Header().Get(analyticsCacheHeader))
+				t.Fatalf("%s: guard-refused request got %d, cache header %q - it was answered from the cache", name, rr.Code, rr.Header().Get(analyticsCacheHeader))
 			}
 		}
 	})
@@ -541,7 +543,7 @@ func TestAnalyticsCacheGuardRejectedNeverServedCached(t *testing.T) {
 		}
 		anon := do(false)
 		if anon.Code != http.StatusUnauthorized || anon.Header().Get(analyticsCacheHeader) != "" || anon.Body.String() == warm.Body.String() {
-			t.Fatalf("anonymous request got %d, cache header %q — it was answered from the cache", anon.Code, anon.Header().Get(analyticsCacheHeader))
+			t.Fatalf("anonymous request got %d, cache header %q - it was answered from the cache", anon.Code, anon.Header().Get(analyticsCacheHeader))
 		}
 	})
 }

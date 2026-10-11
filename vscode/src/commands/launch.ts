@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { ResolvedBinary } from '../binary';
+import { componentInactiveNow } from '../components';
 
 // "Launch <tool> (proxied)" — L2a of the usability arc (P4.5): an
 // integrated terminal running the observer wrapper, which sets
@@ -15,6 +16,14 @@ export function registerLaunch(
   const quoted = bin.path.includes(' ') ? `"${bin.path}"` : bin.path;
   const launch = (id: string, name: string, sub: string) =>
     vscode.commands.registerCommand(id, () => {
+      // Hidden from the palette while the proxy component is not active
+      // (T-670); a keybinding still lands here, so say why instead.
+      if (componentInactiveNow('capture.proxy')) {
+        void vscode.window.showWarningMessage(
+          'SuperBased: the API proxy component is not active on this machine, so a proxied launch would not be routed. Turn it on in Settings > Components.',
+        );
+        return;
+      }
       const term = vscode.window.createTerminal({
         name,
         cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,

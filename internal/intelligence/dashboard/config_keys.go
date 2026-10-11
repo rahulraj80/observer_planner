@@ -93,6 +93,10 @@ type configKeyPatch struct {
 type configKeysRequest struct {
 	BaseEtag string           `json:"base_etag"`
 	Patches  []configKeyPatch `json:"patches"`
+	// DryRun runs every check and renders the masked diff of what the save
+	// would write, without writing (adapter-config plan section 5.5 item 1).
+	// It needs no confirm token: it reports needs_confirm instead.
+	DryRun bool `json:"dry_run,omitempty"`
 }
 
 // keyError is a per-key failure the form renders inline.
@@ -151,11 +155,19 @@ func (s *Server) handleConfigKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.opts.ConfigPath == "" {
-		http.Error(w, "config path not configured — server has no file to save to", http.StatusConflict)
+		http.Error(w, "config path not configured - server has no file to save to", http.StatusConflict)
 		return
 	}
-	req, patches, ok := s.resolveConfigKeys(w, r)
+	req, patches, needsConfirm, ok := s.resolveConfigKeys(w, r)
 	if !ok {
+		return
+	}
+	// Secret posture (plan section 5.5 item 2, the 5.3 posture): a string
+	// value that looks like a credential is a warning on an individual node
+	// and refused where the posture says so. Checked before the lock so a
+	// refused batch never waits on it.
+	secretWarnings := configSecretWarnings(patches)
+	if s.refuseSecretPosture(w, r, secretWarnings, req.DryRun) {
 		return
 	}
 
@@ -177,12 +189,7 @@ func (s *Server) handleConfigKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.BaseEtag != current {
-		writeJSONStatus(w, http.StatusConflict, map[string]any{
-			"error":         "config_changed",
-			"message":       "config.toml changed outside this page since it was loaded — reload, then re-apply your edits",
-			"config_etag":   current,
-			"diverged_keys": divergedKeys(&cfg, patches),
-		})
+		writeConfigChanged(w, current, divergedKeys(&cfg, patches))
 		return
 	}
 
@@ -201,47 +208,21 @@ func (s *Server) handleConfigKeys(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	changed := configschema.ChangedLeaves(&prev, &cfg)
-
-	// 7. Write — surgical where it can, re-serialize where it must.
-	res, err := config.PatchFile(s.opts.ConfigPath, cfg, filePatchesFor(patches))
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-
-	// 8. Read-back verification.
-	if res.Wrote && !s.verifyReadBack(w, res) {
-		return
-	}
-
-	// 9. Live seams + audit.
-	classes := s.applyLiveSeams(cfg, changed)
-	s.notifyConfigSaved()
-	newEtag, _ := configEtag(s.opts.ConfigPath)
-	s.recordManageAudit(r, "config_keys", fmt.Sprintf("keys=%s changed=%d mode=%s comments_kept=%v",
-		strings.Join(patchKeys(patches), ","), len(changed), res.Mode, res.CommentsKept))
-
-	resp := map[string]any{
-		"saved":                 true,
-		"changed_keys":          orEmptyStrings(changed),
-		"restart_required":      len(classes.restart) > 0,
-		"restart_required_keys": orEmptyStrings(classes.restart),
-		"applied_live_keys":     orEmptyStrings(classes.live),
-		"next_spawn_keys":       orEmptyStrings(classes.nextSpawn),
-		"comments_preserved":    res.CommentsKept,
-		"write_mode":            string(res.Mode),
-		"config_path":           s.opts.ConfigPath,
-		"backup_path":           res.BackupPath,
-		"config_etag":           newEtag,
-	}
-	if res.Reason != "" {
-		resp["write_mode_reason"] = res.Reason
-	}
-	if !res.Wrote {
-		resp["write_mode"] = "noop"
-	}
-	writeJSON(w, resp)
+	// 7-9. Dry run, or write + read-back + live seams + audit: the shared
+	// tail (config_commit.go). The confirm token was already demanded in
+	// resolveConfigKeys, so needsConfirm is only reported here.
+	s.commitConfigSave(w, r, configSave{
+		prev:           prev,
+		cfg:            cfg,
+		changed:        configschema.ChangedLeaves(&prev, &cfg),
+		patches:        filePatchesFor(patches),
+		etag:           current,
+		needsConfirm:   needsConfirm,
+		secretWarnings: secretWarnings,
+		dryRun:         req.DryRun,
+		auditAction:    "config_keys",
+		auditDetail:    "keys=" + strings.Join(patchKeys(patches), ","),
+	})
 }
 
 // resolveConfigKeys runs steps 1–3 of handleConfigKeys: decode, schema
@@ -249,27 +230,28 @@ func (s *Server) handleConfigKeys(w http.ResponseWriter, r *http.Request) {
 // confirm token) and per-key parse + validation. It writes the refusal
 // itself and returns ok=false when the request must not proceed. Nothing
 // here touches the lock or the file.
-func (s *Server) resolveConfigKeys(w http.ResponseWriter, r *http.Request) (configKeysRequest, []resolvedPatch, bool) {
+func (s *Server) resolveConfigKeys(w http.ResponseWriter, r *http.Request) (configKeysRequest, []resolvedPatch, bool, bool) {
 	var req configKeysRequest
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, configKeysMaxBody))
 	if err != nil {
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
-		return req, nil, false
+		return req, nil, false, false
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, "decode body: "+err.Error(), http.StatusBadRequest)
-		return req, nil, false
+		return req, nil, false, false
 	}
 	if len(req.Patches) == 0 {
 		http.Error(w, "no patches", http.StatusBadRequest)
-		return req, nil, false
+		return req, nil, false, false
 	}
 	if strings.TrimSpace(req.BaseEtag) == "" {
-		http.Error(w, "base_etag required — read GET /api/config first", http.StatusBadRequest)
-		return req, nil, false
+		http.Error(w, "base_etag required - read GET /api/config first", http.StatusBadRequest)
+		return req, nil, false, false
 	}
 
-	// 1. Lookup. 2. Tier gate.
+	// 1. Lookup. 2. Tier gate: configschema.CheckKey, the same pure check
+	// `observer config set` runs (governance is the guard's, not here).
 	patches := make([]resolvedPatch, 0, len(req.Patches))
 	var unknown, secret, owned []keyError
 	seen := map[string]bool{}
@@ -277,39 +259,42 @@ func (s *Server) resolveConfigKeys(w http.ResponseWriter, r *http.Request) (conf
 	for _, p := range req.Patches {
 		if seen[p.Key] {
 			http.Error(w, "duplicate key in batch: "+p.Key, http.StatusBadRequest)
-			return req, nil, false
+			return req, nil, false, false
 		}
 		seen[p.Key] = true
-		leaf, ok := configschema.Lookup(p.Key)
-		if !ok {
+		c := configschema.CheckKey(p.Key, nil)
+		// The generic route writes whole leaves only, never a map entry.
+		if !c.Found || c.Leaf.Path != p.Key {
 			unknown = append(unknown, keyError{Key: p.Key, Message: "unknown config key"})
 			continue
 		}
-		switch leaf.Tier {
-		case configschema.TierSecret:
+		leaf := c.Leaf
+		switch c.Verdict {
+		case configschema.KeySecret:
 			secret = append(secret, keyError{Key: p.Key, Message: (&errSecretWrite{Key: p.Key, ConfigPath: s.opts.ConfigPath}).Error()})
-		case configschema.TierOwnerElsewhere:
-			owned = append(owned, keyError{Key: p.Key, Message: "read-only here — owned by " + leaf.OwnedBy})
-		case configschema.TierSensitive:
-			needsConfirm = true
+		case configschema.KeyOwnerElsewhere:
+			owned = append(owned, keyError{Key: p.Key, Message: "read-only here - owned by " + leaf.OwnedBy})
 		}
+		needsConfirm = needsConfirm || c.NeedsConfirm
 		patches = append(patches, resolvedPatch{leaf: leaf, raw: p})
 	}
 	switch {
 	case len(unknown) > 0:
 		writeKeyErrors(w, http.StatusBadRequest, "unknown_key", unknown)
-		return req, nil, false
+		return req, nil, false, false
 	case len(secret) > 0:
 		// A credential in the batch refuses the WHOLE batch; nothing is
 		// logged (the audit row is written only after a write).
 		writeKeyErrors(w, http.StatusForbidden, "secret_write_refused", secret)
-		return req, nil, false
+		return req, nil, false, false
 	case len(owned) > 0:
 		writeKeyErrors(w, http.StatusConflict, "owner_elsewhere", owned)
-		return req, nil, false
+		return req, nil, false, false
 	}
-	if needsConfirm && !requireJSONConfirm(w, r) {
-		return req, nil, false
+	// A dry run writes nothing, so it reports needs_confirm instead of
+	// demanding the token; the real save still demands it.
+	if needsConfirm && !req.DryRun && !requireJSONConfirm(w, r) {
+		return req, nil, false, false
 	}
 
 	// 3. Parse + validate per key.
@@ -327,9 +312,27 @@ func (s *Server) resolveConfigKeys(w http.ResponseWriter, r *http.Request) (conf
 	}
 	if len(invalid) > 0 {
 		writeKeyErrors(w, http.StatusBadRequest, "invalid_value", invalid)
-		return req, nil, false
+		return req, nil, false, false
 	}
-	return req, patches, true
+	return req, patches, needsConfirm, true
+}
+
+// configSecretWarnings flags patched values that look like credentials
+// (internal/scrub's pattern-certain detectors, or a credential-named map
+// key). Key names only: the value is never echoed.
+func configSecretWarnings(patches []resolvedPatch) []keyError {
+	values := make([]leafValue, 0, len(patches))
+	for _, p := range patches {
+		values = append(values, leafValue{leaf: p.leaf, value: p.value})
+	}
+	return secretWarningsFor(values)
+}
+
+func orEmptyKeyErrors(v []keyError) []keyError {
+	if v == nil {
+		return []keyError{}
+	}
+	return v
 }
 
 // filePatchesFor renders the resolved patches for config.PatchFile: a TOML
@@ -361,7 +364,7 @@ func (s *Server) verifyReadBack(w http.ResponseWriter, res config.PatchResult) b
 	restoreErr := config.RestoreBackup(s.opts.ConfigPath)
 	msg := "read-back verification failed after write: " + rerr.Error()
 	if restoreErr != nil {
-		msg += "; RESTORE FROM .bak ALSO FAILED: " + restoreErr.Error() + " — recover by hand from " + res.BackupPath
+		msg += "; RESTORE FROM .bak ALSO FAILED: " + restoreErr.Error() + " - recover by hand from " + res.BackupPath
 	} else {
 		msg += "; restored the previous config.toml from " + res.BackupPath
 	}

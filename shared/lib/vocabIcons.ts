@@ -49,7 +49,7 @@ export const VOCAB_ICONS = {
   // (the prompt-submit guard outcome; tone: web/src/lib/vocabTones.ts)
   promptGuardOutcome: {
     blocked: I.ShieldBan, confirmed: I.ShieldQuestion, warned: I.TriangleAlert, redacted: I.EyeOff,
-    allowed: I.ShieldCheck, degraded: I.ShieldOff,
+    allowed: I.ShieldCheck, degraded: I.ShieldOff, detected: I.ShieldAlert,
   },
   // web/src/lib/types.ts suggestions
   suggestionSeverity: { info: I.Info, advice: I.Lightbulb, warning: I.TriangleAlert },
@@ -139,7 +139,7 @@ export const VOCAB_ICONS = {
     oauth_ready: I.KeyRound, api_key_ready: I.KeyRound, claude_not_installed: I.PackageX, routed_to_observer: I.Route,
   },
   mcpToolVerdict: { active: I.Activity, low_use: I.TrendingDown, unused: I.CircleSlash, no_data: I.CircleDashed },
-  // web/src/lib/tagTaxonomy.ts outcome tags
+  // shared/lib/tagTaxonomy.ts outcome tags
   outcomeTag: {
     shipped: I.Rocket, wip: I.Construction, blocked: I.Ban, junk: I.Trash2, success: I.CircleCheck, failed: I.CircleX,
     abandoned: I.Archive,
@@ -182,11 +182,13 @@ export const VOCAB_ICONS = {
     assistant_service_account_create: I.UserPlus, assistant_service_account_deactivate: I.UserX,
     assistant_ingest_credential_mint: I.Key, assistant_ingest_credential_rotate: I.RefreshCw,
     assistant_ingest_credential_revoke: I.Ban, archive_holds_replaced: I.Archive, resolve_projects: I.FolderGit2,
+    node_component_purges_changed: I.CalendarClock,
   },
   // alerts
   alertRuleKind: {
     threshold: I.Gauge, burn_rate: I.Flame, no_data: I.CircleSlash, fleet_authority_divergence: I.Split,
     fleet_integrity_risk: I.Fingerprint, fleet_no_contact: I.Unplug, fleet_governance_lapsed: I.FileWarning,
+    fleet_config_drift: I.FileDiff,
   },
   alertEvent: {
     firing: I.BellRing, fired: I.BellRing, ok: I.Check, resolved: I.Check, delivered: I.Send, attempted: I.Clock,
@@ -217,7 +219,8 @@ export const VOCAB_ICONS = {
     invalidated: I.CircleSlash,
   },
   requestKind: { enable_feature: I.ToggleRight, raise_budget: I.Wallet, allow_tool: I.Wrench, other: I.MessageSquare },
-  requestStatus: { open: I.CircleDot, resolved: I.Check, other: I.Archive },
+  requestStatus: { open: I.CircleDot, resolved: I.Check, other: I.Archive, granted: I.KeyRound, lapsed: I.TimerOff },
+  grantStatus: { scheduled: I.CalendarClock, active: I.ShieldCheck, exhausted: I.CircleSlash, expired: I.TimerOff, revoked: I.Undo2 },
   breakGlass: { pending: I.Hourglass, approved: I.Check, denied: I.Ban, revoked: I.Undo2, expired: I.TimerOff, live: I.Siren },
   // fleet / nodes / updates (docs/enterprise-updates.md)
   nodeContact: { healthy: I.Activity, online: I.Activity, stale: I.Clock, offline: I.Unplug, unknown: I.CircleHelp },
@@ -232,7 +235,7 @@ export const VOCAB_ICONS = {
   },
   fleetFinding: {
     governance_lapsed: I.FileWarning, authority_divergence: I.Split, integrity_risk: I.Fingerprint,
-    no_contact: I.Unplug, resolved: I.Check,
+    no_contact: I.Unplug, config_drift: I.FileDiff, resolved: I.Check,
   },
   fleetPoint: {
     guard: I.Shield, router: I.Shuffle, "proxy-admitter": I.ShieldCheck, "proxy-egress": I.Route,

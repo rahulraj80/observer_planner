@@ -317,7 +317,7 @@ func writeStructuralGrantError(w http.ResponseWriter, s *Server, ctx context.Con
 		s.audit(ctx, accountID, "structural_rejected_grant_terms")
 		writeErr(w, http.StatusForbidden, "grant_terms_mismatch",
 			"this upload's grant terms (schema version, declared timezone, or source-window rule) differ from the ones "+
-				"registered at the same consent generation; re-confirm the standing grant on this device — confirming it "+
+				"registered at the same consent generation; re-confirm the standing grant on this device - confirming it "+
 				"raises the consent generation, and the new terms are recorded with it")
 	case errors.Is(err, store.ErrStructuralBindingIncomplete):
 		s.audit(ctx, accountID, "structural_rejected_binding_incomplete")

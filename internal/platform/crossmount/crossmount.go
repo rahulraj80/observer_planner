@@ -50,17 +50,41 @@ type detector struct {
 	readDir    func(path string) ([]string, error)
 	exists     func(path string) bool
 	getenv     func(name string) string
+	// suppressForeign makes extraHomes report nothing (see testguard.go:
+	// the test-binary guard and EnvDisableForeignHomes). Zero value false,
+	// so detector literals in tests keep enumerating their fake layouts.
+	suppressForeign bool
+	// foreignRoot overrides the foreign mount root extraHomes enumerates
+	// (wslWindowsUsersRoot / windowsWSLHostRoot). Empty = the real root;
+	// only StageForeignLayoutForTest ever sets it.
+	foreignRoot string
 }
 
+// The real foreign mount roots the scan enumerates. Fixed mount points, NOT
+// derived from $HOME — which is why faking HOME never isolated a caller from
+// them (incident 2026-10-02, testguard.go).
+const (
+	wslWindowsUsersRoot = "/mnt/c/Users"
+	windowsWSLHostRoot  = `\\wsl.localhost\`
+)
+
 func defaultDetector() *detector {
-	return &detector{
-		runtimeOS:  runtime.GOOS,
-		nativeHome: os.UserHomeDir,
-		statDir:    isExistingDir,
-		readDir:    readDirNames,
-		exists:     fileExists,
-		getenv:     os.Getenv,
+	// One snapshot for both the permission and the root, so a restore racing
+	// this call can never pair "discovery allowed" with the REAL root.
+	staged := stagedForeign.Load()
+	d := &detector{
+		runtimeOS:       runtime.GOOS,
+		nativeHome:      os.UserHomeDir,
+		statDir:         isExistingDir,
+		readDir:         readDirNames,
+		exists:          fileExists,
+		getenv:          os.Getenv,
+		suppressForeign: foreignSuppressedWith(staged, os.Getenv(EnvDisableForeignHomes), testBinaryGuard),
 	}
+	if staged != nil {
+		d.foreignRoot = staged.root
+	}
+	return d
 }
 
 // The cross-mount scan behind ExtraHomes enumerates and stats a
@@ -154,6 +178,9 @@ func (d *detector) allHomes() []HomeRoot {
 }
 
 func (d *detector) extraHomes() []HomeRoot {
+	if d.suppressForeign {
+		return nil
+	}
 	switch d.runtimeOS {
 	case OSLinux:
 		return d.wslWindowsHomes()
@@ -194,7 +221,7 @@ func (d *detector) extraHomes() []HomeRoot {
 //
 // Set EnvAllWindowsProfiles to restore the unfiltered behaviour.
 func (d *detector) wslWindowsHomes() []HomeRoot {
-	const root = "/mnt/c/Users"
+	root := d.foreignRootOr(wslWindowsUsersRoot)
 	if !d.statDir(root) {
 		return nil
 	}
@@ -238,7 +265,7 @@ func (d *detector) wslWindowsHomes() []HomeRoot {
 // running). Best-effort: distros are typically reachable only when the
 // distro is running or recently used; that's an acceptable limitation.
 func (d *detector) windowsWSLHomes() []HomeRoot {
-	const root = `\\wsl.localhost\`
+	root := d.foreignRootOr(windowsWSLHostRoot)
 	if !d.statDir(root) {
 		return nil
 	}
@@ -269,6 +296,15 @@ func (d *detector) windowsWSLHomes() []HomeRoot {
 		}
 	}
 	return out
+}
+
+// foreignRootOr returns the staged foreign mount root when one is set, else
+// the real one.
+func (d *detector) foreignRootOr(fallback string) string {
+	if d.foreignRoot != "" {
+		return d.foreignRoot
+	}
+	return fallback
 }
 
 // IsWSL reports whether this process runs inside WSL2 with Windows interop —

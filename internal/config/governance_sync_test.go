@@ -46,5 +46,76 @@ func TestPinnableKeysMirrorInSyncWithPolicyfam(t *testing.T) {
 		if !governanceValuesEqual(got.Safe, want.Safe) && !(got.Safe == nil && want.Safe == nil) {
 			t.Errorf("%q: mirror Safe %v, nodegov Safe %v", want.Key, got.Safe, want.Safe)
 		}
+		if got.Min != want.Min || got.Max != want.Max {
+			t.Errorf("%q: mirror bounds %d..%d, nodegov bounds %d..%d", want.Key, got.Min, got.Max, want.Min, want.Max)
+		}
+		if got.Hot != want.Hot {
+			t.Errorf("%q: mirror Hot %v, nodegov Hot %v", want.Key, got.Hot, want.Hot)
+		}
+	}
+}
+
+// TestGovernancePushIntervalCeiling walks the org push-interval pin through
+// the config overlay (2026-10-02 budget-latency arc). The org value is a
+// CEILING: it lowers a slower node, never raises a faster one, and a value
+// outside the row's bounds is skipped rather than applied.
+func TestGovernancePushIntervalCeiling(t *testing.T) {
+	cases := []struct {
+		name    string
+		local   int
+		pinned  any
+		want    int
+		applied bool
+		skipped bool
+	}{
+		{name: "enrol-written 900 lowered to the org's 120", local: 900, pinned: float64(120), want: 120, applied: true},
+		{name: "default 120 lowered to 60", local: 120, pinned: float64(60), want: 60, applied: true},
+		{name: "faster local value survives a slower org ceiling", local: 45, pinned: float64(300), want: 45, applied: true},
+		{name: "org cannot raise the default", local: 120, pinned: float64(900), want: 120, applied: true},
+		{name: "below the 30 s floor is skipped", local: 900, pinned: float64(5), want: 900, skipped: true},
+		{name: "above the 3600 s bound is skipped", local: 900, pinned: float64(7200), want: 900, skipped: true},
+		{name: "non-integer is skipped", local: 900, pinned: 12.5, want: 900, skipped: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.OrgClient.PushIntervalSeconds = tc.local
+			var out GovernanceOutcome
+			applyGovernancePins(&cfg, map[string]any{"org_client.push_interval_seconds": tc.pinned}, &out)
+			if cfg.OrgClient.PushIntervalSeconds != tc.want {
+				t.Fatalf("push interval = %d, want %d", cfg.OrgClient.PushIntervalSeconds, tc.want)
+			}
+			if got := len(out.Applied) == 1; got != tc.applied {
+				t.Fatalf("applied = %v (%v), want %v", got, out.Applied, tc.applied)
+			}
+			if _, got := out.Skipped["org_client.push_interval_seconds"]; got != tc.skipped {
+				t.Fatalf("skipped = %v (%v), want %v", got, out.Skipped, tc.skipped)
+			}
+		})
+	}
+}
+
+// TestGovernancePinnedPushIntervalAndLowerInt pins the two helpers the
+// daemon's hot path uses, so the restart-time overlay and the live value are
+// computed by one definition.
+func TestGovernancePinnedPushIntervalAndLowerInt(t *testing.T) {
+	if got := GovernancePinnedPushInterval(nil); got != 0 {
+		t.Fatalf("no pin = %d, want 0", got)
+	}
+	if got := GovernancePinnedPushInterval(map[string]any{"org_client.push_interval_seconds": int64(60)}); got != 60 {
+		t.Fatalf("int64 pin = %d, want 60", got)
+	}
+	if got := GovernancePinnedPushInterval(map[string]any{"org_client.push_interval_seconds": float64(10)}); got != 0 {
+		t.Fatalf("out-of-range pin = %d, want 0", got)
+	}
+	for _, c := range []struct{ local, org, want int64 }{
+		{900, 120, 120}, {45, 120, 45}, {0, 120, 120}, {900, 0, 900}, {-1, 60, 60},
+	} {
+		if got := GovernanceLowerInt(c.local, c.org); got != c.want {
+			t.Errorf("GovernanceLowerInt(%d, %d) = %d, want %d", c.local, c.org, got, c.want)
+		}
+	}
+	if !GovernanceHotKey("org_client.push_interval_seconds") || GovernanceHotKey("guard.mode") {
+		t.Fatal("GovernanceHotKey must mark only the push-interval ceiling hot")
 	}
 }

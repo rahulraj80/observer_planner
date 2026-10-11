@@ -1,0 +1,27 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "detail": "VerifiedOfficial",
+    "status": "VerifiedOfficial",
+    "title": "VerifiedOfficial",
+    "type": "VerifiedOfficial"
+  },
+  "fixture_sha256": "0b2a9d376cee3ed7f67fd7196847dcd6ada00aa3b811e6f978b884ac854d6be4",
+  "http": {
+    "method": "GET",
+    "path": "/v3/enterprise/consumption/daily",
+    "status": 429,
+    "headers": {
+      "Retry-After": "7"
+    }
+  },
+  "notes": "The ProblemDetail error schema of the 429 response; the Retry-After value is synthesized (the v3 reference does not document the header).",
+  "scenario": "error_429",
+  "sdk_or_spec_version_or_commit": "Devin API v3 (info.version 3.0.0), v3-openapi.yaml fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "13608c9de5bbfe464955061c4e2a81977c5402c03e39bb68cb55a6d3264753d1",
+  "source_url": "https://docs.devin.ai/v3-openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cognition.devin_v3.consumption_daily"
+}

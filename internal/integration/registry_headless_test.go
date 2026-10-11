@@ -5,6 +5,55 @@ import (
 	"testing"
 )
 
+// TestModelCatalogShape pins the model-catalogue declarations the Arena's
+// model pickers dispatch on: every Arena harness that can take a model
+// override states which catalogue it draws from (so a new headless row cannot
+// land with a picker that silently shows nothing), a vendor catalogue names
+// at least one known provider family, and an open catalogue names none.
+func TestModelCatalogShape(t *testing.T) {
+	knownProviders := map[string]bool{"anthropic": true, "openai": true, "xai": true, "google": true}
+	want := map[string]ModelCatalogKind{
+		"claude-code": ModelCatalogVendor,
+		"codex":       ModelCatalogVendor,
+		"grok":        ModelCatalogVendor,
+		"opencode":    ModelCatalogOpen,
+		"aider":       ModelCatalogOpen,
+	}
+	for _, c := range Capabilities() {
+		cat := c.Model.Catalog
+		if c.Headless != nil && c.Model.Kind != ModelNone && cat.Kind == ModelCatalogNone {
+			t.Errorf("tool %q: Arena harness with a model override must declare Model.Catalog", c.Tool)
+		}
+		if k, ok := want[c.Tool]; ok && cat.Kind != k {
+			t.Errorf("tool %q: Model.Catalog.Kind = %q, want %q", c.Tool, cat.Kind, k)
+		}
+		switch cat.Kind {
+		case ModelCatalogNone:
+			if len(cat.Providers) > 0 {
+				t.Errorf("tool %q: providers without a catalogue kind", c.Tool)
+			}
+		case ModelCatalogVendor:
+			if len(cat.Providers) == 0 {
+				t.Errorf("tool %q: vendor catalogue names no provider family", c.Tool)
+			}
+			for _, p := range cat.Providers {
+				if !knownProviders[p] {
+					t.Errorf("tool %q: unknown provider family %q", c.Tool, p)
+				}
+			}
+		case ModelCatalogOpen:
+			if len(cat.Providers) > 0 {
+				t.Errorf("tool %q: an open catalogue must not name provider families", c.Tool)
+			}
+		default:
+			t.Errorf("tool %q: unknown Model.Catalog.Kind %q", c.Tool, cat.Kind)
+		}
+		if cat.Kind != ModelCatalogNone && c.Model.Kind == ModelNone {
+			t.Errorf("tool %q: a catalogue without a model mechanism can never be selected", c.Tool)
+		}
+	}
+}
+
 // TestHeadlessGroundedSet pins the exact set of registry rows carrying a
 // live-verified headless one-shot contract (Capability.Headless). A row is
 // added here ONLY after a real drive proves the argv — the same grounding

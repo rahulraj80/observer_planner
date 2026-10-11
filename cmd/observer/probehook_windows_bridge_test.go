@@ -135,7 +135,7 @@ func TestCheckHookRegistrationHomes_RealBridgeFixtures(t *testing.T) {
 				t.Fatal(err)
 			}
 			if string(before) != string(after) {
-				t.Fatalf("checkHookRegistrationHomes MODIFIED the config file — DryRun invariant violated:\nbefore: %s\nafter:  %s", before, after)
+				t.Fatalf("checkHookRegistrationHomes MODIFIED the config file - DryRun invariant violated:\nbefore: %s\nafter:  %s", before, after)
 			}
 			// The native side must also stay untouched — its own
 			// config dir (HomeDir/.claude etc, distinct from the nested
@@ -158,7 +158,7 @@ func TestCheckHookRegistrationHomes_RealBridgeFixtures(t *testing.T) {
 				t.Fatalf("no native home checked: %+v", homes)
 			}
 			if bridge == nil {
-				t.Fatalf("bridge home was never checked — the real-world regression this test pins (tool=%s): %+v", tc.tool, homes)
+				t.Fatalf("bridge home was never checked - the real-world regression this test pins (tool=%s): %+v", tc.tool, homes)
 			}
 			if bridge.tool != tc.tool+"-windows" {
 				t.Errorf("bridge.tool = %q, want %q", bridge.tool, tc.tool+"-windows")
@@ -303,7 +303,7 @@ func TestCheckHookRegistrationHomes_RegistryEventScoping(t *testing.T) {
 		t.Fatalf("unexpected error: %v", winner.err)
 	}
 	if winner.state != hookRegNotRegistered {
-		t.Errorf("state = %v, want hookRegNotRegistered — a SessionStart-only fixture must not satisfy a UserPromptSubmit check", winner.state)
+		t.Errorf("state = %v, want hookRegNotRegistered - a SessionStart-only fixture must not satisfy a UserPromptSubmit check", winner.state)
 	}
 
 	// Now wire UserPromptSubmit too and confirm it flips to Registered —
@@ -336,7 +336,7 @@ func TestCheckHookRegistrationHomes_DryRunNeverWrites(t *testing.T) {
 	withHookRegistrationOptions(t, wslHome, winHome)
 
 	if !hookRegistrationOptions("/mnt/d/bin/observer", "").DryRun {
-		t.Fatal("hookRegistrationOptions seam did not carry DryRun:true — test setup is broken")
+		t.Fatal("hookRegistrationOptions seam did not carry DryRun:true - test setup is broken")
 	}
 
 	// Deliberately create NEITHER .cursor nor .claude nor .codex under

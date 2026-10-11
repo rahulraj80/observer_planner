@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/loc"
 	"github.com/marmutapp/superbased-observer/internal/projectroi"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -46,9 +47,6 @@ import (
 // thousands of rows — the 2026-09-22 rework's SOL-F10 regression
 // coverage. Production code never mutates them.
 var (
-	promptLinkCap = 10000
-	editLinkCap   = 100000
-	commitLinkCap = 5000
 	promptRowsCap = 500
 	commitRowsCap = 500
 )
@@ -106,135 +104,6 @@ func buildTruncationMeta(affects []string, inputs ...truncatedInput) apiTruncati
 }
 
 // --- wire types (web/src/lib/types.ts §"Projects ROI + commit-alignment") ---
-
-// apiProjectCaptureInfo is the plan's `capture` shape — used both as
-// ProjectDetail's required field and, as a pointer, ProjectRow's
-// optional list-level field (dashboard.go's handleProjects).
-type apiProjectCaptureInfo struct {
-	Commits  string `json:"commits"`
-	HumanLOC string `json:"human_loc"`
-}
-
-type apiProjectCostBucketRow struct {
-	Key     string  `json:"key"`
-	Label   string  `json:"label,omitempty"`
-	CostUSD float64 `json:"cost_usd"`
-	Turns   int     `json:"turns,omitempty"`
-	Count   int     `json:"count,omitempty"`
-	// UnpricedTurns is how many of this bucket's turns carry NO price
-	// (no recorded cost, no pricing entry for the model) - the bucket's
-	// cost_usd is a floor, not an exact figure, whenever it is > 0
-	// (SOL-R13). Omitted when every turn priced.
-	UnpricedTurns int `json:"unpriced_turns,omitempty"`
-	// AISplit is the session's AI-authored code-vs-comment split
-	// (internal/loc.SplitAuthored over projectroi.Edit.CodeLines /
-	// CommentLines), set ONLY on /cost?by=session rows and omitted when
-	// the session authored no code or comment lines.
-	AISplit *loc.AuthoredSplit `json:"ai_split,omitempty"`
-}
-
-type apiProjectSpendByDay struct {
-	Day     string  `json:"day"`
-	CostUSD float64 `json:"cost_usd"`
-	// UnpricedTurns counts this day's turns with no recorded cost and no
-	// pricing entry for their model (2026-09-22 rework finding S5): the
-	// day's cost_usd is a floor, not an exact figure, whenever this is
-	// nonzero. Omitted when every turn priced.
-	UnpricedTurns int `json:"unpriced_turns,omitempty"`
-}
-
-type apiProjectSpendBySession struct {
-	ID        string  `json:"id"`
-	Tool      string  `json:"tool"`
-	StartedAt string  `json:"started_at"`
-	CostUSD   float64 `json:"cost_usd"`
-	Turns     int     `json:"turns"`
-	Prompts   int     `json:"prompts"`
-	// AILines is this session's AI-authored CODE lines (added + modified,
-	// code-category files only - projectroi.Edit.CodeLines). Before
-	// 2026-09-28 it summed docs and config lines in too.
-	AILines int `json:"ai_lines"`
-	// AISplit is the code-vs-comment split of the same edits
-	// (internal/loc.SplitAuthored, the one derivation).
-	AISplit       loc.AuthoredSplit `json:"ai_split"`
-	CommitsLinked int               `json:"commits_linked"`
-	// UnpricedTurns counts this session's turns with no recorded cost and
-	// no pricing entry for their model (2026-09-22 rework finding S5) —
-	// same honesty contract as apiProjectSpendByDay.UnpricedTurns.
-	UnpricedTurns int `json:"unpriced_turns,omitempty"`
-}
-
-type apiProjectDetailSpend struct {
-	TotalUSD float64 `json:"total_usd"`
-	// UnpricedTurns counts turns in the window with no recorded cost and
-	// no pricing entry for their model (loadProjectSpend); omitted when
-	// zero. The page names it so a low total is never mistaken for a
-	// priced one.
-	UnpricedTurns int                        `json:"unpriced_turns,omitempty"`
-	ByTool        []apiProjectCostBucketRow  `json:"by_tool"`
-	ByModel       []apiProjectCostBucketRow  `json:"by_model"`
-	ByDay         []apiProjectSpendByDay     `json:"by_day"`
-	BySession     []apiProjectSpendBySession `json:"by_session"`
-}
-
-type apiProjectRoiTile struct {
-	Key       string  `json:"key"`
-	Label     string  `json:"label"`
-	Value     float64 `json:"value"`
-	Unit      string  `json:"unit"`
-	Formula   string  `json:"formula"`
-	Caveat    string  `json:"caveat,omitempty"`
-	Available bool    `json:"available"`
-}
-
-type apiProjectMeta struct {
-	ID        int64    `json:"id"`
-	RootPath  string   `json:"root_path"`
-	GitRemote string   `json:"git_remote,omitempty"`
-	Name      string   `json:"name,omitempty"`
-	Tools     []string `json:"tools"`
-	FirstSeen string   `json:"first_seen,omitempty"`
-	LastSeen  string   `json:"last_seen,omitempty"`
-}
-
-type apiProjectDetail struct {
-	Project apiProjectMeta        `json:"project"`
-	Spend   apiProjectDetailSpend `json:"spend"`
-	LOC     struct {
-		// AIAdded / AIModified are AI-authored CODE lines (code-category
-		// files only since 2026-09-28; docs/config lines used to be summed
-		// in and dominated the figure on docs-heavy repositories).
-		AIAdded    int `json:"ai_added"`
-		AIModified int `json:"ai_modified"`
-		// AIComment is the AI-added comment lines over the same rows, and
-		// AISplit the code-vs-comment split (internal/loc.SplitAuthored).
-		// Neither needs human measurement, so both are honest even where
-		// HumanCapture is "none".
-		AIComment    int               `json:"ai_comment"`
-		AISplit      loc.AuthoredSplit `json:"ai_split"`
-		HumanCapture string            `json:"human_capture"`
-	} `json:"loc"`
-	Commits struct {
-		Count        int     `json:"count"`
-		AITouched    int     `json:"ai_touched"`
-		WithSpendUSD float64 `json:"with_spend_usd"`
-	} `json:"commits"`
-	Tasks struct {
-		Total   int     `json:"total"`
-		Done    int     `json:"done"`
-		CostUSD float64 `json:"cost_usd"`
-		// Available is false when the lifecycle task rollup could not be
-		// loaded and the figures above fell back to the raw task_items
-		// rows (a different count than the Tasks tab renders) with
-		// cost_usd = 0 - an honest "degraded source" signal (SOL-F11),
-		// never rendered as "zero tasks".
-		Available bool `json:"available"`
-	} `json:"tasks"`
-	ROI        []apiProjectRoiTile   `json:"roi"`
-	Capture    apiProjectCaptureInfo `json:"capture"`
-	WindowDays int                   `json:"window_days"`
-	Truncated  bool                  `json:"truncated,omitempty"`
-}
 
 type apiProjectCommitPrompt struct {
 	ActionID  int64  `json:"action_id"`
@@ -305,7 +174,7 @@ func toAPICommitOwner(o projectroi.CommitOwnership) apiCommitOwner {
 		out.Contributors = append(out.Contributors, apiCommitContributor{
 			SessionID: c.SessionID, Share: c.Share, CodeLines: c.CodeLines, CommentLines: c.CommentLines,
 			Split: loc.SplitAuthored(int64(c.CodeLines), int64(c.CommentLines)),
-			Files: c.Files, Prompts: c.Prompts, FirstPromptAt: fmtProjectTime(c.FirstPromptAt),
+			Files: c.Files, Prompts: c.Prompts, FirstPromptAt: dashapi.FmtProjectTime(c.FirstPromptAt),
 		})
 	}
 	return out
@@ -390,7 +259,7 @@ type apiProjectPromptsResponse struct {
 }
 
 type apiProjectCostRowsResponse struct {
-	Rows []apiProjectCostBucketRow `json:"rows"`
+	Rows []dashapi.APIProjectCostBucketRow `json:"rows"`
 	apiTruncationMeta
 }
 
@@ -425,13 +294,20 @@ func parseProjectID(r *http.Request) (int64, bool) {
 }
 
 // projectDetailWindow resolves the shared days/since/until triple every
-// Projects-page detail route uses: `days` defaults to 30, capped at
-// 365 (plan §3.4); `until` is always "now" — there is no upper-bound
-// query param on these routes.
+// Projects-page detail route uses. It follows the page's global window
+// through windowRange (since / hours / days, and a closed range's until;
+// REVIEW-3 P3-25, T-485): `days` defaults to 30, capped at 365 (plan
+// §3.4); an absent or malformed `until` means now. days is the window's
+// whole-day span, for the responses that still report one.
 func projectDetailWindow(r *http.Request) (since, until time.Time, days int) {
-	days = intArg(r, "days", 30, 1, 365)
-	until = time.Now().UTC()
-	since = until.Add(-time.Duration(days) * 24 * time.Hour)
+	since, until = windowRange(r, 30, 1, 365)
+	if until.IsZero() {
+		until = time.Now().UTC()
+	}
+	if since.IsZero() {
+		since = until.Add(-30 * 24 * time.Hour)
+	}
+	days = windowSpanDays(since, until, 30)
 	return since, until, days
 }
 
@@ -445,13 +321,6 @@ func (s *Server) commitLinkWindow() time.Duration {
 		return projectroi.DefaultLinkWindow
 	}
 	return time.Duration(s.opts.Projects.CommitLinkWindowDays) * 24 * time.Hour
-}
-
-func fmtProjectTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339Nano)
 }
 
 // requireProject 404s the request when projectID is not a known
@@ -469,36 +338,6 @@ func requireProject(ctx context.Context, w http.ResponseWriter, r *http.Request,
 		return store.ProjectMeta{}, false
 	}
 	return meta, true
-}
-
-// commitAgg is the per-commit AI-attribution rollup handleProjectDetail/
-// handleProjectCommits derive from a Linkage: the distinct AI-touched
-// files that reached this commit, and the AI-authored CODE lines (added +
-// modified, code files only) and comment lines carried with them.
-type commitAgg struct {
-	aiFiles   map[string]bool
-	aiLines   int
-	aiComment int
-}
-
-func aggregateByCommit(linkage projectroi.Linkage) map[int64]*commitAgg {
-	out := make(map[int64]*commitAgg)
-	for _, chain := range linkage.Chains {
-		for _, f := range chain.Files {
-			if f.Superseded || f.CommitID == 0 {
-				continue
-			}
-			a, ok := out[f.CommitID]
-			if !ok {
-				a = &commitAgg{aiFiles: map[string]bool{}}
-				out[f.CommitID] = a
-			}
-			a.aiFiles[f.PathHash] = true
-			a.aiLines += f.Added + f.Modified
-			a.aiComment += f.Comment
-		}
-	}
-	return out
 }
 
 // commitOwnershipForRows folds commit ownership (projectroi.Ownership)
@@ -528,144 +367,6 @@ func indexPromptsByAction(prompts []projectroi.Prompt) map[int64]projectroi.Prom
 	out := make(map[int64]projectroi.Prompt, len(prompts))
 	for _, p := range prompts {
 		out[p.ActionID] = p
-	}
-	return out
-}
-
-// bucketCost sums turn cost by an arbitrary key (tool or model),
-// descending by cost — the most informative ordering first, same
-// convention as taskreport.LoadTaskRollup's ByTool.
-func bucketCost(turns []projectroi.Turn, keyFn func(projectroi.Turn) string) []apiProjectCostBucketRow {
-	type agg struct {
-		cost     float64
-		turns    int
-		unpriced int
-	}
-	m := make(map[string]*agg)
-	var order []string
-	for _, t := range turns {
-		k := keyFn(t)
-		if k == "" {
-			k = "unknown"
-		}
-		a, ok := m[k]
-		if !ok {
-			a = &agg{}
-			m[k] = a
-			order = append(order, k)
-		}
-		a.cost += t.CostUSD
-		a.turns++
-		if !t.Priced {
-			a.unpriced++
-		}
-	}
-	rows := make([]apiProjectCostBucketRow, 0, len(order))
-	for _, k := range order {
-		rows = append(rows, apiProjectCostBucketRow{Key: k, CostUSD: m[k].cost, Turns: m[k].turns, UnpricedTurns: m[k].unpriced})
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].CostUSD > rows[j].CostUSD })
-	return rows
-}
-
-func bucketCostByDay(turns []projectroi.Turn) []apiProjectSpendByDay {
-	m := make(map[string]float64)
-	unpriced := make(map[string]int)
-	for _, t := range turns {
-		d := t.At.UTC().Format("2006-01-02")
-		m[d] += t.CostUSD
-		if !t.Priced {
-			unpriced[d]++
-		}
-	}
-	days := make([]string, 0, len(m))
-	for d := range m {
-		days = append(days, d)
-	}
-	sort.Strings(days)
-	rows := make([]apiProjectSpendByDay, 0, len(days))
-	for _, d := range days {
-		rows = append(rows, apiProjectSpendByDay{Day: d, CostUSD: m[d], UnpricedTurns: unpriced[d]})
-	}
-	return rows
-}
-
-// buildBySession composes the by-session spend rows. promptsPerSession
-// is the UNCAPPED per-session prompt count (store.LoadProjectPromptCounts),
-// deliberately not derived from the capped newest-500 prompt slice the
-// chains use, so an older session in a busy window shows its real count
-// rather than 0 (F5 of the 2026-09-22 arc review); commits_linked and
-// ai_lines still come from the capped slices, as the page's truncation
-// banner states.
-func buildBySession(sessions []projectroi.Session, turns []projectroi.Turn, promptsPerSession map[string]int, edits []projectroi.Edit, linkage projectroi.Linkage) []apiProjectSpendBySession {
-	turnsPerSession := make(map[string]int)
-	unpricedPerSession := make(map[string]int)
-	for _, t := range turns {
-		if t.SessionID != "" {
-			turnsPerSession[t.SessionID]++
-			if !t.Priced {
-				unpricedPerSession[t.SessionID]++
-			}
-		}
-	}
-	// Edit.CodeLines / CommentLines, never AddedCode+ModifiedCode: a docs
-	// or config file's lines are not code (the pre-2026-09-28 sum here
-	// counted them, so a docs-heavy session's "AI lines" was mostly prose).
-	aiLinesPerSession := make(map[string]int)
-	aiCommentPerSession := make(map[string]int)
-	for _, e := range edits {
-		aiLinesPerSession[e.SessionID] += e.CodeLines()
-		aiCommentPerSession[e.SessionID] += e.CommentLines()
-	}
-	commitsPerSession := make(map[string]map[int64]bool)
-	for _, chain := range linkage.Chains {
-		for _, cc := range chain.Commits {
-			set := commitsPerSession[chain.Prompt.SessionID]
-			if set == nil {
-				set = make(map[int64]bool)
-				commitsPerSession[chain.Prompt.SessionID] = set
-			}
-			set[cc.ID] = true
-		}
-	}
-
-	out := make([]apiProjectSpendBySession, 0, len(sessions))
-	for _, sess := range sessions {
-		out = append(out, apiProjectSpendBySession{
-			ID:            sess.ID,
-			Tool:          sess.Tool,
-			StartedAt:     fmtProjectTime(sess.StartedAt),
-			CostUSD:       sess.CostUSD,
-			Turns:         turnsPerSession[sess.ID],
-			Prompts:       promptsPerSession[sess.ID],
-			AILines:       aiLinesPerSession[sess.ID],
-			AISplit:       loc.SplitAuthored(int64(aiLinesPerSession[sess.ID]), int64(aiCommentPerSession[sess.ID])),
-			CommitsLinked: len(commitsPerSession[sess.ID]),
-			UnpricedTurns: unpricedPerSession[sess.ID],
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CostUSD > out[j].CostUSD })
-	return out
-}
-
-// toRoiTiles maps internal/projectroi.Proxies' output onto the wire
-// shape, translating the pure package's "ratio" unit to the tile
-// renderer's "pct" (web/src/components/projectdetail/OverviewTab.tsx's
-// fmtRoiValue: `unit === "pct"` multiplies the value by 100 itself via
-// fmtPct's default fromFraction=true — so the VALUE here stays the raw
-// [0,1] fraction; it must NOT be pre-multiplied by 100, or the tile
-// would render 100x too large).
-func toRoiTiles(proxies []projectroi.Proxy) []apiProjectRoiTile {
-	out := make([]apiProjectRoiTile, 0, len(proxies))
-	for _, p := range proxies {
-		unit := p.Unit
-		if unit == projectroi.UnitRatio {
-			unit = "pct"
-		}
-		out = append(out, apiProjectRoiTile{
-			Key: p.Key, Label: p.Label, Value: p.Value, Unit: unit,
-			Formula: p.Formula, Caveat: p.Caveat, Available: p.Available,
-		})
 	}
 	return out
 }
@@ -731,12 +432,12 @@ func (s *Server) handleProjectCommits(w http.ResponseWriter, r *http.Request) {
 	if commitRowsTruncated {
 		rawCommits = rawCommits[:limit]
 	}
-	prompts, promptsTruncated, err := st.LoadProjectPrompts(ctx, projectID, since, until, promptLinkCap)
+	prompts, promptsTruncated, err := st.LoadProjectPrompts(ctx, projectID, since, until, dashapi.PromptLinkCap)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, editLinkCap)
+	edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, dashapi.EditLinkCap)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -746,12 +447,12 @@ func (s *Server) handleProjectCommits(w http.ResponseWriter, r *http.Request) {
 	// displayed page's limit+1 - so a commit's attribution on this tab
 	// cannot disagree with the same commit elsewhere (supersession and
 	// per-file carrying depend on which OTHER commits are in the set).
-	linkCommits, linkCommitsTruncated, err := st.LoadProjectCommitsForLink(ctx, projectID, since, until, commitLinkCap)
+	linkCommits, linkCommitsTruncated, err := st.LoadProjectCommitsForLink(ctx, projectID, since, until, dashapi.CommitLinkCap)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	priced, err := loadProjectSpend(ctx, st, s.opts.CostEngine, projectID, since, until)
+	priced, err := dashapi.LoadProjectSpend(ctx, st, s.opts.CostEngine, projectID, since, until)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -760,23 +461,23 @@ func (s *Server) handleProjectCommits(w http.ResponseWriter, r *http.Request) {
 
 	linkage := projectroi.Link(prompts, edits, linkCommits, projectroi.Options{LinkWindow: s.commitLinkWindow()})
 	spend := projectroi.AttributeSpend(linkage, turns, prompts)
-	agg := aggregateByCommit(linkage)
+	agg := dashapi.AggregateByCommit(linkage)
 	promptByAction := indexPromptsByAction(prompts)
 	ownership := commitOwnershipForRows(linkage, linkCommits, rawCommits)
 
 	rows := make([]apiProjectCommitRow, 0, len(rawCommits))
 	for _, c := range rawCommits {
 		row := apiProjectCommitRow{
-			ID: c.ID, SHA: c.SHA, Subject: c.Subject, CommittedAt: fmtProjectTime(c.CommittedAt),
+			ID: c.ID, SHA: c.SHA, Subject: c.Subject, CommittedAt: dashapi.FmtProjectTime(c.CommittedAt),
 			AuthorHash: c.AuthorHash, IsMerge: c.IsMerge, Reachable: c.Reachable,
 			Files: c.FilesCount, Added: c.Added, Deleted: c.Deleted,
 			SpendUSD: spend.ByCommit[c.ID],
 			Prompts:  []apiProjectCommitPrompt{},
 		}
 		if a := agg[c.ID]; a != nil {
-			row.AIFiles = len(a.aiFiles)
-			row.AILines = a.aiLines
-			row.AICommentLines = a.aiComment
+			row.AIFiles = len(a.AIFiles)
+			row.AILines = a.AILines
+			row.AICommentLines = a.AIComment
 		}
 		row.AISplit = loc.SplitAuthored(int64(row.AILines), int64(row.AICommentLines))
 		row.Owner = toAPICommitOwner(ownership[c.ID])
@@ -786,7 +487,7 @@ func (s *Server) handleProjectCommits(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			row.Prompts = append(row.Prompts, apiProjectCommitPrompt{
-				ActionID: p.ActionID, SessionID: p.SessionID, At: fmtProjectTime(p.At), Preview: p.Preview,
+				ActionID: p.ActionID, SessionID: p.SessionID, At: dashapi.FmtProjectTime(p.At), Preview: p.Preview,
 			})
 		}
 		sort.Slice(row.Prompts, func(i, j int) bool { return row.Prompts[i].At < row.Prompts[j].At })
@@ -843,17 +544,17 @@ func (s *Server) handleProjectPrompts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, editLinkCap)
+	edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, dashapi.EditLinkCap)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	commits, commitsTruncated, err := st.LoadProjectCommitsForLink(ctx, projectID, since, until, commitLinkCap)
+	commits, commitsTruncated, err := st.LoadProjectCommitsForLink(ctx, projectID, since, until, dashapi.CommitLinkCap)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	rawCommits, err := st.LoadProjectCommits(ctx, projectID, since, until, commitLinkCap)
+	rawCommits, err := st.LoadProjectCommits(ctx, projectID, since, until, dashapi.CommitLinkCap)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -904,7 +605,7 @@ func (s *Server) handleProjectPrompts(w http.ResponseWriter, r *http.Request) {
 		}
 		row := apiProjectPromptRow{
 			ActionID: p.ActionID, SessionID: p.SessionID, Tool: p.Tool,
-			At: fmtProjectTime(p.At), Preview: p.Preview,
+			At: dashapi.FmtProjectTime(p.At), Preview: p.Preview,
 			Edits: apiProjectPromptEdits{
 				Files: len(fileset), Added: added, Modified: modified, Comment: comment,
 				Split: loc.SplitAuthored(int64(added+modified), int64(comment)),
@@ -916,7 +617,7 @@ func (s *Server) handleProjectPrompts(w http.ResponseWriter, r *http.Request) {
 		for _, cc := range chain.Commits {
 			row.Commits = append(row.Commits, apiProjectPromptCommitRef{
 				ID: cc.ID, SHA: cc.SHA, Subject: subjectByCommit[cc.ID],
-				CommittedAt: fmtProjectTime(cc.CommittedAt), Share: cc.Share,
+				CommittedAt: dashapi.FmtProjectTime(cc.CommittedAt), Share: cc.Share,
 			})
 		}
 
@@ -924,7 +625,7 @@ func (s *Server) handleProjectPrompts(w http.ResponseWriter, r *http.Request) {
 			row.Alignment = &apiProjectPromptAlignment{
 				Tier: grade.Tier, Delivered: nonNilStrings(grade.Result.Delivered),
 				Missed: nonNilStrings(grade.Result.Missed), Extra: nonNilStrings(grade.Result.Extra),
-				Confidence: grade.Result.Confidence, GradedAt: fmtProjectTime(grade.GradedAt), Model: grade.Model,
+				Confidence: grade.Result.Confidence, GradedAt: dashapi.FmtProjectTime(grade.GradedAt), Model: grade.Model,
 			}
 		}
 		avail := &apiProjectPromptGradeAvailable{Judge: judgeAvailable, Cloud: cloudAvailable}
@@ -983,23 +684,23 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 	}
 	since, until, _ := projectDetailWindow(r)
 
-	priced, err := loadProjectSpend(ctx, st, s.opts.CostEngine, projectID, since, until)
+	priced, err := dashapi.LoadProjectSpend(ctx, st, s.opts.CostEngine, projectID, since, until)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	turns := priced.Turns
 
-	var rows []apiProjectCostBucketRow
+	var rows []dashapi.APIProjectCostBucketRow
 	var meta apiTruncationMeta
 	switch r.URL.Query().Get("by") {
 	case "tool":
-		rows = bucketCost(turns, func(t projectroi.Turn) string { return t.Tool })
+		rows = dashapi.BucketCost(turns, func(t projectroi.Turn) string { return t.Tool })
 	case "model":
-		rows = bucketCost(turns, func(t projectroi.Turn) string { return t.Model })
+		rows = dashapi.BucketCost(turns, func(t projectroi.Turn) string { return t.Model })
 	case "day":
-		for _, d := range bucketCostByDay(turns) {
-			rows = append(rows, apiProjectCostBucketRow{Key: d.Day, CostUSD: d.CostUSD, UnpricedTurns: d.UnpricedTurns})
+		for _, d := range dashapi.BucketCostByDay(turns) {
+			rows = append(rows, dashapi.APIProjectCostBucketRow{Key: d.Day, CostUSD: d.CostUSD, UnpricedTurns: d.UnpricedTurns})
 		}
 	case "session":
 		turnsPerSession := make(map[string]int)
@@ -1013,7 +714,7 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 		// The per-session AI code/comment split rides on the same capped
 		// edits loader every other Projects view uses; a cap hit is named
 		// in the truncation meta (affects ai_split), never silent.
-		edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, editLinkCap)
+		edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, dashapi.EditLinkCap)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -1025,7 +726,7 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 			commentPerSession[e.SessionID] += e.CommentLines()
 		}
 		for _, sess := range priced.Sessions {
-			row := apiProjectCostBucketRow{Key: sess.ID, Label: sess.Tool, CostUSD: sess.CostUSD, Turns: turnsPerSession[sess.ID], UnpricedTurns: unpricedPerSession[sess.ID]}
+			row := dashapi.APIProjectCostBucketRow{Key: sess.ID, Label: sess.Tool, CostUSD: sess.CostUSD, Turns: turnsPerSession[sess.ID], UnpricedTurns: unpricedPerSession[sess.ID]}
 			row.AISplit = optionalAuthoredSplit(codePerSession[sess.ID], commentPerSession[sess.ID])
 			rows = append(rows, row)
 		}
@@ -1064,27 +765,27 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 				// Unpriced ? 1 : 0, so a task with 40 unpriced turns and a
 				// task with 1 rendered identically; UnpricedTurns removes
 				// that collapse at the source.
-				rows = append(rows, apiProjectCostBucketRow{Key: item.Key, Label: item.Content, CostUSD: item.CostUSD, Count: 1, UnpricedTurns: item.UnpricedTurns})
+				rows = append(rows, dashapi.APIProjectCostBucketRow{Key: item.Key, Label: item.Content, CostUSD: item.CostUSD, Count: 1, UnpricedTurns: item.UnpricedTurns})
 			}
 		}
 		sort.Slice(rows, func(i, j int) bool { return rows[i].CostUSD > rows[j].CostUSD })
 	case "commit":
-		rawCommits, err := st.LoadProjectCommits(ctx, projectID, since, until, commitLinkCap)
+		rawCommits, err := st.LoadProjectCommits(ctx, projectID, since, until, dashapi.CommitLinkCap)
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
-		prompts, promptsTruncated, err := st.LoadProjectPrompts(ctx, projectID, since, until, promptLinkCap)
+		prompts, promptsTruncated, err := st.LoadProjectPrompts(ctx, projectID, since, until, dashapi.PromptLinkCap)
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
-		edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, editLinkCap)
+		edits, editsTruncated, err := st.LoadProjectAIEdits(ctx, projectID, since, until, dashapi.EditLinkCap)
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
-		linkCommits, linkCommitsTruncated, err := st.LoadProjectCommitsForLink(ctx, projectID, since, until, commitLinkCap)
+		linkCommits, linkCommitsTruncated, err := st.LoadProjectCommitsForLink(ctx, projectID, since, until, dashapi.CommitLinkCap)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -1098,7 +799,7 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 			// spend.UnpricedTurnsByCommit carries the same honesty signal
 			// projectroi.AttributeSpend now derives alongside the dollar
 			// split.
-			rows = append(rows, apiProjectCostBucketRow{Key: c.SHA, Label: c.Subject, CostUSD: spend.ByCommit[c.ID], UnpricedTurns: spend.UnpricedTurnsByCommit[c.ID]})
+			rows = append(rows, dashapi.APIProjectCostBucketRow{Key: c.SHA, Label: c.Subject, CostUSD: spend.ByCommit[c.ID], UnpricedTurns: spend.UnpricedTurnsByCommit[c.ID]})
 		}
 		sort.Slice(rows, func(i, j int) bool { return rows[i].CostUSD > rows[j].CostUSD })
 		meta = buildTruncationMeta(
@@ -1112,7 +813,7 @@ func (s *Server) handleProjectCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rows == nil {
-		rows = []apiProjectCostBucketRow{}
+		rows = []dashapi.APIProjectCostBucketRow{}
 	}
 	resp := apiProjectCostRowsResponse{Rows: rows}
 	resp.apiTruncationMeta = meta
@@ -1208,7 +909,7 @@ func (s *Server) handleProjectGradeJudge(ctx context.Context, w http.ResponseWri
 		"status": "ok",
 		"alignment": apiProjectPromptAlignment{
 			Tier: "judge", Delivered: nonNilStrings(result.Delivered), Missed: nonNilStrings(result.Missed),
-			Extra: nonNilStrings(result.Extra), Confidence: result.Confidence, GradedAt: fmtProjectTime(gradedAt), Model: model,
+			Extra: nonNilStrings(result.Extra), Confidence: result.Confidence, GradedAt: dashapi.FmtProjectTime(gradedAt), Model: model,
 		},
 	})
 }

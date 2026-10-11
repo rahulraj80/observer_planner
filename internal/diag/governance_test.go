@@ -22,7 +22,7 @@ func TestCheckGovernance_NotEnrolledNoSidecar(t *testing.T) {
 		t.Logf("  detail: %s", d)
 	}
 	if c.Status != StatusOK {
-		t.Fatalf("status=%s want OK — %q %v", c.Status, c.Message, c.Details)
+		t.Fatalf("status=%s want OK - %q %v", c.Status, c.Message, c.Details)
 	}
 	if c.Message != "not governed; no sidecar (correct)" {
 		t.Errorf("message=%q", c.Message)
@@ -46,7 +46,7 @@ func TestCheckGovernance_GovernedLiveSidecar(t *testing.T) {
 		t.Logf("  detail: %s", d)
 	}
 	if c.Status != StatusOK {
-		t.Fatalf("status=%s want OK — %q %v", c.Status, c.Message, c.Details)
+		t.Fatalf("status=%s want OK - %q %v", c.Status, c.Message, c.Details)
 	}
 	if !containsAll(c.Message, "sidecar live", "pins applied=true") {
 		t.Errorf("message=%q", c.Message)
@@ -71,7 +71,7 @@ func TestCheckGovernance_OrphanedSidecarNoGrant(t *testing.T) {
 		t.Logf("  detail: %s", d)
 	}
 	if c.Status != StatusWarn {
-		t.Fatalf("status=%s want WARN — %q %v", c.Status, c.Message, c.Details)
+		t.Fatalf("status=%s want WARN - %q %v", c.Status, c.Message, c.Details)
 	}
 	if c.Message != "orphaned/stale sidecar at "+path {
 		t.Errorf("message=%q", c.Message)
@@ -98,7 +98,7 @@ func TestCheckGovernance_OrphanedSidecarExpiredGrant(t *testing.T) {
 		t.Logf("  detail: %s", d)
 	}
 	if c.Status != StatusWarn {
-		t.Fatalf("status=%s want WARN — %q %v", c.Status, c.Message, c.Details)
+		t.Fatalf("status=%s want WARN - %q %v", c.Status, c.Message, c.Details)
 	}
 	if c.Message != "orphaned/stale sidecar at "+path {
 		t.Errorf("message=%q", c.Message)
@@ -128,10 +128,10 @@ func TestCheckGovernance_UnwritableSidecarDir(t *testing.T) {
 		t.Logf("  detail: %s", d)
 	}
 	if c.Status != StatusFail {
-		t.Fatalf("status=%s want FAIL — %q %v", c.Status, c.Message, c.Details)
+		t.Fatalf("status=%s want FAIL - %q %v", c.Status, c.Message, c.Details)
 	}
 	if !containsAll(c.Message, "not writable", "errno") {
-		t.Errorf("message=%q — expected the errno to be named", c.Message)
+		t.Errorf("message=%q - expected the errno to be named", c.Message)
 	}
 }
 
@@ -152,7 +152,7 @@ func TestCheckGovernance_ExpiringWithinSevenDays(t *testing.T) {
 		t.Logf("  detail: %s", d)
 	}
 	if c.Status != StatusWarn {
-		t.Fatalf("status=%s want WARN — %q %v", c.Status, c.Message, c.Details)
+		t.Fatalf("status=%s want WARN - %q %v", c.Status, c.Message, c.Details)
 	}
 	if !containsAll(c.Message, "grant expires in", "day(s)") {
 		t.Errorf("message=%q", c.Message)

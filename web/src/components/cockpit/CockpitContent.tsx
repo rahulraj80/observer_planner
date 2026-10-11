@@ -508,7 +508,7 @@ function CostStrip({
           <div className="text-[10px] uppercase tracking-wide text-fg-4">next msg</div>
           <div className="text-[12px] font-medium tabular-nums text-fg-1">
             {nextLo != null && nextHi != null ? (
-              <>≈ {fmtCost(nextLo)}–{fmtCost(nextHi)}</>
+              <>≈ {fmtCost(nextLo)}-{fmtCost(nextHi)}</>
             ) : (
               <span className="text-fg-4">-</span>
             )}

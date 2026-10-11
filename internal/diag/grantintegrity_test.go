@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +111,46 @@ func TestCheckStoredGrantIntegrity(t *testing.T) {
 		got, detail := checkStoredGrantIntegrity(ctx, d)
 		if got != grantIntegrityUnchecked || detail != "" {
 			t.Fatalf("integrity = %q detail = %q, want unchecked and silent", got, detail)
+		}
+	})
+}
+
+// TestCheckStoredGrantIntegrityConsentRails (Sol A3-03 class): doctor must
+// reach the SAME verdict as the daemon, through the same verifier. A managed
+// token-rail grant is signed with no consent fields while the node records
+// its resolved mode and local actor; doctor used to rebuild the message from
+// the stored fields only and report every such grant as altered (FAIL).
+func TestCheckStoredGrantIntegrityConsentRails(t *testing.T) {
+	ctx := context.Background()
+	seed := func(t *testing.T, tenancy string) *sql.DB {
+		t.Helper()
+		d, _ := seedGovernedNode(t)
+		if _, err := d.ExecContext(ctx,
+			`UPDATE org_enrolment_grant SET consent_mode = 'managed', consent_actor = 'dev'`); err != nil {
+			t.Fatalf("record resolved consent: %v", err)
+		}
+		if _, err := d.ExecContext(ctx, `
+INSERT INTO org_enrolment (id, org_id, org_name, org_server_url, user_id, user_email, enrolled_at, bearer_key_id, tenancy)
+VALUES (1, 'org-1', 'Acme', 'https://org.example.test', 'u-1', 'dev@acme.example', '2026-10-03T00:00:00Z', 'k', ?)`, tenancy); err != nil {
+			t.Fatalf("seed enrolment: %v", err)
+		}
+		return d
+	}
+
+	t.Run("managed token rail verifies and says the actor is local", func(t *testing.T) {
+		got, detail := checkStoredGrantIntegrity(ctx, seed(t, orgcontract.TenancyManaged))
+		if got != grantIntegrityValid {
+			t.Fatalf("integrity = %q (%s), want valid", got, detail)
+		}
+		if !strings.Contains(detail, "not signed by the organization") {
+			t.Fatalf("detail does not report the consent evidence: %q", detail)
+		}
+	})
+
+	t.Run("an individual grant flipped to managed is INVALID", func(t *testing.T) {
+		got, detail := checkStoredGrantIntegrity(ctx, seed(t, orgcontract.TenancyIndividual))
+		if got != grantIntegrityInvalid {
+			t.Fatalf("integrity = %q (%s), want invalid", got, detail)
 		}
 	})
 }

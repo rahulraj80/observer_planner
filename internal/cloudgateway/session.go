@@ -473,7 +473,7 @@ func (g *Gateway) FeatureSend(ctx context.Context, purpose cloudcontract.Purpose
 		return fmt.Errorf("%w: %q", ErrBootstrapPurpose, string(purpose))
 	}
 	if ok, reason := EvidenceUploadable(purpose); !ok {
-		return fmt.Errorf("%w: %q — %s", ErrPurposeNotUploadable, string(purpose), reason)
+		return fmt.Errorf("%w: %q - %s", ErrPurposeNotUploadable, string(purpose), reason)
 	}
 	auth, err := g.authorize(ctx, grantFilter{purpose: purpose})
 	if err != nil {

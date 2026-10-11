@@ -7,8 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,8 +20,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
-	"github.com/marmutapp/superbased-observer/internal/policy"
-	"github.com/marmutapp/superbased-observer/internal/proxy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -63,6 +59,10 @@ func TestComposeManagedBudgetLaunchState(t *testing.T) {
 	base := config.Config{Guard: config.GuardConfig{
 		Enabled: true, Mode: "enforce", Budget: config.GuardBudgetConfig{FromOrg: true},
 	}}
+	// D-502 / D-509: a missing or unreadable verified body raises the blocking
+	// ceiling only under the org's fail_closed opt-in.
+	failClosed := base
+	failClosed.Guard.Budget.FailClosed = true
 	cases := []struct {
 		name      string
 		cfg       config.Config
@@ -79,8 +79,10 @@ func TestComposeManagedBudgetLaunchState(t *testing.T) {
 		{name: "managed explicit signed none unaffected", cfg: base, cached: explicitNone, granted: true, wantReady: true},
 		{name: "managed no cap unaffected", cfg: base, cached: store.OrgBudgetCache{Have: true}, granted: true, wantReady: true},
 		{name: "unmapped hard rolling cap unaffected", cfg: base, cached: rolling, granted: true, wantReady: true},
-		{name: "missing verified budget activates blocking ceiling", cfg: base, granted: true, wantReq: true, wantReady: true},
-		{name: "unreadable verified budget activates blocking ceiling", cfg: base, cacheErr: errors.New("corrupt"), granted: true, wantReq: true, wantReady: true},
+		{name: "missing verified budget activates blocking ceiling", cfg: failClosed, granted: true, wantReq: true, wantReady: true},
+		{name: "unreadable verified budget activates blocking ceiling", cfg: failClosed, cacheErr: errors.New("corrupt"), granted: true, wantReq: true, wantReady: true},
+		{name: "missing verified budget without fail_closed does not block", cfg: base, granted: true, wantReady: true},
+		{name: "unreadable verified budget without fail_closed does not block", cfg: base, cacheErr: errors.New("corrupt"), granted: true, wantReady: true},
 		{
 			name: "disabled guard does not erase hard requirement",
 			cfg: config.Config{Guard: config.GuardConfig{
@@ -236,6 +238,14 @@ func TestEnforceBudgetControlledLaunchMissingVerifiedBudget(t *testing.T) {
 	t.Parallel()
 	cfgPath, _ := writeManagedBudgetLaunchFixture(t, false, "enforce")
 
+	// D-502 / D-509: without the org's fail_closed opt-in a missing verified
+	// budget does not block a launch.
+	if err := enforceBudgetControlledLaunch(context.Background(), cfgPath, "claude-code",
+		budgetLaunchEvidence{Route: budgetLaunchRouteDirect}); err != nil {
+		t.Fatalf("missing-budget launch without fail_closed refused: %v", err)
+	}
+
+	setBudgetLaunchFailClosed(t, cfgPath)
 	err := enforceBudgetControlledLaunch(context.Background(), cfgPath, "claude-code",
 		budgetLaunchEvidence{Route: budgetLaunchRouteDirect})
 	if !errors.Is(err, errBudgetLaunchUncontrolled) {
@@ -282,6 +292,9 @@ func TestEnforceBudgetControlledLaunchReturnsStateReadErrors(t *testing.T) {
 	}
 
 	cfgPath, dbPath := writeManagedBudgetLaunchFixture(t, true, "enforce")
+	// The refusal on a missing managed grant is the fail_closed posture
+	// (REVIEW-4 P4-03, D-521); without it the launch proceeds on local caps.
+	setBudgetLaunchFailClosed(t, cfgPath)
 	database, openErr := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if openErr != nil {
 		t.Fatalf("reopen DB: %v", openErr)
@@ -303,6 +316,7 @@ func TestEnforceBudgetControlledLaunchReturnsStateReadErrors(t *testing.T) {
 func TestEnforceBudgetControlledLaunchRejectsExpiredManagedGrant(t *testing.T) {
 	t.Parallel()
 	cfgPath, dbPath := writeManagedBudgetLaunchFixture(t, true, "enforce")
+	setBudgetLaunchFailClosed(t, cfgPath) // the refusal is the fail_closed posture (P4-03)
 	rewriteBudgetLaunchGrant(t, dbPath, func(grant *store.EnrolmentGrant) {
 		grant.ExpiresAt = time.Now().UTC().Add(-time.Hour)
 		grant.SignedExpiresAt = grant.ExpiresAt
@@ -384,46 +398,6 @@ func TestRunSeedOnlyLaunchSeededAllowsMuseMaintenanceUnderManagedHardBudget(t *t
 	}
 	if _, statErr := os.Stat(marker); statErr != nil {
 		t.Fatalf("fake Muse maintenance process did not start: %v", statErr)
-	}
-}
-
-func TestWireGuardProxyKeepsBudgetScannerWhenOtherScansOff(t *testing.T) {
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "observer.db")
-	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	defer func() { _ = database.Close() }()
-
-	processGuards.mu.Lock()
-	delete(processGuards.m, dbPath)
-	processGuards.mu.Unlock()
-	t.Cleanup(func() {
-		processGuards.mu.Lock()
-		delete(processGuards.m, dbPath)
-		processGuards.mu.Unlock()
-	})
-
-	cfg := config.Config{
-		Observer: config.ObserverConfig{DBPath: dbPath},
-		Guard:    config.GuardConfig{Enabled: true, Mode: "enforce"},
-	}
-	var opts proxy.Options
-	wireGuardProxy(ctx, cfg, store.New(database), &opts,
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if opts.Guard == nil {
-		t.Fatal("proxy Guard is nil with all proxy/MCP scan toggles off; budget scanning would be absent")
-	}
-	if lookupProcessGuard(dbPath) == nil {
-		t.Fatal("wireGuardProxy did not publish the shared process Guard")
-	}
-	if err := lookupProcessGuard(dbPath).ApplyOrgBudget(config.GuardBudgetConfig{}, nil, true, policy.BudgetProtection{}, ""); err != nil {
-		t.Fatalf("ApplyOrgBudget(required): %v", err)
-	}
-	got := opts.Guard.ScanRequest(ctx, "openai", []byte(`{"model":"test"}`), "")
-	if got.Action != "deny" || got.RuleID != "B-625" {
-		t.Fatalf("required-budget scan = %+v, want deny B-625", got)
 	}
 }
 

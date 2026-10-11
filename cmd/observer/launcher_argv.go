@@ -166,7 +166,7 @@ func splitLauncherArgs(cmd *cobra.Command, argv []string) ([]string, error) {
 				return nil, fmt.Errorf("observer %s: flag %s requires a value", cmd.Name(), name)
 			}
 			i++
-			val = argv[i]
+			val = argv[i] //nolint:gosec // G602: the index is bounds-checked above
 		}
 
 		if err := fs.Set(flag.Name, val); err != nil {

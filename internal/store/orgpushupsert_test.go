@@ -389,6 +389,11 @@ func TestPushChangeTriggersAt141ThenUpgrade(t *testing.T) {
 			if _, err := sqlDB.Exec(`ALTER TABLE api_turns ADD COLUMN request_class TEXT`); err != nil {
 				t.Fatalf("add post-141 push column: %v", err)
 			}
+			// Same for guard_events.grant_id (agent migration 152, access
+			// grants), read by the guard_events push branch.
+			if _, err := sqlDB.Exec(`ALTER TABLE guard_events ADD COLUMN grant_id INTEGER`); err != nil {
+				t.Fatalf("add post-141 push column: %v", err)
+			}
 			err2, rev1 := runUpsertTriggerCase(t, c, s, sqlDB)
 			got, want := c.check(t, sqlDB)
 			switch c.at141 {
@@ -416,6 +421,9 @@ func TestPushChangeTriggersAt141ThenUpgrade(t *testing.T) {
 				t.Fatalf("unknown at141 %q", c.at141)
 			}
 			if _, err := sqlDB.Exec(`ALTER TABLE api_turns DROP COLUMN request_class`); err != nil {
+				t.Fatalf("drop post-141 push column: %v", err)
+			}
+			if _, err := sqlDB.Exec(`ALTER TABLE guard_events DROP COLUMN grant_id`); err != nil {
 				t.Fatalf("drop post-141 push column: %v", err)
 			}
 			if err := sqlDB.Close(); err != nil {

@@ -24,6 +24,7 @@ func TestNativeHookAccountCaptureWithoutActionOrEffort(t *testing.T) {
 	}
 	for _, tool := range []string{models.ToolCodex, models.ToolClaudeCode} {
 		t.Run(tool, func(t *testing.T) {
+			requireAdapter(t, tool)
 			root := t.TempDir()
 			t.Setenv("HOME", root)
 			t.Setenv("USERPROFILE", root)
@@ -90,7 +91,7 @@ func runCodexAccountHook(t *testing.T, body []byte, configPath string) {
 	originalIn, originalOut := os.Stdin, os.Stdout
 	defer func() { os.Stdin, os.Stdout = originalIn, originalOut; _ = outW.Close() }()
 	os.Stdin, os.Stdout = inR, outW
-	handleCodexHook(context.Background(), "PreToolUse", configPath)
+	hookReceivers[models.ToolCodex](context.Background(), "PreToolUse", configPath)
 	_ = outW.Close()
 	out, _ := io.ReadAll(outR)
 	if string(bytes.TrimSpace(out)) != "{}" {

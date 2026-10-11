@@ -1,0 +1,19 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "role",
+      "id": "role_01J1F8ROLE01",
+      "name": "API Group Manager",
+      "description": "Allows managing organization groups",
+      "permissions": [
+        "api.groups.read",
+        "api.groups.write"
+      ],
+      "resource_type": "api.organization",
+      "predefined_role": false
+    }
+  ],
+  "has_more": false,
+  "next": null
+}

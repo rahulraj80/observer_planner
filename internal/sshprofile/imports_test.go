@@ -58,8 +58,10 @@ func TestPackageImports_Bounded(t *testing.T) {
 					t.Errorf("%s: forbidden import %q (sshprofile is pure — it composes an argv, it never runs one)", filepath.Base(path), p)
 				}
 			}
-			if strings.HasPrefix(p, internalPrefix) {
-				t.Errorf("%s: forbidden observer-internal import %q (sshprofile imports no internal package)", filepath.Base(path), p)
+			// internal/sshspec is the neutral profile model this package
+			// re-exports (modular packaging phase PB); it is pure too.
+			if strings.HasPrefix(p, internalPrefix) && p != internalPrefix+"sshspec" {
+				t.Errorf("%s: forbidden observer-internal import %q (sshprofile imports no internal package but internal/sshspec)", filepath.Base(path), p)
 			}
 		}
 	}

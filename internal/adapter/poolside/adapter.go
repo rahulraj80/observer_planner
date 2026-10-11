@@ -70,15 +70,33 @@ func (*Adapter) Name() string { return models.ToolPoolside }
 // WatchPaths implements adapter.Adapter.
 func (a *Adapter) WatchPaths() []string { return a.roots }
 
-// appDataSpec declares Poolside's per-user data-home convention. Only
-// ShapeWindowsLocal is grounded (the sole OS available on the grounding
-// host); ShapeDarwinAppSupport is a documented, unverified guess on the
-// strength of every other JetBrains-bundled ACP agent's OS-native (not
-// XDG) data-home convention. No Linux shape is declared — see the
-// package doc's "Storage layout" section for why.
+// appDataSpec declares where Poolside keeps its trajectories, per OS.
+// ShapeWindowsLocal is grounded on the Windows JetBrains ACP install
+// (2026-09-05). ShapeXDGState is grounded on the standalone Linux `pool`
+// 1.0.16 CLI (demo node 1, 2026-10-08): ~/.local/state/poolside/
+// trajectories, the same record format and filename shape. The pair
+// (Windows %LOCALAPPDATA%, Linux ~/.local/state, with the ACP summary in
+// ~/.local/share on Linux) is the XDG state-home mapping a Go XDG
+// library makes on each OS, which is also why ShapeDarwinAppSupport stays
+// declared for macOS: a documented, still unverified expectation. See the
+// package doc's "Storage layout" section.
 var appDataSpec = adapter.AppDataSpec{
 	Name:   "poolside",
-	Shapes: adapter.ShapeWindowsLocal | adapter.ShapeDarwinAppSupport,
+	Shapes: adapter.ShapeWindowsLocal | adapter.ShapeDarwinAppSupport | adapter.ShapeXDGState,
+}
+
+// hostPoolCLI is the capture-surface host token for the standalone `pool`
+// terminal CLI, following the tool-id + "-cli" convention ("junie-cli",
+// "copilot-cli").
+const hostPoolCLI = "poolside-cli"
+
+// clientHostSurfaces maps session_start.client_metadata.host onto a
+// self-reported capture surface. One grounded row: the standalone `pool`
+// TUI reports "acp:pool" (demo node 1, 2026-10-08). A JetBrains-hosted
+// run is stamped by internal/surfaceenrich instead (host wins over a
+// self-report), so an unknown host stamps nothing rather than guessing.
+var clientHostSurfaces = map[string]models.SessionSurface{
+	"acp:pool": {Surface: models.SurfaceCLI, SurfaceHost: hostPoolCLI},
 }
 
 // defaultRoots returns every plausible Poolside trajectories directory.
@@ -166,6 +184,13 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	}
 
 	res := adapter.ParseResult{NewOffset: fromOffset}
+	// The header is re-read from byte 0 on every call, so the self-report
+	// is re-emitted each tick; Store.SetSessionSurface writes only when
+	// the stored value differs, so a repeat is a no-op.
+	if s, ok := clientHostSurfaces[st.clientHost]; ok && sessionID != "" {
+		s.SessionID = sessionID
+		res.SessionSurfaces = append(res.SessionSurfaces, s)
+	}
 
 	// bufio.Reader.ReadString (not Scanner) so the byte cursor advances by
 	// the exact terminator length including CRLF.
@@ -230,6 +255,8 @@ type parseState struct {
 	sessionStarted bool
 	// cwd is the raw absolute workspace root stated by session.start.
 	cwd string
+	// clientHost is session.start's client_metadata.host, when present.
+	clientHost string
 	// rootResolved / root / branch / remote memoize the ONE project-root
 	// resolution a session performs (a session log never changes cwd).
 	rootResolved bool
@@ -283,9 +310,13 @@ func (st *parseState) readHeader(f *os.File) error {
 		raw := strings.TrimRight(line, "\r\n")
 		if raw != "" {
 			var rec rawRecord
-			if jsonErr := json.Unmarshal([]byte(raw), &rec); jsonErr == nil &&
-				rec.SessionStart != nil && len(rec.SessionStart.WorkingDirectories) > 0 {
-				st.cwd = rec.SessionStart.WorkingDirectories[0]
+			if jsonErr := json.Unmarshal([]byte(raw), &rec); jsonErr == nil && rec.SessionStart != nil {
+				if rec.SessionStart.ClientMetadata != nil {
+					st.clientHost = rec.SessionStart.ClientMetadata.Host
+				}
+				if len(rec.SessionStart.WorkingDirectories) > 0 {
+					st.cwd = rec.SessionStart.WorkingDirectories[0]
+				}
 				return nil
 			}
 		}

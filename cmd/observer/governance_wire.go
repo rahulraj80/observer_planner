@@ -209,7 +209,7 @@ func lowerShareOptions(local store.ShareOptions, eff govern.Effective) store.Sha
 	// carries the extract.managed umbrella unlocks the SAME raw-content
 	// posture FullContent/AdminManaged already provide, without requiring the
 	// node operator to separately flip full_content — this is how a node
-	// enrolled BEFORE `observer org enroll` wrote full_content = true for
+	// enrolled BEFORE `observer enroll` wrote full_content = true for
 	// managed enrolments is raised to full content (L2): by the grant the
 	// org signed and the developer was shown, never by a silent rewrite of
 	// its config file. EnterpriseContentInForce (not the bare

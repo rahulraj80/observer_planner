@@ -1025,7 +1025,7 @@ func (a *Adapter) recoverViaLocalGRPC(ctx context.Context, path string, fi os.Fi
 	// local language_servers and call them directly via Go's HTTP/2
 	// client. The discovered endpoints are on the same loopback as
 	// this process.
-	servers, discoveryErr := a.discoverLanguageServersCached()
+	servers, discoveryErr := a.discoverLanguageServersCached(ctx)
 	if discoveryErr != nil {
 		tracef("discovery_err=%v", discoveryErr)
 		return adapter.ParseResult{}, "", fmt.Errorf("language-server discovery failed: %w", discoveryErr)
@@ -1526,7 +1526,7 @@ func (a *Adapter) fetchStructuredEnrichmentNativeAt(ctx context.Context, ls Lang
 	// sessions; an operator can grep for "structured_shape_mismatch"
 	// to find candidates for proto-path investigation.
 	if len(raw) >= 10*1024 && len(en.TokenEvents) == 0 && en.Model == "" {
-		tracef("structured_shape_mismatch pid=%d %s conversation=%s payload=%d_bytes — proto path mapping may need updating",
+		tracef("structured_shape_mismatch pid=%d %s conversation=%s payload=%d_bytes - proto path mapping may need updating",
 			ls.PID, endpoint, conversationID, len(raw))
 		// Optional debug dump (Issue #5 follow-up). Operator sets
 		// [observer.antigravity] dump_shape_mismatches_dir in
@@ -1651,14 +1651,14 @@ func tracef(format string, args ...any) {
 // running language_server processes at most once every 30s. The
 // underlying discovery shells out (PowerShell on WSL2; ps/lsof on
 // macOS) and is too expensive to run per file.
-func (a *Adapter) discoverLanguageServersCached() ([]LanguageServer, error) {
+func (a *Adapter) discoverLanguageServersCached(ctx context.Context) ([]LanguageServer, error) {
 	a.lsMu.Lock()
 	defer a.lsMu.Unlock()
 	now := time.Now().UnixNano()
 	if now < a.lsCacheValidUntil {
 		return a.lsCache, nil
 	}
-	servers, err := discoverLanguageServers()
+	servers, err := discoverLanguageServers(ctx)
 	if err != nil {
 		return nil, err
 	}

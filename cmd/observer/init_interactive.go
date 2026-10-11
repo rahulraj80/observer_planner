@@ -14,8 +14,9 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/browserhost"
 	"github.com/marmutapp/superbased-observer/internal/hook"
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/mcp"
+	"github.com/marmutapp/superbased-observer/internal/mcpregister"
 	"github.com/marmutapp/superbased-observer/internal/proxyroute"
+	"github.com/marmutapp/superbased-observer/internal/routeprov"
 )
 
 // Interactive `observer init` (usability arc P6.10) — the CLI twin of
@@ -49,6 +50,10 @@ type interactiveInitOptions struct {
 	WindowsBrowserHomes []string
 	WSLDistro           string
 	NewWindowsRegistry  func() (browserhost.RegistryWriter, error)
+	// Components, when set, runs the install-time component chooser
+	// (components_chooser.go) first on a machine with no [components]
+	// selection. Nil (tests, embedders) skips it.
+	Components chooserService
 }
 
 // stdinIsTerminal mirrors stdoutIsTerminal for the input side — the
@@ -79,7 +84,7 @@ func (p *initPrompter) ask(question string, def bool) (bool, error) {
 		line, err := p.in.ReadString('\n')
 		answer := strings.ToLower(strings.TrimSpace(line))
 		if err != nil && answer == "" {
-			return false, fmt.Errorf("stdin closed — stopping; nothing further was written")
+			return false, fmt.Errorf("stdin closed - stopping; nothing further was written")
 		}
 		switch answer {
 		case "":
@@ -91,7 +96,7 @@ func (p *initPrompter) ask(question string, def bool) (bool, error) {
 		default:
 			fmt.Fprintln(p.out, "  please answer y or n (enter for the default)")
 			if err != nil {
-				return false, fmt.Errorf("stdin closed — stopping; nothing further was written")
+				return false, fmt.Errorf("stdin closed - stopping; nothing further was written")
 			}
 		}
 	}
@@ -107,7 +112,7 @@ func (p *initPrompter) askChoice(question string, max int) (int, error) {
 		line, err := p.in.ReadString('\n')
 		answer := strings.ToLower(strings.TrimSpace(line))
 		if err != nil && answer == "" {
-			return -1, fmt.Errorf("stdin closed — stopping; nothing further was written")
+			return -1, fmt.Errorf("stdin closed - stopping; nothing further was written")
 		}
 		switch answer {
 		case "", "n", "no":
@@ -118,7 +123,7 @@ func (p *initPrompter) askChoice(question string, max int) (int, error) {
 		}
 		fmt.Fprintf(p.out, "  please enter a number 1-%d, or n to skip\n", max)
 		if err != nil {
-			return -1, fmt.Errorf("stdin closed — stopping; nothing further was written")
+			return -1, fmt.Errorf("stdin closed - stopping; nothing further was written")
 		}
 	}
 }
@@ -143,7 +148,7 @@ func runWindowsRouteDisambiguation(out io.Writer, p *initPrompter, candidates ma
 		ic, _ := integration.For(base)
 		fmt.Fprintf(out, "\n%s\n", label)
 		fmt.Fprintln(out, "  several Windows-side homes were detected and ownership could not be")
-		fmt.Fprintln(out, "  auto-verified against the current Windows user — pick which one to wire:")
+		fmt.Fprintln(out, "  auto-verified against the current Windows user - pick which one to wire:")
 		for i, h := range homes {
 			fmt.Fprintf(out, "    %d) %s\n", i+1, h)
 		}
@@ -156,7 +161,7 @@ func runWindowsRouteDisambiguation(out io.Writer, p *initPrompter, candidates ma
 			continue
 		}
 		chosen := homes[choice]
-		rOpts := proxyroute.RegisterOptions{ProxyPort: port, HomeDir: opts.HomeDir}
+		rOpts := proxyroute.RegisterOptions{ProxyPort: port, HomeDir: opts.HomeDir, Writer: routeprov.WriterInit}
 		switch ic.Proxy.Kind {
 		case integration.RouteEnvSettings:
 			rOpts.WindowsClaudeHome = chosen
@@ -206,8 +211,9 @@ func runWindowsRouteDisambiguation(out io.Writer, p *initPrompter, candidates ma
 			continue
 		}
 		hr, herr := hook.NewRegistry(hook.Options{
-			BinaryPath:        opts.BinaryPath,
-			ConfigPath:        opts.ConfigPath,
+			Getenv:            os.Getenv,
+			BinaryPath:        registrationCommand(opts.BinaryPath),
+			ConfigPath:        registrationConfigArg(opts.ConfigPath, opts.HomeDir),
 			HomeDir:           opts.HomeDir,
 			WSLDistro:         opts.WSLDistro,
 			WindowsClaudeHome: chosen,
@@ -231,19 +237,21 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 	}
 	newHookReg := func(dryRun bool) (*hook.Registry, error) {
 		return hook.NewRegistry(hook.Options{
-			BinaryPath: opts.BinaryPath, DryRun: dryRun,
-			ConfigPath: opts.ConfigPath, HomeDir: opts.HomeDir,
+			Getenv:     os.Getenv,
+			BinaryPath: registrationCommand(opts.BinaryPath), DryRun: dryRun,
+			ConfigPath: registrationConfigArg(opts.ConfigPath, opts.HomeDir), HomeDir: opts.HomeDir,
 		})
 	}
-	newMCPReg := func(dryRun bool) (*mcp.Registrar, error) {
-		return mcp.NewRegistrar(mcp.RegisterOptions{
-			BinaryPath: opts.BinaryPath, DryRun: dryRun,
-			ConfigPath: opts.ConfigPath, HomeDir: opts.HomeDir,
+	newMCPReg := func(dryRun bool) (*mcpregister.Registrar, error) {
+		return mcpregister.NewRegistrar(mcpregister.RegisterOptions{
+			BinaryPath: registrationCommand(opts.BinaryPath), DryRun: dryRun,
+			ConfigPath: registrationConfigArg(opts.ConfigPath, opts.HomeDir), HomeDir: opts.HomeDir,
+			SelfBinary: opts.BinaryPath,
 		})
 	}
 	newRouteReg := func(dryRun bool) (*proxyroute.Registrar, error) {
 		return proxyroute.NewRegistrar(proxyroute.RegisterOptions{
-			ProxyPort: port, DryRun: dryRun, HomeDir: opts.HomeDir,
+			ProxyPort: port, DryRun: dryRun, HomeDir: opts.HomeDir, Writer: routeprov.WriterInit,
 		})
 	}
 
@@ -278,6 +286,22 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 	// way hook.Registry.Installed surfaces claude-code-windows.
 	installed = unionStrings(installed, previewRoute.WindowsRouteTargets())
 	tools := selectToolsForInit(false, false, false, false, false, installed)
+	p := &initPrompter{in: bufio.NewReader(in), out: out}
+	// Install-time component chooser (modular packaging 7.1): before the
+	// gate resolves, so the checklist below offers only what was chosen.
+	if opts.Components != nil {
+		if err := runComponentChooser(context.Background(), out, p, opts.Components, installed); err != nil {
+			return err
+		}
+	}
+	// Component gate: no consent is offered for an inactive component.
+	gate := initGateForHome(opts.ConfigPath, opts.HomeDir)
+	var gateNotes strings.Builder
+	tools = gate.tools(tools, &gateNotes)
+	hooksOn := gate.allow(&gateNotes, true, "hooks", "integration.hooks")
+	mcpOn := gate.allow(&gateNotes, true, "mcp", "integration.mcp-server")
+	routeOn := gate.allow(&gateNotes, true, "proxy route", "integration.proxy-route")
+	browserOn := gate.allow(&gateNotes, anyExtensionSupported(), "browser", "capture.browser")
 	sort.Strings(tools)
 	// F2: a cross-OS "<tool>-windows" whose Windows home is ownership-unverified
 	// or ambiguous is EXCLUDED from WindowsRouteTargets (so it isn't in tools),
@@ -286,24 +310,27 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 	// do — the disambiguation picker below. Only conclude "no AI tools detected"
 	// when there are neither tools NOR candidates.
 	routeCandidates := previewRoute.WindowsRouteCandidates()
+	if !routeOn {
+		routeCandidates = nil
+	}
+	fmt.Fprint(out, gateNotes.String())
 	if len(tools) == 0 && len(routeCandidates) == 0 {
-		fmt.Fprintln(out, "no AI tools detected — install one (or pass --claude-code / --cursor / --codex / --hermes explicitly) and re-run")
+		fmt.Fprintln(out, "no AI tools detected - install one (or pass --claude-code / --cursor / --codex / --hermes explicitly) and re-run")
 		return nil
 	}
 
-	fmt.Fprintln(out, "observer init — interactive setup")
+	fmt.Fprintln(out, "observer init - interactive setup")
 	if len(tools) > 0 {
 		fmt.Fprintf(out, "detected: %s\n", strings.Join(tools, ", "))
 	}
 	fmt.Fprintln(out, "each write below asks first; nothing is written without a yes.")
-	p := &initPrompter{in: bufio.NewReader(in), out: out}
 
 	codexHooksAdded := false
 	claudeRouteDeclined := false
 	for _, t := range tools {
 		fmt.Fprintf(out, "\n%s\n", t)
 
-		if hookSupported(t) {
+		if hooksOn && hookSupported(t) {
 			pre := previewHooks.Register(t)
 			switch {
 			case pre.Error != nil:
@@ -314,15 +341,15 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 			case pre.Skipped && pre.SkipAdvice != "":
 				// A skip with its OWN advice is not the plugin case (today:
 				// the cross-OS sandbox gate, where --force does not apply).
-				fmt.Fprintf(out, "  hooks: skipped — %s\n", pre.SkipReason)
+				fmt.Fprintf(out, "  hooks: skipped - %s\n", pre.SkipReason)
 				fmt.Fprintf(out, "         %s\n", pre.SkipAdvice)
 			case pre.Skipped:
-				fmt.Fprintf(out, "  hooks: wired via the Claude Code plugin — %s\n", pre.SkipReason)
+				fmt.Fprintf(out, "  hooks: wired via the Claude Code plugin - %s\n", pre.SkipReason)
 				fmt.Fprintln(out, "         nothing to register; `observer init --force` would add a second copy.")
 			case len(pre.HooksAdded) == 0:
 				fmt.Fprintf(out, "  hooks: already set in %s\n", pre.ConfigPath)
 			default:
-				fmt.Fprintln(out, "  hooks — session + tool-call capture into the local observer database.")
+				fmt.Fprintln(out, "  hooks - session + tool-call capture into the local observer database.")
 				fmt.Fprintf(out, "  would add %d hook(s) in %s\n", len(pre.HooksAdded), pre.ConfigPath)
 				yes, err := p.ask(fmt.Sprintf("register hooks for %s?", t), true)
 				if err != nil {
@@ -340,7 +367,7 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 			}
 		}
 
-		if mcpSupported(t) {
+		if mcpOn && mcpSupported(t) {
 			pre := previewMCP.Register(t)
 			switch {
 			case pre.Error != nil:
@@ -349,16 +376,16 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 			case pre.Skipped && pre.SkipAdvice != "":
 				// See the hooks branch: a self-described skip is not the
 				// plugin case.
-				fmt.Fprintf(out, "  mcp: skipped — %s\n", pre.SkipReason)
+				fmt.Fprintf(out, "  mcp: skipped - %s\n", pre.SkipReason)
 				fmt.Fprintf(out, "       %s\n", pre.SkipAdvice)
 			case pre.Skipped:
-				fmt.Fprintf(out, "  mcp: wired via the Claude Code plugin — %s\n", pre.SkipReason)
+				fmt.Fprintf(out, "  mcp: wired via the Claude Code plugin - %s\n", pre.SkipReason)
 				fmt.Fprintln(out, "       nothing to register; a second copy would load the tool schema twice.")
 			case pre.AlreadySet:
 				fmt.Fprintf(out, "  mcp: already set in %s\n", pre.ConfigPath)
 			default:
-				fmt.Fprintln(out, "  MCP server — on-demand project-knowledge queries from inside the tool.")
-				fmt.Fprintln(out, "  note: the tool schema costs ~1,800 tokens on every turn — skip unless you'll use it.")
+				fmt.Fprintln(out, "  MCP server - on-demand project-knowledge queries from inside the tool.")
+				fmt.Fprintln(out, "  note: the tool schema costs ~1,800 tokens on every turn - skip unless you'll use it.")
 				fmt.Fprintf(out, "  would register in %s\n", pre.ConfigPath)
 				yes, err := p.ask(fmt.Sprintf("register the MCP server for %s?", t), false)
 				if err != nil {
@@ -372,7 +399,7 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 			}
 		}
 
-		if routeSupported(t) {
+		if routeOn && routeSupported(t) {
 			// Dispatch on the base adapter's route KIND (CLAUDE.md #3), and on
 			// the "-windows" virtual-target suffix for the cross-OS writer —
 			// mirrors the batch dispatch in wireAIClients.
@@ -404,9 +431,9 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 				fmt.Fprintf(out, "  route: already set in %s → %s\n", pre.ConfigPath, pre.BaseURL)
 			default:
 				if isWindows {
-					fmt.Fprintf(out, "  proxy route (Windows → WSL) — route this Windows-installed tool's API traffic through the WSL proxy at %s.\n", pre.BaseURL)
+					fmt.Fprintf(out, "  proxy route (Windows → WSL) - route this Windows-installed tool's API traffic through the WSL proxy at %s.\n", pre.BaseURL)
 				} else {
-					fmt.Fprintln(out, "  proxy route — exact token accounting + conversation compression via the local proxy.")
+					fmt.Fprintln(out, "  proxy route - exact token accounting + conversation compression via the local proxy.")
 				}
 				fmt.Fprintf(out, "  would write %s → %s\n", pre.ConfigPath, pre.BaseURL)
 				yes, err := p.ask(fmt.Sprintf("route %s through the observer proxy?", t), true)
@@ -443,6 +470,9 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 	// is opt-in (default no), one consent per tool — the checklist's
 	// semantics.
 	for _, t := range probeRouteTools() {
+		if !routeOn || !gate.snap.AdapterActive(t) {
+			continue
+		}
 		previewFn, ok := probeRouteWriter(previewRoute, t)
 		if !ok {
 			continue
@@ -458,7 +488,7 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 		case pre.AlreadySet:
 			fmt.Fprintf(out, "  route: already set in %s → %s\n", pre.ConfigPath, pre.BaseURL)
 		default:
-			fmt.Fprintln(out, "  proxy route (probe) — config-lane route through the local proxy; NOT yet")
+			fmt.Fprintln(out, "  proxy route (probe) - config-lane route through the local proxy; NOT yet")
 			fmt.Fprintln(out, "  live-verified for this tool, so it's opt-in.")
 			fmt.Fprintf(out, "  would write %s → %s\n", pre.ConfigPath, pre.BaseURL)
 			yes, err := p.ask(fmt.Sprintf("route %s through the observer proxy (unverified probe)?", t), false)
@@ -480,7 +510,7 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 	// config), and the write is per-BROWSER, shared across every *-web site,
 	// so it is one standalone step. Consent defaults YES like hooks/route
 	// (the extension itself is opt-in regardless of the manifest existing).
-	if anyExtensionSupported() {
+	if browserOn && anyExtensionSupported() {
 		reg, err := browserhost.NewRegistrar(browserhost.Options{Home: opts.HomeDir, DryRun: true})
 		if err == nil {
 			det := reg.Detect()
@@ -492,7 +522,7 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 			ids := browserOfferedBrowsers(det, opts.WindowsBrowserHomes)
 			if len(ids) > 0 {
 				fmt.Fprintf(out, "\nbrowser extension\n")
-				fmt.Fprintln(out, "  native-messaging host — lets the opt-in browser-capture extension relay")
+				fmt.Fprintln(out, "  native-messaging host - lets the opt-in browser-capture extension relay")
 				fmt.Fprintln(out, "  ChatGPT/Claude/Perplexity/Gemini/Copilot web turns to observer.")
 				fmt.Fprintf(out, "  detected browser(s): %s\n", strings.Join(ids, ", "))
 				yes, aerr := p.ask("install the browser native-messaging host manifest?", true)
@@ -502,7 +532,7 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 				if yes {
 					// Prompt for the extension id so the manifest is COMPLETE
 					// (A1) — blank keeps the placeholder + follow-up.
-					extID, perr := promptBrowserExtensionID(out, p.in)
+					extID, perr := promptBrowserExtensionID(out, p.in, discoverExtensionIDs(opts.HomeDir, opts.WindowsBrowserHomes))
 					if perr != nil {
 						return perr
 					}
@@ -540,7 +570,7 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 	}
 	if home != "" {
 		if fi, err := os.Stat(filepath.Join(home, ".hermes")); err == nil && fi.IsDir() {
-			fmt.Fprintln(out, "\nhermes detected — it lives on a separate install path; run `observer init --hermes` to wire it.")
+			fmt.Fprintln(out, "\nhermes detected - it lives on a separate install path; run `observer init --hermes` to wire it.")
 		}
 	}
 	// The elevated-ETW setup surface is informational (it writes nothing), so
@@ -557,6 +587,12 @@ func runInteractiveInit(out io.Writer, in io.Reader, opts interactiveInitOptions
 func printCodexTrustHint(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "next: codex requires per-hook trust approval (security feature).")
-	fmt.Fprintln(out, "  open codex once and run /hooks to mark all 6 entries trusted.")
+	fmt.Fprintln(out, codexTrustLine())
 	fmt.Fprintln(out, "  one-time setup; trust persists in ~/.codex/config.toml [hooks.state].")
+}
+
+// codexTrustLine is the /hooks instruction with the number of entries the
+// codex writer registers (U8: it said 6 after the writer grew to 9).
+func codexTrustLine() string {
+	return fmt.Sprintf("  open codex once and run /hooks to mark all %d Observer entries trusted.", len(hook.CodexHookEvents()))
 }

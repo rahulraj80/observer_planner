@@ -82,12 +82,12 @@ func TestTasksCmd_SessionJSON(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"sTasksCLI", "--config", cfgPath, "--json"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute: %v — output: %s", err, out.String())
+		t.Fatalf("execute: %v - output: %s", err, out.String())
 	}
 
 	var rep taskreport.SessionTaskReport
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
-		t.Fatalf("decode: %v — body %s", err, out.String())
+		t.Fatalf("decode: %v - body %s", err, out.String())
 	}
 	if !rep.HasTasks || len(rep.Items) != 1 {
 		t.Fatalf("rep = %+v", rep)
@@ -105,7 +105,7 @@ func TestTasksCmd_SessionTable(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"sTasksCLI", "--config", cfgPath})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute: %v — output: %s", err, out.String())
+		t.Fatalf("execute: %v - output: %s", err, out.String())
 	}
 	if !bytes.Contains(out.Bytes(), []byte("Fix the bug")) {
 		t.Errorf("table output missing task content, got: %s", out.String())
@@ -120,12 +120,12 @@ func TestTasksCmd_Rollup(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"--rollup", "--config", cfgPath, "--json"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute: %v — output: %s", err, out.String())
+		t.Fatalf("execute: %v - output: %s", err, out.String())
 	}
 
 	var rep taskreport.TaskRollup
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
-		t.Fatalf("decode: %v — body %s", err, out.String())
+		t.Fatalf("decode: %v - body %s", err, out.String())
 	}
 	if rep.SessionsWithTasks != 1 {
 		t.Errorf("sessions_with_tasks = %d, want 1", rep.SessionsWithTasks)
@@ -154,7 +154,7 @@ func TestTasksCmd_DisabledByConfig(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"sTasksCLI", "--config", cfgPath})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute: %v — output: %s", err, out.String())
+		t.Fatalf("execute: %v - output: %s", err, out.String())
 	}
 	if !bytes.Contains(out.Bytes(), []byte("disabled")) {
 		t.Errorf("expected a '[tasks] disabled' message, got: %s", out.String())

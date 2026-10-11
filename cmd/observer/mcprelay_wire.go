@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 // Agent Access P4 W4d (doc3 §12.5-§12.8): the ONE daemon composition point
@@ -45,9 +47,9 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/govern"
 	"github.com/marmutapp/superbased-observer/internal/guard"
-	"github.com/marmutapp/superbased-observer/internal/mcp"
 	"github.com/marmutapp/superbased-observer/internal/mcpaccess"
 	"github.com/marmutapp/superbased-observer/internal/mcpegress"
+	"github.com/marmutapp/superbased-observer/internal/mcpregister"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/coverage"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/localpdp"
@@ -57,7 +59,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/policyfam"
 	famcp "github.com/marmutapp/superbased-observer/internal/policyfam/mcpaccess"
 	"github.com/marmutapp/superbased-observer/internal/policystate"
-	"github.com/marmutapp/superbased-observer/internal/proxy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -433,70 +434,6 @@ func (h *mcpRelayHandle) AccessLookup() guard.MCPAccessLookup {
 	return func(server, tool string) guard.MCPAccessVerdict { return h.decide(server, tool) }
 }
 
-// connectorApproved reports whether a provider-hosted connector URL is one
-// the org table names (a vserver audience or a server target).
-func connectorApproved(reg mcpaccess.Registry, c proxy.HostedMCPConnector) bool {
-	if c.URL == "" {
-		return false
-	}
-	u := strings.TrimRight(c.URL, "/")
-	for _, v := range reg.VServers {
-		if strings.TrimRight(reg.AudienceOf(v), "/") == u {
-			return true
-		}
-		for _, s := range v.Servers {
-			if strings.TrimRight(s.Target, "/") == u {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// ToolsSeam is the proxy seam: strip every `mcp__*` declaration the table
-// does not allow (R-306); refuse the request for a hosted connector the org
-// does not approve (R-307, org-authoritative nodes only — an individual
-// node's unknown connector is ungoverned).
-func (h *mcpRelayHandle) ToolsSeam() proxy.ToolsAllowlistSeam {
-	return func(in proxy.ToolsAllowlistInput) proxy.ToolsAllowlistResult {
-		t := h.Table()
-		if t == nil {
-			return proxy.ToolsAllowlistResult{Keep: in.Decls}
-		}
-		orgAuth := h.orgAuth()
-		for _, c := range in.Connectors {
-			if connectorApproved(t.Node.Registry, c) {
-				continue
-			}
-			if !orgAuth {
-				continue
-			}
-			if t.Mode == localpdp.ModeObserve {
-				h.logger.Info("mcp-relay: observe would-deny hosted MCP connector", "connector", c.Name, "url", c.URL, "session_id", in.SessionID)
-				continue
-			}
-			name := c.Name
-			if name == "" {
-				name = c.ConnectorID
-			}
-			return proxy.ToolsAllowlistResult{
-				DenyRuleID: "R-307",
-				DenyReason: "hosted MCP connector " + name + " is not approved by the organization's tools.mcp_access grant; remote MCP must route through the org gateway",
-			}
-		}
-		keep := make([]proxy.MCPToolDecl, 0, len(in.Decls))
-		for _, d := range in.Decls {
-			v := h.decide(d.Server, d.Tool)
-			if !v.Known || v.Allowed {
-				keep = append(keep, d)
-				continue
-			}
-			h.logger.Info("mcp-relay: stripping disallowed MCP tool declaration", "tool", d.Name, "reason", v.Reason, "session_id", in.SessionID)
-		}
-		return proxy.ToolsAllowlistResult{Keep: keep}
-	}
-}
-
 // pointCapabilities lists the capabilities the relay point actually holds in
 // this process — the `point_capability_set` the effective hash and status
 // are computed from. Missing ANY required one reports ineffective.
@@ -588,22 +525,21 @@ func mcpRelayClear() {
 }
 
 // wireMCPRelay binds the node-side seams under [mcp_relay].enabled and
-// returns the handle (nil when disabled: NOTHING is bound).
-func wireMCPRelay(cfg config.Config, st *store.Store, ngov *nodeGovernanceHandle, opts *proxy.Options, g *guard.Guard, logger *slog.Logger) *mcpRelayHandle {
+// returns the handle (nil when disabled: NOTHING is bound). The proxy's
+// tools[] seam is bound separately by bindMCPRelayProxy (mcprelay_proxy.go),
+// so a build without capture.proxy keeps the relay (lane MP-L1L, T-715).
+func wireMCPRelay(cfg config.Config, st *store.Store, ngov *nodeGovernanceHandle, g *guard.Guard, logger *slog.Logger) *mcpRelayHandle {
 	if !cfg.MCPRelay.Enabled {
 		return nil
 	}
 	h := newMCPRelayHandle(cfg, st, ngov, logger)
 	processMCPRelay.Store(h)
-	if opts != nil {
-		opts.ToolsAllowlist = h.ToolsSeam()
-	}
 	if g != nil {
 		g.SetMCPAccessLookup(h.AccessLookup())
 	}
 	h.logger.Info("mcp-relay: node-side seams wired",
 		"mode", cfg.MCPRelay.Mode, "audit_mode", cfg.MCPRelay.AuditMode,
-		"proxy_tools_filter", opts != nil, "guard_access_lookup", g != nil,
+		"guard_access_lookup", g != nil,
 		"table_loaded", h.Table() != nil, "family", policyfam.FamilyMCPAccess)
 	return h
 }
@@ -640,7 +576,7 @@ func serveMCPRelayLoopback(ctx context.Context, listen string, handler http.Hand
 		return "", fmt.Errorf("mcp-relay listen: %w", err)
 	}
 	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	go func() {
+	go func() { //nolint:gosec // G118: shutdown must outlive the cancelled listener context; bounded by its own timeout
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -768,17 +704,19 @@ func overlayEnv(base, refs []string, lookup func(string) (string, bool)) []strin
 	return out
 }
 
-// mcpRelayBackupDir is where the verbatim pre-relay config backups live:
-// <db dir>/mcp-relay/backups (doc3 §12.1 R8.28.i: ~/.observer/mcp-relay/
-// backups on a default install), owner-only.
+// mcpRelayBackupDir is where an OLDER build kept verbatim whole-file
+// backups of client configs (<db dir>/mcp-relay/backups). Since T-397
+// nothing is written there (a client MCP config can hold credentials, D-268
+// / D-270); a backup an older build left is removed once no journal row
+// names it, and is never read.
 func mcpRelayBackupDir(cfg config.Config) string {
 	return filepath.Join(filepath.Dir(cfg.Observer.DBPath), "mcp-relay", "backups")
 }
 
 // mcpRelayJournal is the ONE project.Journal owner on the node: the
-// mcp_relay_launch_spec rows through N-M's store + the backup FILE half
-// (internal/mcprelay/journal.go). It is a pure adapter - the SEQUENCE is
-// the projector's (parking decision B5).
+// mcp_relay_launch_spec rows through N-M's store. It is a pure adapter - the
+// SEQUENCE is the projector's (parking decision B5). It keeps no copy of a
+// client config.
 type mcpRelayJournal struct {
 	st        launchSpecStore
 	backupDir string
@@ -811,8 +749,24 @@ func (j mcpRelayJournal) List(ctx context.Context) ([]project.JournalRow, error)
 	return out, nil
 }
 
-// Put implements project.Journal (the store's generation CAS).
+// Put implements project.Journal (the store's generation CAS). A put that
+// drops a legacy backup reference (the projector's conversion of an older
+// row, T-397) removes that backup file once no row names it.
 func (j mcpRelayJournal) Put(ctx context.Context, row project.JournalRow, expected int64) error {
+	var legacy string
+	if row.BackupPath == "" {
+		if old, err := j.st.GetLaunchSpec(ctx, row.Tool, row.ConfigPath, row.EntryKey); err == nil {
+			legacy = old.BackupPath
+		}
+	}
+	if err := j.putRow(ctx, row, expected); err != nil {
+		return err
+	}
+	j.dropLegacyBackup(ctx, legacy)
+	return nil
+}
+
+func (j mcpRelayJournal) putRow(ctx context.Context, row project.JournalRow, expected int64) error {
 	return j.st.PutLaunchSpec(ctx, record.LaunchSpec{
 		Client: row.Tool, ConfigPath: row.ConfigPath, EntryKey: row.EntryKey,
 		OrigCommand: row.OrigCommand, OrigArgs: row.OrigArgs, OrigCwd: row.OrigCwd, OrigEnvRefs: row.OrigEnvRefs,
@@ -822,8 +776,9 @@ func (j mcpRelayJournal) Put(ctx context.Context, row project.JournalRow, expect
 	}, expected)
 }
 
-// Delete implements project.Journal; the backup file is removed once no
-// row references it (a backup of a client config may hold secrets).
+// Delete implements project.Journal; a legacy backup file the row named is
+// removed once no row references it (a copy of a client config may hold
+// secrets).
 func (j mcpRelayJournal) Delete(ctx context.Context, tool, configPath, entryKey string) error {
 	old, err := j.st.GetLaunchSpec(ctx, tool, configPath, entryKey)
 	if errors.Is(err, record.ErrNotFound) {
@@ -835,48 +790,31 @@ func (j mcpRelayJournal) Delete(ctx context.Context, tool, configPath, entryKey 
 	if err := j.st.DeleteLaunchSpec(ctx, tool, configPath, entryKey); err != nil {
 		return err
 	}
-	if old.BackupPath == "" {
-		return nil
-	}
-	rows, err := j.st.ListLaunchSpecs(ctx)
-	if err != nil {
-		return nil // best-effort cleanup; the row is gone
-	}
-	for _, r := range rows {
-		if r.BackupPath == old.BackupPath {
-			return nil
-		}
-	}
-	_ = os.Remove(old.BackupPath)
+	j.dropLegacyBackup(ctx, old.BackupPath)
 	return nil
 }
 
-// Backup implements project.Journal (doc3 §12.1 step 1: verbatim, owner-
-// only, fsynced).
-func (j mcpRelayJournal) Backup(_ context.Context, c project.Client, original []byte) (string, string, error) {
-	return mcprelay.BackupConfigBytes(c.ConfigPath, j.backupDir, original, original == nil)
-}
-
-// RestoreWhole implements project.Journal through the ONE whole-file
-// restore primitive (mcprelay.RestoreConfigCAS): backup digest verified,
-// CAS on the row's applied digest; refusals are mapped onto the
-// projector's sentinels so its rule table can fall back to the reversal.
-func (j mcpRelayJournal) RestoreWhole(_ context.Context, _ project.Client, row project.JournalRow) error {
-	err := mcprelay.RestoreConfigCAS(mcprelay.LaunchJournalEntry{
-		Client: row.Tool, ConfigPath: row.ConfigPath, EntryKey: row.EntryKey,
-		OrigCommand: row.OrigCommand, OrigArgs: row.OrigArgs, OrigCwd: row.OrigCwd, OrigEnvRefs: row.OrigEnvRefs,
-		ConfigGeneration: row.ConfigGeneration, BackupPath: row.BackupPath, BackupSHA256: row.BackupSHA256,
-		AppliedAt: row.AppliedAt, AppliedSHA256: row.AppliedSHA256,
-	})
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, mcprelay.ErrConfigChanged):
-		return fmt.Errorf("%w: %v", project.ErrConfigChanged, err) //nolint:errorlint // single-sentinel classification; cause deliberately not in the chain
-	case errors.Is(err, mcprelay.ErrNoAppliedDigest):
-		return fmt.Errorf("%w: %v", project.ErrNoAppliedDigest, err) //nolint:errorlint // single-sentinel classification; cause deliberately not in the chain
+// dropLegacyBackup removes a whole-file backup an older build wrote, once
+// no journal row names it. Only a file inside the relay's own backup
+// directory is ever removed; it is never read. Best effort.
+func (j mcpRelayJournal) dropLegacyBackup(ctx context.Context, path string) {
+	if path == "" || j.backupDir == "" {
+		return
 	}
-	return err
+	rel, err := filepath.Rel(j.backupDir, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return
+	}
+	rows, err := j.st.ListLaunchSpecs(ctx)
+	if err != nil {
+		return
+	}
+	for _, r := range rows {
+		if r.BackupPath == path {
+			return
+		}
+	}
+	_ = os.Remove(path)
 }
 
 // mcpRelayHomeOverride pins the registrar's home directory (tests only:
@@ -886,7 +824,7 @@ var mcpRelayHomeOverride string
 
 // mcpRelayRegistrar builds the per-format writer over the running binary
 // (the command every wrapped entry spawns).
-func mcpRelayRegistrar() (*mcp.Registrar, string, error) {
+func mcpRelayRegistrar() (*mcpregister.Registrar, string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, "", fmt.Errorf("mcp-relay: resolve observer binary: %w", err)
@@ -894,7 +832,7 @@ func mcpRelayRegistrar() (*mcp.Registrar, string, error) {
 	if abs, aerr := filepath.EvalSymlinks(exe); aerr == nil {
 		exe = abs
 	}
-	r, err := mcp.NewRegistrar(mcp.RegisterOptions{BinaryPath: exe, HomeDir: mcpRelayHomeOverride})
+	r, err := mcpregister.NewRegistrar(mcpregister.RegisterOptions{BinaryPath: exe, HomeDir: mcpRelayHomeOverride})
 	if err != nil {
 		return nil, "", err
 	}
@@ -961,7 +899,7 @@ func mcpRelayApproved(t *localpdp.Table) []project.ApprovedServer {
 }
 
 // mcpRelayEntryPrefix prefixes every relay-owned remote entry key
-// ("superbased-<slug>"), distinct from mcp.ServerName ("observer").
+// ("superbased-<slug>"), distinct from mcpregister.ServerName ("observer").
 const mcpRelayEntryPrefix = "superbased-"
 
 // runMCPRelayProjection is THE installation path (Sol P3+P4 finding 2):
@@ -985,8 +923,8 @@ func runMCPRelayProjection(ctx context.Context, cfg config.Config, configPath st
 }
 
 // restoreMCPRelayProjection puts every journaled client config back through
-// the projector's restore rule table (whole-file byte-identical under the
-// applied-digest CAS, else the format-aware reversal), never bypassing it.
+// the projector's restore (the format-aware reversal of only the
+// relay-owned entries), never bypassing it.
 func restoreMCPRelayProjection(ctx context.Context, cfg config.Config, st launchSpecStore, h *mcpRelayHandle) ([]project.RestoreReceipt, error) {
 	registrar, _, err := mcpRelayRegistrar()
 	if err != nil {
@@ -998,22 +936,22 @@ func restoreMCPRelayProjection(ctx context.Context, cfg config.Config, st launch
 	return recs, rerr
 }
 
-// mcpRelayConfigDigest is the VerifyApplied current-bytes seam: the
-// lowercase hex SHA-256 of a client config's bytes on disk (ok=false when
-// it cannot be read - an absent or unreadable config verifies nothing).
-func mcpRelayConfigDigest(path string) (string, bool) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
+// mcpRelayOwnedDigests is the VerifyApplied seam: the writer's CURRENT
+// owned digest of each journaled entry (ok=false when the config cannot be
+// read - an absent or unreadable config verifies nothing). Only the owned
+// part of each entry is hashed, in process (T-397).
+func mcpRelayOwnedDigests(ctx context.Context, w project.Writer) project.OwnedDigestsFunc {
+	return func(c project.Client, rows []project.JournalRow) (map[string]string, bool) {
+		m, err := w.Owned(ctx, c, rows)
+		return m, err == nil
 	}
-	return mcprelay.HashBytes(raw), true
 }
 
 // mcpRelayAppliedState is THE applied predicate on this node (Sol P3+P4
 // fold finding 3), per client AND per transport: a journal row counts only
-// when its config's CURRENT bytes hash to the row's applied digest - a row
-// left behind by a failed commit, or a config edited since, is NOT
-// applied. The coverage matrix, the effective-state ACK's
+// when its entry's CURRENT owned part hashes to the row's applied digest -
+// a row left behind by a failed commit, or an entry edited since, is NOT
+// applied; an edit elsewhere in the config does not matter. The coverage matrix, the effective-state ACK's
 // `projection.applied` capability and `observer mcp-relay status` all read
 // this one derivation.
 func mcpRelayAppliedState(ctx context.Context, st launchSpecStore) project.AppliedState {
@@ -1028,7 +966,11 @@ func mcpRelayAppliedState(ctx context.Context, st launchSpecStore) project.Appli
 	for _, l := range specs {
 		rows = append(rows, journalRowOf(l))
 	}
-	return project.VerifyApplied(rows, mcpRelayConfigDigest)
+	registrar, _, err := mcpRelayRegistrar()
+	if err != nil {
+		return project.VerifyApplied(nil, nil)
+	}
+	return project.VerifyApplied(rows, mcpRelayOwnedDigests(ctx, registrar))
 }
 
 // mcpRelayUnmediatedStdio previews (Stage only - nothing is journaled or
@@ -1073,7 +1015,7 @@ func mcpRelayCoverageLive(ctx context.Context, cfg config.Config, st launchSpecS
 	applied := mcpRelayAppliedState(ctx, st)
 	unmediated := mcpRelayUnmediatedStdio(ctx, cfg, h, remoteWired)
 	return coverage.Live{
-		WrapWriter:      mcp.WrapWriterImplemented,
+		WrapWriter:      mcpregister.WrapWriterImplemented,
 		AppliedStdio:    applied.StdioApplied,
 		AppliedRemote:   applied.RemoteApplied,
 		StdioUnmediated: func(tool string) int { return unmediated[tool] },
@@ -1339,7 +1281,7 @@ func startMCPRelayRuntime(ctx context.Context, cfg config.Config, db *sql.DB, st
 		case r.Skipped != "":
 			logger.Info("mcp-relay: projection skipped", "client", r.Client.Tool, "reason", r.Skipped)
 		case r.Changed:
-			logger.Info("mcp-relay: client config projected", "client", r.Client.Tool, "config", r.Client.ConfigPath, "wrapped", r.Wrapped, "remote", r.Remote, "backup", r.BackupPath)
+			logger.Info("mcp-relay: client config projected", "client", r.Client.Tool, "config", r.Client.ConfigPath, "wrapped", r.Wrapped, "remote", r.Remote)
 		}
 		for _, f := range r.Refused {
 			logger.Info("mcp-relay: stdio entry not wrapped (left direct)", "client", r.Client.Tool, "entry", f.Key, "reason", f.Reason)

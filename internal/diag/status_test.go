@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -87,6 +88,10 @@ func TestSnapshot_EmptyDB(t *testing.T) {
 	if !snap.LastActionAt.IsZero() {
 		t.Errorf("LastActionAt should be zero on empty DB")
 	}
+	// T-425: the snapshot names its machine, so a remote dashboard can.
+	if want, err := os.Hostname(); err == nil && snap.HostName != want {
+		t.Errorf("HostName = %q, want %q", snap.HostName, want)
+	}
 }
 
 func TestSnapshot_PopulatedAndPerToolSummary(t *testing.T) {
@@ -147,7 +152,7 @@ func TestSnapshot_PopulatedAndPerToolSummary(t *testing.T) {
 		t.Errorf("live_sessions: want 1 got %d", snap.Counts.LiveSessions)
 	}
 	if snap.LastActionTool != models.ToolCodex {
-		t.Errorf("last action tool: %s (want codex — most recent)", snap.LastActionTool)
+		t.Errorf("last action tool: %s (want codex - most recent)", snap.LastActionTool)
 	}
 	tools := map[string]bool{}
 	for _, ta := range snap.PerToolLastSeen {
@@ -406,7 +411,7 @@ func TestSnapshot_QueryErrors(t *testing.T) {
 			t.Fatalf("expected the all-zero fabricated counts: %+v", snap.Counts)
 		}
 		if snap.QueryErrors == 0 {
-			t.Fatal("QueryErrors = 0 on a database that answered nothing — a partial " +
+			t.Fatal("QueryErrors = 0 on a database that answered nothing - a partial " +
 				"snapshot is indistinguishable from an empty one, which is exactly what " +
 				"this field exists to prevent")
 		}
@@ -432,7 +437,7 @@ func TestSnapshot_QueryErrors(t *testing.T) {
 			t.Fatalf("Snapshot must stay tolerant: %v", err)
 		}
 		if snap.QueryErrors == 0 {
-			t.Error("QueryErrors = 0 for a scan under a cancelled context — the zeros " +
+			t.Error("QueryErrors = 0 for a scan under a cancelled context - the zeros " +
 				"it returned would be cached as fact")
 		}
 	})
@@ -515,7 +520,7 @@ func TestSnapshot_SurfacesIntegrityVerdict(t *testing.T) {
 				t.Fatalf("Integrity present = %v, want %v", snap.Integrity != nil, tc.wantPresent)
 			}
 			if snap.QueryErrors != 0 {
-				t.Errorf("QueryErrors = %d, want 0 — an absent verdict is a legitimate answer, not a failed lookup", snap.QueryErrors)
+				t.Errorf("QueryErrors = %d, want 0 - an absent verdict is a legitimate answer, not a failed lookup", snap.QueryErrors)
 			}
 			if tc.wantPresent {
 				if snap.Integrity.Status != tc.record.Status {

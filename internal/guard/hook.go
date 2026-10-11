@@ -46,7 +46,20 @@ func (g *Guard) EvaluateHook(ev policy.Event) (ActionVerdict, bool) {
 	// One snapshot for the evaluate+categorize pair (NIT contract).
 	es := g.set.Load()
 	verdict, guardErr := g.evaluateWith(es, ev)
-	verdict, approved := g.applyApprovals(verdict, &ev)
+	verdict, appr := g.applyApprovals(verdict, &ev, OrgGrantLaneTool)
+	// An exhausted managed budget stops this call too (T-519), on a channel
+	// that can block: a post-hoc event cannot be stopped, and recording the
+	// same breach on every one of them is what the once-per-session watcher
+	// flag already does. Stricter wins: a policy deny keeps its own rule.
+	// Budget rows never take an approval or an org guard grant (a budget
+	// increase is its own grant, folded into the cap), so nothing below
+	// may soften it.
+	budgetStop := false
+	if ev.Caps.CanBlock && verdict.Decision < policy.DecisionDeny {
+		if bv, ok := g.hookBudgetVerdict(ev); ok {
+			verdict, appr, guardErr, budgetStop = bv, approvalOutcome{}, nil, true
+		}
+	}
 	av := ActionVerdict{
 		Input: ActionInput{
 			SessionID:   ev.SessionID,
@@ -62,12 +75,18 @@ func (g *Guard) EvaluateHook(ev policy.Event) (ActionVerdict, bool) {
 		TaintOrigin: taintOriginFor(verdict, ev.Taint),
 		GuardError:  guardErr != nil,
 	}
-	g.stampOrgOverride(es, &av)
-	if approved {
-		// The grant is an audited exception: the row records what the
-		// verdict WAS downgraded from (§14.4 exception register).
-		av.DegradedFrom = "approved"
+	if budgetStop {
+		// The budget category is the rule's own, whatever the project
+		// layer's category table says; a budget stop is never "org locked"
+		// (its remedy is a budget request, not an access request).
+		av.Category = string(policy.CategoryBudget)
+	} else {
+		g.stampOrgOverride(es, &av)
 	}
+	// An exception is audited: the row records what the verdict WAS
+	// downgraded from (§14.4 exception register) and, for an org grant,
+	// which grant.
+	appr.stamp(&av)
 	return av, verdict.Decision >= policy.DecisionFlag || guardErr != nil
 }
 

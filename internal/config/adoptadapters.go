@@ -95,7 +95,7 @@ func AdoptEnabledAdapters(tomlBody string, defaults []string) (newBody string, r
 	if !ok {
 		res.Skipped = true
 		res.SkipReason = fmt.Sprintf(
-			"line %d: enabled_adapters is not a single literal array I can safely edit (not closed on a plain line, or nests an array/inline table) — add the missing adapters by hand",
+			"line %d: enabled_adapters is not a single literal array I can safely edit (not closed on a plain line, or nests an array/inline table) - add the missing adapters by hand",
 			keyLine+1,
 		)
 		return tomlBody, res, nil
@@ -106,7 +106,7 @@ func AdoptEnabledAdapters(tomlBody string, defaults []string) (newBody string, r
 	if !ok {
 		res.Skipped = true
 		res.SkipReason = fmt.Sprintf(
-			"line %d: enabled_adapters contains a value that is not a plain quoted adapter name — add the missing adapters by hand",
+			"line %d: enabled_adapters contains a value that is not a plain quoted adapter name - add the missing adapters by hand",
 			keyLine+1,
 		)
 		return tomlBody, res, nil

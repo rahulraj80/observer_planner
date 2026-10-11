@@ -1,0 +1,20 @@
+{
+  "Events": [
+    {
+      "AccessKeyId": "SYNTHETICACCESSKEYID",
+      "CloudTrailEvent": "{\"eventVersion\":\"1.08\",\"eventSource\":\"q.amazonaws.com\",\"eventName\":\"SendMessage\",\"requestParameters\":{\"conversationToken\":\"***\",\"utterance\":\"***\"}}",
+      "EventId": "2939ba50-1d26-4a5a-83bd-000000085850",
+      "EventName": "SendMessage",
+      "EventSource": "q.amazonaws.com",
+      "EventTime": 1791367200,
+      "ReadOnly": "false",
+      "Resources": [
+        {
+          "ResourceName": "a298ec0d-0a49-4d2e-92bd-7d6e629b4619",
+          "ResourceType": "AWS::Q::Conversation"
+        }
+      ],
+      "Username": "Paulo"
+    }
+  ]
+}

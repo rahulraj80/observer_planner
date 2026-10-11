@@ -190,8 +190,8 @@ func TestHasArenaProvenanceRequiresCanonicalFields(t *testing.T) {
 		RunID: "run-1", Tool: "claude-code", Model: "sonnet",
 		SessionIDs: []string{"session-1"}, InputTokens: 12, OutputTokens: 3, CostUSD: 0.004,
 	}
-	good := provenanceFooter(row)
-	if !hasArenaProvenance(good, row) {
+	good := provenanceFooter(row, "usd")
+	if !hasArenaProvenance(good, row, "usd") {
 		t.Fatalf("canonical footer was rejected: %q", good)
 	}
 	for name, corrupted := range map[string]string{
@@ -200,10 +200,46 @@ func TestHasArenaProvenanceRequiresCanonicalFields(t *testing.T) {
 		"wrong usage":   strings.Replace(good, "Usage:      12 input", "Usage:      99 input", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if hasArenaProvenance(corrupted, row) {
+			if hasArenaProvenance(corrupted, row, "usd") {
 				t.Fatalf("accepted non-canonical footer: %q", corrupted)
 			}
 		})
+	}
+}
+
+// TestProvenanceFollowsCostDisplay pins T-204: under the token-usage
+// developer cost display the footer a kept commit carries into shared git
+// history names the token counts and no dollar figure, and the verifier
+// accepts exactly that footer.
+func TestProvenanceFollowsCostDisplay(t *testing.T) {
+	row := &models.ArenaCandidate{
+		RunID: "run-1", Tool: "claude-code", Model: "sonnet",
+		SessionIDs: []string{"session-1"}, InputTokens: 12, OutputTokens: 3, CostUSD: 0.004,
+	}
+	rows := []struct {
+		mode      string
+		wantUsage string
+		dollar    bool
+	}{
+		{"usd", "Usage:      12 input / 3 output / $0.004000\n", true},
+		{"tokens", "Usage:      12 input / 3 output\n", false},
+	}
+	for _, r := range rows {
+		footer := provenanceFooter(row, r.mode)
+		if !strings.Contains(footer, r.wantUsage) {
+			t.Errorf("%s footer = %q, want usage line %q", r.mode, footer, r.wantUsage)
+		}
+		if strings.Contains(footer, "$") != r.dollar {
+			t.Errorf("%s footer dollar presence = %v, want %v: %q", r.mode, !r.dollar, r.dollar, footer)
+		}
+		if !hasArenaProvenance(footer, row, r.mode) {
+			t.Errorf("%s footer rejected by its own verifier", r.mode)
+		}
+		for _, prompt := range []string{provenanceMessage(row, r.mode), renderJudgeMergePrompt(row, r.mode)} {
+			if strings.Contains(prompt, "$") != r.dollar {
+				t.Errorf("%s message/prompt dollar presence wrong: %q", r.mode, prompt)
+			}
+		}
 	}
 }
 

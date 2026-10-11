@@ -172,7 +172,7 @@ func TestPredictCmd_NoSourceTool(t *testing.T) {
 			t.Error("limit.source_note is empty")
 		}
 		if got.Limit.NeedsProxy {
-			t.Error("limit.needs_proxy = true at the same time as no_source — must never both be true")
+			t.Error("limit.needs_proxy = true at the same time as no_source - must never both be true")
 		}
 	})
 

@@ -162,4 +162,9 @@ type Verdict struct {
 	// non-overridable rule under an org bundle is inert). False on
 	// every individual node — nothing consults it there.
 	Overridable bool
+	// EnforceCappedBy carries Rule.EnforceCappedBy: the layer whose
+	// explicit `enforce = false` capped this verdict at FLAG ("" when
+	// uncapped). The prompt lanes read it so a capped rule warns and is
+	// never escalated to confirm or block by [guard.prompt].mode.
+	EnforceCappedBy string
 }

@@ -37,7 +37,7 @@ func newVibeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "vibe [-- vibe-args...]",
 		Short: "Launch Mistral Code (vibe); with --continue-from, seed a handover as vibe's positional prompt",
-		Long: "Wraps Mistral Code (`vibe`). This launcher is NON-PROXIED —\n" +
+		Long: "Wraps Mistral Code (`vibe`). This launcher is NON-PROXIED -\n" +
 			"vibe authenticates to the Mistral API via an API key and its\n" +
 			"base-url override has never been driven live through the proxy,\n" +
 			"so routing it there would be a guess. Token capture happens via\n" +
@@ -101,7 +101,7 @@ func newVibeCmd() *cobra.Command {
 			var continueDir string
 			if continueFrom != "" {
 				if vibeHeadless(args) {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE vibe session, but you forwarded a headless flag (e.g. -p/--prompt) — drop it")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE vibe session, but you forwarded a headless flag (e.g. -p/--prompt) - drop it")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer vibe: %v\n", err)
 					return err
 				}

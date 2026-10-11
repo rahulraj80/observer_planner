@@ -2,6 +2,7 @@ import { memo } from "react";
 import { ActionBreakdownDonut } from "@/components/charts";
 import {
   ModelsUsedPanel,
+  RequestClassesPanel,
   TokenBucketsPanel,
 } from "@shared/components/sessiondetail";
 import { SessionLOCCard } from "@/components/SessionLOCCard";
@@ -40,6 +41,10 @@ export const OverviewTab = memo(function OverviewTab({ d }: { d: SessionDetail }
         )}
         <ModelsUsedPanel rows={d.per_model} totalCost={d.cost_usd} />
       </div>
+      {/* GET /api/session/<id> has carried request_class_split since the
+          request-class lane; the org drawer rendered it and the node did not.
+          Renders nothing when no counted turn carried a class. */}
+      <RequestClassesPanel split={d.request_class_split} />
       <SessionQualityCard sessionId={d.id} />
       <SessionLOCCard sessionId={d.id} />
       <SessionCommitsCard sessionId={d.id} />

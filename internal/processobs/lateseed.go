@@ -206,14 +206,14 @@ var lateSeedRules = []lateSeedRule{
 	},
 	{
 		Verdict: lateSeedSkipAuthoritative,
-		Why:     "already attributed at or above the seed's confidence — never downgrade or clobber",
+		Why:     "already attributed at or above the seed's confidence - never downgrade or clobber",
 		When: func(c lateSeedCandidate) bool {
 			return !outranks(c.SeedConfidence, c.Run.Attribution.Confidence)
 		},
 	},
 	{
 		Verdict: lateSeedSkipStale,
-		Why:     "older than MaxAge — past any plausible correlation lag, and a pid-reuse hazard",
+		Why:     "older than MaxAge - past any plausible correlation lag, and a pid-reuse hazard",
 		When: func(c lateSeedCandidate) bool {
 			if c.Policy.MaxAge <= 0 || c.Run.StartedAt.IsZero() || c.Now.IsZero() {
 				return false
@@ -223,7 +223,7 @@ var lateSeedRules = []lateSeedRule{
 	},
 	{
 		Verdict: lateSeedProbe,
-		Why:     "live, recent and below the seed's confidence — worth one SeedLookup",
+		Why:     "live, recent and below the seed's confidence - worth one SeedLookup",
 		When:    func(lateSeedCandidate) bool { return true },
 	},
 }

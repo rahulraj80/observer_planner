@@ -1,119 +1,79 @@
-// Obs - the SuperBased mascot (the website arcade's player sprite,
-// PLAYER_ART in website/arcade/main.js) as a tiny inline-SVG React
-// component. The delight-layer enabler (usability arc P4.9 / review
-// §9.2): build the sprite once, and every earned moment after this is
-// a cheap cameo.
+// Obs - the SuperBased mascot as a tiny inline-SVG React component:
+// "Prompt in a cape" (B4C-1, chosen 2026-10-02 to replace the arcade's
+// pixel player sprite on the dashboards). A squishy terminal buddy whose
+// face IS the prompt - a ">" winking eye and a blinking "_" cursor - in a
+// streaming shoulder cape, with the logo mark as a belly badge. Blueprint
+// body + amber cape in the light theme, amber body + periwinkle cape in
+// the dark theme. The delight-layer enabler (usability arc P4.9 / review
+// §9.2): build it once, and every earned moment after this is a cheap
+// cameo.
 //
 // Design contract (§9.1/§9.4, binding):
-//   - states: idle (slow blink) · jump (teal→gold pulse, the brand's
-//     celebration) · lost (greyed, x-eyes — error pages only)
-//   - prefers-reduced-motion → every animation collapses to a static
-//     frame (CSS media query, no JS)
+//   - states: idle (cursor blinks, cape ripples) · jump = celebrate (a
+//     burst, the cape flares, a fist pump and a dash-hop - the brand's
+//     celebration) · lost (the cape hangs, the cursor waits, thinking dots:
+//     puzzled, never sad - error pages only)
+//   - prefers-reduced-motion → every animation collapses to a static frame
+//     (CSS media query, no JS)
+//   - at <= 40 px the cape is the simplified silhouette (SMALL_CAPE_MAX_PX)
+//   - colours come only from the --mascot-* tokens (shared/styles/tokens.css)
+//   - the celebrate burst and the cape draw slightly outside the box
+//     (overflow visible): never put it in a clipping container
 //   - no image assets, no new deps, no sound, no confetti
-//   - appears ONLY in earned/transitional moments — never inside
-//     working surfaces (tables, charts, forms)
+//   - appears ONLY in earned/transitional moments (onboarding, first
+//     capture, setup steps, 404, crash) - never inside working surfaces
+//     (tables, charts, forms)
 //
-// Lives in shared/ (operator decision D6) so the org dashboard's 404,
-// crash and onboarding states use the same sprite as the node dashboard;
-// web's @/components/Obs is a re-export shim.
+// The artwork is data in shared/lib/mascot.ts (pure; pinned by
+// web/src/lib/mascot.test.ts); this file only maps it to elements. Lives
+// in shared/ (operator decision D6) so the org dashboard's 404, crash and
+// setup states use the same mascot as the node dashboard; web's
+// @/components/Obs is a re-export shim.
 
-import { useId } from "react";
+import { createElement, useId, type ReactNode } from "react";
+import { mascotCss, mascotNodes, type MascotNode, type MascotState } from "../lib/mascot";
 
-// The arcade's 8×8-grid humanoid: [x, y, w, h] cell segments.
-// Head (0-2) + neck (3) + chest (4) + torso/arms (5) + legs/feet (6-7).
-const SEGMENTS: [number, number, number, number][] = [
-  [2, 0, 4, 1], // head crown
-  [1, 1, 6, 1], // head full
-  [1, 2, 6, 1], // head row (eyes overlay)
-  [2, 3, 4, 1], // neck
-  [1, 4, 6, 1], // chest (emblem overlay)
-  [0, 5, 8, 1], // torso + arms
-  [1, 6, 2, 1], // left leg
-  [5, 6, 2, 1], // right leg
-  [1, 7, 2, 1], // left foot
-  [5, 7, 2, 1], // right foot
-];
-
-// The 'S' chest emblem as pixels (3×3 sub-grid on the chest row, the
-// glyph reduced to its minimum legible pixel form).
-const EMBLEM: [number, number][] = [
-  [3, 3.7],
-  [2.6, 4.1],
-  [3.4, 4.4],
-];
-
+/** Legacy state names; "jump" is the celebrate state. */
 export type ObsState = "idle" | "jump" | "lost";
+export type { MascotState };
 
-// Obs renders the mascot at `size` CSS pixels (default 32). Colors
-// ride the dashboard theme through currentColor-independent vars with
-// arcade fallbacks (teal #2EC4B6, gold #F4A024).
+/** Maps the legacy "jump" onto "celebrate"; the new names pass through. */
+export function toMascotState(state: ObsState | MascotState): MascotState {
+  return state === "jump" ? "celebrate" : state;
+}
+
+function render(node: MascotNode, key: number): ReactNode {
+  return createElement(node.tag, { ...node.attrs, key }, node.children?.map(render));
+}
+
+// Obs renders the mascot at `size` CSS pixels (default 32), square.
 export function Obs({
   state = "idle",
   size = 32,
   className,
 }: {
-  state?: ObsState;
+  state?: ObsState | MascotState;
   size?: number;
   className?: string;
 }) {
-  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
-  const body = state === "lost" ? "var(--fg-3, #8a8a93)" : "#2EC4B6";
-  const cells = SEGMENTS.map(([x, y, w, h], i) => (
-    <rect key={i} x={x * 4} y={y * 4 + 4} width={w * 4} height={h * 4} />
-  ));
+  const scope = `sb-mascot-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const s = toMascotState(state);
   return (
     <svg
       width={size}
-      height={size * 1.125}
-      viewBox="0 0 32 36"
+      height={size}
+      viewBox="0 0 100 100"
       role="img"
-      aria-label="Obs, the observer mascot"
-      className={className}
-      style={{ imageRendering: "pixelated" }}
+      aria-label="Obs, the SuperBased mascot"
+      data-state={s}
+      className={className ? `${scope} ${className}` : scope}
+      style={{ overflow: "visible" }}
     >
-      <style>{`
-        .obs-body-${uid} { fill: ${body}; }
-        .obs-eye-${uid} { fill: #0E0C18; }
-        .obs-emblem-${uid} { fill: #0E0C18; opacity: 0.75; }
-        @media (prefers-reduced-motion: no-preference) {
-          ${
-            state === "idle"
-              ? `.obs-eye-${uid} { animation: obs-blink-${uid} 4.2s step-end infinite; }
-                 @keyframes obs-blink-${uid} { 0%, 92%, 100% { opacity: 1; } 93%, 97% { opacity: 0; } }`
-              : ""
-          }
-          ${
-            state === "jump"
-              ? `.obs-body-${uid} { animation: obs-pulse-${uid} 1.1s ease-in-out infinite; }
-                 .obs-root-${uid} { animation: obs-hop-${uid} 1.1s ease-in-out infinite; }
-                 @keyframes obs-pulse-${uid} { 0%, 100% { fill: #2EC4B6; } 50% { fill: #F4A024; } }
-                 @keyframes obs-hop-${uid} { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }`
-              : ""
-          }
-        }
-      `}</style>
-      <g className={`obs-root-${uid}`}>
-        <g className={`obs-body-${uid}`}>{cells}</g>
-        {state === "lost" ? (
-          // x-eyes: two tiny crosses, reads "lost" at a glance.
-          <g className={`obs-eye-${uid}`}>
-            <rect x={9} y={13} width={2} height={2} />
-            <rect x={11} y={15} width={2} height={2} />
-            <rect x={21} y={13} width={2} height={2} />
-            <rect x={19} y={15} width={2} height={2} />
-          </g>
-        ) : (
-          <g className={`obs-eye-${uid}`}>
-            <rect x={10} y={13} width={3} height={3} />
-            <rect x={19} y={13} width={3} height={3} />
-          </g>
-        )}
-        <g className={`obs-emblem-${uid}`}>
-          {EMBLEM.map(([x, y], i) => (
-            <rect key={i} x={x * 4} y={y * 4 + 4} width={4} height={1.6} />
-          ))}
-        </g>
-      </g>
+      <style>{mascotCss(scope, s)}</style>
+      {mascotNodes(s, size).map(render)}
     </svg>
   );
 }
+
+/** Alias for new code; `Obs` stays the canonical export. */
+export const Mascot = Obs;

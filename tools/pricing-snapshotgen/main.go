@@ -210,7 +210,7 @@ func runWith(bundlePath, outPath string, check bool, keys pricingfeed.KeySet) er
 	encoded = append(encoded, '\n')
 
 	if check {
-		current, err := os.ReadFile(outPath)
+		current, err := os.ReadFile(outPath) //nolint:gosec // G703: a repo generator reading the path given on its own command line
 		if err != nil {
 			return fmt.Errorf("read %s for -check: %w", outPath, err)
 		}
@@ -225,7 +225,7 @@ func runWith(bundlePath, outPath string, check bool, keys pricingfeed.KeySet) er
 	// 0600: the snapshot holds nothing secret (it is a published list price
 	// destined for a public repository), but a generator has no business
 	// widening a file's mode, and the repo's gosec gate enforces that.
-	if err := os.WriteFile(outPath, encoded, 0o600); err != nil {
+	if err := os.WriteFile(outPath, encoded, 0o600); err != nil { //nolint:gosec // G703: a repo generator writing the path given on its own command line
 		return fmt.Errorf("write %s: %w", outPath, err)
 	}
 	fmt.Printf("wrote %s: feed_version %d, %d rows, digest %s\n", outPath, doc.FeedVersion, len(doc.Rows), doc.Digest)
@@ -250,7 +250,7 @@ func checkMonotonic(env pricingfeed.Envelope, outPath string) error {
 		return fmt.Errorf("refusing bundle feed_version %d: this tree's compiled floor is %d (an older bundle would roll the seed back)",
 			env.FeedVersion, snapshotMinFeedVersion)
 	}
-	raw, err := os.ReadFile(outPath)
+	raw, err := os.ReadFile(outPath) //nolint:gosec // G703: a repo generator reading the path given on its own command line
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}

@@ -1,8 +1,11 @@
+//go:build !sbo_omit_integration_shell_wrap
+
 package dashboard
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,11 +19,21 @@ import (
 
 // fakeShellWrap records calls; it never touches a file.
 type fakeShellWrap struct {
-	applied  []shellwrapsvc.Request
-	disabled []bool
+	applied         []shellwrapsvc.Request
+	disabled        []bool
+	disabledTargets []shellwrapsvc.Target
+	statusTargets   []shellwrapsvc.Target
+	windowsMissing  bool
 }
 
-func (f *fakeShellWrap) Status(context.Context) (shellwrap.Status, error) {
+func (f *fakeShellWrap) StatusFor(_ context.Context, t shellwrapsvc.Target) (shellwrap.Status, error) {
+	f.statusTargets = append(f.statusTargets, t)
+	if t == shellwrapsvc.TargetWindows {
+		if f.windowsMissing {
+			return shellwrap.Status{}, fmt.Errorf("%w: observer is not running inside WSL", shellwrapsvc.ErrTargetUnavailable)
+		}
+		return shellwrap.Status{GOOS: "windows", ShimDir: `C:\Users\u\.observer\shims`, Bridge: &shellwrap.WSLBridge{Distro: "Ubuntu"}}, nil
+	}
 	return shellwrap.Status{GOOS: "linux", ShimDir: "/h/.observer/shims"}, nil
 }
 
@@ -29,9 +42,17 @@ func (f *fakeShellWrap) Apply(_ context.Context, req shellwrapsvc.Request) (shel
 	return shellwrapsvc.Outcome{DryRun: req.DryRun}, nil
 }
 
-func (f *fakeShellWrap) Disable(_ context.Context, dry bool) (shellwrapsvc.Outcome, error) {
+func (f *fakeShellWrap) DisableFor(_ context.Context, t shellwrapsvc.Target, dry bool) (shellwrapsvc.Outcome, error) {
 	f.disabled = append(f.disabled, dry)
+	f.disabledTargets = append(f.disabledTargets, t)
 	return shellwrapsvc.Outcome{DryRun: dry}, nil
+}
+
+func (f *fakeShellWrap) Targets(context.Context) ([]shellwrapsvc.TargetInfo, error) {
+	return []shellwrapsvc.TargetInfo{
+		{ID: shellwrapsvc.TargetNative, Label: "WSL (Ubuntu)", GOOS: "linux", Available: true},
+		{ID: shellwrapsvc.TargetWindows, Label: "Windows (via WSL Ubuntu)", GOOS: "windows", Available: !f.windowsMissing},
+	}, nil
 }
 
 func shellWrapServer(t *testing.T, svc ShellWrapService) *Server {
@@ -75,20 +96,6 @@ func shellWrapToken(t *testing.T, s *Server) (string, *http.Cookie) {
 	return "", nil
 }
 
-func shellWrapPost(s *Server, path, body, token string, cookie *http.Cookie) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set(remoteConfirmHeader, token)
-	}
-	if cookie != nil {
-		req.AddCookie(cookie)
-	}
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-	return rr
-}
-
 func TestShellWrapRoutes(t *testing.T) {
 	fake := &fakeShellWrap{}
 	s := shellWrapServer(t, fake)
@@ -121,5 +128,64 @@ func TestShellWrapRoutesNotWired(t *testing.T) {
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/shell-wrap/status", nil))
 	if rr.Code != http.StatusNotImplemented {
 		t.Fatalf("got %d", rr.Code)
+	}
+}
+
+// TestShellWrapRoutesCarryTheTarget pins the WSL bridge target (T-419) on all
+// three routes: status takes ?target=, apply and disable take "target", an
+// unknown target is a 400 that never reaches the service, and an unavailable
+// Windows target is a 409 with the reason.
+func TestShellWrapRoutesCarryTheTarget(t *testing.T) {
+	fake := &fakeShellWrap{}
+	s := shellWrapServer(t, fake)
+	tok, ck := shellWrapToken(t, s)
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/shell-wrap/status?target=windows", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status windows: %d %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Status  shellwrap.Status          `json:"status"`
+		Target  string                    `json:"target"`
+		Targets []shellwrapsvc.TargetInfo `json:"targets"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Target != "windows" || body.Status.Bridge == nil || len(body.Targets) != 2 {
+		t.Fatalf("status body %+v", body)
+	}
+
+	rr = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/shell-wrap/status?target=mars", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unknown target: %d", rr.Code)
+	}
+
+	if rr := shellWrapPost(s, "/api/shell-wrap/apply", `{"target":"windows","tools":["muse"],"dry_run":true}`, tok, ck); rr.Code != http.StatusOK {
+		t.Fatalf("apply windows: %d %s", rr.Code, rr.Body.String())
+	}
+	if len(fake.applied) != 1 || fake.applied[0].Target != shellwrapsvc.TargetWindows {
+		t.Fatalf("service saw %+v", fake.applied)
+	}
+	if rr := shellWrapPost(s, "/api/shell-wrap/apply", `{"target":"mars","tools":["muse"]}`, tok, ck); rr.Code != http.StatusBadRequest {
+		t.Fatalf("apply unknown target: %d", rr.Code)
+	}
+	if len(fake.applied) != 1 {
+		t.Fatal("an unknown target reached the service")
+	}
+	if rr := shellWrapPost(s, "/api/shell-wrap/disable", `{"target":"windows"}`, tok, ck); rr.Code != http.StatusOK {
+		t.Fatalf("disable windows: %d %s", rr.Code, rr.Body.String())
+	}
+	if len(fake.disabledTargets) != 1 || fake.disabledTargets[0] != shellwrapsvc.TargetWindows {
+		t.Fatalf("disable targets %+v", fake.disabledTargets)
+	}
+
+	fake.windowsMissing = true
+	rr = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/shell-wrap/status?target=windows", nil))
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "not running inside WSL") {
+		t.Fatalf("unavailable windows target: %d %s", rr.Code, rr.Body.String())
 	}
 }

@@ -69,7 +69,9 @@ const ENTITY_ROUTES: Record<EntityKind, EntityRoute> = {
   // per-id detail route — none of those pages expose an id-addressable
   // detail view today (checked 2026-08-16), so linking to the list is
   // honest; a wrong deep link would be worse than a plain list link.
-  policy: { hasId: false, to: () => "/policy", label: () => "policy" },
+  // The coding policy page; the old /policy route only reaches it through the
+  // legacy redirect table (web2/src/lib/legacyRedirects.ts).
+  policy: { hasId: false, to: () => "/coding/policies", label: () => "policy" },
   provider: { hasId: true, to: () => "/intelligence", label: (id) => `provider ${short(id)}` },
   enduser: { hasId: true, to: () => "/trajectories/end-users", label: (id) => `end user ${short(id)}` },
   // The org-rollup identities. `developer` keys on the org member's user_id

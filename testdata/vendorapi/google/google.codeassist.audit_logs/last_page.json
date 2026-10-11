@@ -1,0 +1,26 @@
+{
+  "entries": [
+    {
+      "insertId": "3c4d5e6f7a8b",
+      "logName": "projects/acme-gemini-prod/logs/cloudaudit.googleapis.com%2Fdata_access",
+      "protoPayload": {
+        "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+        "authenticationInfo": {
+          "principalEmail": "dev.two@example.com"
+        },
+        "methodName": "google.cloud.cloudaicompanion.v1.TextGenerationService.GenerateText",
+        "resourceName": "projects/acme-gemini-prod/locations/global/instances/default",
+        "serviceName": "cloudaicompanion.googleapis.com",
+        "status": {
+          "code": 7
+        }
+      },
+      "receiveTimestamp": "2026-10-06T10:02:101Z",
+      "resource": {
+        "type": "audited_resource"
+      },
+      "severity": "INFO",
+      "timestamp": "2026-10-06T10:02:10Z"
+    }
+  ]
+}

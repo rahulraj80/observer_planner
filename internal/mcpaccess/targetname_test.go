@@ -8,9 +8,10 @@ import (
 )
 
 // TestValidTargetNameMatchesAgentgateway pins ValidTargetName to the pinned
-// agentgateway v1.5.0's own validate_mcp_target_name test vectors
+// agentgateway v1.6.0's own validate_mcp_target_name test vectors
 // (crates/agentgateway/src/types/agent.rs, the four
-// validate_mcp_target_name_* tests) plus the live-defect id.
+// validate_mcp_target_name_* tests, identical to v1.5.0's; T-749) plus the
+// live-defect id.
 func TestValidTargetNameMatchesAgentgateway(t *testing.T) {
 	for _, c := range []struct {
 		name string

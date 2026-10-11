@@ -172,6 +172,11 @@ func kiloAttachPassthrough(kiloPath string) []string {
 // best-effort launch_seeds row for the started child so the daemon's
 // correlation sweep can attribute the session directly.
 func runKiloLauncher(configPath, dbPath, bin string, args []string, dir string) error {
+	// P6 item 5 + G8: the process that starts the tool refuses an
+	// org-disallowed tool and counts a tool grant's use, once (review M3-10).
+	if err := refuseIfToolDisallowedDB(dbPath, "kilo-code-cli", os.Stderr); err != nil {
+		return err
+	}
 	// Executable + argv are what make process-cutoff recovery reachable for a
 	// native-exempt tool: kilo can never prove a proxy route, so the daemon's
 	// attested cutoff over this exact installed surface is its only admission

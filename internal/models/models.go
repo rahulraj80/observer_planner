@@ -892,6 +892,14 @@ const (
 	// register by default — incorrect handler behavior cannot break
 	// spawns.
 	ActionWorktreeRemove = "worktree_remove"
+	// ActionTaskEvent captures a host's task / todo lifecycle HOOK event
+	// (Claude Code TaskCreated / TaskCompleted, Qwen Code TodoCreated /
+	// TodoCompleted; hook-parity Lane E, task_observe). Capture only: the
+	// hook never decides anything, and the transcript's own TaskCreate /
+	// TodoWrite tool calls stay the task-tracking source (internal/taskflow
+	// decodes those, never this row). Target is "created: <title>" or
+	// "completed: <title>"; RawToolName is the native event name.
+	ActionTaskEvent = "task_event"
 	// ActionRateLimit captures a host-emitted rate-limit status check.
 	// Cowork's audit.jsonl emits a `rate_limit_event` record per poll
 	// (~50/session in observed data) carrying the current window
@@ -1258,6 +1266,13 @@ type ActionMetadata struct {
 	// Recorded on the session-opening user_prompt rows so an unmapped
 	// value stays auditable after the fact; never interpreted downstream.
 	CaptureSource string `json:"capture_source,omitempty"`
+	// RetryReplays is how many times the host re-wrote this same assistant
+	// reply into its transcript while retrying the model request inside one
+	// turn (cursor: a LostConnection retry appends the identical reply
+	// again). The adapter stores the reply ONCE and counts the replays here,
+	// so retries stay countable without inflating the message count. Zero
+	// when the reply was written once.
+	RetryReplays int `json:"retry_replays,omitempty"`
 }
 
 // IsZero reports whether the struct has no non-zero fields. Used by
@@ -1289,7 +1304,7 @@ func (m ActionMetadata) telemetryFieldsZero() bool {
 	return m.CoworkProcessName == "" && m.CoworkTitle == "" && !m.HostLoopMode &&
 		m.ServiceTier == "" && m.InferenceGeo == "" &&
 		m.CacheCreate5mTok == 0 && m.CacheCreate1hTok == 0 && m.TotalCostUSD == 0 &&
-		m.CoworkToolSummary == ""
+		m.CoworkToolSummary == "" && m.RetryReplays == 0
 }
 
 // rateLimitFieldsZero reports whether the rate-limit and permission-location

@@ -89,20 +89,20 @@ func TestCheckClaudeCodePlugin(t *testing.T) {
 			wantStatus: StatusOK,
 		},
 		{
-			name:       "BOTH — plugin enabled and init hooks",
+			name:       "BOTH - plugin enabled and init hooks",
 			settings:   "{" + fixturePluginOn + "," + fixtureObserverHooks + "}",
 			wantStatus: StatusWarn,
 			wantDetail: "hook event(s)",
 		},
 		{
 			// The wsl.exe bridge shape must still be recognised as ours.
-			name:       "BOTH — plugin enabled and wsl-bridged init hooks",
+			name:       "BOTH - plugin enabled and wsl-bridged init hooks",
 			settings:   "{" + fixturePluginOn + "," + fixtureWSLBridgeHooks + "}",
 			wantStatus: StatusWarn,
 			wantDetail: "hook event(s)",
 		},
 		{
-			name:       "BOTH — plugin cached and init MCP entry",
+			name:       "BOTH - plugin cached and init MCP entry",
 			cached:     true,
 			claudeJSON: fixtureObsMCP,
 			wantStatus: StatusWarn,
@@ -115,7 +115,7 @@ func TestCheckClaudeCodePlugin(t *testing.T) {
 			wantStatus: StatusOK,
 		},
 		{
-			name:       "plugin explicitly disabled with init hooks — no double fire",
+			name:       "plugin explicitly disabled with init hooks - no double fire",
 			settings:   `{"enabledPlugins":{"` + claudeplugin.EnabledKey + `":false},` + fixtureObserverHooks + `}`,
 			cached:     true,
 			wantStatus: StatusOK,
@@ -225,7 +225,7 @@ func TestCheckClaudeCodePluginWindowsSide(t *testing.T) {
 		}
 	})
 
-	t.Run("no windows side resolved — native only", func(t *testing.T) {
+	t.Run("no windows side resolved - native only", func(t *testing.T) {
 		noWindowsSide(t)
 		home := t.TempDir()
 		mustWriteFile(t, filepath.Join(home, ".claude", "settings.json"),
@@ -336,7 +336,7 @@ func TestCheckClaudeCodePluginRespectsDoctorSandbox(t *testing.T) {
 	got := checkClaudeCodePlugin(sandbox, sandbox) // homeOverride == the sandbox
 
 	if len(asked) != 0 {
-		t.Errorf("sandboxed doctor run resolved foreign-OS homes %v — it must read nothing outside %s", asked, sandbox)
+		t.Errorf("sandboxed doctor run resolved foreign-OS homes %v - it must read nothing outside %s", asked, sandbox)
 	}
 	if got.Status != StatusOK {
 		t.Errorf("empty sandbox should be OK, got %v: %s", got.Status, got.Message)

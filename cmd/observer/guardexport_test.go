@@ -200,13 +200,13 @@ func TestGuardReportCmd(t *testing.T) {
 		t.Fatalf("guard report: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"Guard evidence pack — period 24h",
+		"Guard evidence pack - period 24h",
 		"== Policy changes in period ==",
 		"/u/guard-policy.toml",
 		"total 3, enforced 0",
 		"by severity:",
 		"== Audit-chain verification ==",
-		"OK — 3 row(s) verified",
+		"OK - 3 row(s) verified",
 		"== Coverage matrix (§6.5) ==",
 		"claude-code",
 		"== Exception register (active approvals) ==",

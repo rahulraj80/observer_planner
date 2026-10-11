@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "claude_code_metrics": {
+        "distinct_session_plugin_used_count": 0
+      },
+      "cowork_metrics": {
+        "distinct_session_plugin_used_count": 0
+      },
+      "distinct_user_count": 0,
+      "install_count": 0,
+      "invocation_count": 0,
+      "plugin_name": "plugin_name",
+      "plugin_id": "plugin_id",
+      "product": "product",
+      "rbac_group_id": "rbac_group_id",
+      "rbac_group_name": "rbac_group_name",
+      "user_id": "user_id"
+    }
+  ],
+  "next_page": "next_page"
+}

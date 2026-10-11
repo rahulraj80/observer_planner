@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,9 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/marmutapp/superbased-observer/internal/costtext"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
-	notifydigest "github.com/marmutapp/superbased-observer/internal/notify/digest"
 	"github.com/marmutapp/superbased-observer/internal/notify/sharecard"
+	"github.com/marmutapp/superbased-observer/internal/notifycfg"
 )
 
 // report.go wires `observer report share` — a PURE LOCAL artifact generator
@@ -49,30 +51,36 @@ func newReportShareCmd() *cobra.Command {
 		Use:   "share",
 		Short: "Compose a shareable cost card (SVG) + Markdown for a completed period",
 		Long: "Compose a beautiful, copy-pasteable summary of your observed agent\n" +
-			"spend for the most-recently-COMPLETED period — period total, top 3\n" +
+			"spend for the most-recently-COMPLETED period - period total, top 3\n" +
 			"models, cache-read share, and tool mix. Writes a 1200×630 social card\n" +
 			"(SVG, default ./observer-report.svg) and/or prints the Markdown block\n" +
 			"with --markdown. Entirely local: no network, and the card carries only\n" +
-			"aggregates — never project names, paths, or session titles.",
+			"aggregates - never project names, paths, or session titles.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// The card celebrates a dollar total with no token figure behind
+			// it, so under the token-usage developer cost display it is not
+			// offered, the way the dashboard drops the savings milestone (T-204).
+			if costtext.Tokens(costModeFrom(cmd.Context())) {
+				return errors.New("report share: the shareable card is a dollar spend figure, and your organization shows token usage instead of costs on this machine, so it is not offered here; `observer cost` shows the token usage")
+			}
 			cfg, db, cleanup, err := loadConfigAndDB(cmd.Context(), configPath)
 			if err != nil {
 				return err
 			}
 			defer cleanup()
 
-			freq := notifydigest.Weekly
+			freq := notifycfg.Weekly
 			kind := "week"
 			switch strings.ToLower(strings.TrimSpace(period)) {
 			case "", "week", "weekly":
 			case "month", "monthly":
-				freq = notifydigest.Monthly
+				freq = notifycfg.Monthly
 				kind = "month"
 			default:
 				return fmt.Errorf("report share: --period %q not in {week, month}", period)
 			}
 
-			p, _ := notifydigest.DuePeriod(freq, 0, time.Now().UTC())
+			p, _ := notifycfg.DuePeriod(freq, 0, time.Now().UTC())
 			engine := acquireProcessCostEngine(cmd.Context(), cfg, db, slog.Default())
 			data, err := assembleShareData(cmd.Context(), engine, db, p, kind)
 			if err != nil {
@@ -90,7 +98,7 @@ func newReportShareCmd() *cobra.Command {
 				if err := os.WriteFile(outPath, []byte(data.SVG()), 0o600); err != nil {
 					return fmt.Errorf("report share: write %s: %w", outPath, err)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (%s — %s)\n", outPath, p.Label, moneyLine(data.TotalUSD))
+				fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (%s - %s)\n", outPath, p.Label, moneyLine(data.TotalUSD))
 			}
 			return nil
 		},
@@ -104,7 +112,7 @@ func newReportShareCmd() *cobra.Command {
 
 // assembleShareData builds the content-free sharecard.Data for a period from
 // the cost engine: total spend, top models, tool mix, and the cache-read share.
-func assembleShareData(ctx context.Context, engine *cost.Engine, db *sql.DB, p notifydigest.Period, kind string) (sharecard.Data, error) {
+func assembleShareData(ctx context.Context, engine *cost.Engine, db *sql.DB, p notifycfg.Period, kind string) (sharecard.Data, error) {
 	modelSum, err := engine.Summary(ctx, db, cost.Options{
 		Since: p.Start, Until: p.End, GroupBy: cost.GroupByModel, Source: cost.SourceAuto, Limit: 200,
 	})

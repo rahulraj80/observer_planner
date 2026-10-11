@@ -1,0 +1,22 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-08",
+  "field_ledger": {
+    "code": "Inferred",
+    "error": "Inferred"
+  },
+  "fixture_sha256": "a37ce36237819d05b66e7877968597d4000d2ce525bff442207e1abeeaeebe4e",
+  "http": {
+    "method": "GET",
+    "path": "/audit/teams/{teamId}/events",
+    "status": 401
+  },
+  "notes": "The reference documents no error body; this shape is synthesized and Inferred.",
+  "scenario": "error_401",
+  "sdk_or_spec_version_or_commit": "xAI Management API reference (audit.md, billing.md), fetched 2026-10-08",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "b0ec3ad3bec4d19d346800315f6ccb5708906b0ef51f910c482154fd929a7873",
+  "source_url": "https://docs.x.ai/developers/rest-api-reference/management/audit.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "xai.mgmt.audit_events"
+}

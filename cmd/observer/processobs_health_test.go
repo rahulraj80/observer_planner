@@ -1,3 +1,5 @@
+//go:build !sbo_omit_processobs
+
 package main
 
 import (
@@ -242,7 +244,7 @@ func TestPublishProcessHealth_WritesAndCleansUp(t *testing.T) {
 
 	stop()
 	if _, ok := diag.LatestProcessHealth(dir); ok {
-		t.Error("record survived stop() — a dead daemon would look live to doctor")
+		t.Error("record survived stop() - a dead daemon would look live to doctor")
 	}
 	stop() // idempotent
 }
@@ -511,7 +513,7 @@ func TestSelectProcessBackendPreservesBackendCapabilities(t *testing.T) {
 			t.Fatal("the requested-but-missing transport must still carry its reason")
 		}
 		if !requiresUnattributed(b) {
-			t.Fatal("the cross-OS baseline lost UnattributedCapturer — Windows process rows would stop being persisted, silently")
+			t.Fatal("the cross-OS baseline lost UnattributedCapturer - Windows process rows would stop being persisted, silently")
 		}
 	})
 
@@ -656,7 +658,7 @@ func assertNoBackendWrapper(t *testing.T, b processobs.Backend) {
 	// literal "main" silently never matches. localPkgMarker pins the right
 	// value without hardcoding the module path.
 	if ty.PkgPath() == reflect.TypeOf(localPkgMarker{}).PkgPath() {
-		t.Fatalf("selectProcessBackend wrapped the backend in %s — a main-declared decorator over an "+
+		t.Fatalf("selectProcessBackend wrapped the backend in %s - a main-declared decorator over an "+
 			"embedded Backend interface promotes only Backend's methods, so every optional capability "+
 			"(UnattributedCapturer, NetworkSampler, TransportStatsSource, and anything added later) "+
 			"becomes invisible to a type assertion. Return the fact beside the backend instead.", ty.String())

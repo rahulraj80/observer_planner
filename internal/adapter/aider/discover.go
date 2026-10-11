@@ -49,10 +49,10 @@ var skipDirNames = map[string]bool{
 // repo (e.g. crush's <repo>/.crush) and avoid recursively watching whole
 // repo trees.
 //
-// The set is a SNAPSHOT — the walk runs once here. A repo that gains its
-// first aider session after the daemon starts is not covered until a
-// restart or an `observer scan`/`observer backfill`; see
-// Adapter.WatchPaths and docs/aider-adapter.md.
+// Each call is one walk. The adapter re-runs it in the background every
+// rediscoverInterval (T-706), so a repo that gains its first aider session
+// after the daemon starts is picked up by the watcher's root re-detector;
+// see Adapter.WatchPaths and docs/aider-adapter.md.
 func discoverRoots() []string {
 	var roots []string
 	seen := map[string]bool{}
@@ -138,7 +138,11 @@ func walkForAiderRoots(root string, budget int) (found []string, visited int) {
 				}
 				continue
 			}
-			if strings.EqualFold(name, historyFileName) {
+			// Only a REGULAR file is a transcript (SEC-SWEEP, ledger
+			// AIDER-SYMLINK-1): a committed symlink named like one
+			// (".aider.chat.history.md -> ~/notes/private.md") would make the
+			// daemon read its target, the SR27-A3 class.
+			if strings.EqualFold(name, historyFileName) && e.Type().IsRegular() {
 				p := filepath.Join(cur.path, name)
 				if !seen[p] {
 					seen[p] = true

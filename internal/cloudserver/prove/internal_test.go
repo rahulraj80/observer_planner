@@ -122,7 +122,7 @@ func TestJSONSafeTokenCannotBreakTheAuditDetail(t *testing.T) {
 		for _, bad := range []rune{'"', '\\', '\n', 0} {
 			for _, r := range got {
 				if r == bad {
-					t.Fatalf("jsonSafeToken(%q) = %q — still contains %q", in, got, bad)
+					t.Fatalf("jsonSafeToken(%q) = %q - still contains %q", in, got, bad)
 				}
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/termcore"
 	"github.com/marmutapp/superbased-observer/internal/termlease"
 )
 
@@ -167,20 +168,11 @@ type Options struct {
 }
 
 // SessionExit is the metadata handed to Options.OnExit when a session ends.
-// Content-free by construction (ids + enums + exit code).
-type SessionExit struct {
-	Handle     string
-	SessionID  string
-	Subcommand string
-	ExitCode   int
-	At         time.Time
-	// PID is the OS pid of the exited PTY child, or 0 when the backend did not
-	// report one. Additive (2026-07-26): a consumer that seeded process
-	// attribution against this pid needs the pid back to retract it. Prefer
-	// Options.OnProcess for that — it fires synchronously and therefore closes
-	// the pid-reuse window that OnExit's detached delivery leaves open.
-	PID int
-}
+// Content-free by construction (ids + enums + exit code). It is the core
+// internal/termcore.SessionExit (lane MP-L1K, T-715); prefer
+// Options.OnProcess to retract a pid, because it fires synchronously and so
+// closes the pid-reuse window that OnExit's detached delivery leaves open.
+type SessionExit = termcore.SessionExit
 
 // ProcessEventKind classifies a [ProcessEvent] edge.
 type ProcessEventKind string
@@ -1459,6 +1451,26 @@ func (m *Manager) ProcessAttributionForHandle(handle string) (pid int, launchedA
 	return s.pid, s.createdAt, true
 }
 
+// ExitAttributionForHandle returns the launcher verb (Spec.Subcommand) and
+// exit time of a handle's PTY child once it has exited. It is the companion
+// to ProcessAttributionForHandle for a wrapped launch, whose PTY child is the
+// `observer <tool>` launcher rather than the vendor process an external
+// observation names (T-584): a caller correlates by the run's tool and exit
+// time instead. ok is false for an unknown handle or a child still running.
+func (m *Manager) ExitAttributionForHandle(handle string) (subcommand string, exitedAt time.Time, ok bool) {
+	m.mu.Lock()
+	s := m.sessions[handle]
+	m.mu.Unlock()
+	if s == nil {
+		return "", time.Time{}, false
+	}
+	done := s.doneAt.Load()
+	if done == 0 {
+		return "", time.Time{}, false
+	}
+	return s.spec.Subcommand, time.Unix(0, done).UTC(), true
+}
+
 // ProcessIdentityForHandle returns the observed OS identity of a terminal's
 // PTY child when the manager has not recorded its exit and the process birth
 // observed during this call matches the immutable value captured immediately
@@ -1603,8 +1615,28 @@ func (m *Manager) Shutdown() {
 	for _, h := range handles {
 		m.terminate(h)
 	}
-	m.wg.Wait()
+	// Bounded (T-553): a terminated child whose descendants keep the pty
+	// open can hold a session's pump or exit wait for as long as they live.
+	// The daemon's stop must not wait on that; it logs and moves on (the
+	// goroutines end with the process).
+	waited := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(waited)
+	}()
+	select {
+	case <-waited:
+	case <-time.After(managerShutdownWait):
+		if m.logger != nil {
+			m.logger.Warn("termsession: sessions still exiting after the shutdown wait; continuing the stop",
+				"wait", managerShutdownWait, "sessions", len(handles))
+		}
+	}
 }
+
+// managerShutdownWait bounds how long Shutdown waits for terminated sessions'
+// goroutines. A var for tests.
+var managerShutdownWait = 5 * time.Second
 
 // Info is a read-only snapshot of a session (Phase 3 session list). ID is
 // the opaque session handle.

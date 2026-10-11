@@ -464,6 +464,21 @@ func SnapshotMinCacheable() map[string]int {
 	return out
 }
 
+// SnapshotModels returns the model ids the embedded snapshot prices, sorted -
+// the compiled projection of the Tokenomics catalogue. Unlike Table.Known it
+// carries no family-prefix keys or hand-literal aliases, so it reads as a list
+// of real, current model ids (the Arena model picker's catalogue source). A
+// refused or empty snapshot yields an empty slice.
+func SnapshotModels() []string {
+	loadSnapshot()
+	out := make([]string, 0, len(snapshotRows))
+	for k := range snapshotRows {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // applySnapshot folds the embedded snapshot onto a freshly-seeded table (the
 // hand literal plus its baked dated timelines). It is called from [NewTable]
 // only, inside the seed rung.

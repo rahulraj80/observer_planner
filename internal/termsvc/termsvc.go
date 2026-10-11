@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/integration"
-	"github.com/marmutapp/superbased-observer/internal/sshprofile"
+	"github.com/marmutapp/superbased-observer/internal/sshspec"
+	"github.com/marmutapp/superbased-observer/internal/termcore"
 	"github.com/marmutapp/superbased-observer/internal/termfeed"
 	"github.com/marmutapp/superbased-observer/internal/termrun"
 )
@@ -45,7 +46,7 @@ var (
 	// the feature is absent; a sandboxed request FAILS CLOSED rather than
 	// silently degrading to an unsandboxed launch. Returned BEFORE a run is
 	// minted, so no orphan terminal_runs row is created.
-	ErrSandboxUnavailable = errors.New("termsvc: sandboxed launch requested but no sandbox seam is configured")
+	ErrSandboxUnavailable = termcore.ErrSandboxUnavailable
 	// ErrSSHLaunchDisabled — [terminal.ssh].enabled is false. An SSH shell runs
 	// arbitrary commands on ANOTHER machine, so it has its own master opt-in
 	// rather than riding on AllowShell (which grants only a LOCAL shell).
@@ -64,7 +65,7 @@ var (
 	// creation / git clone / bwrap-plan failure). Returned before a run is
 	// minted, same fail-closed posture as ErrSandboxUnavailable. The dashboard
 	// maps this to a 500.
-	ErrWorkspacePrepFailed = errors.New("termsvc: sandbox workspace preparation failed")
+	ErrWorkspacePrepFailed = termcore.ErrWorkspacePrepFailed
 )
 
 // Policy is the resolved fresh-launch authorization, built from the operator's
@@ -92,12 +93,29 @@ type Policy struct {
 	// this feature: the client sends a profile NAME, LaunchSSH resolves it
 	// HERE, and a name that is not in this slice is refused. Empty = deny-all,
 	// even when AllowSSH is true.
-	SSHProfiles []sshprofile.Profile
+	// The profile model is the core internal/sshspec type, so this policy
+	// holds no terminals.ssh package (lane MP-L1H, T-715).
+	SSHProfiles []sshspec.Profile
 	// SSHOptions carries the connection-tuning knobs ([terminal.ssh]
 	// connect_timeout_seconds / keepalive_seconds). Its zero value resolves to
-	// the sshprofile defaults.
-	SSHOptions sshprofile.Options
+	// the sshspec defaults.
+	SSHOptions sshspec.Options
 }
+
+// currentPolicy is the ONE read of the launch authorization: the live source
+// when one is wired, else the construction-time Policy. Callers take it once
+// per decision (see Options.PolicySource).
+func (s *Service) currentPolicy() Policy {
+	if s.policySource != nil {
+		return s.policySource()
+	}
+	return s.policy
+}
+
+// PolicyLive reports whether the Service reads a live PolicySource (a launch
+// policy save binds without a restart) rather than its construction-time
+// Policy. The dashboard uses it to state the restart honestly.
+func (s *Service) PolicyLive() bool { return s != nil && s.policySource != nil }
 
 // toolAllowed reports whether tool is in the fresh-launch allow-list.
 func (p Policy) toolAllowed(tool string) bool {
@@ -362,9 +380,11 @@ const endedHandleGCBound = 256
 
 // Service is the terminal application service. One instance per daemon.
 type Service struct {
-	policy   Policy
-	rec      RunRecorder
-	launcher Launcher
+	policy Policy
+	// policySource is Options.PolicySource (nil = the static policy above).
+	policySource func() Policy
+	rec          RunRecorder
+	launcher     Launcher
 	// guiLauncher spawns a DETACHED IDE / desktop app (see gui.go). Optional;
 	// nil means the feature is absent on this daemon and LaunchGUI fails closed
 	// with ErrGUIUnsupported — the same nil-seam posture as sandboxer.
@@ -459,12 +479,20 @@ type sessionLink struct {
 // Options configures a Service. Recorder and Launcher are required; the rest
 // are optional.
 type Options struct {
-	Policy   Policy
-	Recorder RunRecorder
-	Launcher Launcher
-	Feed     *termfeed.Feed
-	Logger   *slog.Logger
-	Now      func() time.Time
+	Policy Policy
+	// PolicySource, when set, is consulted on EVERY authorization instead of
+	// the construction-time Policy, so a [terminal.launch] / [terminal.ssh]
+	// save binds on the next launch without a daemon restart (T-488/T-489).
+	// The cmd layer wires one owner (a config-file stamp holder) that returns
+	// the current resolved Policy. Each call site reads it ONCE and decides
+	// against that one snapshot, so a save racing a launch can never mix an
+	// old allow-list with a new master switch. Nil keeps the static Policy.
+	PolicySource func() Policy
+	Recorder     RunRecorder
+	Launcher     Launcher
+	Feed         *termfeed.Feed
+	Logger       *slog.Logger
+	Now          func() time.Time
 	// ExitStatus is the authoritative Manager exit query used by launch() to
 	// close the pre-registration exit gap (see Service.exitStatus). Satisfied by
 	// termsession.Manager.ExitStatus. Nil disables the reconcile.
@@ -503,6 +531,7 @@ func New(opts Options) *Service {
 	return &Service{
 		getwd:                getwd,
 		policy:               opts.Policy,
+		policySource:         opts.PolicySource,
 		rec:                  opts.Recorder,
 		launcher:             opts.Launcher,
 		sandboxer:            opts.Sandboxer,
@@ -572,7 +601,7 @@ type LaunchResult struct {
 // recorded and reported under (status feed, run history, remote-sensitivity
 // classification) — it is never a member of the capability registry's
 // launchable-tool set, so it can never collide with a real AI-tool name.
-const ShellTool = "shell"
+const ShellTool = termcore.ShellTool
 
 // SSHTool is the reserved pseudo-tool name an outbound SSH remote-system
 // session is recorded and reported under, mirroring ShellTool. Like ShellTool
@@ -587,19 +616,20 @@ func (s *Service) LaunchFresh(ctx context.Context, req FreshRequest) (LaunchResu
 	if s.launcher == nil {
 		return LaunchResult{}, ErrNoLauncher
 	}
+	pol := s.currentPolicy()
 	if req.Shell {
-		if !s.policy.AllowShell {
+		if !pol.AllowShell {
 			return LaunchResult{}, ErrShellLaunchDisabled
 		}
 	} else {
-		if !s.policy.AllowFresh {
+		if !pol.AllowFresh {
 			return LaunchResult{}, ErrFreshLaunchDisabled
 		}
-		if !s.policy.toolAllowed(req.Tool) {
+		if !pol.toolAllowed(req.Tool) {
 			return LaunchResult{}, fmt.Errorf("%w: %q", ErrToolNotAllowed, req.Tool)
 		}
 	}
-	dir, err := ValidateProjectRoot(req.ProjectRoot, s.policy.AllowedProjectRoots)
+	dir, err := ValidateProjectRoot(req.ProjectRoot, pol.AllowedProjectRoots)
 	if err != nil {
 		return LaunchResult{}, err
 	}
@@ -744,10 +774,11 @@ func (s *Service) LaunchSSH(ctx context.Context, req SSHRequest) (LaunchResult, 
 	if s.launcher == nil {
 		return LaunchResult{}, ErrNoLauncher
 	}
-	if !s.policy.AllowSSH {
+	pol := s.currentPolicy()
+	if !pol.AllowSSH {
 		return LaunchResult{}, ErrSSHLaunchDisabled
 	}
-	profile, ok := sshprofile.Find(s.policy.SSHProfiles, req.Profile)
+	profile, ok := findSSHProfile(pol.SSHProfiles, req.Profile)
 	if !ok {
 		return LaunchResult{}, fmt.Errorf("%w: %q", ErrSSHProfileUnknown, req.Profile)
 	}
@@ -757,7 +788,7 @@ func (s *Service) LaunchSSH(ctx context.Context, req SSHRequest) (LaunchResult, 
 	if err := profile.ValidateWithFS(); err != nil {
 		return LaunchResult{}, fmt.Errorf("%w: %w", ErrSSHProfileInvalid, err)
 	}
-	argv, err := sshprofile.Argv(profile, s.policy.SSHOptions)
+	argv, err := sshLaunchArgv(profile, pol.SSHOptions)
 	if err != nil {
 		return LaunchResult{}, fmt.Errorf("%w: %w", ErrSSHProfileInvalid, err)
 	}
@@ -780,16 +811,19 @@ func (s *Service) LaunchSSH(ctx context.Context, req SSHRequest) (LaunchResult, 
 // picker can never offer a profile LaunchSSH would refuse (one owner, one
 // list). The returned slice is a copy — a caller cannot mutate the policy.
 //
-// There is deliberately no writer counterpart. Profiles are authored in
-// config.toml; adding a create/update path here would turn "which machines may
-// this daemon shell into" into something the dashboard can change.
-func (s *Service) SSHProfileList() (enabled bool, profiles []sshprofile.Profile) {
-	if len(s.policy.SSHProfiles) == 0 {
-		return s.policy.AllowSSH, nil
+// There is deliberately no writer counterpart HERE. Profiles stay authored in
+// config.toml, now also through the owner-local dashboard editor (T-488,
+// PUT /api/terminal/ssh/profiles: CapabilityLocal + confirm token, the same
+// authority as editing the file by hand), which writes the file; this service
+// only reads the result through Options.PolicySource.
+func (s *Service) SSHProfileList() (enabled bool, profiles []sshspec.Profile) {
+	pol := s.currentPolicy()
+	if len(pol.SSHProfiles) == 0 {
+		return pol.AllowSSH, nil
 	}
-	out := make([]sshprofile.Profile, len(s.policy.SSHProfiles))
-	copy(out, s.policy.SSHProfiles)
-	return s.policy.AllowSSH, out
+	out := make([]sshspec.Profile, len(pol.SSHProfiles))
+	copy(out, pol.SSHProfiles)
+	return pol.AllowSSH, out
 }
 
 // HandoffRequest is the dashboard-derived continue-a-session request. It does
@@ -937,13 +971,14 @@ func (s *Service) LaunchResume(ctx context.Context, req ResumeRequest) (LaunchRe
 	if s.launcher == nil {
 		return LaunchResult{}, ErrNoLauncher
 	}
-	if !s.policy.AllowFresh {
+	pol := s.currentPolicy()
+	if !pol.AllowFresh {
 		return LaunchResult{}, ErrFreshLaunchDisabled
 	}
-	if !s.policy.toolAllowed(req.Tool) {
+	if !pol.toolAllowed(req.Tool) {
 		return LaunchResult{}, fmt.Errorf("%w: %q", ErrToolNotAllowed, req.Tool)
 	}
-	dir, err := ValidateProjectRoot(req.ProjectRoot, s.policy.AllowedProjectRoots)
+	dir, err := ValidateProjectRoot(req.ProjectRoot, pol.AllowedProjectRoots)
 	if err != nil {
 		return LaunchResult{}, err
 	}

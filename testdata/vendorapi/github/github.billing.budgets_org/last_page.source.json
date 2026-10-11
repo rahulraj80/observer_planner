@@ -1,0 +1,41 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "budgets": "VerifiedOfficial",
+    "budgets[]": "VerifiedOfficial",
+    "budgets[].budget_alerting": "VerifiedOfficial",
+    "budgets[].budget_alerting.alert_recipients": "VerifiedOfficial",
+    "budgets[].budget_alerting.alert_recipients[]": "VerifiedOfficial",
+    "budgets[].budget_alerting.will_alert": "VerifiedOfficial",
+    "budgets[].budget_amount": "VerifiedOfficial",
+    "budgets[].budget_product_skus": "VerifiedOfficial",
+    "budgets[].budget_product_skus[]": "VerifiedOfficial",
+    "budgets[].budget_scope": "VerifiedOfficial",
+    "budgets[].budget_type": "VerifiedOfficial",
+    "budgets[].id": "VerifiedOfficial",
+    "budgets[].prevent_further_usage": "VerifiedOfficial",
+    "has_next_page": "VerifiedOfficial",
+    "total_count": "VerifiedOfficial"
+  },
+  "fixture_sha256": "3dc7c54503ee2be8a0f11b6d56c842d469e3713bf010c5e36886d5ac9cefdc64",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/organizations/{org}/settings/billing/budgets",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example default of GET /organizations/{org}/settings/billing/budgets (operationId billing/get-all-budgets-org). Last page: same body, no Link rel=\"next\" header (the documented terminal condition).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description api.github.com.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "4d10d960b047176d1be58543dbdfb8ece46d77efcc2e57411770747259b1345f",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.billing.budgets_org"
+}

@@ -1,0 +1,41 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].ending_at": "VerifiedOfficial",
+    "data[].results": "VerifiedOfficial",
+    "data[].results[]": "VerifiedOfficial",
+    "data[].results[].amount": "VerifiedOfficial",
+    "data[].results[].context_window": "VerifiedOfficial",
+    "data[].results[].cost_type": "VerifiedOfficial",
+    "data[].results[].currency": "VerifiedOfficial",
+    "data[].results[].description": "VerifiedOfficial",
+    "data[].results[].inference_geo": "VerifiedOfficial",
+    "data[].results[].model": "VerifiedOfficial",
+    "data[].results[].service_tier": "VerifiedOfficial",
+    "data[].results[].token_type": "VerifiedOfficial",
+    "data[].results[].workspace_id": "VerifiedOfficial",
+    "data[].starting_at": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "8b081cbad28aa68d608943fefc0cc9857725d97ebb1de15c1a84aa49aa837ab1",
+  "http": {
+    "method": "GET",
+    "path": "/v1/organizations/cost_report",
+    "query": {
+      "group_by[]": "description"
+    },
+    "status": 200
+  },
+  "notes": "Synthesized: every documented cost_type, a large decimal-string amount, null token fields for non-token costs (documented), the default workspace as null, last page.",
+  "scenario": "enum_sweep",
+  "sdk_or_spec_version_or_commit": "generated API reference (Stainless, from the Anthropic OpenAPI spec), fetched 2026-10-07",
+  "source_kind": "synthesized_from_schema",
+  "source_sha256": "0067029979a320022bba25db2ebf35f774d04ed28596ac2b38834fa906dc6dec",
+  "source_url": "https://platform.claude.com/docs/en/api/beta/organization.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.console.cost_report"
+}

@@ -308,13 +308,45 @@ type sessionMetaPayload struct {
 	// attribution. See docs/plans/ide-surface-capture-remediation-
 	// plan-2026-09-02.md §0/§3.
 	Originator string `json:"originator"`
-	Source     string `json:"source"`
+	// Source is the flat `source` string. A spawned subagent's
+	// session_meta carries an OBJECT there instead
+	// ({"subagent":{"thread_spawn":{...}}}); sessionMetaSource decodes
+	// that to "" so the rest of the record (id, thread_source,
+	// parent_thread_id) still decodes (T-582).
+	Source sessionMetaSource `json:"source"`
 	// CLIVersion is the codex CLI version the runtime stamped on the
 	// OWNING session_meta ("0.150.0", "0.130.0-alpha.5"). Captured
 	// node-local per Issue 2 (migration 125) and emitted as a
 	// models.SessionToolVersion at the same owner-gated site as the
 	// surface attribution below.
 	CLIVersion string `json:"cli_version"`
+}
+
+// sessionMetaSource is session_meta's `source`, tolerant of both wire
+// shapes codex writes: a plain string ("cli", "exec", "vscode") on a
+// primary session, and an object on a spawned subagent
+// ({"subagent":{"thread_spawn":{...}}} or {"subagent":"review"}). With a
+// plain string field the object shape failed the WHOLE session_meta
+// unmarshal, so a subagent rollout lost its id (every row landed under
+// the filename-derived id) and its thread_source / parent_thread_id
+// lineage (T-582). Anything that is not a JSON string decodes to "": a
+// subagent has no flat surface source, so resolveCodexSurface falls back
+// to the originator exactly as it does for an absent source. The subagent
+// marker itself is read from thread_source / parent_thread_id, never
+// from here.
+type sessionMetaSource string
+
+// UnmarshalJSON implements json.Unmarshaler. It never fails: a value of
+// any other JSON type is the "no flat source" case, not a malformed
+// record.
+func (s *sessionMetaSource) UnmarshalJSON(b []byte) error {
+	var v string
+	if err := json.Unmarshal(b, &v); err != nil {
+		*s = ""
+		return nil
+	}
+	*s = sessionMetaSource(v)
+	return nil
 }
 
 // turnContextPayload extends sessionContext with developer_instructions —
@@ -417,15 +449,23 @@ type agentMessage struct {
 // message rows) and every tool call falls back to the dashboard's
 // "no recovered text" placeholder.
 //
-// Only item.type == "AgentMessage" is handled (mirroring the
-// "agent_message" case below). Reasoning and CommandExecution items
-// are exact-count duplicates of the response_item "reasoning" and
-// "custom_tool_call"/"custom_tool_call_output" entries already
-// captured elsewhere — handling them here would double-count.
-// UserMessage is left alone too: it is not a confirmed gap (initial
-// prompts have been observed captured via a different route on
-// item_completed-only rollouts), and speculatively wiring it risks
-// double-counting without a demonstrated need.
+// item.type == "AgentMessage" mirrors the "agent_message" case and
+// item.type == "UserMessage" mirrors the "user_message" case below.
+// Reasoning and CommandExecution items are exact-count duplicates of
+// the response_item "reasoning" and "custom_tool_call" /
+// "custom_tool_call_output" entries already captured elsewhere, so
+// handling them here would double-count.
+//
+// UserMessage IS a confirmed gap (T-559, 2026-10-06): every rollout
+// written by Codex 0.148+ (codex_exec and Codex Desktop alike) carries
+// its user prompts ONLY as item_completed/UserMessage plus the
+// role=user response_item; event_msg/user_message never appears. A
+// survey of the operator's corpus found the two shapes mutually
+// exclusive per file (352 files item-only, 189 legacy-only, 0 both),
+// so emitting here cannot double-count a transcript prompt. Before
+// this case existed only the UserPromptSubmit hook row survived, which
+// fires for few Codex Desktop turns, so a multi-turn session showed
+// its first prompt and then no further user messages.
 //
 // The content-block shape ({"type":"Text","text":"..."} for
 // AgentMessage, {"type":"text",...} for UserMessage — casing is
@@ -974,7 +1014,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	var resumed resumePrefix
 	lineOffset := 0
 	if fromOffset > 0 {
-		if pre, ok := prefetchSessionContext(f, fromOffset); ok {
+		if pre, ok := prefetchCached(path, f, fromOffset); ok {
 			ctxState = mergeSessionContext(sessionContext{}, pre.ctx)
 			hasRealSessionID = ctxState.SessionID != ""
 			lineOffset = pre.lineCount
@@ -1026,6 +1066,16 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 	pendingTokenModels := map[string][]int{}
 	pendingUserPromptIdx := -1
 	pendingTurnlessTokenIdxs := []int{}
+	// respUserAtts / respUserAttsIdx carry the attachment parts of the
+	// most recent role=user response_item and the prompt row they were
+	// provisionally stamped onto (-1 when none). On legacy rollouts the
+	// event_msg/user_message prompt PRECEDES that response_item, so the
+	// stamp lands on the right row. On item_completed rollouts the
+	// response_item comes FIRST and the UserMessage prompt follows, so the
+	// provisional stamp would sit on the PREVIOUS turn's prompt; the
+	// UserMessage case moves it onto its own row.
+	var respUserAtts []models.UserAttachment
+	respUserAttsIdx := -1
 	// agentMessages caches the latest assistant preamble per turn so
 	// every tool_call / exec_command_end / web_search_end inside that
 	// turn picks it up as PrecedingReasoning. Keyed by turn_id; entries
@@ -1270,7 +1320,10 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 		return ev
 	}
 
-	reader := bufio.NewReaderSize(f, 64*1024)
+	// A watcher catching up on an over-cap tail bounds this parse to one
+	// window (adapter.LimitTail, T-413); a record cut by the window is
+	// deferred whole exactly like an in-progress append.
+	reader := bufio.NewReaderSize(adapter.LimitTail(ctx, f), 64*1024)
 
 	var bytesRead int64 = fromOffset
 	// Seed from prefetch so :L<linenum>: SourceEventIDs are absolute-
@@ -1419,7 +1472,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				if !forkTrack.ownerLatched {
 					sessionMetaObservedThisChunk = true
 					ownerOriginator = meta.Originator
-					ownerSource = meta.Source
+					ownerSource = string(meta.Source)
 					ownerCLIVersion = meta.CLIVersion
 				}
 				created, have := sessionMetaCreationSec(meta, line.Timestamp)
@@ -1524,7 +1577,33 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 				}
 			case "item_completed":
 				var ic itemCompletedPayload
-				if err := json.Unmarshal(line.Payload, &ic); err == nil && ic.Item.Type == "AgentMessage" {
+				if err := json.Unmarshal(line.Payload, &ic); err == nil && ic.Item.Type == "UserMessage" {
+					// Same row the legacy user_message case builds, keyed
+					// to the item's own turn so MessageID is "user:<turn>"
+					// (the hook's UserPromptSubmit key for the same turn).
+					if ic.TurnID != "" {
+						applyContext(sessionContext{TurnID: ic.TurnID})
+					}
+					msg := concatMessageContent(ic.Item.Content)
+					if msg != "" {
+						projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
+						evt := a.buildUserPromptEvent(path, ctxState, projectRoot, ts, lineNum, msg)
+						evt.MessageID = userMessageID(msg, lineNum)
+						if respUserAtts != nil {
+							if respUserAttsIdx >= 0 && respUserAttsIdx < len(res.ToolEvents) {
+								res.ToolEvents[respUserAttsIdx].UserAttachments = nil
+							}
+							evt.UserAttachments = respUserAtts
+						} else if atts := userAttachmentsFromContent(ic.Item.Content); len(atts) > 0 {
+							evt.UserAttachments = atts
+						}
+						respUserAtts, respUserAttsIdx = nil, -1
+						res.ToolEvents = append(res.ToolEvents, withEffort(evt))
+						if ctxState.TurnID == "" {
+							pendingUserPromptIdx = len(res.ToolEvents) - 1
+						}
+					}
+				} else if err == nil && ic.Item.Type == "AgentMessage" {
 					turnID := firstNonEmpty(ic.TurnID, ctxState.TurnID)
 					msg := strings.TrimSpace(concatMessageContent(ic.Item.Content))
 					if turnID != "" && msg != "" {
@@ -1544,6 +1623,7 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 					projectRoot := a.resolveProjectRoot(ctxState.Cwd, rootCache)
 					evt := a.buildUserPromptEvent(path, ctxState, projectRoot, ts, lineNum, um.Message)
 					evt.MessageID = userMessageID(um.Message, lineNum)
+					respUserAtts, respUserAttsIdx = nil, -1
 					res.ToolEvents = append(res.ToolEvents, withEffort(evt))
 					if ctxState.TurnID == "" {
 						pendingUserPromptIdx = len(res.ToolEvents) - 1
@@ -2243,7 +2323,8 @@ func (a *Adapter) parseSessionFile(ctx context.Context, path string, fromOffset 
 					// double-counting the prompt text.
 					if rm.Role == "user" {
 						if atts := userAttachmentsFromContent(rm.Content); len(atts) > 0 {
-							attachToRecentUserPrompt(res.ToolEvents, atts)
+							respUserAtts = atts
+							respUserAttsIdx = attachToRecentUserPrompt(res.ToolEvents, atts)
 						}
 					}
 					emit := false
@@ -2847,6 +2928,10 @@ func userAttachmentsFromContent(parts []responseItemMessageContent) []models.Use
 		switch p.Type {
 		case "input_image", "image_url", "image":
 			atts = append(atts, models.UserAttachment{Kind: "image", MediaType: mediaTypeFromImageURL(p.ImageURL)})
+		case "local_image":
+			// item_completed/UserMessage spelling of an attached image: it
+			// names a local path, which is never read, so no media type.
+			atts = append(atts, models.UserAttachment{Kind: "image"})
 		case "input_file", "file":
 			atts = append(atts, models.UserAttachment{Kind: "file"})
 		}
@@ -2859,17 +2944,20 @@ func userAttachmentsFromContent(parts []responseItemMessageContent) []models.Use
 // response_item that carries the attachment parts is emitted alongside the
 // event_msg/user_message that produced the prompt row). Scans backward and
 // stops at the first user_prompt; a no-op when none exists yet or the row
-// already carries attachments (idempotent re-parse).
-func attachToRecentUserPrompt(evs []models.ToolEvent, atts []models.UserAttachment) {
+// already carries attachments (idempotent re-parse). Returns the index it
+// stamped, or -1 when it stamped nothing.
+func attachToRecentUserPrompt(evs []models.ToolEvent, atts []models.UserAttachment) int {
 	for i := len(evs) - 1; i >= 0; i-- {
 		if evs[i].ActionType != models.ActionUserPrompt {
 			continue
 		}
 		if len(evs[i].UserAttachments) == 0 {
 			evs[i].UserAttachments = atts
+			return i
 		}
-		return
+		return -1
 	}
+	return -1
 }
 
 // mediaTypeFromImageURL extracts the IANA media type from an
@@ -4279,17 +4367,25 @@ func (p *resumePrefix) noteSystemPrompt(body string) {
 // SessionID, empty cwd, and lineNum starting at 0 (the pre-fix
 // behavior — accepting the duplication risk).
 func prefetchSessionContext(f *os.File, until int64) (resumePrefix, bool) {
-	var pre resumePrefix
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	var ps prefixScan
+	if !ps.advance(f, until) {
 		return resumePrefix{}, false
 	}
+	return ps.result(), true
+}
+
+// advance continues the prefix scan from where it stopped (ps.bytesRead, a
+// record boundary) up to until, applying exactly the per-record rules a scan
+// from byte 0 applies. A scan advanced in steps ends in the same state as
+// one scan to the final offset, which is what lets prefixcache.go resume it
+// instead of re-reading the whole prefix on every watcher poll (T-413).
+// Returns false only when the file cannot be positioned.
+func (ps *prefixScan) advance(f *os.File, until int64) bool {
+	if _, err := f.Seek(ps.bytesRead, io.SeekStart); err != nil {
+		return false
+	}
 	reader := bufio.NewReaderSize(f, 64*1024)
-	var (
-		bytesRead int64
-		lineNum   int
-		out       sessionContext
-		track     forkReplayTracker
-	)
+	pre, bytesRead, lineNum, out, track := ps.pre, ps.bytesRead, ps.lineNum, ps.out, ps.track
 	for {
 		lineStr, consumed, oversized, err := readRecord(reader, maxRecordBytes)
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -4309,14 +4405,16 @@ func prefetchSessionContext(f *os.File, until int64) (resumePrefix, bool) {
 		if errors.Is(err, io.EOF) {
 			break
 		}
-		bytesRead += consumed // terminator-inclusive; matches ParseSessionFile
-		if bytesRead > until {
+		if bytesRead+consumed > until {
 			// Don't apply context from a line that straddles the resume
 			// offset — the resumed parse will see (and apply) it itself.
 			// Also don't bump lineNum for the straddling line — the
-			// resumed parse will increment its own counter for it.
+			// resumed parse will increment its own counter for it. The
+			// position stays at the line's start, so a later advance
+			// re-reads it whole.
 			break
 		}
+		bytesRead += consumed // terminator-inclusive; matches ParseSessionFile
 		// Count every line that fits before `until`, including empty
 		// (and oversized-skipped) lines, to mirror ParseSessionFile's
 		// lineNum semantics (it increments before the empty-line skip).
@@ -4409,10 +4507,8 @@ func prefetchSessionContext(f *os.File, until int64) (resumePrefix, bool) {
 			}
 		}
 	}
-	pre.ctx = out
-	pre.track = track
-	pre.lineCount = lineNum
-	return pre, true
+	ps.pre, ps.bytesRead, ps.lineNum, ps.out, ps.track = pre, bytesRead, lineNum, out, track
+	return true
 }
 
 // mergeSessionContext copies non-empty fields from `from` over `into`

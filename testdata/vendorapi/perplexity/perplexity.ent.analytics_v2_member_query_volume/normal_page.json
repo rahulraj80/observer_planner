@@ -1,0 +1,59 @@
+{
+  "categories": [
+    "Feature",
+    "Project",
+    "Comet"
+  ],
+  "data": [
+    {
+      "start_time": 1746057600,
+      "end_time": 1746144000,
+      "results": [
+        {
+          "user_email": "alice@example.com",
+          "count": 42,
+          "by_categories": {
+            "Feature": [
+              {
+                "category": "search",
+                "count": 30
+              },
+              {
+                "category": "research",
+                "count": 10
+              }
+            ],
+            "Project": [
+              {
+                "category": "Market research space",
+                "count": 12
+              }
+            ],
+            "Comet": [
+              {
+                "category": "comet",
+                "count": 5
+              }
+            ]
+          }
+        },
+        {
+          "user_email": "bob@example.com",
+          "count": 7,
+          "by_categories": {
+            "Feature": [
+              {
+                "category": "search",
+                "count": 7
+              }
+            ],
+            "Project": [],
+            "Comet": []
+          }
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next_page": "eyJwayI6ICJPUkcjLi4uIn0="
+}

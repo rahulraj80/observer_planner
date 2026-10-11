@@ -14,9 +14,11 @@
 //     BEFORE the child ever sees it. Because the client spawned it, the
 //     wrapper can attest its parent (Attestor, R8.24.o): a verified parent
 //     yields `process_attested`; any unknown / racy / unsupported case
-//     DOWNGRADES to `configured`. The original config is restored from the
-//     crash-safe launch journal (R8.18) on disable/uninstall.
-//   - ipc (ServeIPC): an owner-only endpoint - internal/attachsock's
+//     DOWNGRADES to `configured`. On disable/uninstall the original launch
+//     is put back from the crash-safe launch journal (R8.18), which holds
+//     the original launch and an owned-entry digest only, never a copy of
+//     the client config (T-397).
+//   - ipc (ServeIPC): an owner-only endpoint - internal/localipc's
 //     Transport seam, an AF_UNIX socket under a 0700 directory on unix, an
 //     owner-only DACL named pipe on Windows; never a new primitive - plus a
 //     per-client bootstrap secret on the first frame -> `ipc_bound`.

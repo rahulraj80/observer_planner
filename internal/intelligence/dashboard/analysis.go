@@ -127,7 +127,7 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 	if priorMonthStart.Before(queryStart) {
 		queryStart = priorMonthStart
 	}
-	turns, err := s.spendTurns(r.Context(), queryStart, time.Time{}, tool, project, nil)
+	turns, err := s.spendTurns(r.Context(), queryStart, time.Time{}, scopeFromRequest(r), nil)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -408,7 +408,7 @@ func (s *Server) handleAnalysisHeadline(w http.ResponseWriter, r *http.Request) 
 		s.opts.Logger.Warn("analysis: blended input rate", "err", brErr)
 		blendedRate = cost.DefaultBlendedInputRate
 	}
-	if est, dErr := discover.New(s.db()).WastedTokens(r.Context(), discover.Options{Since: periodStart, Limit: 500, Tool: tool, ProjectRoot: project}); dErr != nil {
+	if est, dErr := discover.New(s.db()).WastedTokens(r.Context(), discover.Options{Since: periodStart, Limit: 500, Tool: tool, ProjectRoot: project, Model: modelParam(r)}); dErr != nil {
 		s.opts.Logger.Warn("analysis: discover wasted tokens", "err", dErr)
 	} else {
 		wasteTokens = est
@@ -532,6 +532,7 @@ func (s *Server) handleAnalysisTrend(w http.ResponseWriter, r *http.Request) {
 		Source:      cost.SourceAuto,
 		ProjectRoot: projectFilter,
 		Tool:        toolFilter,
+		Model:       modelParam(r),
 		// One row per (bucket, key); the bucket count is capped
 		// (sub-day) or data-bounded (day/week), so this never truncates.
 		Limit: 1 << 20,
@@ -631,7 +632,7 @@ func (s *Server) handleAnalysisMovers(w http.ResponseWriter, r *http.Request) {
 	current, err := s.opts.CostEngine.Summary(r.Context(), s.db(), cost.Options{
 		Since: periodStart, Until: periodEnd,
 		GroupBy: groupBy, Source: cost.SourceAuto,
-		ProjectRoot: projectFilter, Tool: toolFilter, Limit: 5000,
+		ProjectRoot: projectFilter, Tool: toolFilter, Model: modelParam(r), Limit: 5000,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -640,7 +641,7 @@ func (s *Server) handleAnalysisMovers(w http.ResponseWriter, r *http.Request) {
 	prior, err := s.opts.CostEngine.Summary(r.Context(), s.db(), cost.Options{
 		Since: priorStart, Until: periodStart,
 		GroupBy: groupBy, Source: cost.SourceAuto,
-		ProjectRoot: projectFilter, Tool: toolFilter, Limit: 5000,
+		ProjectRoot: projectFilter, Tool: toolFilter, Model: modelParam(r), Limit: 5000,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -758,8 +759,6 @@ func (s *Server) handleAnalysisMovers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAnalysisTopSessions(w http.ResponseWriter, r *http.Request) {
 	days := intArg(r, "days", 30, 1, 36500)
 	limit := intArg(r, "limit", 10, 1, 100)
-	tool := r.URL.Query().Get("tool")
-	project := r.URL.Query().Get("project")
 
 	now := time.Now().UTC()
 	since, end, _ := periodWindow(r, now, days)
@@ -768,7 +767,7 @@ func (s *Server) handleAnalysisTopSessions(w http.ResponseWriter, r *http.Reques
 		until = end
 	}
 
-	turns, err := s.spendTurns(r.Context(), since, until, tool, project, nil)
+	turns, err := s.spendTurns(r.Context(), since, until, scopeFromRequest(r), nil)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -989,8 +988,6 @@ func joinStrings(parts []string, sep string) string {
 func (s *Server) handleAnalysisRoutingSuggestions(w http.ResponseWriter, r *http.Request) {
 	days := intArg(r, "days", 30, 1, 36500)
 	limit := intArg(r, "limit", 20, 1, 100)
-	tool := r.URL.Query().Get("tool")
-	project := r.URL.Query().Get("project")
 
 	now := time.Now().UTC()
 	since, end, _ := periodWindow(r, now, days)
@@ -1006,7 +1003,7 @@ func (s *Server) handleAnalysisRoutingSuggestions(w http.ResponseWriter, r *http
 		minSavingsUSD          = 0.05
 	)
 
-	turns, err := s.spendTurns(r.Context(), since, until, tool, project, nil)
+	turns, err := s.spendTurns(r.Context(), since, until, scopeFromRequest(r), nil)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -1143,7 +1140,7 @@ func (s *Server) handleAnalysisRoutingSuggestions(w http.ResponseWriter, r *http
 			"max_trivial_output_tokens": maxTrivialOutputTokens,
 			"min_savings_usd":           minSavingsUSD,
 		},
-		"framing_note": "informational only — model choice may be deliberate",
+		"framing_note": "informational only - model choice may be deliberate",
 	})
 }
 
@@ -1163,12 +1160,10 @@ func (s *Server) handleAnalysisRoutingSuggestions(w http.ResponseWriter, r *http
 // instant in that zone, so a DST change inside the window is exact.
 func (s *Server) handleAnalysisCostByHour(w http.ResponseWriter, r *http.Request) {
 	days := intArg(r, "days", 30, 1, 36500)
-	tool := r.URL.Query().Get("tool")
-	project := r.URL.Query().Get("project")
 	since, until := windowRange(r, 30, 1, 36500)
 	loc, tzName, tzFallback := timebucket.LoadZone(r.URL.Query().Get("tz"))
 
-	turns, err := s.spendTurns(r.Context(), since, until, tool, project, nil)
+	turns, err := s.spendTurns(r.Context(), since, until, scopeFromRequest(r), nil)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -1225,12 +1220,10 @@ func (s *Server) handleAnalysisCostByHour(w http.ResponseWriter, r *http.Request
 // `tz=<IANA>` (UTC when absent or unknown, echoed as `timezone`).
 func (s *Server) handleAnalysisCostByDowHour(w http.ResponseWriter, r *http.Request) {
 	days := intArg(r, "days", 30, 1, 36500)
-	tool := r.URL.Query().Get("tool")
-	project := r.URL.Query().Get("project")
 	since, until := windowRange(r, 30, 1, 36500)
 	loc, tzName, tzFallback := timebucket.LoadZone(r.URL.Query().Get("tz"))
 
-	turns, err := s.spendTurns(r.Context(), since, until, tool, project, nil)
+	turns, err := s.spendTurns(r.Context(), since, until, scopeFromRequest(r), nil)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -1292,8 +1285,6 @@ func (s *Server) handleAnalysisCostByDowHour(w http.ResponseWriter, r *http.Requ
 // cache_creation), which is invariant under the input ↔ cache_read swap.
 func (s *Server) handleAnalysisCacheSavingsTrend(w http.ResponseWriter, r *http.Request) {
 	days := intArg(r, "days", 30, 1, 36500)
-	tool := r.URL.Query().Get("tool")
-	project := r.URL.Query().Get("project")
 	since, until := windowRange(r, 30, 1, 36500)
 	spec, err := bucketSpec(r, since, until)
 	if err != nil {
@@ -1301,7 +1292,7 @@ func (s *Server) handleAnalysisCacheSavingsTrend(w http.ResponseWriter, r *http.
 		return
 	}
 
-	turns, err := s.spendTurns(r.Context(), since, until, tool, project, nil)
+	turns, err := s.spendTurns(r.Context(), since, until, scopeFromRequest(r), nil)
 	if err != nil {
 		writeErr(w, err)
 		return

@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 )
 
 // Live session view (usability arc P6.1 / review §8.2): the "now
@@ -60,6 +63,10 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	windowMin := intArg(r, "window_minutes", 15, 1, 240)
 	now := time.Now().UTC()
 	since := now.Add(-time.Duration(windowMin) * time.Minute).Format(time.RFC3339Nano)
+	// The global Model filter, session grain: an active session counts
+	// when it used the model (modelfilter.AndSessionsUsing; "" = none).
+	mPred, mArgs := modelfilter.AndSessionsUsing("s.id", modelParam(r))
+	activeArgs := append([]any{since, since, since}, mArgs...)
 
 	// ids_only=1 is the lightweight identity mode the Sessions page's watch
 	// badges poll: EVERY active session id in the window (bounded at 500, vs
@@ -69,12 +76,13 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("ids_only") == "1" {
 		ids := []string{}
 		if s.db() != nil {
+			//nolint:gosec // G202: the model fragment is a code constant; its value is bound.
 			rows, err := s.db().QueryContext(r.Context(),
 				`SELECT s.id FROM sessions s
-				 WHERE EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
+				 WHERE (EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
 				    OR EXISTS (SELECT 1 FROM api_turns t WHERE t.session_id = s.id AND t.timestamp >= ?)
-				    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?)
-				 LIMIT 500`, since, since, since)
+				    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?))`+mPred+`
+				 LIMIT 500`, activeArgs...)
 			if err != nil {
 				writeErr(w, err)
 				return
@@ -109,11 +117,11 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 			        (SELECT COUNT(*) FROM actions a WHERE a.session_id = s.id) AS actions_total
 			 FROM sessions s
 			 LEFT JOIN projects p ON p.id = s.project_id
-			 WHERE EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
+			 WHERE (EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.timestamp >= ?)
 			    OR EXISTS (SELECT 1 FROM api_turns t WHERE t.session_id = s.id AND t.timestamp >= ?)
-			    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?)
+			    OR EXISTS (SELECT 1 FROM token_usage u WHERE u.session_id = s.id AND u.timestamp >= ?))`+mPred+`
 			 ORDER BY last_activity DESC
-			 LIMIT 8`, since, since, since)
+			 LIMIT 8`, activeArgs...)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -135,9 +143,9 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 		for _, ls := range active {
 			ids = append(ids, ls.SessionID)
 		}
-		bySession := map[string][]spendTurn{}
+		bySession := map[string][]dashapi.SpendTurn{}
 		if len(ids) > 0 {
-			if turns, err := s.spendTurns(r.Context(), time.Time{}, time.Time{}, "", "", ids); err == nil {
+			if turns, err := s.spendTurns(r.Context(), time.Time{}, time.Time{}, dashapi.SpendScope{}, ids); err == nil {
 				for _, t := range turns {
 					bySession[t.SessionID] = append(bySession[t.SessionID], t)
 				}
@@ -159,7 +167,7 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 // attachLiveRollup fills one session's lifetime token/cost/model rollup
 // from its deduped spend rows (spendTurns), the substrate the session
 // detail header and the Sessions list also sum.
-func attachLiveRollup(ls *liveSession, turns []spendTurn) {
+func attachLiveRollup(ls *liveSession, turns []dashapi.SpendTurn) {
 	models := map[string]bool{}
 	for _, t := range turns {
 		bundle := t.Bundle

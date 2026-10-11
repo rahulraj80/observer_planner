@@ -11,7 +11,13 @@ import type {
   InstanceInfo,
   InstancesResponse,
   InstanceTestResult,
+  StatusSnapshot,
 } from "@/lib/types";
+import {
+  remoteBuildLine,
+  remoteDashboardURL,
+  type LocalBuild,
+} from "@/lib/remoteIdentity";
 import { Icon, LiveDot, Spinner, Tooltip } from "@/components/primitives";
 import { INSTANCE_DOT, liveDotProps, withDotClass } from "@/lib/liveSignals";
 import { Check, ChevronDown, Plug, X } from "lucide-react";
@@ -31,11 +37,25 @@ import { Check, ChevronDown, Plug, X } from "lucide-react";
 //
 // It renders NOTHING when the feature is off or no instances are configured, so
 // a solo install's header is unchanged.
+//
+// T-425: the remote tab is told which machine it is (the profile label and
+// target ride in the URL fragment, never sent to a server, with this
+// machine's build for comparison), and each connected row shows the remote
+// daemon's own build and hostname and flags one older than this machine.
+
+function selectLocalBuild(s: StatusSnapshot): LocalBuild {
+  return { version: s.version, schema: s.schema_version };
+}
 
 export function InstanceSwitcher() {
   const res = useApi<InstancesResponse>("/api/instances", undefined, [], {
     refreshMs: 15000,
   });
+  const localBuild =
+    useApi<StatusSnapshot, LocalBuild>("/api/status", undefined, [], {
+      refreshMs: 60000,
+      select: selectLocalBuild,
+    }).data ?? {};
   const [open, setOpen] = useState(false);
   // pending is the name currently being connected/disconnected. It is what
   // makes the "Connecting…" state real rather than optimistic: it is set before
@@ -94,8 +114,9 @@ export function InstanceSwitcher() {
         setLocal((l) => ({ ...l, [name]: info }));
         if (info.url) {
           // Open the REMOTE dashboard in its own tab. noreferrer so this
-          // dashboard's URL is never disclosed to the forwarded page.
-          window.open(info.url, "_blank", "noreferrer");
+          // dashboard's URL is never disclosed to the forwarded page; the
+          // fragment names the machine there (T-425).
+          window.open(remoteDashboardURL(info, localBuild), "_blank", "noreferrer");
         }
       } catch (e) {
         setFailures((f) => ({ ...f, [name]: apiReason(e) }));
@@ -103,7 +124,7 @@ export function InstanceSwitcher() {
         setPending(null);
       }
     },
-    [],
+    [localBuild],
   );
 
   const onDisconnect = useCallback(async (name: string) => {
@@ -195,6 +216,7 @@ export function InstanceSwitcher() {
             <InstanceRow
               key={r.name}
               info={r}
+              localBuild={localBuild}
               busy={pending === r.name}
               // Any pending request disables the others so two forwards cannot
               // be opened from one impatient burst of clicks.
@@ -223,6 +245,7 @@ export function InstanceSwitcher() {
 // InstanceRow renders one configured remote instance and its state.
 function InstanceRow({
   info,
+  localBuild,
   busy,
   blocked,
   failure,
@@ -235,6 +258,7 @@ function InstanceRow({
   onTest,
 }: {
   info: InstanceInfo;
+  localBuild: LocalBuild;
   busy: boolean;
   blocked: boolean;
   failure: string;
@@ -326,7 +350,7 @@ function InstanceRow({
         {connected ? (
           <div className="flex shrink-0 items-center gap-1">
             <a
-              href={info.url}
+              href={remoteDashboardURL(info, localBuild)}
               target="_blank"
               rel="noreferrer"
               className="rounded-1 border border-line-2 bg-bg-2 px-1.5 py-1 text-[10px] text-fg-2 hover:bg-bg-3 hover:text-fg-0"
@@ -382,6 +406,7 @@ function InstanceRow({
           {info.dashboard_port}
         </div>
       ) : null}
+      {connected ? <RemoteBuildLine info={info} localBuild={localBuild} /> : null}
       {connecting && !connected ? (
         <div className="mt-1 pl-3.5 text-[10px] text-warn">
           Connecting over SSH…
@@ -401,3 +426,21 @@ function InstanceRow({
   );
 }
 
+
+// RemoteBuildLine says which build answers on the other end of a live
+// forward, and flags one older than this machine (D-325: a stale remote was
+// mistaken for a fault here). Silent when the remote has not reported yet.
+function RemoteBuildLine({ info, localBuild }: { info: InstanceInfo; localBuild: LocalBuild }) {
+  const line = remoteBuildLine(info, localBuild);
+  if (!line) {
+    return info.remote_probe_error ? (
+      <div className="mt-0.5 pl-3.5 text-[10px] leading-snug text-fg-4">{info.remote_probe_error}</div>
+    ) : null;
+  }
+  return (
+    <div className={clsx("mt-0.5 pl-3.5 text-[10px] leading-snug", line.outdated ? "text-warn" : "text-fg-4")}>
+      {line.text}
+      {line.outdated ? <span className="block">Older build than this machine: {line.reason}.</span> : null}
+    </div>
+  );
+}

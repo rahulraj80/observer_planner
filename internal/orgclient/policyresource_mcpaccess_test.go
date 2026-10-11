@@ -65,6 +65,15 @@ func TestFetchAndAcceptPolicyResource_MCPAccessAppliedCompilesNodeTable(t *testi
 	if err != nil {
 		t.Fatalf("FetchAndAcceptPolicyResource: %v", err)
 	}
+	if !policyfam.IsFamilyLinked(policyfam.FamilyMCPAccess) {
+		// A build without Agent Access links no tools.mcp_access compiler
+		// (policyfam/linked.go): the node refuses the body with the named
+		// reason, never applies it silently (D-535).
+		if res.Status != PRRejected || res.RejectCode != PRRejectDecodeFailed || !strings.Contains(res.Detail, "not in this build") {
+			t.Fatalf("result = %+v, want rejected decode_failed naming the build", res)
+		}
+		return
+	}
 	if res.Status != PRAppliedInert || res.EnforceAllowed || res.InertReason != "not_preauthorized" || res.Family != policyfam.FamilyMCPAccess {
 		t.Fatalf("result = %+v, want applied_inert not_preauthorized", res)
 	}
@@ -172,8 +181,14 @@ func TestFetchAndAcceptPolicyResource_MCPAccessFourGatesRefuse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("FetchAndAcceptPolicyResource: %v", err)
 			}
-			if res.Status != tc.want || res.RejectCode != tc.wantCode {
-				t.Fatalf("result = %+v, want %s/%s", res, tc.want, tc.wantCode)
+			want, wantCode := tc.want, tc.wantCode
+			if want == PRDeliveredUnaccepted && !policyfam.IsFamilyLinked(policyfam.FamilyMCPAccess) {
+				// No compiler in this build: the verified body fails to
+				// compile before the accept_families check (D-535).
+				want, wantCode = PRRejected, PRRejectDecodeFailed
+			}
+			if res.Status != want || res.RejectCode != wantCode {
+				t.Fatalf("result = %+v, want %s/%s", res, want, wantCode)
 			}
 			if res.Spec != nil {
 				t.Fatal("a refused resource must not hand back a compiled spec")
@@ -187,6 +202,12 @@ func TestFetchAndAcceptPolicyResource_MCPAccessFourGatesRefuse(t *testing.T) {
 // CAS fence (a concurrent re-enrol) — the verified envelope is refused
 // identity_changed and nothing is installed.
 func TestFetchAndAcceptPolicyResource_MCPAccessStaleGenerationRefused(t *testing.T) {
+	if !policyfam.IsFamilyLinked(policyfam.FamilyMCPAccess) {
+		// Without the compiler the body is refused decode_failed before the
+		// CAS fence this test pins; the refusal itself is pinned by
+		// TestFetchAndAcceptPolicyResource_MCPAccessAppliedCompilesNodeTable.
+		t.Skip("tools.mcp_access compiler is not in this build (D-535)")
+	}
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	r := signedTestResource(t, priv, pub, policyfam.FamilyMCPAccess, 1, mcpAccessBody(t, famcp.ModeObserve), nil)
 

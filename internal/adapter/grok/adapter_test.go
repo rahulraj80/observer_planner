@@ -108,7 +108,7 @@ func TestParseUpdates(t *testing.T) {
 	if strings.Contains(p.RawToolInput, "sk-") {
 		t.Errorf("user prompt not scrubbed: %q", p.RawToolInput)
 	}
-	if !strings.Contains(p.RawToolInput, scrub.Redacted) {
+	if !scrub.HasRedaction(p.RawToolInput) {
 		t.Errorf("expected %s in scrubbed prompt, got %q", scrub.Redacted, p.RawToolInput)
 	}
 	if p.ProjectRoot != "/home/dev/demo" {

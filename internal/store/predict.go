@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -238,29 +239,21 @@ func turnSamples(rows []predictTurnRow) ([]time.Time, []predict.TurnSample) {
 }
 
 // loadUserPromptTimes returns the session's user_prompt action timestamps
-// in ascending order — the user-message boundaries.
+// in ascending order: the user-message boundaries. A prompt both the
+// tool's hook and its transcript recorded is one boundary (T-570, the
+// prompt-shadow fold via canonicalPromptsBySession).
 func loadUserPromptTimes(ctx context.Context, db *sql.DB, sessionID string) ([]time.Time, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT timestamp FROM actions
-		 WHERE session_id = ? AND action_type = 'user_prompt'
-		 ORDER BY timestamp ASC`, sessionID)
+	bySession, err := canonicalPromptsBySession(ctx, db, `a.session_id = ?`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("user_prompt times: %w", err)
 	}
-	defer rows.Close()
 	var out []time.Time
-	for rows.Next() {
-		var ts string
-		if err := rows.Scan(&ts); err != nil {
-			return nil, fmt.Errorf("scan user_prompt: %w", err)
-		}
-		if t, ok := parseDBTime(ts); ok {
+	for _, p := range bySession[sessionID] {
+		if t, ok := parseDBTime(p.Timestamp); ok {
 			out = append(out, t)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("user_prompt rows: %w", err)
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Before(out[j]) })
 	return out, nil
 }
 
@@ -305,8 +298,9 @@ func bucketTurnsPerMessage(prompts, turns []time.Time) []int {
 // LoadToolProjectPrior returns the cross-session turns-per-message prior
 // for (tool, projectID) — the tier-2 fallback when the current session
 // has no user_prompt boundaries. Each sample is one comparable session's
-// average turns-per-user-message (turn rows ÷ user_prompt count), a cheap
-// approximation that avoids per-session bucketing across the corpus.
+// average turns-per-user-message (turn rows ÷ canonical prompt count, a
+// hook and transcript pair counted once, T-635), a cheap approximation that
+// avoids per-session bucketing across the corpus.
 //
 // Scopes to the project first; widens to the tool when the project yields
 // fewer than 3 comparable sessions. windowDays bounds recency (0 = no
@@ -359,25 +353,33 @@ func (s *Store) loadPriorScoped(ctx context.Context, tool string, projectID int6
 	// A session whose proxied turns carry prompt ids (migration 139) uses
 	// the exact ratio instead: tagged turns ÷ distinct prompt ids. That also
 	// admits prompt-id sessions with no user_prompt actions into the prior.
+	//
+	// The divisor of every other session is its CANONICAL prompt count
+	// (T-635): a prompt both the tool's hook and its transcript recorded is
+	// one message, through the one pairing table (canonicalPromptCounts over
+	// sessionmsg.CanonicalPrompts), never a SQL copy of it. Hook rows are only
+	// identifiable in Go (hooklifecycle.IsHookSource), so SQL returns each
+	// session's turn count and the division happens here.
 	s.refreshSpendVerdictsBounded(ctx)
 	//nolint:gosec // G202: the verdict fragments are closed constant SQL; values bind via args.
 	q := `
-		SELECT CASE
+		SELECT s.id,
+		       CASE
 		         WHEN EXISTS (SELECT 1 FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `)
 		         THEN CAST(ROUND(
 		           (SELECT COUNT(*) FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `) * 1.0 /
 		           (SELECT COUNT(DISTINCT prompt_id) FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `)
 		         ) AS INTEGER)
-		         ELSE CAST(ROUND(
-		           ((SELECT COUNT(*) FROM api_turns t WHERE t.session_id = s.id
-		               AND ` + spendverdict.CountedProxyRowOf("t") + `
-		               AND (COALESCE(t.input_tokens, 0) > 0 OR ` + spendverdict.ProxyOutputOf("t") + ` > 0))
-		            + (SELECT COUNT(*) FROM token_usage k WHERE k.session_id = s.id
-		               AND ` + spendverdict.CountedTokenRow("k") + `
-		               AND (COALESCE(k.input_tokens, 0) > 0 OR COALESCE(k.output_tokens, 0) > 0))) * 1.0 /
-		           (SELECT COUNT(*) FROM actions a WHERE a.session_id = s.id AND a.action_type = 'user_prompt')
-		         ) AS INTEGER)
-		       END AS avg_t
+		       END AS prompt_id_avg,
+		       CASE
+		         WHEN NOT EXISTS (SELECT 1 FROM api_turns p WHERE p.session_id = s.id AND ` + promptTurnFilter + `)
+		         THEN (SELECT COUNT(*) FROM api_turns t WHERE t.session_id = s.id
+		                 AND ` + spendverdict.CountedProxyRowOf("t") + `
+		                 AND (COALESCE(t.input_tokens, 0) > 0 OR ` + spendverdict.ProxyOutputOf("t") + ` > 0))
+		              + (SELECT COUNT(*) FROM token_usage k WHERE k.session_id = s.id
+		                 AND ` + spendverdict.CountedTokenRow("k") + `
+		                 AND (COALESCE(k.input_tokens, 0) > 0 OR COALESCE(k.output_tokens, 0) > 0))
+		       END AS turns
 		  FROM sessions s
 		 WHERE s.tool = ?
 		   AND (EXISTS (SELECT 1 FROM actions a WHERE a.session_id = s.id AND a.action_type = 'user_prompt')
@@ -394,23 +396,52 @@ func (s *Store) loadPriorScoped(ctx context.Context, tool string, projectID int6
 	}
 	q += ` ORDER BY s.started_at DESC LIMIT 100`
 
+	type priorRow struct {
+		id          string
+		promptIDAvg sql.NullInt64
+		turns       sql.NullInt64
+	}
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("prior scoped: %w", err)
 	}
-	defer rows.Close()
-	var out []int
+	var scanned []priorRow
+	var needPrompts []string
 	for rows.Next() {
-		var t sql.NullInt64
-		if err := rows.Scan(&t); err != nil {
+		var r priorRow
+		if err := rows.Scan(&r.id, &r.promptIDAvg, &r.turns); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scan prior: %w", err)
 		}
-		if t.Valid && t.Int64 >= 1 {
-			out = append(out, int(t.Int64))
+		scanned = append(scanned, r)
+		if !r.promptIDAvg.Valid {
+			needPrompts = append(needPrompts, r.id)
 		}
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return nil, fmt.Errorf("prior rows: %w", err)
+	}
+	rows.Close()
+
+	prompts, err := canonicalPromptCounts(ctx, s.db, needPrompts)
+	if err != nil {
+		return nil, fmt.Errorf("prior scoped: %w", err)
+	}
+	var out []int
+	for _, r := range scanned {
+		avg := r.promptIDAvg.Int64
+		if !r.promptIDAvg.Valid {
+			n := prompts[r.id]
+			if n == 0 {
+				continue
+			}
+			// math.Round rounds half away from zero, as SQLite ROUND did.
+			avg = int64(math.Round(float64(r.turns.Int64) / float64(n)))
+		}
+		if avg >= 1 {
+			out = append(out, int(avg))
+		}
 	}
 	return out, nil
 }

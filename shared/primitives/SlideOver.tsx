@@ -6,13 +6,17 @@ import { Tooltip } from "./Tooltip";
 import { DUR, prefersReducedMotion } from "../lib/motion";
 import { focusableWithin, trapTarget } from "../lib/focusTrap";
 import { lockScroll } from "../lib/scrollLock";
+import { overlayClosesOn } from "../lib/overlayEscape";
+import { STABLE_SCROLL_Y } from "../lib/scroll";
 
 // Right-side slide-over drawer with backdrop - the ONE owner for web/ and
 // web2/ (web2's fork was folded in here; its additive `bodyClassName` and
 // `footer` slots came with it).
 //
 // Behaviour:
-//   - Escape closes; clicking the backdrop closes.
+//   - Escape closes; clicking the backdrop closes. An Escape a control
+//     inside the panel already handled (a picker closing its list calls
+//     preventDefault) is left alone: shared/lib/overlayEscape.ts.
 //   - Modal focus: focus moves into the panel on open, Tab / Shift+Tab wrap
 //     inside it (a real focus trap, not just an initial focus), and focus
 //     returns to the element that opened it when it closes.
@@ -116,7 +120,7 @@ export function SlideOver({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (overlayClosesOn(e)) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -219,7 +223,7 @@ export function SlideOver({
             </button>
           </Tooltip>
         </header>
-        <div className={clsx("min-h-0 flex-1 overflow-y-auto", bodyClassName)}>{children}</div>
+        <div className={clsx("min-h-0 flex-1", STABLE_SCROLL_Y, bodyClassName)}>{children}</div>
         {footer && (
           <footer className="shrink-0 border-t border-line-1 bg-bg-1 px-5 py-3">{footer}</footer>
         )}

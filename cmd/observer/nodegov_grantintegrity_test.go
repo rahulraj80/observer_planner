@@ -135,7 +135,7 @@ func TestGovernanceIdentityLoaderReVerifiesStoredGrant(t *testing.T) {
 		t.Fatalf("tampered grant resolved %q, want grant_signature_invalid", eff.State)
 	}
 	if eff.GrantsBudgetEnforcement() {
-		t.Fatal("a tampered grant granted budget enforcement — the rewrite took effect")
+		t.Fatal("a tampered grant granted budget enforcement - the rewrite took effect")
 	}
 }
 

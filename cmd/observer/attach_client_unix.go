@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !sbo_omit_terminals
 
 package main
 
@@ -69,7 +69,7 @@ func runAttachSession(ctx context.Context, in attachLaunch) error {
 		// is not retrofittable). This is the runtime guard for the "flags may be
 		// registered unconditionally" case (session-attach design §3.4).
 		msg := fmt.Sprintf(
-			"observer: --attach is not available for %q — no grounded attach capability. Launch it without --attach.",
+			"observer: --attach is not available for %q - no grounded attach capability. Launch it without --attach.",
 			in.tool,
 		)
 		fmt.Fprintln(in.stderr, msg)
@@ -211,7 +211,7 @@ func attachAttempt(ctx context.Context, sockPath, subcommand string, in attachLa
 	if err != nil {
 		if errors.Is(err, attachsock.ErrDaemonUnreachable) {
 			fmt.Fprintf(in.stderr,
-				"observer %s --attach: the observer daemon is not running (or attach is disabled) at %s — start it with `observer start`, or launch without --attach.\n",
+				"observer %s --attach: the observer daemon is not running (or attach is disabled) at %s - start it with `observer start`, or launch without --attach.\n",
 				subcommand, sockPath)
 			return attemptResult{setupErr: exitErr(1)}
 		}
@@ -526,7 +526,7 @@ func resumeSpawn(in attachLaunch, subcommand, cwd, sessionID string) attachsock.
 // through every wait/backoff/prompt (M5) so a cancellation aborts immediately.
 func offerAutoResume(ctx context.Context, stderr io.Writer, sockPath, subcommand, sessionID string, dial func(string) (net.Conn, error)) bool {
 	fmt.Fprintf(stderr,
-		"\nobserver %s --attach: observer daemon went away — waiting up to %s for it to return to auto-resume session %s…\n",
+		"\nobserver %s --attach: observer daemon went away - waiting up to %s for it to return to auto-resume session %s…\n",
 		subcommand, autoResumeWaitCap.Round(time.Second), sessionID)
 	if !waitForDaemon(ctx, sockPath, autoResumeWaitCap, dial) {
 		if ctx.Err() != nil {
@@ -637,7 +637,7 @@ func sleepUntil(ctx context.Context, wake, deadline time.Time) bool {
 // back to a ctx-aware sleep and proceeds (robust default).
 func promptReattach(ctx context.Context, stderr io.Writer, timeout time.Duration, subcommand, sessionID string) bool {
 	fmt.Fprintf(stderr,
-		"observer: daemon restarted — resuming session %s in %s (Enter = now, Ctrl-C = skip)\n",
+		"observer: daemon restarted - resuming session %s in %s (Enter = now, Ctrl-C = skip)\n",
 		sessionID, timeout.Round(time.Second))
 
 	// Install signal handling BEFORE entering raw mode (H4). Externally delivered
@@ -745,7 +745,7 @@ func reportAttachResult(stderr io.Writer, subcommand string, capab integration.C
 	case aerr == nil:
 		// Clean detach (external signal or stdin EOF): the child keeps running.
 		fmt.Fprintf(stderr,
-			"\nobserver %s --attach: detached — session continues under the observer daemon; re-attach or use the dashboard.\n",
+			"\nobserver %s --attach: detached - session continues under the observer daemon; re-attach or use the dashboard.\n",
 			subcommand)
 		return nil
 	case errors.Is(aerr, attachsock.ErrInputStalled):
@@ -754,12 +754,12 @@ func reportAttachResult(stderr io.Writer, subcommand string, capab integration.C
 		// still runs under the observer daemon) OR the leading edge of a daemon
 		// exit. Stay ambiguous and point at the dashboard to check (A2-2).
 		fmt.Fprintf(stderr,
-			"\nobserver %s --attach: input stopped reaching the session — detaching. The %s session MAY still be running under the observer daemon; check the dashboard and re-attach, or %s to continue if it ended.\n",
+			"\nobserver %s --attach: input stopped reaching the session - detaching. The %s session MAY still be running under the observer daemon; check the dashboard and re-attach, or %s to continue if it ended.\n",
 			subcommand, subcommand, nativeResumeHint(capab))
 		return exitErr(1)
 	case errors.Is(aerr, attachsock.ErrDaemonExited):
 		fmt.Fprintf(stderr,
-			"\nobserver %s --attach: observer daemon exited — this session ended with it. Your conversation is preserved by the tool; %s to continue.\n",
+			"\nobserver %s --attach: observer daemon exited - this session ended with it. Your conversation is preserved by the tool; %s to continue.\n",
 			subcommand, nativeResumeHint(capab))
 		return exitErr(1)
 	case errors.Is(aerr, attachsock.ErrConnLost):

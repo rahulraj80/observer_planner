@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "id": "bc-00000000-0000-0000-0000-000000000001",
+      "name": "Add README with setup instructions",
+      "status": "ACTIVE",
+      "env": {
+        "type": "cloud"
+      },
+      "url": "https://cursor.com/agents/bc-00000000-0000-0000-0000-000000000001",
+      "createdAt": "2026-04-13T18:30:00.000Z",
+      "updatedAt": "2026-04-13T18:45:00.000Z",
+      "latestRunId": "run-00000000-0000-0000-0000-000000000001"
+    }
+  ],
+  "nextCursor": "bc-00000000-0000-0000-0000-000000000002"
+}

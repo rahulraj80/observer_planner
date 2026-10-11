@@ -168,7 +168,7 @@ func (j judgeScorer) Score(ctx context.Context, s Sample) (Score, error) {
 
 func buildLLMJudge(params map[string]string, judge JudgeClient) (Scorer, error) {
 	if judge == nil {
-		return nil, fmt.Errorf("eval: llm_judge requires a judge client (none wired — set [observability.eval] judge_model and bind a host JudgeClient)")
+		return nil, fmt.Errorf("eval: llm_judge requires a judge client (none wired - set [observability.eval] judge_model and bind a host JudgeClient)")
 	}
 	prompt := params["prompt"]
 	if strings.TrimSpace(prompt) == "" {

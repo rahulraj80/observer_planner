@@ -17,7 +17,7 @@ import (
 
 // keysCorpus is a hand-written config.toml with comments in every position
 // the surgical editor must preserve.
-const keysCorpus = `# Operator header comment — must survive.
+const keysCorpus = `# Operator header comment - must survive.
 [observer]
 # log_level explains itself
 log_level = "warn" # inline: keep me
@@ -117,7 +117,7 @@ func TestConfigKeys_SurgicalWriteKeepsCommentsAndClassifies(t *testing.T) {
 		t.Fatalf("expected a surgical, comment-preserving write: %v", m)
 	}
 	if m["restart_required"] != true {
-		t.Fatalf("observer.log_level binds at start — restart_required must be true: %v", m)
+		t.Fatalf("observer.log_level binds at start - restart_required must be true: %v", m)
 	}
 	if got := strs(m["restart_required_keys"]); strings.Join(got, ",") != "observer.log_level,terminal.max_concurrent" {
 		t.Errorf("restart_required_keys = %v (terminal limits have no live setter on a bare test server, so they degrade to restart)", got)
@@ -127,7 +127,7 @@ func TestConfigKeys_SurgicalWriteKeepsCommentsAndClassifies(t *testing.T) {
 	}
 	body, _ := os.ReadFile(path)
 	text := string(body)
-	for _, want := range []string{"# Operator header comment — must survive.", "# log_level explains itself", `log_level = "debug" # inline: keep me`, "max_concurrent = 12", `default = "claude-code"`, `allowed_tools = ["claude"]`} {
+	for _, want := range []string{"# Operator header comment - must survive.", "# log_level explains itself", `log_level = "debug" # inline: keep me`, "max_concurrent = 12", `default = "claude-code"`, `allowed_tools = ["claude"]`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("file missing %q:\n%s", want, text)
 		}
@@ -171,7 +171,7 @@ func TestConfigKeys_TierGates(t *testing.T) {
 	})
 	t.Run("owner-elsewhere is 409 naming the owner", func(t *testing.T) {
 		rr := putKeys(t, s, keysBody(etag, `{"key":"org_client.enabled","value":true}`), true)
-		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "observer org") {
+		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "observer enroll") {
 			t.Fatalf("got %d %s", rr.Code, rr.Body.String())
 		}
 		untouched(t)
@@ -464,7 +464,7 @@ func TestSecretFieldsMatchSchemaT2(t *testing.T) {
 	}
 	for k := range schemaT2 {
 		if !table[k] {
-			t.Errorf("configschema marks %s secret but secretFields has no redaction row — GET /api/config would leak it", k)
+			t.Errorf("configschema marks %s secret but secretFields has no redaction row - GET /api/config would leak it", k)
 		}
 	}
 }
@@ -494,7 +494,7 @@ func TestConfigSchemaRouteServesEmbeddedSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	if d.SchemaVersion != configschema.SchemaVersion || len(d.Leaves) != len(configschema.Leaves()) {
-		t.Fatalf("embedded schema is stale: version %d leaves %d (runtime %d) — run make config-schema-build", d.SchemaVersion, len(d.Leaves), len(configschema.Leaves()))
+		t.Fatalf("embedded schema is stale: version %d leaves %d (runtime %d) - run make config-schema-build", d.SchemaVersion, len(d.Leaves), len(configschema.Leaves()))
 	}
 	var docs int
 	for _, l := range d.Leaves {
@@ -503,6 +503,6 @@ func TestConfigSchemaRouteServesEmbeddedSchema(t *testing.T) {
 		}
 	}
 	if docs < len(d.Leaves)/2 {
-		t.Errorf("only %d/%d leaves carry a doc comment — the go/ast harvest is broken", docs, len(d.Leaves))
+		t.Errorf("only %d/%d leaves carry a doc comment - the go/ast harvest is broken", docs, len(d.Leaves))
 	}
 }

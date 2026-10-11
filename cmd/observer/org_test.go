@@ -76,7 +76,7 @@ func TestEnrolWritesFullContentByTenancy(t *testing.T) {
 				t.Fatalf("loaded full_content = %v, want %v", cfg.OrgClient.Share.FullContent, tc.want)
 			}
 			if cfg.OrgClient.Share.AdminManaged {
-				t.Fatal("enrol must never write admin_managed — that is the provisioning-template knob, not the enrolment's")
+				t.Fatal("enrol must never write admin_managed - that is the provisioning-template knob, not the enrolment's")
 			}
 		})
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marmutapp/superbased-observer/internal/processobs"
+	"github.com/marmutapp/superbased-observer/internal/procmodel"
 )
 
 func TestWriteProcessHealth_RoundTrip(t *testing.T) {
@@ -19,7 +19,7 @@ func TestWriteProcessHealth_RoundTrip(t *testing.T) {
 		Backend:                 "linux_ebpf+poll",
 		BackendUp:               true,
 		QueueDepth:              3,
-		NetworkAccountingMode:   processobs.NetworkAccountingUnavailable,
+		NetworkAccountingMode:   procmodel.NetworkAccountingUnavailable,
 		NetworkAccountingReason: "missing CAP_BPF/CAP_PERFMON",
 	}
 	path, err := WriteProcessHealth(dir, want)
@@ -92,7 +92,7 @@ func TestLiveProcessHealth_DropsDeadDaemons(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := WriteProcessHealth(dir, ProcessHealth{
 		PID: 2147483646, WrittenAt: time.Now().UTC(), Backend: "poll",
-		NetworkAccountingMode: processobs.NetworkAccountingTCP,
+		NetworkAccountingMode: procmodel.NetworkAccountingTCP,
 	}); err != nil {
 		t.Fatalf("WriteProcessHealth: %v", err)
 	}
@@ -209,31 +209,31 @@ func TestNetworkAccountingLine(t *testing.T) {
 	}{
 		{
 			name:        "off is stated, not nagged",
-			mode:        processobs.NetworkAccountingOff,
+			mode:        procmodel.NetworkAccountingOff,
 			reason:      "not enabled ([observer.process.network].process_bytes)",
 			wantContain: []string{"off", "process_bytes"},
 			wantAbsent:  []string{"UNAVAILABLE", "NOT measured"},
 		},
 		{
 			name:        "unavailable carries the reason verbatim",
-			mode:        processobs.NetworkAccountingUnavailable,
+			mode:        procmodel.NetworkAccountingUnavailable,
 			reason:      "missing CAP_BPF/CAP_PERFMON",
 			wantContain: []string{"UNAVAILABLE", "NOT measured", "missing CAP_BPF/CAP_PERFMON"},
 		},
 		{
 			name:        "unavailable without a reason says so",
-			mode:        processobs.NetworkAccountingUnavailable,
+			mode:        procmodel.NetworkAccountingUnavailable,
 			wantContain: []string{"UNAVAILABLE", "no reason reported"},
 		},
 		{
 			name:        "etw elevation reason survives",
-			mode:        processobs.NetworkAccountingUnavailable,
+			mode:        procmodel.NetworkAccountingUnavailable,
 			reason:      "ETW session needs elevation (ERROR_ACCESS_DENIED)",
 			wantContain: []string{"UNAVAILABLE", "needs elevation", "ERROR_ACCESS_DENIED"},
 		},
 		{
 			name:        "tcp states the TCP-only caveat",
-			mode:        processobs.NetworkAccountingTCP,
+			mode:        procmodel.NetworkAccountingTCP,
 			wantContain: []string{"live (tcp)", "TCP payload bytes only", "UDP/QUIC"},
 			wantAbsent:  []string{"UNAVAILABLE"},
 		},
@@ -241,7 +241,7 @@ func TestNetworkAccountingLine(t *testing.T) {
 			name:        "empty mode is unknown, not guessed",
 			mode:        "",
 			wantContain: []string{"unknown"},
-			wantAbsent:  []string{"off —"},
+			wantAbsent:  []string{"off -"},
 		},
 		{
 			name:        "unrecognised mode is reported as itself",
@@ -302,10 +302,10 @@ func TestTransportLine(t *testing.T) {
 		{
 			name: "never connected is waiting, not an error",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 			},
 			wantContain: []string{"waiting", "no capturer has ever connected", "127.0.0.1:8823", "Scheduled Task"},
-			wantAbsent:  []string{"AUTH FAILURE", "DISCONNECTED", "live —"},
+			wantAbsent:  []string{"AUTH FAILURE", "DISCONNECTED", "live -"},
 		},
 		{
 			// The defect this row now guards: the counter conflates EVERY
@@ -316,7 +316,7 @@ func TestTransportLine(t *testing.T) {
 			// only as one candidate among several.
 			name: "a non-token refusal is not diagnosed as a token problem",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures:  6,
 				TransportLastAuthError: "processobs/bridge: malformed handshake: capturer speaks protocol v2, this daemon speaks v1",
 			},
@@ -335,7 +335,7 @@ func TestTransportLine(t *testing.T) {
 		{
 			name: "a token refusal reports the token reason verbatim, still as a candidate",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures:  2,
 				TransportLastAuthError: "processobs/bridge: invalid token",
 			},
@@ -345,7 +345,7 @@ func TestTransportLine(t *testing.T) {
 		{
 			name: "a refusal with no recorded reason says so rather than guessing",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportAuthFailures: 6,
 			},
 			wantContain: []string{"AUTH FAILURE", "no refusal reason was recorded"},
@@ -355,7 +355,7 @@ func TestTransportLine(t *testing.T) {
 			// M3: requested and broken must not read like never requested.
 			name: "a requested transport that never started is reported, not silent",
 			health: ProcessHealth{
-				TransportState:             processobs.TransportStateUnavailable,
+				TransportState:             procmodel.TransportStateUnavailable,
 				TransportUnavailableReason: "processobs/bridge: listen 127.0.0.1:8823: bind: address already in use",
 			},
 			wantContain: []string{
@@ -367,14 +367,14 @@ func TestTransportLine(t *testing.T) {
 		{
 			name: "an unavailable transport with no reason states the gap",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateUnavailable,
+				TransportState: procmodel.TransportStateUnavailable,
 			},
 			wantContain: []string{"UNAVAILABLE", "no reason reported by the daemon"},
 		},
 		{
 			name: "connected reports since-when",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportConnected: true, TransportConnections: 1,
 				TransportLastConnectAt: transportNow().Add(-90 * time.Second),
 			},
@@ -384,7 +384,7 @@ func TestTransportLine(t *testing.T) {
 		{
 			name: "connected after an earlier refusal still mentions it",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportConnected: true,
+				TransportState: procmodel.TransportStateConfigured, TransportConnected: true,
 				TransportConnections: 2, TransportAuthFailures: 3,
 				TransportLastConnectAt: transportNow().Add(-10 * time.Second),
 			},
@@ -393,7 +393,7 @@ func TestTransportLine(t *testing.T) {
 		{
 			name: "a capturer that came and went shows both timestamps",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportConnections:      4,
 				TransportLastConnectAt:    transportNow().Add(-5 * time.Minute),
 				TransportLastDisconnectAt: transportNow().Add(-2 * time.Minute),
@@ -408,7 +408,7 @@ func TestTransportLine(t *testing.T) {
 			name: "a stale record does not claim the capturer is connected NOW",
 			health: ProcessHealth{
 				WrittenAt:      transportNow().Add(-10 * time.Minute),
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportConnected: true, TransportConnections: 1,
 				TransportLastConnectAt: transportNow().Add(-11 * time.Minute),
 			},
@@ -418,7 +418,7 @@ func TestTransportLine(t *testing.T) {
 			name: "a fresh record carries no staleness qualifier",
 			health: ProcessHealth{
 				WrittenAt:      transportNow().Add(-5 * time.Second),
-				TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+				TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 				TransportConnected: true, TransportConnections: 1,
 				TransportLastConnectAt: transportNow().Add(-time.Minute),
 			},
@@ -428,7 +428,7 @@ func TestTransportLine(t *testing.T) {
 		{
 			name: "a missing timestamp is stated, not printed as epoch zero",
 			health: ProcessHealth{
-				TransportState: processobs.TransportStateConfigured, TransportConnections: 1,
+				TransportState: procmodel.TransportStateConfigured, TransportConnections: 1,
 			},
 			wantContain: []string{"DISCONNECTED", "unrecorded time"},
 			wantAbsent:  []string{"1970", "0001"},
@@ -487,17 +487,17 @@ func TestProcessHealthTransportBackCompat(t *testing.T) {
 	if h.TransportLastAuthErrorClass != "" {
 		t.Errorf("a legacy record cannot carry a refusal class, got %q", h.TransportLastAuthErrorClass)
 	}
-	if got := processobs.NormalizeTransportAuthClass(h.TransportLastAuthErrorClass); got != processobs.TransportAuthClassUnknown {
-		t.Errorf("an absent class must read as %q, got %q", processobs.TransportAuthClassUnknown, got)
+	if got := procmodel.NormalizeTransportAuthClass(h.TransportLastAuthErrorClass); got != procmodel.TransportAuthClassUnknown {
+		t.Errorf("an absent class must read as %q, got %q", procmodel.TransportAuthClassUnknown, got)
 	}
 
 	dir2 := t.TempDir()
 	want := ProcessHealth{
 		PID: os.Getpid(), WrittenAt: transportNow(), Backend: "composite[poll+bridge-listen]",
-		TransportState: processobs.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
+		TransportState: procmodel.TransportStateConfigured, TransportAddr: "127.0.0.1:8823",
 		TransportConnections: 2, TransportAuthFailures: 1, TransportConnected: true,
 		TransportLastAuthError:      "processobs/bridge: malformed handshake: capturer speaks protocol v2, this daemon speaks v1",
-		TransportLastAuthErrorClass: processobs.TransportAuthClassProtocolVersion,
+		TransportLastAuthErrorClass: procmodel.TransportAuthClassProtocolVersion,
 		TransportLastConnectAt:      transportNow().Add(-time.Minute),
 		TransportLastDisconnectAt:   transportNow().Add(-2 * time.Minute),
 	}
@@ -553,7 +553,7 @@ func TestCapturerDecodeLineNothingClassified(t *testing.T) {
 			wantEmpty: true,
 		},
 		{
-			name: "a capturer that never reported stays silent — absence is not a suspicion",
+			name: "a capturer that never reported stays silent - absence is not a suspicion",
 			health: ProcessHealth{
 				TransportCapturerDecodeReported: false,
 				TransportCapturerIgnored:        48211,

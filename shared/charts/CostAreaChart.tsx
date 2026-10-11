@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { ChartTooltip } from "./ChartTooltip";
 import { ChartLegendFrame, type ChartLegendItem } from "./ChartLegend";
-import { fmtCompact, fmtUSD } from "../lib/format";
+import { dollarsShown, fmtCompact, fmtUSD } from "../lib/format";
 import type { Granularity } from "../lib/granularity";
 import type { CostPoint } from "../lib/types";
 import { bucketTooltipLabel, CHART_AXIS, CHART_GRID, timeAxis } from "./common";
@@ -135,7 +135,9 @@ export const CostAreaChart = memo(function CostAreaChart({
                     : `${name}: ${fmtCompact(value)}`
                 }
                 extra={(row) =>
-                  mode === "tokens" && row.cost_usd != null
+                  // The day's dollar total rides along with the token
+                  // buckets, except in a developer's token-usage view.
+                  mode === "tokens" && row.cost_usd != null && dollarsShown()
                     ? `${fmtUSD(Number(row.cost_usd))} total`
                     : null
                 }

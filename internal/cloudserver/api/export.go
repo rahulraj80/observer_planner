@@ -182,5 +182,5 @@ func (s *Server) downloadExport(w http.ResponseWriter, r *http.Request, accountI
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
+	_, _ = w.Write(body) //nolint:gosec // G705: a JSON attachment with nosniff, never rendered as HTML
 }

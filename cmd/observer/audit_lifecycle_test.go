@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote && !sbo_omit_terminals && !sbo_omit_ui_dashboard
+
 package main
 
 import (
@@ -7,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
@@ -24,7 +27,7 @@ import (
 type leaseAuditHarness struct {
 	st      *store.Store
 	adapter *launchManagerAdapter
-	rc      dashboard.RemoteController
+	rc      dashapi.RemoteController
 	mgr     *termsession.Manager
 	device  string
 	handle  string
@@ -66,7 +69,7 @@ func newLeaseAuditHarness(t *testing.T) *leaseAuditHarness {
 	if err != nil {
 		t.Fatalf("HashSecret: %v", err)
 	}
-	rc := dashboard.NewRemoteController(dashboard.RemoteOptions{
+	rc := dashboard.NewRemoteController(dashapi.RemoteOptions{
 		HashedSecret:    hash,
 		AllowedHosts:    []string{"remote.example:8443"},
 		RateLimitPerMin: 60,
@@ -75,7 +78,7 @@ func newLeaseAuditHarness(t *testing.T) *leaseAuditHarness {
 	device := pairDevice(t, rc, enc)
 
 	adapter := &launchManagerAdapter{svc: svc, mgr: mgr}
-	authz, ok := rc.(dashboard.TerminalControlAuthorizer)
+	authz, ok := rc.(dashapi.TerminalControlAuthorizer)
 	if !ok {
 		t.Fatal("controller is not a TerminalControlAuthorizer")
 	}
@@ -86,14 +89,14 @@ func newLeaseAuditHarness(t *testing.T) *leaseAuditHarness {
 
 // acquireRemote mints a fresh capability + confirm and acquires the remote
 // writer lease through the real adapter (real §4.δ conjunction + real lease).
-func (h *leaseAuditHarness) acquireRemote(t *testing.T) (dashboard.LaunchWriter, string, string) {
+func (h *leaseAuditHarness) acquireRemote(t *testing.T) (dashapi.LaunchWriter, string, string) {
 	t.Helper()
-	authz := h.rc.(dashboard.TerminalControlAuthorizer)
+	authz := h.rc.(dashapi.TerminalControlAuthorizer)
 	capTok, confirm, err := authz.MintTerminalControl(h.rc.Sessions()[0].ID, h.handle)
 	if err != nil {
 		t.Fatalf("MintTerminalControl: %v", err)
 	}
-	w, err := h.adapter.AcquireWriterRemote(dashboard.RemoteWriterRequest{
+	w, err := h.adapter.AcquireWriterRemote(dashapi.RemoteWriterRequest{
 		Handle:          h.handle,
 		DeviceSessionID: h.device,
 		CapabilityToken: capTok,

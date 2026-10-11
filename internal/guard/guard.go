@@ -146,12 +146,27 @@ type Guard struct {
 	roots    []string
 	readFile func(string) ([]byte, error)
 
+	// budgetOrigins is the org-authored window label table (budgetorigin.go),
+	// keyed by rule id. nil = every ceiling renders as a local one.
+	budgetOrigins atomic.Pointer[map[string]BudgetOrigin]
+	// costDisplay resolves the developer cost display (budgetorigin.go,
+	// SetCostDisplay). nil = dollars.
+	costDisplay atomic.Pointer[func() string]
+
 	// managedTenancy is Options.ManagedTenancy behind an
 	// atomic.Pointer so SetManagedTenancy can wire (or re-wire) it
 	// after construction without racing the hot paths that read it.
 	// A nil pointer means "tenancy unresolved in this process" - see
 	// Options.ManagedTenancy for what that deliberately implies.
 	managedTenancy atomic.Pointer[func() bool]
+
+	// orgBundleRejected is set when a cached org bundle EXISTS but could
+	// not be verified or parsed (signature, key pin, envelope or TOML),
+	// at construction or at the last ReloadOrgLayer; cleared by a
+	// successful reload. GateEnforcement reads it: on a managed node an
+	// unverifiable bundle counts as enforcing (the org's floor is
+	// unknown, not absent); on an individual node it counts as absent.
+	orgBundleRejected atomic.Bool
 
 	// projectRootForSession is the injected session-to-project
 	// resolver (approvals.go: SessionProjectRootLookup). nil on every
@@ -291,6 +306,16 @@ type Guard struct {
 	// approvals is the §6.3 grant lookup (SetApprovalLookup); nil =
 	// no approvals, every blocking verdict enforces.
 	approvals ApprovalLookup
+	// orgGrants is the org access-grant claim (orggrant.go,
+	// SetOrgGrantClaim); nil = no org grants.
+	orgGrants OrgGrantClaim
+	// requestBase is the node dashboard origin for the org-locked deny
+	// line's request link (override.go, SetRequestAccessBase).
+	requestBase string
+	// hookBudget is the hook path's managed budget stop lookup
+	// (hookbudget.go, SetHookBudgetLookup); nil = the hook path never stops
+	// on a budget (the daemon, every test that does not wire it).
+	hookBudget HookBudgetLookup
 
 	// promptAllow are the compiled [guard.prompt].allow value patterns
 	// (promptguard.go), analogous to egressAllow but a distinct config
@@ -305,6 +330,10 @@ type Guard struct {
 	// block until the store seam is wired (prompt-submit-intervention
 	// spec §5.4/§10 item 5 — never a silent allow).
 	promptReconsider PromptReconsiderFuncs
+	// promptPreSend is the post-hoc prompt lane's dedupe lookup
+	// (SetPromptPreSendLookup; posthocprompt.go): did a hook/proxy lane
+	// already judge this session's prompt? nil = always record.
+	promptPreSend PromptPreSendLookup
 
 	// mcpPins is the §9.2 pin-status lookup (SetMCPPinLookup); nil =
 	// every MCP server marks mcp_unpinned taint (the G3 baseline).
@@ -323,10 +352,15 @@ type Guard struct {
 	// admission. Native intervention supplies the same fact explicitly after
 	// its authority read; proxy requests need this local-store seam so an
 	// external re-enrollment immediately invalidates the prior engine binding.
-	budgetBindingLookup BudgetBindingLookup
-	budgetMu            sync.Mutex
-	budgetCache         map[string]budgetEntry
-	budgetRecorded      map[string]map[string]bool
+	// It is TRI-STATE (REVIEW-4 P4-01, ruling D-521): a read that failed is
+	// "unknown", never "not enrolled".
+	budgetIdentityLookup BudgetIdentityLookup
+	budgetMu             sync.Mutex
+	budgetCache          map[string]budgetEntry
+	budgetRecorded       map[string]map[string]bool
+	// budgetClock is the clock the budget cache ages on (budgetNow).
+	// Nil means wall-clock time; tests inject a fake one.
+	budgetClock budgetClockFunc
 	// repeats is the A-610 consecutive-identical tracker (§12.2,
 	// repeat.go) feeding Event.RepeatCount on the ingest path.
 	repeats repeatTracker
@@ -399,6 +433,7 @@ func New(opts Options) (*Guard, error) {
 		pf, st, issue, loaded := g.parseOrgBundle(g.orgBundlePath, opts.OrgKeyPinHash)
 		if issue != "" {
 			g.issues = append(g.issues, issue)
+			g.orgBundleRejected.Store(true)
 		}
 		if loaded {
 			orgLayer = pf
@@ -494,19 +529,55 @@ func modeOrDefault(s string) string {
 // build all funnel through this one seam against an explicit layer set
 // (B3 — no hidden read of mutable guard state).
 func (g *Guard) buildEngine(mode policy.Mode, org, user, project, trusted *policyFile) (*policy.Engine, error) {
+	return g.buildEngineWith(mode, org, user, project, trusted, g.publishedBudgetInputs())
+}
+
+// engineBudgetInputs is every budget-shaped input one engine build reads. It
+// exists so the ONE build funnel can produce two engines from the same layers:
+// the published (org-composed) one, and the node's own local-only one the
+// proxy admission falls back to when the enrolment the composition belongs to
+// is gone or replaced (REVIEW-4 P4-02).
+type engineBudgetInputs struct {
+	budget     config.GuardBudgetConfig
+	soft       []policy.Override
+	subjects   []policy.BudgetSubjectCap
+	protection policy.BudgetProtection
+	required   bool
+}
+
+// publishedBudgetInputs reads the EFFECTIVE budget, not g.cfg.Budget: an
+// org-composed ceiling applied through ApplyOrgBudget must survive every later
+// engine rebuild (project layer, org-bundle reload). Falls back to the
+// constructed config when nothing has been applied.
+func (g *Guard) publishedBudgetInputs() engineBudgetInputs {
+	return engineBudgetInputs{
+		budget: g.budgetConfig(),
+		// The per-window half of that budget: BudgetHard upgrades EVERY
+		// CategoryBudget row to deny, so the windows the org authored as
+		// soft/report are held back at flag by an override appended AFTER the
+		// layer overrides (policy.New applies overrides in order, last wins).
+		// Empty on every node with one uniform posture. See ApplyOrgBudget.
+		soft:       g.budgetSoftOverrides(),
+		subjects:   g.budgetSubjectCaps(),
+		protection: g.budgetProtection(),
+		required:   g.effBudgetRequired.Load(),
+	}
+}
+
+// localBudgetInputs is the node's OWN [guard.budget] block as this Guard was
+// constructed with it, and nothing an organization composed: no per-subject
+// caps, no authority provenance, no soft-window set and never the B-625
+// requirement. It is what D-502 means by "fail open on its own numbers".
+func (g *Guard) localBudgetInputs() engineBudgetInputs {
+	return engineBudgetInputs{budget: g.cfg.Budget}
+}
+
+// buildEngineWith is buildEngine over an explicit set of budget inputs.
+func (g *Guard) buildEngineWith(mode policy.Mode, org, user, project, trusted *policyFile, in engineBudgetInputs) (*policy.Engine, error) {
 	extra, overrides, layerDisable, mergeIssues := mergeLayers(org, user, project, trusted)
 	g.recordIssues(mergeIssues)
-	// The EFFECTIVE budget, not g.cfg.Budget: an org-composed ceiling applied
-	// through ApplyOrgBudget must survive every later engine rebuild (project
-	// layer, org-bundle reload). Falls back to the constructed config when
-	// nothing has been applied.
-	budget := g.budgetConfig()
-	// The per-window half of that budget: BudgetHard below upgrades EVERY
-	// CategoryBudget row to deny, so the windows the org authored as
-	// soft/report are held back at flag by an override appended AFTER the
-	// layer overrides (policy.New applies overrides in order, last wins).
-	// Empty on every node with one uniform posture. See ApplyOrgBudget.
-	budgetSoft := g.budgetSoftOverrides()
+	budget := in.budget
+	budgetSoft := in.soft
 	// Boundary slices pass through as-is: nil (section absent) lets
 	// the engine defaults apply; an explicitly-empty TOML list means
 	// "none" — the decoder already produces exactly this distinction.
@@ -516,6 +587,7 @@ func (g *Guard) buildEngine(mode policy.Mode, org, user, project, trusted *polic
 		AllowPaths:        g.cfg.Boundary.AllowPaths,
 		ProtectedBranches: g.cfg.Boundary.ProtectedBranches,
 		KnownProjectRoots: g.roots,
+		ResolveLinks:      resolveExistingLinks,
 		// Config-level disables ([guard.rules] disable) unioned with the
 		// trusted per-project layer's `disable` list (empty on New /
 		// ReloadOrgLayer, where trusted is nil — byte-identical to the
@@ -541,13 +613,13 @@ func (g *Guard) buildEngine(mode policy.Mode, org, user, project, trusted *polic
 		// The organization's per-tool / per-model caps (B-626..B-629). Read
 		// here, in the one rebuild funnel, so a project layer loading lazily
 		// cannot silently drop a cap the org authored.
-		BudgetSubjectCaps: g.budgetSubjectCaps(),
+		BudgetSubjectCaps: in.subjects,
 		BudgetHard:        budget.Hard,
-		BudgetProtection:  g.budgetProtection(),
+		BudgetProtection:  in.protection,
 		// The fail-closed row (B-625): armed only by an org-composed posture
 		// that says this managed node may not run without the organization's
 		// budget. Zero on every individual node.
-		BudgetRequired:      g.effBudgetRequired.Load(),
+		BudgetRequired:      in.required,
 		LimitUtil5hWarn:     budget.Window.Util5hWarn,
 		LimitUtil5hDeny:     budget.Window.Util5hDeny,
 		LimitUtilWeeklyWarn: budget.Window.UtilWeeklyWarn,
@@ -694,7 +766,7 @@ func (g *Guard) evaluateWith(es *engineSet, ev policy.Event) (verdict policy.Ver
 	// event copy before the engine runs — the ONE place every KindMCPCall
 	// channel (hook, ingest, proxy inspection) passes through.
 	g.stampMCPAccess(&ev)
-	return es.engineFor(g, ev.ProjectRoot).Evaluate(ev), nil
+	return g.displayVerdict(es.engineFor(g, ev.ProjectRoot).Evaluate(ev)), nil
 }
 
 // evaluateBudgetWith is evaluateWith's budget-only sibling for proxy
@@ -736,6 +808,13 @@ func (g *Guard) categoryWith(es *engineSet, ruleID string) string {
 // failureVerdict builds the Q2 wrapper verdict: fail-open allow by
 // default, fail-closed deny under [guard] strict. Severity is high
 // either way — a guard internal error is always worth surfacing.
+//
+// Superseded default for gate hooks under enforcement (2026-10-03,
+// hook-parity audit section 5.7): `observer hook` sets Strict on the
+// config it builds a gate hook's guard from whenever the node's posture
+// says enforcement is in force (cmd/observer/hook.go buildHookGuard), so
+// on that path this wrapper denies. Every other caller keeps the
+// configured default.
 func (g *Guard) failureVerdict(err error) policy.Verdict {
 	v := policy.Verdict{
 		Decision: policy.DecisionAllow,

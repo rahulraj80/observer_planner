@@ -28,6 +28,13 @@
 //     block, including a newline the insert had to add and a file the insert
 //     had to create (RemoveBlock).
 //
+// The WSL bridge target (bridge.go, T-419) renders Windows .cmd shims for a
+// daemon that runs inside WSL: a tool with a Windows build keeps running as
+// Windows with the routing environment the WSL observer hands back
+// (`observer shell-wrap launch-env`), a tool with no Windows build runs
+// inside the distro. Which side a row takes is a table over its registry
+// spellings, never its name.
+//
 // The package is PURE (CLAUDE.md "Module Boundaries" #1): no os, os/exec,
 // database/sql, net/http or fsnotify - pinned by imports_test.go. It plans
 // and renders text; internal/shellwrap/host is the I/O applier. It dispatches

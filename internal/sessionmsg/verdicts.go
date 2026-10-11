@@ -114,6 +114,10 @@ type Caps struct {
 	ShadowCapable     bool
 	ReasoningDisjoint bool
 	SessionCumulative bool
+	// PromptHookShadow is DeriveInput.PromptHookShadow, resolved from the
+	// tool's Hook.PromptShadowsTranscript. It affects only the user rows
+	// Derive builds from actions, never a spend verdict.
+	PromptHookShadow bool
 }
 
 // SessionVerdicts is DeriveVerdicts over one session's rows after the

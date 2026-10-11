@@ -3,7 +3,10 @@ import {
   ChartLine,
   DatabaseZap,
   DollarSign,
+  FileCog,
   FolderKanban,
+  Gauge,
+  Inbox,
   LayoutDashboard,
   Lightbulb,
   Lock,
@@ -24,6 +27,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { costLabel, dollarsShown } from "../../../shared/lib/format.ts";
 
 // NavItem.icon is the lucide glyph itself, so the nav table below is the ONE
 // place a page's icon is decided. The Sidebar and the command palette both
@@ -40,6 +44,22 @@ export type NavGroup = {
   id: string;
   label: string;
   items: NavItem[];
+};
+
+// The cost page's entry follows the org's developer cost display (format.ts
+// cost affordances): in token-usage mode it reads "Usage" with a non-dollar
+// glyph, on the same /cost route. Getters, not values: this table is built
+// at module load, before the boot-time gate sets the mode, and every reader
+// (sidebar, breadcrumb, command palette, page header) reads it at render.
+const costNavItem: NavItem = {
+  id: "cost",
+  get label() {
+    return costLabel("Cost", "Usage");
+  },
+  path: "/cost",
+  get icon() {
+    return dollarsShown() ? DollarSign : Gauge;
+  },
 };
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -61,7 +81,7 @@ export const NAV_GROUPS: NavGroup[] = [
     id: "analyze",
     label: "Analyze",
     items: [
-      { id: "cost", label: "Cost", path: "/cost", icon: DollarSign },
+      costNavItem,
       { id: "analysis", label: "Analysis", path: "/analysis", icon: ChartLine },
       { id: "tools", label: "Tools", path: "/tools", icon: Wrench },
     ],
@@ -84,9 +104,11 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Configure",
     items: [
       { id: "policies", label: "Policies", path: "/policies", icon: ScrollText },
+      { id: "agent-config", label: "AI tool settings", path: "/agent-config", icon: FileCog },
       { id: "privacy", label: "Privacy", path: "/privacy", icon: Lock },
       { id: "terminals", label: "Terminals", path: "/terminals", icon: SquareTerminal },
       { id: "remote", label: "Remote", path: "/remote", icon: SatelliteDish },
+      { id: "requests", label: "Requests", path: "/requests", icon: Inbox },
       { id: "settings", label: "Settings", path: "/settings", icon: Settings },
     ],
   },

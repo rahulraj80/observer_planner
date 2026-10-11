@@ -76,7 +76,8 @@ func TestRenewalNeverExceedsSignedWindow(t *testing.T) {
 	}
 }
 
-// TestOrgBundleWiresGovernanceSidecarPath pins the CLI-side wiring the
+// TestOrgBundleWiresGovernanceSidecarPath pins the CLI-side wiring (governance
+// and node.features sidecars) the
 // 2026-08-15 smoke found missing: `observer unenroll` runs through
 // buildOrgBundle, and unless THAT client learns the sidecar path, unenroll
 // orphans the file and pins keep applying until its embedded grant clock
@@ -99,5 +100,16 @@ func TestOrgBundleWiresGovernanceSidecarPath(t *testing.T) {
 	}
 	if got := b.client.GovernanceSidecarPath(); got != want {
 		t.Fatalf("bundle client sidecar path = %q, want %q", got, want)
+	}
+	// T-393 (Integration 7 live smoke): `observer enroll` into another org
+	// also runs through this bundle, and only start.go set the node.features
+	// sidecar path, so the previous org's tools.disallow list survived a
+	// re-enrolment (and a CLI unenroll).
+	wantFeatures := config.ResolveFeaturesSidecarPath(b.cfg, "")
+	if wantFeatures == "" {
+		t.Fatal("test setup: features sidecar path resolved empty")
+	}
+	if got := b.client.FeaturesSidecarPath(); got != wantFeatures {
+		t.Fatalf("bundle client features sidecar path = %q, want %q", got, wantFeatures)
 	}
 }

@@ -320,18 +320,15 @@ func TestRunProbeHook_EndToEnd(t *testing.T) {
 		})
 	}
 
-	// zcode: AutoWired:false — documented, not auto-wired. This must
-	// report distinctly from both REGISTERED and NOT REGISTERED, and
-	// must never depend on registration state at all (no HOME setup
-	// needed, and none is done here on purpose).
-	t.Run("zcode: documented, not auto-wired", func(t *testing.T) {
-		probeHookSetupHome(t) // fresh HOME — must not matter for zcode
+	// zcode: since hook-parity Lane A4 (2026-10-03) `observer init` has a
+	// writer for it, so the probe checks a real registration like every
+	// other row: a fresh HOME is NOT REGISTERED (a fail), never the old
+	// "documented, not auto-wired" warn.
+	t.Run("zcode: NOT REGISTERED in a fresh HOME", func(t *testing.T) {
+		probeHookSetupHome(t)
 		c := runProbeHook(context.Background(), binary, "", "zcode")
-		if c.Status != diag.StatusWarn {
-			t.Errorf("Status = %v, want StatusWarn. Message=%s", c.Status, c.Message)
-		}
-		if !strings.Contains(c.Message, "not auto-wired") {
-			t.Errorf("Message = %q, want it to say \"not auto-wired\"", c.Message)
+		if c.Status != diag.StatusFail || !strings.Contains(c.Message, "NOT REGISTERED") {
+			t.Errorf("Status = %v Message=%s, want a NOT REGISTERED fail", c.Status, c.Message)
 		}
 	})
 

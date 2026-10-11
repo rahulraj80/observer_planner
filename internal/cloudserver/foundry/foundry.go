@@ -77,7 +77,22 @@ type Response struct {
 	Content   string
 	TokensIn  int64
 	TokensOut int64
+	// FinishReason is the provider's stop reason, normalized across dialects:
+	// FinishLength when the answer was cut at MaxOutputTokens (Chat Completions
+	// finish_reason "length", or a Responses status "incomplete" for reason
+	// "max_output_tokens"), otherwise the provider's value verbatim (often
+	// "stop"; empty when the provider sent none). It is DIAGNOSTIC only: a
+	// truncated answer is incomplete JSON, which the caller already rejects as
+	// invalid output, and this lets the attempt ledger say why.
+	FinishReason string
 }
+
+// FinishLength is the normalized FinishReason of an answer cut at the
+// request's MaxOutputTokens.
+const FinishLength = "length"
+
+// Truncated reports whether the answer was cut at the output-token cap.
+func (r Response) Truncated() bool { return r.FinishReason == FinishLength }
 
 // Provider is the seam the worker's Luna executor calls. AzureClient is the
 // real implementation; tests inject a fake or drive AzureClient at an httptest
@@ -166,6 +181,7 @@ func (c *AzureClient) chatCompletions(ctx context.Context, req Request) (Respons
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
 			PromptTokens     int64 `json:"prompt_tokens"`
@@ -179,9 +195,10 @@ func (c *AzureClient) chatCompletions(ctx context.Context, req Request) (Respons
 		return Response{}, errors.New("foundry: chat response had no choices")
 	}
 	return Response{
-		Content:   parsed.Choices[0].Message.Content,
-		TokensIn:  parsed.Usage.PromptTokens,
-		TokensOut: parsed.Usage.CompletionTokens,
+		Content:      parsed.Choices[0].Message.Content,
+		TokensIn:     parsed.Usage.PromptTokens,
+		TokensOut:    parsed.Usage.CompletionTokens,
+		FinishReason: parsed.Choices[0].FinishReason,
 	}, nil
 }
 
@@ -227,8 +244,12 @@ func (c *AzureClient) responsesStoreFalse(ctx context.Context, req Request) (Res
 				Text string `json:"text"`
 			} `json:"content"`
 		} `json:"output"`
-		OutputText string `json:"output_text"`
-		Usage      struct {
+		OutputText        string `json:"output_text"`
+		Status            string `json:"status"`
+		IncompleteDetails struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+		Usage struct {
 			InputTokens  int64 `json:"input_tokens"`
 			OutputTokens int64 `json:"output_tokens"`
 		} `json:"usage"`
@@ -244,7 +265,11 @@ func (c *AzureClient) responsesStoreFalse(ctx context.Context, req Request) (Res
 			}
 		}
 	}
-	return Response{Content: content, TokensIn: parsed.Usage.InputTokens, TokensOut: parsed.Usage.OutputTokens}, nil
+	finish := parsed.Status
+	if parsed.Status == "incomplete" && parsed.IncompleteDetails.Reason == "max_output_tokens" {
+		finish = FinishLength
+	}
+	return Response{Content: content, TokensIn: parsed.Usage.InputTokens, TokensOut: parsed.Usage.OutputTokens, FinishReason: finish}, nil
 }
 
 // indicatesPersistence reports whether a responses body signals server-side

@@ -13,6 +13,8 @@ import {
   Table,
 } from "@/components/primitives";
 import { fetchJSON } from "@/lib/api";
+import { ConfigSaveCancelled, saveConfigSection } from "@/lib/configSectionSave";
+import type { OverrideEditorMode } from "@/lib/guardEditorMode";
 import type { ApiState } from "@/lib/useApi";
 import { markRestartPending } from "@/lib/restartPending";
 import type {
@@ -164,7 +166,7 @@ export function RuleManager({
 
   const [editor, setEditor] = useState<
     | { kind: "rule"; index: number | null; initial?: GuardRuleRow }
-    | { kind: "override"; index: number | null; initial?: GuardOverrideRow }
+    | { kind: "override"; mode: OverrideEditorMode; index: number | null; initial?: GuardOverrideRow }
     | null
   >(null);
 
@@ -240,11 +242,18 @@ export function RuleManager({
         if (globalDisableDirty) {
           const cfg = await fetchJSON<{ config: { Guard: GuardSectionConfig } }>("/api/config");
           const guardSec = { ...cfg.config.Guard, Rules: { ...cfg.config.Guard.Rules, Disable: globalDisable } };
-          await fetchJSON("/api/config/section/guard", undefined, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(guardSec),
-          });
+          try {
+            await saveConfigSection("guard", guardSec);
+          } catch (e) {
+            // The policy file above is already saved; only the global
+            // disables were cancelled, so say exactly that.
+            if (e instanceof ConfigSaveCancelled) {
+              markRestartPending("guard-policy");
+              setError("The policy file was saved; the global rule disables were not (save cancelled).");
+              return;
+            }
+            throw e;
+          }
           setGlobalDisableDirty(false);
         }
         markRestartPending("guard-policy");
@@ -364,7 +373,7 @@ export function RuleManager({
 
               <RuleSection
                 title={`Overrides (${overrides.length})`}
-                onAdd={() => setEditor({ kind: "override", index: null })}
+                onAdd={() => setEditor({ kind: "override", mode: "add", index: null })}
                 addLabel="+ Add override"
               >
                 {overrides.length === 0 ? (
@@ -376,7 +385,7 @@ export function RuleManager({
                     <OverrideRow
                       key={r.rule}
                       r={r}
-                      onEdit={() => setEditor({ kind: "override", index: i, initial: r })}
+                      onEdit={() => setEditor({ kind: "override", mode: "edit", index: i, initial: r })}
                       onRemove={() => removeOverride(i)}
                     />
                   ))
@@ -421,7 +430,7 @@ export function RuleManager({
         </div>
       )}
 
-      <EffectiveRulesTable ruleDefs={ruleDefs} ids={effectiveIds} loading={rulesApi.loading} onOverride={(id) => setEditor({ kind: "override", index: null, initial: { rule: id, decision: "", enforce: true } })} onDisable={(id) => setActiveDisable([...new Set([...activeDisable, id])])} />
+      <EffectiveRulesTable ruleDefs={ruleDefs} ids={effectiveIds} loading={rulesApi.loading} onOverride={(id) => setEditor({ kind: "override", mode: "preset", index: null, initial: { rule: id, decision: "", enforce: true } })} onDisable={(id) => setActiveDisable([...new Set([...activeDisable, id])])} />
 
       {editor?.kind === "rule" && (
         <RuleEditor
@@ -436,6 +445,7 @@ export function RuleManager({
         <RuleEditor
           open
           kind="override"
+          mode={editor.mode}
           initial={editor.initial ?? emptyGuardOverride()}
           allowWeaken={true}
           onClose={() => setEditor(null)}

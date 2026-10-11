@@ -111,6 +111,61 @@ const (
 	// hermesplugin precedent (an embedded, non-JSON-config bridge) more
 	// than any of this repo's other hooks.json/settings.json writers.
 	HookCommandCodeMod HookMechanism = "commandcode_mods_ts"
+	// HookAntigravityJSON (audit P1, 2026-10-02): Antigravity CLI's
+	// ~/.gemini/config/hooks.json, a map of hook NAME -> event lists
+	// (antigravity.google/docs/hooks). Observer owns one hook name and
+	// registers only PreInvocation, a WARN-ONLY prompt seam: agy hooks
+	// cannot see or block the user's prompt, so the receiver reads it from
+	// the transcript and can only tell the model (HookSpec.PromptWarnOnly).
+	HookAntigravityJSON HookMechanism = "antigravity_hooks_json"
+	// The hook-parity Lane A6 tool-gate mechanisms (2026-10-03), one per
+	// vendor config FORMAT. Each registers the vendor's pre-tool event only
+	// (internal/hook register_jsonhooks.go / register_vibe_cline.go):
+	//
+	//   - HookGrokHooksJSON: Grok Build loads every ~/.grok/hooks/*.json;
+	//     Observer owns superbased-observer.json there.
+	//   - HookCopilotCLIHooks: Copilot CLI loads every ~/.copilot/hooks/*.json
+	//     (version 1, flat preToolUse handlers whose command is "bash").
+	//   - HookVibeHooksTOML: Mistral vibe's ~/.vibe/hooks.toml [[hooks]].
+	//   - HookGoosePlugin: Goose's Open Plugins directory
+	//     ~/.agents/plugins/superbased-observer (plugin.json + hooks/hooks.json).
+	//   - HookClineHookFiles: the Cline SDK's file-per-event hooks directory
+	//     (~/.cline/hooks/PreToolUse, an executable).
+	//   - HookJunieConfig: the "hooks" key of Junie CLI's ~/.junie/config.json.
+	//   - HookCrushJSON: the "hooks" key of ~/.config/crush/crush.json.
+	//   - HookOpenInterpreterHooks: Open Interpreter's Codex-shaped
+	//     ~/.openinterpreter/hooks.json.
+	HookGrokHooksJSON        HookMechanism = "grok_hooks_json"
+	HookCopilotCLIHooks      HookMechanism = "copilot_cli_hooks_json"
+	HookVibeHooksTOML        HookMechanism = "vibe_hooks_toml"
+	HookGoosePlugin          HookMechanism = "goose_open_plugin"
+	HookClineHookFiles       HookMechanism = "cline_hook_files"
+	HookJunieConfig          HookMechanism = "junie_config_json"
+	HookCrushJSON            HookMechanism = "crush_json"
+	HookOpenInterpreterHooks HookMechanism = "open_interpreter_hooks_json"
+	// HookMuseSettings (T-479, 2026-10-06): the "hooks" key of Muse Code's
+	// user settings, ~/.config/muse/settings.json (Claude-shaped matcher
+	// groups beside "schema_version": 1). Muse 1.4.3 on demo node 1 ran a
+	// hook from that block with no trust step; it refuses a flat array
+	// ("hooks must be an object") and ignores an untrusted project's
+	// .muse/hooks.json.
+	HookMuseSettings HookMechanism = "muse_settings_json"
+	// HookKimiCodeTOML (T-378, 2026-10-07): the [[hooks]] array of tables in
+	// Kimi Code's ~/.kimi-code/config.toml ($KIMI_CODE_HOME/config.toml),
+	// {event, matcher, command, timeout} per table (any other field fails
+	// the vendor's load). The same file can hold a plaintext provider
+	// api_key, so the writer runs under the D-268 / D-270 credential-file
+	// exception: it edits only Observer's own [[hooks]] tables, line by
+	// line, and never reads a value out of the file.
+	HookKimiCodeTOML HookMechanism = "kimi_code_config_toml"
+	// HookPluginShimTS (hook-parity Lane D, 2026-10-03): the ONE embedded
+	// TypeScript plugin shim (internal/hook/pluginshim) placed into an
+	// in-process plugin host's plugin directory (OpenCode, Kilo CLI, pi;
+	// OpenClaw and DeepSeek Harness render the same shim but have no
+	// grounded install location). The shim forwards the subscribed events
+	// (this row's Registered bindings) to `observer hook <tool> <event>` in
+	// the plugin dialect and maps the reply onto the host's own contract.
+	HookPluginShimTS HookMechanism = "plugin_shim_ts"
 )
 
 // HookSpec describes a tool's hook-registration capability. A zero-value
@@ -146,7 +201,64 @@ type HookSpec struct {
 	// worst. This is a MECHANISM-level flag, not a tool-name list
 	// (CLAUDE.md rule 3): a future prompt-submit-only vendor gets the
 	// same gate automatically by setting this true on its own row.
+	//
+	// Since hook-parity Lane A every one of those long-tail rows also wires
+	// a pre-tool gate, so none is prompt-only any more and the flag is false
+	// on all of them (TestPromptLaneOnlyMatchesWiredBindings keeps it equal
+	// to HookSpec.WiredPromptOnly). The registration decision itself is the
+	// capability-shaped HookSpec.WantsRegistration (hook-parity Lane C2).
 	PromptLaneOnly bool
+	// PromptWarnOnly is true for a prompt seam that runs before the model
+	// sees a new prompt but can only WARN, never confirm or block
+	// (Antigravity CLI PreInvocation). It is not a pre-send seam in the
+	// controlcoverage sense: the prompt was already submitted. Coverage
+	// surfaces report it as "warns before the model call".
+	PromptWarnOnly bool
+	// PromptShadowsTranscript is true when the tool's prompt-submit hook
+	// writes a user_prompt row ("<tool>:hook" source_file) for a prompt the
+	// tool's own transcript ALSO records for the same turn. Session messages
+	// (internal/sessionmsg, node and org alike) then fold the hook row onto
+	// the transcript row, which is canonical, so one typed prompt is one
+	// user message (T-563). False for a hook that is the ONLY record of the
+	// prompt. Grounded for codex (UserPromptSubmit row beside the rollout's
+	// user_message / item_completed UserMessage row).
+	PromptShadowsTranscript bool
+	// PromptScope names the surfaces the prompt hook covers when it does
+	// NOT cover every surface the tool's sessions come from ("" = every
+	// surface). Coverage surfaces show it beside the hook seam so an
+	// admin is not told a prompt rule acts before send on a surface
+	// whose prompts it never sees.
+	PromptScope string
+	// Bindings lists the tool's hook surface event by event (hookcaps.go):
+	// every native event the vendor provides, the capability it maps to,
+	// and whether Observer registers and wires it today. Additive: every
+	// field above keeps its meaning; Mechanism still selects the FORMAT
+	// writer.
+	Bindings []HookBinding
+	// Note is the honest-zero reason for a row whose vendor surface offers
+	// no hook Observer could bind at all (Bindings empty): tools run on
+	// hosted VMs, only static permission rules, post-hoc command options,
+	// hooks that do not fire, an observe-only SDK. Empty on every row that
+	// declares bindings.
+	Note string
+	// HooksShareCredentialFile declares the D-268 exception: the vendor
+	// keeps its hook config in a file that also holds plaintext
+	// credentials (a provider API key, a bearer token), so registering a
+	// hook means a read-modify-write of a credential-bearing file. Only a
+	// row carrying this flag may do that, and its writer then runs under
+	// the credential-file rules in internal/hook/credentialfile.go: it
+	// changes only the span Observer owns (the hooks subtree, or Hermes's
+	// plugins list), keeps every other key's bytes or values, keeps
+	// the file's mode, writes atomically, refuses a file it cannot parse,
+	// withholds parse details from every error, and records only a digest
+	// of the hooks subtree in hook_checksums.json, never a whole-file
+	// hash. It is a capability flag, not a tool branch: the writers ask it
+	// of the row.
+	HooksShareCredentialFile bool
+	// CredentialFileReason names the file and the credential it holds for
+	// a row with HooksShareCredentialFile set (the grounding of the
+	// exception). Empty otherwise.
+	CredentialFileReason string
 }
 
 // EnforcementChannel classifies HOW an org guard policy can actually STOP a
@@ -165,10 +277,12 @@ const (
 	// (Capability).EnforcementChannel(); reserved for callers that need a
 	// zero value before a row is looked up.
 	EnforcementUnknown EnforcementChannel = ""
-	// EnforceHookBlock: the tool's own hook mechanism supports a genuine
-	// blocking reply (a non-zero/deny verdict the vendor's own tool honors
-	// BEFORE the dangerous action runs), and observer's receiver is wired to
-	// send one. Strongest channel: the action never executes.
+	// EnforceHookBlock: the tool's own hook supports a genuine blocking
+	// reply (a deny verdict the vendor's own tool honors BEFORE the
+	// dangerous action runs), observer's receiver is wired to send one, and
+	// a live test on a real install proved the deny holds
+	// (HookSpec.LiveBlockingToolGate). Strongest channel: the action never
+	// executes.
 	EnforceHookBlock EnforcementChannel = "hook_block"
 	// EnforceSandbox: no blocking hook exists (or the mechanism is
 	// structurally fire-and-forget/post-hoc), but the tool is launchable via
@@ -191,47 +305,30 @@ const (
 	EnforceRecordedAcceptance EnforcementChannel = "recorded_acceptance"
 )
 
-// blockingHookMechanisms is the grounded set of hook mechanisms verified
-// (survey 2026-08-30, grep against internal/hook + each adapter's hook
-// receiver) to support a genuine deny reply, i.e. the vendor tool itself
-// aborts the dangerous action when observer's hook replies non-approve:
-//
-//   - HookClaudeSettings: Claude Code PreToolUse — a non-zero exit / deny
-//     JSON reply blocks (internal/hook/guarded.go::HandleGuarded, the
-//     reference implementation; cmd/observer/hook.go::handleClaudeCodePreTool
-//     replies BEFORE the lazy DB persist).
-//   - HookCursor: Cursor's parallel guarded path
-//     (internal/hook/cursor.go::BuildCursorEvent + HandleCursorEventGuarded).
-//
-// Every other mechanism was checked and found NOT blocking-capable, each for
-// a distinct grounded reason (not merely "not yet wired"):
-//
-//   - HookCodexConfig: internal/hook/codex.go::HandleCodexEvent replies `{}`
-//     on stdout UNCONDITIONALLY and FIRST, before the event is even parsed
-//     — genuinely fire-and-forget today. Codex's own PermissionRequest hook
-//     class may support a deny in principle, but observer has no vendor-
-//     verified reply schema for it (docs/codex-hook-capture.md's
-//     capture-first discipline: do not fabricate a schema, prove it live).
-//   - HookHermesPlugin: internal/hook/hermesplugin's embedded plugin hard-
-//     documents "absent / slow / mis-configured MUST NEVER block the host
-//     Hermes" — a design invariant, not an omission.
-//   - HookClineCLIJSONL: a post-hoc TAIL of hooks.jsonl, read AFTER the
-//     logged action already completed — structurally incapable of blocking.
-//   - HookBrowserExtension: the native-messaging chat-capture bridge has no
-//     local dangerous-tool-call surface to gate at all.
-//
-// A future vendor-verified deny schema is the only honest way to grow this
-// set — never add a mechanism here without live confirmation.
-var blockingHookMechanisms = map[HookMechanism]bool{
-	HookClaudeSettings: true,
-	HookCursor:         true,
+// LiveBlockingToolGate reports whether the spec carries a tool gate that
+// stops a dangerous call before it runs, proven on a real install: some
+// binding is a tool_gate that Observer wires today, whose reply can express
+// a deny, and whose grounding is a recorded live test (T-340, the per-binding
+// successor of the mechanism-level set that listed only Claude Code and
+// Cursor). A doc-, fixture- or inference-grounded gate does not count, even
+// when it is wired: the vendor tool honouring the deny is exactly the fact a
+// live test establishes. The answer follows the binding rows, never a tool
+// or mechanism name, so a binding that goes live reclassifies its row.
+func (h HookSpec) LiveBlockingToolGate() bool {
+	for _, b := range h.Bindings {
+		if b.Cap == HookCapToolGate && b.Wired && b.Grounding.Kind == GroundingLive && b.HasDecision(HookDecisionDeny) {
+			return true
+		}
+	}
+	return false
 }
 
 // EnforcementChannel returns the grounded bucket for how an org guard policy
 // can stop a dangerous action on this adapter, walked as an ordered ladder
 // (table-driven, CLAUDE.md rule #5 — not a tool-name switch):
 //
-//  1. a wired, blocking-capable hook mechanism -> EnforceHookBlock
+//  1. a live-verified blocking tool gate (Hook.LiveBlockingToolGate)
+//     -> EnforceHookBlock
 //  2. else a launchable tool (Handoff.Launch != nil) -> EnforceSandbox
 //  3. else a proxy-routable tool (Proxy != nil)      -> EnforceOrgDisallow
 //  4. else                                            -> EnforceRecordedAcceptance
@@ -242,9 +339,15 @@ var blockingHookMechanisms = map[HookMechanism]bool{
 // automatically reclassifies correctly. The registry golden test pins the
 // resulting bucket per adapter so a silent reclassification is loud.
 func (c Capability) EnforcementChannel() EnforcementChannel {
-	if blockingHookMechanisms[c.Hook.Mechanism] {
+	if c.Hook.LiveBlockingToolGate() {
 		return EnforceHookBlock
 	}
+	return c.channelWithoutHook()
+}
+
+// channelWithoutHook is the ladder below hook_block: the lever a tool falls
+// back to when no blocking hook stands in front of its tool calls.
+func (c Capability) channelWithoutHook() EnforcementChannel {
 	if c.Handoff.Launchable() {
 		return EnforceSandbox
 	}
@@ -254,6 +357,19 @@ func (c Capability) EnforcementChannel() EnforcementChannel {
 	return EnforceRecordedAcceptance
 }
 
+// NodeEnforcement is the channel that actually holds on THIS node, and the
+// one a launch decision must use. The registry's hook_block says the tool CAN
+// block through its tool-gate hook; it holds here only while that hook is
+// registered and current (toolGateCurrent, from the node's own hook
+// registration state). A hook that is missing, stale, untrusted or switched
+// off blocks nothing, so the tool falls back to the channel it would have
+// with no hook at all (normally sandbox_enforce), which is then degraded for
+// the platform exactly as EffectiveEnforcement does. A caller that cannot
+// tell passes false: an unverified hook never stands in for the sandbox.
+func (c Capability) NodeEnforcement(toolGateCurrent, sandboxAvailable bool) EnforcementChannel {
+	return c.EffectiveEnforcementUnder(toolGateCurrent, sandboxAvailable, EnforceRecordedAcceptance)
+}
+
 // EffectiveEnforcement is EnforcementChannel() degraded for the current
 // platform: EnforceSandbox is only a real lever where internal/sandbox can
 // actually build a bwrap sandbox (Linux/WSL2 with a working userns; see
@@ -261,12 +377,36 @@ func (c Capability) EnforcementChannel() EnforcementChannel {
 // VerdictAvailable at the call site (cmd/observer). Never upgrades a
 // channel, never fails — the honest floor when sandboxing isn't available
 // is the same recorded-acceptance posture as a tool with no lever at all.
+// It is capability-level: it assumes a hook_block tool's hook is in place,
+// so a launch decision uses NodeEnforcement instead.
 func (c Capability) EffectiveEnforcement(sandboxAvailable bool) EnforcementChannel {
+	return c.EffectiveEnforcementUnder(true, sandboxAvailable, EnforceRecordedAcceptance)
+}
+
+// EffectiveEnforcementUnder is the per-node channel (NodeEnforcement) with
+// the organization's choice of what a missing sandbox degrades to (D-178,
+// operator ruling 2026-10-04: org-configurable, default
+// recorded_acceptance). toolGateCurrent is the node's own tool-gate state
+// (D-262): a hook_block tool whose gate hook is not registered and current
+// here falls through to the channel it would have with no hook, and from
+// there to the org's fallback when no sandbox is available. noSandbox is
+// EnforceRecordedAcceptance or EnforceOrgDisallow; org_disallow is honoured
+// only for a tool whose model traffic Observer proxy-routes (Proxy != nil),
+// the same precondition the static ladder puts on that bucket, so a tool with
+// no proxy lever still degrades to recorded_acceptance. Any other noSandbox
+// value is treated as recorded_acceptance (never an upgrade).
+func (c Capability) EffectiveEnforcementUnder(toolGateCurrent, sandboxAvailable bool, noSandbox EnforcementChannel) EnforcementChannel {
 	ch := c.EnforcementChannel()
-	if ch == EnforceSandbox && !sandboxAvailable {
-		return EnforceRecordedAcceptance
+	if ch == EnforceHookBlock && !toolGateCurrent {
+		ch = c.channelWithoutHook()
 	}
-	return ch
+	if ch != EnforceSandbox || sandboxAvailable {
+		return ch
+	}
+	if noSandbox == EnforceOrgDisallow && c.Proxy != nil {
+		return EnforceOrgDisallow
+	}
+	return EnforceRecordedAcceptance
 }
 
 // BudgetAdmissionChannel names a pre-model-request enforcement point that can
@@ -293,6 +433,59 @@ func (c Capability) BudgetAdmissionChannel() BudgetAdmissionChannel {
 		return BudgetAdmissionObserverProxy
 	}
 	return BudgetAdmissionNone
+}
+
+// BudgetHookStop names where an exhausted managed hard budget stops a
+// direct-provider session of this tool through its OWN hooks (T-519, D-332):
+// the prompt-submit seam, the pre-tool seam, both, or neither. It is separate
+// from BudgetAdmissionChannel, which names the pre-request chokepoint Observer
+// controls (the proxy): a hook stop is the vendor honouring a deny reply, so
+// it bites at the NEXT prompt or tool call, not on the model request already
+// in flight, and only while the hook is registered and current on the node.
+type BudgetHookStop string
+
+const (
+	// BudgetHookStopNone: no wired pre-send hook can deny; an exhausted
+	// budget is flagged after send (D-031) unless the proxy or the process
+	// controller stops the session.
+	BudgetHookStopNone BudgetHookStop = ""
+	// BudgetHookStopPrompt: the prompt-submit seam denies the next prompt.
+	BudgetHookStopPrompt BudgetHookStop = "prompt"
+	// BudgetHookStopTool: the pre-tool seam denies the next tool call.
+	BudgetHookStopTool BudgetHookStop = "tool"
+	// BudgetHookStopPromptAndTool: both seams deny.
+	BudgetHookStopPromptAndTool BudgetHookStop = "prompt+tool"
+)
+
+// BudgetHookStop is computed from the hook bindings, never stored and never a
+// tool-name switch (CLAUDE.md #3): a WIRED prompt_gate binding whose reply can
+// express a deny is the prompt seam, a WIRED tool_gate binding whose reply can
+// express a deny is the pre-tool seam. The grounding of each binding (live,
+// doc, fixture) is the gate columns' to report; this answers only "is there a
+// seam Observer answers today".
+func (c Capability) BudgetHookStop() BudgetHookStop {
+	prompt, tool := false, false
+	for _, b := range c.Hook.Bindings {
+		if !b.Wired || !b.HasDecision(HookDecisionDeny) {
+			continue
+		}
+		switch b.Cap {
+		case HookCapPromptGate:
+			prompt = true
+		case HookCapToolGate:
+			tool = true
+		}
+	}
+	switch {
+	case prompt && tool:
+		return BudgetHookStopPromptAndTool
+	case prompt:
+		return BudgetHookStopPrompt
+	case tool:
+		return BudgetHookStopTool
+	default:
+		return BudgetHookStopNone
+	}
 }
 
 // MCPFormat names the on-disk shape a client uses to store MCP server
@@ -349,6 +542,20 @@ type MCPTarget struct {
 	// fabricated writer). The per-format writers in internal/mcp dispatch
 	// on THIS row's spelling table, never on the tool name (CLAUDE.md #3).
 	Remote *MCPRemoteTarget
+	// SharesCredentialFile declares the D-268/D-270 credential-file
+	// exception for this client's MCP config file (review T-384): the file
+	// can hold plaintext credentials (a sibling server's env block or
+	// headers, provider keys), so writing observer's entry is a
+	// read-modify-write of a credential-bearing file. Only a row carrying
+	// this flag may be written by internal/mcp's registrar (and Hermes'
+	// MCP writer in internal/hook), and the write then follows the
+	// internal/credfile rules: only the MCP subtree changes, every other
+	// member keeps its bytes and position, the mode is kept, and no
+	// whole-file hash and no value from the file is stored or surfaced.
+	SharesCredentialFile bool
+	// CredentialFileReason names the credential the file can hold, for a
+	// row with SharesCredentialFile set. Empty otherwise.
+	CredentialFileReason string
 }
 
 // MCPRemoteTransport is the client-agnostic transport vocabulary for a
@@ -864,6 +1071,41 @@ type ModelSpec struct {
 	// empty — an empty Known list is honest when no example was grounded,
 	// never a reason to fabricate one.
 	Known []string
+	// Catalog declares WHICH models this tool can be pointed at, so a model
+	// picker (the Arena's judge/candidate pickers) offers the tool's own
+	// provider's models instead of a free-text box. Zero value = no grounded
+	// catalogue statement; consumers then offer only the tool's own history.
+	Catalog ModelCatalog
+}
+
+// ModelCatalogKind names the shape of the model catalogue a tool draws on.
+// Consumers dispatch on this shape, never on tool name (CLAUDE.md #3).
+type ModelCatalogKind string
+
+const (
+	// ModelCatalogNone (zero value): no grounded statement about which
+	// models the tool serves. The honest floor.
+	ModelCatalogNone ModelCatalogKind = ""
+	// ModelCatalogVendor: the tool is locked to one vendor's models (Claude
+	// Code -> Anthropic, Codex -> OpenAI). Providers names the provider
+	// families; a picker offers that family's catalogue models.
+	ModelCatalogVendor ModelCatalogKind = "vendor"
+	// ModelCatalogOpen: bring-your-own-model. The tool accepts many
+	// providers' ids, so no catalogue can say which ones this machine has
+	// keys for; a picker offers only the models this node has actually used.
+	ModelCatalogOpen ModelCatalogKind = "open"
+)
+
+// ModelCatalog is the per-tool catalogue declaration (see ModelSpec.Catalog).
+type ModelCatalog struct {
+	// Kind is the catalogue shape.
+	Kind ModelCatalogKind
+	// Providers lists the provider families ("anthropic", "openai", "xai",
+	// "google") a ModelCatalogVendor tool serves. Empty for the other kinds.
+	Providers []string
+	// Note is optional operator-facing copy about a caveat of selecting a
+	// model for this tool (e.g. which models the proxy lane can capture).
+	Note string
 }
 
 // BinaryNames lists the executable spellings a launcher looks for, split by
@@ -959,6 +1201,25 @@ type InstallHint struct {
 	Argv []string
 	// Display is the human-readable command surfaced pre-consent.
 	Display string
+	// Requires lists the HOST programs this command needs on PATH beyond its
+	// own argv[0] (which the dashboard already resolves): the `curl` a
+	// curl|bash pipeline fetches with, and every program the vendor script
+	// itself hard-requires (kiro-cli's script exits "Missing required
+	// dependencies: unzip" on Linux; goose's extracts a .tar.bz2 with tar +
+	// bzip2). An entry may list alternatives separated by "|"
+	// ("sha256sum|shasum": either one satisfies it). The guided install checks
+	// these BEFORE spawning and, when one is missing, refuses with the
+	// package-manager command that fixes it (internal/toolinstall
+	// PrereqRemedy) instead of letting the vendor script fail. Same honesty
+	// rule as the hint itself: list only what was read in the vendor's
+	// current script (every Unix script hint was read for this on
+	// 2026-10-03; re-read the script whenever its hint changes, and note
+	// that Windows irm|iex hints run on PowerShell built-ins and carry
+	// none); a program the script
+	// needs only on some other path (e.g. xz when it must also download
+	// Node.js) is NOT listed, so a guess never blocks an install. Empty =
+	// nothing grounded beyond argv[0].
+	Requires []string
 }
 
 // BinaryResolveSpec is a tool's grounded binary-resolution row: the executable
@@ -991,6 +1252,57 @@ type BinaryResolveSpec struct {
 	// fabricates a channel to fill the gap. Rendered alongside
 	// WindowsNote.
 	InstallNote string
+	// UserInstallHint is OPTIONAL user-facing copy for the same gap: one
+	// short plain sentence an end user can act on ("available for Windows
+	// and macOS only"), shown by the dashboard when there is no guided
+	// install. WindowsNote / InstallNote are engineering records (sources,
+	// dates, rejected channels) and are not rendered to users; set this only
+	// when the gap carries a fact worth telling them. Empty = say nothing
+	// beyond the generic sentence. Pinned plain by user_install_hint_test.go.
+	UserInstallHint string
+	// Runtime is the tool's grounded MINIMUM HOST RUNTIME: the interpreter
+	// version its code needs when it runs on the host's own interpreter (an
+	// npm install, whose `#!/usr/bin/env node` shim runs on whatever node the
+	// launch's PATH resolves first). nil = unknown, the honest zero: nothing
+	// is checked. Set ONLY from the vendor's published metadata (the npm
+	// package's engines.node), with the source and date in Source; pinned by
+	// TestRuntimeRequirementsGrounded. The guided install refuses an install
+	// channel that runs on the host runtime (internal/toolinstall
+	// ChannelHostRuntime) when the host's version is older, and every
+	// launcher refuses a resolved shim whose interpreter is older, both with
+	// the same plain sentence, before the tool can crash at startup. At
+	// launch, an installed npm package's OWN engines.node (its package.json
+	// beside the resolved shim target) takes precedence when it parses to a
+	// floor, since it is exact for the version on disk; this value is the
+	// fallback, and the only input for the guided install.
+	Runtime *RuntimeRequirement
+}
+
+// RuntimeNode is the Node.js runtime in RuntimeRequirement.Runtime's closed
+// vocabulary (internal/toolinstall's runtime table carries one row per value:
+// display name, program spelling per OS, install guidance per host family).
+const RuntimeNode = "node"
+
+// RuntimeRequirement is one grounded minimum-runtime fact (see
+// BinaryResolveSpec.Runtime). Every field is data; nothing here is executed.
+type RuntimeRequirement struct {
+	// Runtime names the interpreter, a CLOSED vocabulary: RuntimeNode.
+	Runtime string
+	// MinVersion is the lowest acceptable version, dotted numeric ("20",
+	// "22.19.0"), copied from the vendor's own range. The floor alone is what
+	// blocks: the check may under-block, never over-block.
+	MinVersion string
+	// Range is the vendor's whole engines range when it has a hole the floor
+	// cannot express (openclaw's ">=24.16.0 <25 || >=26.1.0"); "" otherwise.
+	// A version above the floor but outside Range is reported
+	// (outside_range), never blocked (review M3-18).
+	Range string
+	// Product is the tool's product name for the user-facing sentence
+	// ("Gemini CLI needs Node.js 20 or newer.").
+	Product string
+	// Source records where MinVersion was read and when (engineering record,
+	// not rendered to users).
+	Source string
 }
 
 // Vocabulary is an adapter's NATIVE TOOL VOCABULARY row: whether the

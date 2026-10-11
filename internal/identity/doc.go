@@ -1,5 +1,5 @@
 // Package identity provides the agent's org-enrolment identity and the
-// row-stamping seam used to attribute ingested data to an organisation
+// row-stamping seam used to attribute ingested data to an organization
 // and user when the agent is enrolled in an org (Teams & Org Visibility).
 //
 // The package is deliberately dependency-light: it imports only the

@@ -40,7 +40,7 @@ func newZcodeCmd() *cobra.Command {
 		Use:   "zcode [-- zcode-args...]",
 		Short: "Launch the zcode CLI; with --continue-from, seed a handover via zcode's --prompt flag",
 		Long: "Wraps the zcode CLI (`zcode`, a Z.AI product; an OpenCode fork).\n" +
-			"This launcher is NON-PROXIED — zcode authenticates via Z.AI OAuth\n" +
+			"This launcher is NON-PROXIED - zcode authenticates via Z.AI OAuth\n" +
 			"and exposes no OpenAI base-URL knob, so routing it through the\n" +
 			"proxy would be a guess. Token capture happens via observer's local\n" +
 			"zcode adapter (the model_usage table in the CLI's SQLite store).\n\n" +
@@ -105,7 +105,7 @@ func newZcodeCmd() *cobra.Command {
 				// headless --prompt collides with the seeded interactive launch;
 				// fail fast before the (comparatively expensive) handoff render.
 				if zcodeHeadless(args) {
-					err := fmt.Errorf("--continue-from seeds an INTERACTIVE zcode session, but you forwarded a headless flag/subcommand (e.g. --prompt or `login`) — drop it")
+					err := fmt.Errorf("--continue-from seeds an INTERACTIVE zcode session, but you forwarded a headless flag/subcommand (e.g. --prompt or `login`) - drop it")
 					fmt.Fprintf(cmd.ErrOrStderr(), "observer zcode: %v\n", err)
 					return err
 				}

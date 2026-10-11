@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "cycle_acu_limit": 5000,
+      "scope": "enterprise",
+      "org_id": null,
+      "user_id": null
+    },
+    {
+      "cycle_acu_limit": 1000,
+      "scope": "org",
+      "org_id": "org_synth01",
+      "user_id": null
+    }
+  ],
+  "has_next_page": true,
+  "end_cursor": "synthaculimitsorg0002",
+  "total": 3
+}

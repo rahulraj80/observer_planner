@@ -29,6 +29,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/platform/crossmount"
 )
 
 var (
@@ -99,11 +101,19 @@ func repoRootDir() (string, error) {
 // cmd/observer/statusline.go's defaultStatuslineDeps — none of them set
 // hook.Options.HomeDir explicitly, so all fall back to
 // os.UserHomeDir()).
+//
+// $HOME alone does NOT isolate the cross-OS targets: `observer start`'s
+// autoRegisterHooks resolves "claude-code-windows" through crossmount's fixed
+// /mnt/c/Users root, so on a WSL2 dev host the child would rewrite the
+// operator's REAL Windows-side ~/.claude/settings.json (incident 2026-10-02).
+// The spawned binary is not a test binary, so crossmount's in-process guard
+// does not cover it; EnvDisableForeignHomes is what does.
 func buildScratchEnv(home, tmpdir string) []string {
 	return []string{
 		"HOME=" + home,
 		"TMPDIR=" + tmpdir,
 		"PATH=" + os.Getenv("PATH"),
+		crossmount.EnvDisableForeignHomes + "=1",
 	}
 }
 

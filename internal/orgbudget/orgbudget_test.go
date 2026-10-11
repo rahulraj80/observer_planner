@@ -537,8 +537,13 @@ func TestNonHardOrUnverifiedBudgetCarriesNoNumericProtection(t *testing.T) {
 		},
 		{
 			name: "managed missing body uses B-625", local: Thresholds{MonthlyTokens: 500},
-			caps:         Capabilities{FromOrg: true, OrgAuthoritative: true, RequireOrgBudget: true, FetchState: orgcontract.BudgetFetchUnverified},
+			caps:         Capabilities{FromOrg: true, OrgAuthoritative: true, RequireOrgBudget: true, FailClosed: true, FetchState: orgcontract.BudgetFetchUnverified},
 			wantRequired: true,
+		},
+		{
+			// D-502: without the org's opt-in the same state fails open.
+			name: "managed missing body fails open by default", local: Thresholds{MonthlyTokens: 500},
+			caps: Capabilities{FromOrg: true, OrgAuthoritative: true, RequireOrgBudget: true, FetchState: orgcontract.BudgetFetchUnverified},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -852,6 +857,37 @@ func TestComposeFailClosedMatrix(t *testing.T) {
 		},
 	}
 
+	// D-502: every BLOCKED row above is the org's explicit fail-closed opt-in.
+	// The same row WITHOUT the opt-in (the default) must fail open on the
+	// node's own numbers, which the companion loop below pins row for row.
+	for i := range cases {
+		if cases[i].wantBlocked {
+			cases[i].caps.FailClosed = true
+		}
+	}
+	for _, tc := range cases {
+		if !tc.wantBlocked {
+			continue
+		}
+		tc := tc
+		t.Run("fail-open default/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			caps := tc.caps
+			caps.FailClosed = false
+			eff, posture := Compose(local, body, caps)
+			if eff.BudgetRequired {
+				t.Fatalf("BudgetRequired = true without the org's fail_closed opt-in")
+			}
+			if eff.MonthlyTokens != 5_000_000 || posture.Source != orgcontract.BudgetSourceLocal ||
+				posture.Coverage != orgcontract.BudgetCoverageProxyOnly {
+				t.Errorf("fail-open must run the node's own numbers: monthly=%d source=%q coverage=%q",
+					eff.MonthlyTokens, posture.Source, posture.Coverage)
+			}
+			if posture.FetchState != caps.FetchState {
+				t.Errorf("fetch_state = %q, want %q", posture.FetchState, caps.FetchState)
+			}
+		})
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

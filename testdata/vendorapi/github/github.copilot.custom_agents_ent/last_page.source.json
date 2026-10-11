@@ -1,0 +1,31 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "custom_agents": "VerifiedOfficial",
+    "custom_agents[]": "VerifiedOfficial",
+    "custom_agents[].file_path": "VerifiedOfficial",
+    "custom_agents[].name": "VerifiedOfficial",
+    "custom_agents[].url": "VerifiedOfficial"
+  },
+  "fixture_sha256": "c8a47687122dde77414842eb3072e8bf96a720e7519ddd2b5b54bcde382a1778",
+  "http": {
+    "headers": {
+      "x-github-api-version": "2026-03-10"
+    },
+    "method": "GET",
+    "path": "/enterprises/{enterprise}/copilot/custom-agents",
+    "query": {
+      "page": "2"
+    },
+    "status": 200
+  },
+  "notes": "Verbatim example with_agents of GET /enterprises/{enterprise}/copilot/custom-agents (operationId copilot/get-copilot-custom-agents-for-enterprise). Last page: same body, no Link rel=\"next\" header (the documented terminal condition).",
+  "scenario": "last_page",
+  "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+  "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "github.copilot.custom_agents_ent"
+}

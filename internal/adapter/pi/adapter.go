@@ -2,6 +2,7 @@ package pi
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,18 +77,18 @@ type rawLine struct {
 // Role downstream. See pi-coding-agent docs/session-format.md for the
 // authoritative schema.
 type piMessage struct {
-	Role         string        `json:"role"`
-	Content      []contentPart `json:"content"`
-	API          string        `json:"api"`
-	Provider     string        `json:"provider"`
-	Model        string        `json:"model"`
-	StopReason   string        `json:"stopReason"`
-	ErrorMessage string        `json:"errorMessage"`
-	Timestamp    int64         `json:"timestamp"`
-	Usage        tokenUsage    `json:"usage"`
-	ToolCallID   string        `json:"toolCallId"`
-	ToolName     string        `json:"toolName"`
-	IsError      bool          `json:"isError"`
+	Role         string       `json:"role"`
+	Content      contentParts `json:"content"`
+	API          string       `json:"api"`
+	Provider     string       `json:"provider"`
+	Model        string       `json:"model"`
+	StopReason   string       `json:"stopReason"`
+	ErrorMessage string       `json:"errorMessage"`
+	Timestamp    int64        `json:"timestamp"`
+	Usage        tokenUsage   `json:"usage"`
+	ToolCallID   string       `json:"toolCallId"`
+	ToolName     string       `json:"toolName"`
+	IsError      bool         `json:"isError"`
 	// bashExecution-only fields. Pi emits a separate message-role per
 	// shell command (whether or not an LLM tool call invoked it) so users
 	// can re-run from the TUI; exitCode is undefined while the command is
@@ -97,6 +98,35 @@ type piMessage struct {
 	ExitCode  *int   `json:"exitCode"`
 	Cancelled bool   `json:"cancelled"`
 	Truncated bool   `json:"truncated"`
+}
+
+// contentParts is a message's content: a block array, or (demo node 1,
+// 2026-10-02: a system message) a bare string. The string form decodes as
+// one text block. Before this a string content failed the whole line
+// ("cannot unmarshal string into ... []pi.contentPart"), so a message
+// written that way, a user prompt included, was dropped with a warning.
+type contentParts []contentPart
+
+// UnmarshalJSON accepts a block array, a bare string or null.
+func (c *contentParts) UnmarshalJSON(b []byte) error {
+	t := bytes.TrimSpace(b)
+	if len(t) > 0 && t[0] == '"' {
+		var s string
+		if err := json.Unmarshal(t, &s); err != nil {
+			return err
+		}
+		*c = nil
+		if s != "" {
+			*c = contentParts{{Type: "text", Text: s}}
+		}
+		return nil
+	}
+	var parts []contentPart
+	if err := json.Unmarshal(t, &parts); err != nil {
+		return err
+	}
+	*c = parts
+	return nil
 }
 
 type contentPart struct {

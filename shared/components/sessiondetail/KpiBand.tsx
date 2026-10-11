@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import clsx from "clsx";
 import { BigStat, Tooltip } from "../../primitives";
 import { ClockIcon, DollarIcon, LayersIcon, LightningIcon } from "../../lib/icons";
-import { fmtCompact, fmtDuration, fmtInt } from "../../lib/format";
+import { dollarsShown, fmtCompact, fmtDuration, fmtInt } from "../../lib/format";
 import { elapsedMillis, elapsedSub } from "../../lib/sessionElapsed";
 import { TOKENS_DEFINITION } from "../../lib/tokenSources";
 import { defaultRenderCost, type RenderCost } from "./cost";
@@ -87,19 +87,25 @@ export function KpiBand({
   // totalTokens>0 rule and the "Unknown" branches never fire.
   const usageUnknown = usageRecorded === false;
   const hasTokens = usageRecorded ?? totalTokens > 0;
+  // In a developer's token-usage view (format.ts cost affordances) the cost
+  // tile would only repeat the Tokens tile with its API / Tool split hidden,
+  // so the band drops it. The org never sets that view.
+  const showCost = dollarsShown();
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <CostStat
-        cost={cost}
-        aiCost={aiCost}
-        toolCost={toolCost}
-        totalTokens={totalTokens}
-        muted={!hasProxyCost}
-        renderCost={renderCost}
-        costSub={costSub}
-        usageRecorded={usageRecorded}
-        tokensNote={tokensNote}
-      />
+    <div className={clsx("grid grid-cols-2 gap-3", showCost ? "md:grid-cols-4" : "md:grid-cols-3")}>
+      {showCost && (
+        <CostStat
+          cost={cost}
+          aiCost={aiCost}
+          toolCost={toolCost}
+          totalTokens={totalTokens}
+          muted={!hasProxyCost}
+          renderCost={renderCost}
+          costSub={costSub}
+          usageRecorded={usageRecorded}
+          tokensNote={tokensNote}
+        />
+      )}
       <BigStat
         label="Actions"
         icon={<LightningIcon size={12} />}
@@ -113,6 +119,10 @@ export function KpiBand({
         value={elapsedMs != null ? fmtDuration(elapsedMs) : "(open)"}
         sub={elapsedSub({ ended_at: endedAt, last_activity_at: lastActivityAt })}
       />
+      {/* Three tiles on a two-column phone grid: Tokens takes the full
+          second row instead of leaving a hole. `contents` keeps the
+          four-tile band's layout untouched. */}
+      <div className={showCost ? "contents" : "col-span-2 grid md:col-span-1"}>
       <BigStat
         label="Tokens"
         icon={<LayersIcon size={12} />}
@@ -143,6 +153,7 @@ export function KpiBand({
         subTitle={tokensNote || (hasTokens && tokensSub != null ? TOKENS_DEFINITION : undefined)}
         muted={!hasTokens}
       />
+      </div>
     </div>
   );
 }

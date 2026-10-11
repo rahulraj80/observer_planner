@@ -1,0 +1,39 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "data": "VerifiedOfficial",
+    "data[]": "VerifiedOfficial",
+    "data[].artifact_type": "VerifiedOfficial",
+    "data[].id": "VerifiedOfficial",
+    "data[].organization_uuid": "VerifiedOfficial",
+    "data[].owner_user_id": "VerifiedOfficial",
+    "data[].published_version_id": "VerifiedOfficial",
+    "data[].read_mode": "VerifiedOfficial",
+    "data[].updated_at": "VerifiedOfficial",
+    "data[].user": "VerifiedOfficial",
+    "data[].user.email_address": "VerifiedOfficial",
+    "data[].user.id": "VerifiedOfficial",
+    "data[].versions": "VerifiedOfficial",
+    "data[].versions[]": "VerifiedOfficial",
+    "data[].versions[].created_at": "VerifiedOfficial",
+    "data[].versions[].id": "VerifiedOfficial",
+    "data[].versions[].name": "VerifiedOfficial",
+    "has_more": "VerifiedOfficial",
+    "next_page": "VerifiedOfficial"
+  },
+  "fixture_sha256": "26b1f0c7a85f59d72b1c7e4bcc992fd65b2206b362ddd5c297e2e63e66ee75dd",
+  "http": {
+    "method": "GET",
+    "path": "/v1/compliance/apps/code/artifacts",
+    "status": 200
+  },
+  "notes": "Verbatim official 200 example of GET /v1/compliance/apps/code/artifacts.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "generated Compliance API reference, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "2ece9f3f845885fdfa0f44bbe7ea6c31fe869a313eabf2c3e6f5babf9e17a0ed",
+  "source_url": "https://platform.claude.com/docs/en/api/compliance.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "anthropic.enterprise.compliance.code_artifacts"
+}

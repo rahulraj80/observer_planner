@@ -1,15 +1,10 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/BurntSushi/toml"
 )
 
 // This file implements the dotted-key setter behind `observer config
@@ -33,25 +28,17 @@ func SetConfigKey(cfg *Config, dotted, value string) error {
 // UpdateProjectOverlay sets a dotted key in <root>/.observer/
 // config.toml, creating the file when absent. Only allow-listed keys
 // are writable: the profiles table and compression parameters. The
-// write goes through the shared .bak + atomic-rename path.
+// edit is key-preserving and goes through the shared .bak +
+// atomic-rename path (PlanProjectOverlayEdit / ApplyProjectOverlayEdit,
+// the one owner the dashboard's per-project profile card also uses).
+// The home directory is always refused; a caller that knows a custom
+// master config path plans with ProjectOverlayEditRequest.ExcludeFile.
 func UpdateProjectOverlay(root, dotted, value string) error {
-	seg0 := strings.SplitN(dotted, ".", 2)[0]
-	if seg0 != "profiles" && seg0 != "compression" {
-		return fmt.Errorf("config: project files accept only profiles.* and compression.* keys (got %q) — daemon-level keys live in the global config.toml", dotted)
-	}
-	path := filepath.Join(root, ProjectOverlayFilename)
-	var doc projectOverlayDoc
-	if body, err := os.ReadFile(path); err == nil {
-		if err := toml.Unmarshal(body, &doc); err != nil {
-			return fmt.Errorf("config: existing %s does not parse; fix it before setting keys: %w", path, err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("config: read %s: %w", path, err)
-	}
-	if err := setStructKey(reflect.ValueOf(&doc).Elem(), strings.Split(dotted, "."), dotted, value); err != nil {
+	e, err := PlanProjectOverlayEdit(ProjectOverlayEditRequest{Root: root, Key: dotted, Value: value})
+	if err != nil {
 		return err
 	}
-	return writeTOMLAtomic(path, doc)
+	return ApplyProjectOverlayEdit(e)
 }
 
 // setStructKey walks segs against v's toml tags and sets the leaf
@@ -131,7 +118,7 @@ func setLeaf(field reflect.Value, dotted, value string) error {
 		}
 		field.Set(reflect.ValueOf(items))
 	case reflect.Map:
-		return fmt.Errorf("config: %q is a table — set one entry (e.g. %s.anthropic)", dotted, dotted)
+		return fmt.Errorf("config: %q is a table - set one entry (e.g. %s.anthropic)", dotted, dotted)
 	default:
 		return fmt.Errorf("config: %q is a table, not a settable value", dotted)
 	}

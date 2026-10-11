@@ -79,6 +79,16 @@ func (a *Adapter) WithSessionHookChecker(check SessionHookChecker) *Adapter {
 	return a
 }
 
+// ConfigureHookDedup implements adapter.HookDedupConfigurer: the watcher
+// builder hands the store's source-file probe and the adapter binds it to
+// its own hook marker (hookSourceFile), the same gate WithSessionHookChecker
+// installs.
+func (a *Adapter) ConfigureHookDedup(hasRows func(ctx context.Context, sessionID, sourceFile string) (bool, error)) {
+	a.WithSessionHookChecker(func(ctx context.Context, sessionID string) (bool, error) {
+		return hasRows(ctx, sessionID, hookSourceFile)
+	})
+}
+
 // Name implements adapter.Adapter.
 func (*Adapter) Name() string { return models.ToolClineCLI }
 

@@ -84,7 +84,7 @@ func TestAdminManagedIsNeverTouchedByGovernance(t *testing.T) {
 	// lowers everything else.
 	eff := shareEffective(t, `{"schema":2,"share":{"full_content":false,"routing_summary":false}}`)
 	if !lowerShareOptions(local, eff).AdminManaged {
-		t.Fatal("the lowering seam cleared admin_managed — that flag is a node-side provisioning decision with no remote path")
+		t.Fatal("the lowering seam cleared admin_managed - that flag is a node-side provisioning decision with no remote path")
 	}
 }
 

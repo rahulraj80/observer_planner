@@ -1,3 +1,5 @@
+//go:build !sbo_omit_remote
+
 package dashboard
 
 import (
@@ -11,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/tailnet"
 )
 
@@ -121,30 +122,6 @@ func TestRemoteTailscaleServe(t *testing.T) {
 	if !strings.Contains(rec2.Body.String(), `"ok":true`) {
 		t.Errorf("serve response should pass runner OK through: %s", rec2.Body.String())
 	}
-}
-
-// newManageServerWithLaunch is newManageServer plus an injected LaunchManager,
-// for the operator-grant PTY-spawn path.
-func newManageServerWithLaunch(t *testing.T, lm LaunchManager) http.Handler {
-	t.Helper()
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "observer.db")
-	database, err := openTestDB(context.Background(), db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	cfgPath := filepath.Join(dir, "config.toml")
-	body := "[observer]\ndb_path = \"" + filepath.ToSlash(dbPath) + "\"\n"
-	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	rc, _ := newReadyRemoteController(t)
-	s, err := New(Options{DB: database, ConfigPath: cfgPath, Remote: rc, LaunchManager: lm})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	return s.Handler()
 }
 
 // TestRemoteTailscaleOperatorGrant covers the guided privilege fix: the route

@@ -3,6 +3,7 @@ package integration
 import (
 	"regexp"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -315,6 +316,73 @@ func TestGUILaunchablesIsSortedAndComplete(t *testing.T) {
 			t.Errorf("GUI row %q carries lifecycle %q but adapter %q is %q — the carrier's lifecycle must "+
 				"compose through", g.Spec.ID, string(g.Lifecycle), g.Adapter, string(c.Lifecycle))
 		}
+	}
+}
+
+// TestZedGUIRowMatchesVendorSources pins the zed-ide row (D-177, T-037c) to
+// the vendor install sources it was grounded from on 2026-10-04: the three
+// commands zed.dev/docs/installation documents, the Windows layouts zed.iss
+// ({autopf}\Zed with PrivilegesRequired=lowest) and the winget manifest
+// (%ProgramFiles%\Zed) produce, the install.sh Linux layout, and the
+// Homebrew cask's "Zed.app". ProbeOnly is load-bearing: the installer's
+// default-on addtopath task puts bin\zed.exe (the CLI) on PATH, which would
+// match the Zed.exe spelling case-insensitively.
+func TestZedGUIRowMatchesVendorSources(t *testing.T) {
+	g, ok := GUILaunchFor("zed-ide")
+	if !ok {
+		t.Fatal("zed-ide GUI row missing")
+	}
+	s := g.Spec
+	if g.Adapter != "zed" || !g.Advertised() || !s.Grounded {
+		t.Fatalf("zed-ide: adapter %q advertised=%v grounded=%v, want zed/true/true", g.Adapter, g.Advertised(), s.Grounded)
+	}
+	if s.Surface != "ide" || s.DarwinApp != "Zed" || !s.ProjectDirArgv || !s.ProbeOnly {
+		t.Errorf("zed-ide: surface=%q darwinApp=%q projectDirArgv=%v probeOnly=%v, want ide/Zed/true/true",
+			s.Surface, s.DarwinApp, s.ProjectDirArgv, s.ProbeOnly)
+	}
+	if got := s.Binary.Names; len(got.Windows) != 1 || got.Windows[0] != "Zed.exe" || len(got.Unix) != 1 || got.Unix[0] != "zed" {
+		t.Errorf("zed-ide: Names = %+v, want Windows [Zed.exe] (never the bin\\zed.exe CLI) and Unix [zed]", got)
+	}
+	wantDirs := map[ProbeDir]bool{
+		{OS: ProbeUnix, Rel: ".local/zed.app/bin"}:              true,
+		{OS: ProbeWindows, Rel: "AppData/Local/Programs/Zed"}:   true,
+		{OS: ProbeWindows, Rel: "Zed", EnvRoot: "ProgramFiles"}: true,
+	}
+	if len(s.Binary.ProbeDirs) != len(wantDirs) {
+		t.Errorf("zed-ide: %d probe dirs, want %d", len(s.Binary.ProbeDirs), len(wantDirs))
+	}
+	for _, pd := range s.Binary.ProbeDirs {
+		if !wantDirs[pd] {
+			t.Errorf("zed-ide: unexpected probe dir %+v", pd)
+		}
+	}
+	wantInstall := map[string]string{
+		"windows/winget": "winget install --id ZedIndustries.Zed -e --source winget",
+		"darwin/brew":    "brew install --cask zed",
+		"linux/script":   "curl -f https://zed.dev/install.sh | sh",
+	}
+	if len(s.Binary.Installs) != len(wantInstall) {
+		t.Errorf("zed-ide: %d install hints, want %d", len(s.Binary.Installs), len(wantInstall))
+	}
+	for _, h := range s.Binary.Installs {
+		want, ok := wantInstall[h.OS+"/"+h.Channel]
+		if !ok || h.Display != want {
+			t.Errorf("zed-ide: install %s/%s display %q, want %q", h.OS, h.Channel, h.Display, want)
+		}
+		if h.Channel == "script" {
+			if last := h.Argv[len(h.Argv)-1]; last != want {
+				t.Errorf("zed-ide: script argv runs %q, display shows %q", last, want)
+			}
+			if strings.Join(h.Requires, ",") != "curl,tar" {
+				t.Errorf("zed-ide: script Requires = %v, want [curl tar] (read from zed.dev/install.sh)", h.Requires)
+			}
+		}
+	}
+	if s.Wrap.Kind != WrapNone {
+		t.Errorf("zed-ide: wrap kind %q, want none (no grounded base-URL environment knob)", s.Wrap.Kind)
+	}
+	if len(s.Hosts) != 1 || s.Hosts[0] != "zed" {
+		t.Errorf("zed-ide: Hosts = %v, want [zed] only", s.Hosts)
 	}
 }
 

@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -153,14 +155,14 @@ func TestSidechainRowsNeverBecomeExcerpts(t *testing.T) {
 		t.Fatalf("a sub-agent row's content reached the upload bytes: %q\n%s", secret, body)
 	}
 	if len(res.Envelope.Context) == 0 {
-		t.Fatal("no excerpts were produced at all — the test would pass vacuously")
+		t.Fatal("no excerpts were produced at all - the test would pass vacuously")
 	}
 	first := res.Envelope.Context[0]
 	if first.Source != cloudevidence.SourceFirstUserPrompt {
 		t.Fatalf("first excerpt source = %q, want first_user_prompt", first.Source)
 	}
 	if !strings.HasPrefix(first.Text, "Wire the retry-safe device auth flow") {
-		t.Errorf("first_user_prompt = %q, want the developer's OWN first prompt — "+
+		t.Errorf("first_user_prompt = %q, want the developer's OWN first prompt - "+
 			"a sub-agent's delegation brief is not the session's prompt", first.Text)
 	}
 	for _, c := range res.Envelope.Context {
@@ -301,12 +303,12 @@ func TestOutcomesCoverTheWholeSessionAndLongTargets(t *testing.T) {
 	res, _ := buildAstraEnvelope(t, dbPath, sessionID, cloudcontract.PurposeStructuralInsights, nil)
 	out := res.Envelope.Outcomes
 	if out.Build != "failed" {
-		t.Errorf("build = %q, want failed — the session's LAST build sits at row %d of %d, "+
+		t.Errorf("build = %q, want failed - the session's LAST build sits at row %d of %d, "+
 			"inside the window a head+tail read omits", out.Build, buildRow, total)
 	}
 	// Two test runs: the plain one and the long-env-prefixed one, both known.
 	if out.TestsRun != 2 || out.TestsPassed != 2 {
-		t.Errorf("tests = %d/%d, want 2/2 — one of them carries a 600-byte inline env "+
+		t.Errorf("tests = %d/%d, want 2/2 - one of them carries a 600-byte inline env "+
 			"assignment ahead of the program, which a 512-byte target window decapitated",
 			out.TestsPassed, out.TestsRun)
 	}
@@ -430,7 +432,7 @@ func TestPricingUsesTheCompleteBundlePerRow(t *testing.T) {
 		t.Fatal("the pricer could not price the reference bundle")
 	}
 	if !nearlyEqualUSD(res.Envelope.Metrics.CostUSD, want.Total) {
-		t.Errorf("cost = %v, want %v — the envelope must price the COMPLETE bundle "+
+		t.Errorf("cost = %v, want %v - the envelope must price the COMPLETE bundle "+
 			"(fast tier, 1h cache tier, web-search fee), not a subset of it",
 			res.Envelope.Metrics.CostUSD, want.Total)
 	}
@@ -507,20 +509,20 @@ func TestErrorClassesCoverEveryFailure(t *testing.T) {
 		}
 	}
 	if _, ok := classes[cloudevidence.ErrorClassTestFailure]; !ok {
-		t.Fatalf("the session's DOMINANT failure class is missing from %v — it lives in the "+
+		t.Fatalf("the session's DOMINANT failure class is missing from %v - it lives in the "+
 			"middle of the population, which a head+tail window omits", classes)
 	}
 	if got := classes[cloudevidence.ErrorClassTestFailure]; got != cloudevidence.ErrorClassTestFailure+" x3000" {
 		t.Errorf("test_failure count = %q, want the WHOLE population's count (x3000)", got)
 	}
 	if got := classes[cloudevidence.ErrorClassRateLimited]; got != cloudevidence.ErrorClassRateLimited+" x800" {
-		t.Errorf("rate_limited = %q, want %q — a failure recorded on a non-tool_failure row "+
+		t.Errorf("rate_limited = %q, want %q - a failure recorded on a non-tool_failure row "+
 			"(success = 0 with an error message) is still a failure of this session, and this "+
 			"one is the session's SECOND most frequent class",
 			got, cloudevidence.ErrorClassRateLimited+" x800")
 	}
 	if got := classes[cloudevidence.ErrorClassPermissionDenied]; got == "" {
-		t.Errorf("classes = %v — the session's LAST observed class must ride along even when "+
+		t.Errorf("classes = %v - the session's LAST observed class must ride along even when "+
 			"it is not one of the top two", classes)
 	}
 }

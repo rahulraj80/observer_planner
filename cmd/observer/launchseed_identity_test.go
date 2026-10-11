@@ -61,7 +61,7 @@ func TestLaunchSeedIdentity_CanonicalisationIsIdempotent(t *testing.T) {
 	t.Parallel()
 	tools := integration.Tools()
 	if len(tools) == 0 {
-		t.Fatal("integration.Tools() is empty — the test premise is unverifiable")
+		t.Fatal("integration.Tools() is empty - the test premise is unverifiable")
 	}
 	for _, tool := range tools {
 		tool := tool
@@ -69,7 +69,7 @@ func TestLaunchSeedIdentity_CanonicalisationIsIdempotent(t *testing.T) {
 			t.Parallel()
 			got, _ := launchSeedIdentity(tool, "/dir", nil)
 			if got != tool {
-				t.Fatalf("launchSeedIdentity(%q) rewrote a canonical adapter key to %q — some other adapter declares %q as its launcher verb, so recordLaunchSeed would bind the wrong tool", tool, got, tool)
+				t.Fatalf("launchSeedIdentity(%q) rewrote a canonical adapter key to %q - some other adapter declares %q as its launcher verb, so recordLaunchSeed would bind the wrong tool", tool, got, tool)
 			}
 		})
 	}
@@ -93,11 +93,11 @@ func TestLaunchSeedIdentity_EveryLaunchVerbResolves(t *testing.T) {
 		verbs++
 		got, _ := launchSeedIdentity(verb, "/dir", nil)
 		if got != tool {
-			t.Errorf("launchSeedIdentity(%q) = %q, want the declaring adapter key %q — a launcher passing its verb would record an unmatchable launch seed", verb, got, tool)
+			t.Errorf("launchSeedIdentity(%q) = %q, want the declaring adapter key %q - a launcher passing its verb would record an unmatchable launch seed", verb, got, tool)
 		}
 	}
 	if verbs == 0 {
-		t.Fatal("no launcher verbs resolved from the registry — the test premise is unverifiable")
+		t.Fatal("no launcher verbs resolved from the registry - the test premise is unverifiable")
 	}
 }
 
@@ -163,7 +163,7 @@ func TestLaunchSeedRunID(t *testing.T) {
 			vals:      map[string]string{envOOBRun: "run-A"},
 			oobActive: false,
 			want:      "",
-			why:       "binding here would attribute the nested child to the OUTER run's session — worse than the heuristic",
+			why:       "binding here would attribute the nested child to the OUTER run's session - worse than the heuristic",
 		},
 		{
 			name:      "a plain shell invocation has neither",

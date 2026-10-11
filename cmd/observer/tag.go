@@ -30,12 +30,12 @@ import (
 // never parsed: pflag claimed `-junk` as a shorthand flag cluster).
 const tagGrammarHelp = "Grammar:\n" +
 	"  +<tag>        add a tag (positional; repeatable)\n" +
-	"  --rm <tag>    remove a tag (repeatable) — the primary remove spelling\n" +
+	"  --rm <tag>    remove a tag (repeatable) - the primary remove spelling\n" +
 	"  -- -<tag>     remove a tag using the '-' spelling. The '--' end-of-flags\n" +
 	"                marker is REQUIRED: a bare -tag looks like a flag to the\n" +
 	"                argument parser and is rejected before this command runs.\n\n" +
 	"Flag placement: every flag (--rm, --favorite, --note, --config, --json …)\n" +
-	"must come BEFORE the '--' marker. Tokens after '--' are tag tokens only —\n" +
+	"must come BEFORE the '--' marker. Tokens after '--' are tag tokens only -\n" +
 	"a '--favorite' written after '--' is read as a tag, not as a flag.\n\n" +
 	"Tags are normalized on write: trimmed, lowercased, spaces become '-',\n" +
 	"charset [a-z0-9._-], at most 40 characters, at most 16 tags per session.\n\n" +
@@ -65,8 +65,8 @@ func newTagCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tag <session-id-prefix> [+tag ...] [--rm tag]",
 		Short: "Tag, star, or annotate a session (classification for later review)",
-		Long: "Applies the session-classification primitives — tags, the favorite\n" +
-			"star, and the free-text note — to one session. The session id may be\n" +
+		Long: "Applies the session-classification primitives - tags, the favorite\n" +
+			"star, and the free-text note - to one session. The session id may be\n" +
 			"abbreviated to any unique prefix.\n\n" + tagGrammarHelp,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -226,7 +226,7 @@ func resolveSessionPrefix(ctx context.Context, st *store.Store, prefix string) (
 		// MatchCountLabel, not len(Candidates): the candidate list is capped, so
 		// a prefix matching more sessions than the cap must read "10+ sessions"
 		// instead of understating the ambiguity as exactly 10.
-		return "", fmt.Errorf("session id prefix %q matches %s sessions — be more specific:\n  %s",
+		return "", fmt.Errorf("session id prefix %q matches %s sessions - be more specific:\n  %s",
 			amb.Prefix, amb.MatchCountLabel(), strings.Join(amb.Candidates, "\n  "))
 	}
 	return "", err
@@ -241,7 +241,7 @@ func newTagsCmd() *cobra.Command {
 		Short: "Session tag vocabulary: per-tag session counts + cost, rename, remove",
 		Long: "Lists the tag vocabulary derived from the tags actually in use, with\n" +
 			"per-tag session counts and the summed cost of the sessions carrying\n" +
-			"each tag — the 'analysis by label' surface. Use `observer tag` to\n" +
+			"each tag - the 'analysis by label' surface. Use `observer tag` to\n" +
 			"classify an individual session.",
 	}
 	cmd.AddCommand(newTagsListCmd())

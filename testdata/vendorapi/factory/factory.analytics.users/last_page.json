@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "user_id": "user_synth0002",
+      "user_email": null,
+      "date": "2026-01-15",
+      "tool_calls": 40,
+      "billable_tokens": 12000,
+      "primary_model": "claude-sonnet-4-5-20250929",
+      "primary_model_tier": "standard",
+      "files_created": 0,
+      "files_edited": 3,
+      "git_commits": 0,
+      "git_prs_created": 0,
+      "mcp_calls": 0,
+      "skill_calls": 0,
+      "slash_commands": 1,
+      "hooks": 4,
+      "sessions": 2,
+      "messages": 20,
+      "user_messages": 5,
+      "assistant_messages": 9,
+      "autonomy_ratio": 1.5,
+      "delegation_level": "manual",
+      "languages": [
+        "Go"
+      ]
+    }
+  ],
+  "meta": {
+    "org_id": "org_01HPMQ6ABCDE",
+    "start_date": "2026-01-15",
+    "end_date": "2026-01-15",
+    "has_more": false,
+    "next_cursor": null
+  }
+}

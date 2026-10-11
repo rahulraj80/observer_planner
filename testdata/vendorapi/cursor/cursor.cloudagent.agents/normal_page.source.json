@@ -1,0 +1,32 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "items": "VerifiedOfficial",
+    "items[]": "VerifiedOfficial",
+    "items[].createdAt": "VerifiedOfficial",
+    "items[].env": "VerifiedOfficial",
+    "items[].env.type": "VerifiedOfficial",
+    "items[].id": "VerifiedOfficial",
+    "items[].latestRunId": "VerifiedOfficial",
+    "items[].name": "VerifiedOfficial",
+    "items[].status": "VerifiedOfficial",
+    "items[].updatedAt": "VerifiedOfficial",
+    "items[].url": "VerifiedOfficial",
+    "nextCursor": "VerifiedOfficial"
+  },
+  "fixture_sha256": "df5792b4c5f1c6beb6287c41c4c849dfa755bf9b10e2cb5d989016ea00c09c49",
+  "http": {
+    "method": "GET",
+    "path": "/v1/agents",
+    "status": 200
+  },
+  "notes": "Verbatim response example from the \"List Agents\" section.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "Cursor Cloud Agents API endpoints page, fetched 2026-10-07",
+  "source_kind": "api_reference_example",
+  "source_sha256": "606bb636970ab8de2e8d87bfff9c13ae972ebe4817cc88ced9a60882aab124ef",
+  "source_url": "https://cursor.com/docs/cloud-agent/api/endpoints.md",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "cursor.cloudagent.agents"
+}

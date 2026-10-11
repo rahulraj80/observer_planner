@@ -1,3 +1,5 @@
+//go:build !sbo_omit_org_update
+
 package main
 
 import (
@@ -15,13 +17,16 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/db"
+	"github.com/marmutapp/superbased-observer/internal/store"
 	"github.com/marmutapp/superbased-observer/internal/update"
 )
 
 // update.go is the READ-ONLY half of the `observer update` command family
 // (docs/plans/enterprise-update-management-plan-2026-09-07.md §3.10):
 //
-//   - `observer update status` — local state only, no network, no DB.
+//   - `observer update status`: local state only, no network (it reads the
+//     node database for the update state and the enrolment grant, T-727).
 //   - `observer update check`  — the same local read, said out loud: the
 //     manifest FETCH belongs to the daemon's push cycle, and this command
 //     deliberately opens no second fetch path on the node (ruling R8).
@@ -65,8 +70,8 @@ they ask the running daemon over loopback, because the drain and the
 fork-exec-and-watch handshake are only meaningful in the process that owns
 the listeners.
 
-Updates are served by the org server a node is enrolled with — never by
-GitHub, npm or a CDN — so a node that is not enrolled has nothing to
+Updates are served by the org server a node is enrolled with - never by
+GitHub, npm or a CDN - so a node that is not enrolled has nothing to
 check. The dashboard's click-gated "Check for updates" button remains
 the independent freshness oracle for standalone installs.`,
 		Args: cobra.NoArgs,
@@ -177,7 +182,7 @@ there is nothing to check.`,
 			}
 			out := cmd.OutOrStdout()
 			if rep.LastManifestVersion == 0 {
-				fmt.Fprintln(out, "update check: no manifest — this node has never accepted one.")
+				fmt.Fprintln(out, "update check: no manifest - this node has never accepted one.")
 			} else {
 				fmt.Fprintf(out, "update check: last accepted manifest %d (%s), target %s.\n",
 					rep.LastManifestVersion, orDash(rep.LastManifestSeenAt), orDash(rep.TargetVersion))
@@ -225,18 +230,15 @@ func buildUpdateStatus() (updateStatusReport, error) {
 	// is carried beside the value.
 	cfg, cfgErr := config.Load(config.LoadOptions{})
 	win, _ := update.ParseWindow("")
-	autoApply, autoWhy := false, update.AutoApplyReason(false, false, update.ManagedPosture{})
+	autoApply, autoWhy := resolveUpdateAutoApply(config.Config{}, updateManagedPosture(store.ShareOptions{}))
 	channel := string(st.Channel)
 	if cfgErr == nil {
 		win, _ = update.ParseWindow(cfg.Update.Window)
-		// EnterpriseGranted lives on the RUNTIME enrolment grant, not in
-		// the TOML, so a CLI with no daemon can only see admin_managed.
-		// The daemon resolves the full posture (see start.go); reporting
-		// the half this process can actually observe is better than
-		// inventing the other half.
-		posture := update.ManagedPosture{AdminManaged: cfg.OrgClient.Share.AdminManaged}
-		effective, explicit := cfg.Update.EffectiveAutoApply(update.AutoApplyDefault(posture))
-		autoApply, autoWhy = effective, update.AutoApplyReason(explicit, effective, posture)
+		// T-727: the same resolver and the same posture inputs as the
+		// daemon. EnterpriseGranted lives on the enrolment grant, not in
+		// the TOML, so it is read from the live governance grant
+		// (cliUpdateShareOptions), never assumed false.
+		autoApply, autoWhy = updateStatusAutoApply(context.Background(), cfg)
 		if strings.TrimSpace(cfg.Update.Channel) != "" {
 			channel = cfg.Update.Channel
 		}
@@ -266,12 +268,26 @@ func buildUpdateStatus() (updateStatusReport, error) {
 	return rep, nil
 }
 
+// updateStatusAutoApply resolves the status line's auto-apply value the way
+// the daemon does (T-727): open the node's database for the governance
+// grant, map through updateManagedPosture, resolve through
+// resolveUpdateAutoApply. An unopenable database reads the grant as absent.
+func updateStatusAutoApply(ctx context.Context, cfg config.Config) (bool, string) {
+	var st *store.Store
+	if database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath}); err == nil {
+		defer func() { _ = closeDBQuietly(database) }()
+		st = store.New(database)
+	}
+	share := cliUpdateShareOptions(ctx, cfg, st, newLogger("warn"))
+	return resolveUpdateAutoApply(cfg, updateManagedPosture(share))
+}
+
 // writeUpdateStatus renders the report as aligned text.
 func writeUpdateStatus(w io.Writer, rep updateStatusReport) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SuperBased update status\t")
 	fmt.Fprintf(tw, "  installed version\t%s\n", rep.InstalledVersion)
-	fmt.Fprintf(tw, "  channel\t%s\n", orText(rep.Channel, "(unassigned — the org assigns one)"))
+	fmt.Fprintf(tw, "  channel\t%s\n", orText(rep.Channel, "(unassigned - the org assigns one)"))
 	fmt.Fprintf(tw, "  state\t%s\n", stateText(rep))
 	fmt.Fprintf(tw, "  target version\t%s\n", orDash(rep.TargetVersion))
 	fmt.Fprintf(tw, "  last manifest\t%s\n", manifestText(rep))

@@ -508,7 +508,7 @@ func TestFetchAndAcceptPolicyResource_NoGenerationRowYet(t *testing.T) {
 
 // TestOrgKey_ScopedByURLAndOrgID pins plan §6.2: the enrolment-identity key
 // is a function of BOTH the org URL and the org id, normalized the same way
-// Enroll normalizes the URL, so two organisations at one control-plane URL
+// Enroll normalizes the URL, so two organizations at one control-plane URL
 // never collide.
 func TestOrgKey_ScopedByURLAndOrgID(t *testing.T) {
 	base := OrgKey("https://org.example", "org-1")
@@ -812,5 +812,33 @@ func TestMaybeKickPolicyResourceFetch(t *testing.T) {
 	c.maybeKickPolicyResourceFetch([]byte(`{"accepted_rows":3}`))
 	if kicked() {
 		t.Fatal("an ack without policy_versions must not kick")
+	}
+}
+
+// TestFirstPublishAfterAnEmptyBaselineKicks: an org with NO policy resource
+// yet acknowledges with an empty (or absent) version map. That is a baseline,
+// so the org's first publish of any family is an advance and kicks a fetch
+// within seconds, instead of being swallowed as the node's "first
+// observation" and left to the hourly poll (found live, managed-node
+// visibility arc: an admin exposing a page on a fresh org saw nothing).
+func TestFirstPublishAfterAnEmptyBaselineKicks(t *testing.T) {
+	for _, empty := range []string{`{"policy_versions":{}}`, `{"accepted_rows":0}`} {
+		c := New(config.OrgClientConfig{}, nil, nil, "test", nil, nil)
+		kicked := func() bool {
+			select {
+			case <-c.policyResourceKick:
+				return true
+			default:
+				return false
+			}
+		}
+		c.maybeKickPolicyResourceFetch([]byte(empty))
+		if kicked() {
+			t.Fatalf("%s: the empty baseline itself must not kick", empty)
+		}
+		c.maybeKickPolicyResourceFetch([]byte(`{"policy_versions":{"node.governance":1}}`))
+		if !kicked() {
+			t.Fatalf("%s: the first publish after an empty baseline must kick", empty)
+		}
 	}
 }

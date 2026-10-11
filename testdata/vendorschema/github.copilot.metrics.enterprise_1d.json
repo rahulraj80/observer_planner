@@ -1,0 +1,31 @@
+{
+ "checked_on": "2026-10-07",
+ "name": "github.copilot.metrics.enterprise_1d",
+ "note": "Fully dereferenced response schema (descriptions and examples stripped) for schema-random property tests. Nothing here was observed from a vendor response.",
+ "pointer": "#/paths/~1enterprises~1{enterprise}~1copilot~1metrics~1reports~1enterprise-1-day/get/responses/200",
+ "schema": {
+  "properties": {
+   "download_links": {
+    "items": {
+     "format": "uri",
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "report_day": {
+    "format": "date",
+    "type": "string"
+   }
+  },
+  "required": [
+   "download_links",
+   "report_day"
+  ],
+  "type": "object"
+ },
+ "sdk_or_spec_version_or_commit": "github/rest-api-description ghec.2026-03-10 info.version 1.1.4, fetched 2026-10-07",
+ "source_kind": "openapi_spec",
+ "source_sha256": "02fc40b8fb1a6e9e06f669bffe0072e33bfe82d200453088575022fb0e71d820",
+ "source_url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/ghec/ghec.2026-03-10.json",
+ "status": "synthetic, awaiting live validation"
+}

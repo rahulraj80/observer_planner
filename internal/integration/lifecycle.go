@@ -117,9 +117,9 @@ var productLifecycles = map[string]ProductLifecycle{
 			"vendor pivoted to the Slack-only cloud product Roomote (community continuation: " +
 			"ZooCode). Observer keeps parsing the existing rooveterinaryinc.roo-cline/tasks " +
 			"globalStorage through internal/adapter/cline (a per-file retag, no roo-code " +
-			"registry row by design — IDE-20) and never deletes its rows; nothing is " +
+			"registry row by design - IDE-20) and never deletes its rows; nothing is " +
 			"advertised for it. Sources: https://github.com/RooCodeInc/Roo-Code (archived), " +
-			"docs/audits/vendor-surface-inventory-2026-09-03.md §3.3 (MEDIUM confidence — " +
+			"docs/audits/vendor-surface-inventory-2026-09-03.md §3.3 (MEDIUM confidence - " +
 			"third-party corroboration, Roo's own pages are archived).",
 	},
 	"open-interpreter-python": {
@@ -146,7 +146,7 @@ var productLifecycles = map[string]ProductLifecycle{
 			"IDE still installs under %LOCALAPPDATA%\\Programs\\Windsurf with a `windsurf` shim, " +
 			"and its bundled devin.exe lane is expected to write ~/.devin (captured by the devin " +
 			"row, UNVERIFIED until a logged-in run). The separate Cascade / \"Devin Local\" agent " +
-			"store is NOT covered (would be a new tool id — inventory §3.1 #2). Source: " +
+			"store is NOT covered (would be a new tool id - inventory §3.1 #2). Source: " +
 			"https://docs.devin.ai/desktop, docs/audits/vendor-surface-inventory-2026-09-03.md §1.5.",
 	},
 	"gemini-code-assist-individuals": {
@@ -156,7 +156,7 @@ var productLifecycles = map[string]ProductLifecycle{
 		Note: "On 2026-06-18 Google stopped serving Gemini CLI and the Gemini Code Assist IDE " +
 			"extensions for the free 'for individuals' tier and for Google AI Pro / Ultra " +
 			"accounts; those users are directed to the Antigravity family (Antigravity CLI " +
-			"`agy` and the Antigravity IDE — Observer rows antigravity-cli / antigravity). " +
+			"`agy` and the Antigravity IDE - Observer rows antigravity-cli / antigravity). " +
 			"Gemini Code Assist STANDARD and ENTERPRISE subscriptions are unchanged, so the " +
 			"gemini-cli registry row stays ACTIVE (capture, install and launch still valid " +
 			"for those tiers); the operator's live attempt 2026-09-03 returned \"This client " +
@@ -171,7 +171,7 @@ var productLifecycles = map[string]ProductLifecycle{
 		Note: "ZooCode (ZooCodeOrganization.zoo-code) is the community continuation of Roo Code " +
 			"after its 2026-04-21 shutdown, shipped 2026 as a separate VS Code listing; parsed " +
 			"by internal/adapter/cline as a per-file retag (no registry row by design, like " +
-			"roo-code). Vendor status: active community project — on-disk extension-dir " +
+			"roo-code). Vendor status: active community project - on-disk extension-dir " +
 			"spelling still UNCONFIRMED (inventory rates the ext id LOW; the Marketplace id " +
 			"ZooCodeOrganization.zoo-code itself is vendor-confirmed). Sources: " +
 			"https://www.zoocode.dev/, https://github.com/Zoo-Code-Org/Zoo-Code, " +

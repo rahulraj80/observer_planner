@@ -515,15 +515,35 @@ func (s *Store) LoadLOCByDay(ctx context.Context, days int, projectID int64) ([]
 	if days <= 0 {
 		days = 30
 	}
-	since := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339Nano)
+	return s.LoadLOCByDayRange(ctx, time.Now().UTC().AddDate(0, 0, -days), time.Time{}, projectID)
+}
+
+// locWindowBounds renders a [since, until) window as the two string
+// bounds the LOC reads bind. A zero since matches every row (empty string
+// sorts first); a zero until is the open-ended "until now" window.
+func locWindowBounds(since, until time.Time) (sinceStr, untilStr string) {
+	if !since.IsZero() {
+		sinceStr = since.UTC().Format(time.RFC3339Nano)
+	}
+	if !until.IsZero() {
+		untilStr = until.UTC().Format(time.RFC3339Nano)
+	}
+	return sinceStr, untilStr
+}
+
+// LoadLOCByDayRange is LoadLOCByDay over an explicit [since, until)
+// window (T-550): the dashboard's closed custom range binds the upper
+// bound here instead of being silently widened to "until now".
+func (s *Store) LoadLOCByDayRange(ctx context.Context, since, until time.Time, projectID int64) ([]LOCDay, error) {
+	sinceStr, untilStr := locWindowBounds(since, until)
 	q := locDedupCTE + `
 		SELECT substr(fc.saved_at, 1, 10) AS day, fc.project_id, fc.actor, COUNT(*),` +
 		locStatsColumns + `
 		FROM file_changes fc JOIN keep k ON k.id = fc.id
-		WHERE fc.saved_at >= ? AND (? = 0 OR fc.project_id = ?)
+		WHERE fc.saved_at >= ? AND (? = '' OR fc.saved_at < ?) AND (? = 0 OR fc.project_id = ?)
 		GROUP BY day, fc.project_id, fc.actor
 		ORDER BY day`
-	rows, err := s.db.QueryContext(ctx, q, "", "", "", "", since, projectID, projectID)
+	rows, err := s.db.QueryContext(ctx, q, "", "", "", "", sinceStr, untilStr, untilStr, projectID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("store.LoadLOCByDay: %w", err)
 	}
@@ -566,18 +586,25 @@ func (s *Store) LoadLOCSummary(ctx context.Context, days int, projectID int64) (
 	if days <= 0 {
 		days = 7
 	}
+	return s.LoadLOCSummaryRange(ctx, days, time.Now().UTC().AddDate(0, 0, -days), time.Time{}, projectID)
+}
+
+// LoadLOCSummaryRange is LoadLOCSummary over an explicit [since, until)
+// window (T-550). days is echoed on the result for the payload's
+// back-compat `days` field only; the bounds decide which rows count.
+func (s *Store) LoadLOCSummaryRange(ctx context.Context, days int, since, until time.Time, projectID int64) (LOCSummary, error) {
 	out := LOCSummary{Days: days, HumanCapture: "none"}
-	since := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339Nano)
+	sinceStr, untilStr := locWindowBounds(since, until)
 
 	q := locDedupCTE + `
 		SELECT fc.actor, fc.sidechain, fc.category, COUNT(*),
 		       SUM(CASE WHEN fc.actor_confidence != 'high' THEN 1 ELSE 0 END),
 		       SUM(fc.overwrite), SUM(fc.deleted_file),` + locStatsColumns + `
 		FROM file_changes fc JOIN keep k ON k.id = fc.id
-		WHERE fc.saved_at >= ? AND (? = 0 OR fc.project_id = ?)
+		WHERE fc.saved_at >= ? AND (? = '' OR fc.saved_at < ?) AND (? = 0 OR fc.project_id = ?)
 		GROUP BY fc.actor, fc.sidechain, fc.category
 		ORDER BY fc.actor, fc.sidechain, fc.category`
-	rows, err := s.db.QueryContext(ctx, q, "", "", "", "", since, projectID, projectID)
+	rows, err := s.db.QueryContext(ctx, q, "", "", "", "", sinceStr, untilStr, untilStr, projectID, projectID)
 	if err != nil {
 		return out, fmt.Errorf("store.LoadLOCSummary: %w", err)
 	}
@@ -616,15 +643,15 @@ func (s *Store) LoadLOCSummary(ctx context.Context, days int, projectID int64) (
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM file_changes
 		WHERE source IN ('editor','editor-echo')
-		  AND saved_at >= ? AND (? = 0 OR project_id = ?)`,
-		since, projectID, projectID).Scan(&editorRows); err != nil {
+		  AND saved_at >= ? AND (? = '' OR saved_at < ?) AND (? = 0 OR project_id = ?)`,
+		sinceStr, untilStr, untilStr, projectID, projectID).Scan(&editorRows); err != nil {
 		return out, fmt.Errorf("store.LoadLOCSummary: human capture: %w", err)
 	}
 	if editorRows.Int64 > 0 {
 		out.HumanCapture = "vscode"
 	}
 
-	byDay, err := s.LoadLOCByDay(ctx, days, projectID)
+	byDay, err := s.LoadLOCByDayRange(ctx, since, until, projectID)
 	if err != nil {
 		return out, err
 	}

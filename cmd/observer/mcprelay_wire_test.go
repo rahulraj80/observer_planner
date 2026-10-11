@@ -1,3 +1,5 @@
+//go:build !sbo_omit_agentaccess_relay
+
 package main
 
 import (
@@ -5,8 +7,11 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,9 +22,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
-	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/mcpaccess"
-	"github.com/marmutapp/superbased-observer/internal/mcprelay"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/coverage"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/localpdp"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/project"
@@ -27,7 +30,6 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
 	famcp "github.com/marmutapp/superbased-observer/internal/policyfam/mcpaccess"
 	"github.com/marmutapp/superbased-observer/internal/policystate"
-	"github.com/marmutapp/superbased-observer/internal/proxy"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -86,126 +88,6 @@ func appliedHandle(t *testing.T, cfg config.Config, mode string, orgAuth bool) *
 		t.Fatalf("table not applied: %+v", h.State())
 	}
 	return h
-}
-
-// TestMCPRelay_DisabledBindsNothing pins the enabled=false byte-identical
-// contract: no handle, no proxy seam, no hook lookup.
-func TestMCPRelay_DisabledBindsNothing(t *testing.T) {
-	prev := processMCPRelay.Load()
-	t.Cleanup(func() { processMCPRelay.Store(prev) })
-	processMCPRelay.Store(nil)
-	cfg := mcpRelayTestCfg(t, false)
-	var opts proxy.Options
-	if h := wireMCPRelay(cfg, nil, nil, &opts, nil, nil); h != nil {
-		t.Fatal("disabled relay returned a handle")
-	}
-	if opts.ToolsAllowlist != nil {
-		t.Error("disabled relay bound the proxy tools seam")
-	}
-	if processMCPRelay.Load() != nil {
-		t.Error("disabled relay registered a process handle")
-	}
-	if hookMCPAccessLookup(cfg) != nil {
-		t.Error("disabled relay produced a hook lookup")
-	}
-	mcpRelayPublish(orgclient.PolicyResourceResult{Status: orgclient.PRApplied})
-	mcpRelayClear()
-}
-
-// TestMCPRelay_DecideRows is the accessRules table test: one case per row,
-// on both postures.
-func TestMCPRelay_DecideRows(t *testing.T) {
-	cases := []struct {
-		name    string
-		mode    string
-		orgAuth bool
-		server  string
-		tool    string
-		want    guard.MCPAccessVerdict
-	}{
-		{"allow row (enforce)", "enforce", false, "github", "create_issue", guard.MCPAccessVerdict{Known: true, Allowed: true}},
-		{"allow row by slug resolves the vserver", "enforce", false, "github", "create_issue", guard.MCPAccessVerdict{Known: true, Allowed: true}},
-		{"allow row by vserver id", "enforce", false, "vs-gh", "create_issue", guard.MCPAccessVerdict{Known: true, Allowed: true}},
-		{"deny row (enforce) = org grant denied", "enforce", false, "github", "delete_repo", guard.MCPAccessVerdict{Known: true, OrgDenied: true}},
-		{"no row matched (enforce) = default-deny, org grant", "enforce", false, "github", "list_repos", guard.MCPAccessVerdict{Known: true, OrgDenied: true}},
-		{"deny row in observe = would-deny → allowed", "observe", false, "github", "delete_repo", guard.MCPAccessVerdict{Known: true, Allowed: true}},
-		{"unknown server, individual = inert", "enforce", false, "slack", "post", guard.MCPAccessVerdict{}},
-		{"unknown server, org authoritative = R-306 shape", "enforce", true, "slack", "post", guard.MCPAccessVerdict{Known: true}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := appliedHandle(t, mcpRelayTestCfg(t, true), tc.mode, tc.orgAuth)
-			got := h.decide(tc.server, tc.tool)
-			if got.Known != tc.want.Known || got.Allowed != tc.want.Allowed || got.OrgDenied != tc.want.OrgDenied {
-				t.Errorf("decide = %+v, want Known=%v Allowed=%v OrgDenied=%v", got, tc.want.Known, tc.want.Allowed, tc.want.OrgDenied)
-			}
-		})
-	}
-	// No table at all: inert on both postures.
-	h := newMCPRelayHandle(mcpRelayTestCfg(t, true), nil, nil, slog.New(slog.DiscardHandler))
-	h.orgAuthoritative = func() bool { return true }
-	if got := h.decide("github", "create_issue"); got.Known {
-		t.Errorf("no-table decide = %+v, want inert", got)
-	}
-}
-
-// TestMCPRelay_ToolsSeam pins the proxy seam: strip denied decls, keep
-// allowed + (individual) unknown ones, refuse an unapproved hosted connector
-// only on an org-authoritative node, and never in observe.
-func TestMCPRelay_ToolsSeam(t *testing.T) {
-	decls := []proxy.MCPToolDecl{
-		{Index: 0, Name: "mcp__github__create_issue", Server: "github", Tool: "create_issue"},
-		{Index: 1, Name: "mcp__github__delete_repo", Server: "github", Tool: "delete_repo"},
-		{Index: 2, Name: "mcp__slack__post", Server: "slack", Tool: "post"},
-	}
-	unknownConn := proxy.HostedMCPConnector{Provider: "anthropic", Kind: "anthropic_mcp_servers", Name: "ex", URL: "https://mcp.example.com/sse"}
-	approvedConn := proxy.HostedMCPConnector{Provider: "anthropic", Kind: "anthropic_mcp_servers", Name: "gh", URL: "https://mcp.github.com/mcp/"}
-	audienceConn := proxy.HostedMCPConnector{Provider: "openai", Kind: "openai_responses_mcp", Name: "gh", URL: "https://gw.acme/mcp/github"}
-	cases := []struct {
-		name     string
-		mode     string
-		orgAuth  bool
-		conns    []proxy.HostedMCPConnector
-		wantKeep []string
-		wantDeny string
-	}{
-		{"individual: strip deny row, keep allow + unknown", "enforce", false, nil, []string{"mcp__github__create_issue", "mcp__slack__post"}, ""},
-		{"org authoritative: unknown stripped too", "enforce", true, nil, []string{"mcp__github__create_issue"}, ""},
-		{"observe: nothing stripped", "observe", true, nil, []string{"mcp__github__create_issue", "mcp__github__delete_repo", "mcp__slack__post"}, ""},
-		{"individual: unknown connector ungoverned", "enforce", false, []proxy.HostedMCPConnector{unknownConn}, []string{"mcp__github__create_issue", "mcp__slack__post"}, ""},
-		{"org authoritative: unknown connector refused R-307", "enforce", true, []proxy.HostedMCPConnector{unknownConn}, nil, "R-307"},
-		{"org authoritative: server-target connector approved", "enforce", true, []proxy.HostedMCPConnector{approvedConn}, []string{"mcp__github__create_issue"}, ""},
-		{"org authoritative: gateway-audience connector approved", "enforce", true, []proxy.HostedMCPConnector{audienceConn}, []string{"mcp__github__create_issue"}, ""},
-		{"org authoritative observe: connector would-deny only", "observe", true, []proxy.HostedMCPConnector{unknownConn}, []string{"mcp__github__create_issue", "mcp__github__delete_repo", "mcp__slack__post"}, ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := appliedHandle(t, mcpRelayTestCfg(t, true), tc.mode, tc.orgAuth)
-			res := h.ToolsSeam()(proxy.ToolsAllowlistInput{Provider: "anthropic", SessionID: "s", Decls: decls, Connectors: tc.conns})
-			if res.DenyRuleID != tc.wantDeny {
-				t.Fatalf("deny = %q (%s), want %q", res.DenyRuleID, res.DenyReason, tc.wantDeny)
-			}
-			if tc.wantDeny != "" {
-				if !strings.Contains(res.DenyReason, "not approved") {
-					t.Errorf("deny reason %q", res.DenyReason)
-				}
-				return
-			}
-			var got []string
-			for _, d := range res.Keep {
-				got = append(got, d.Name)
-			}
-			if strings.Join(got, ",") != strings.Join(tc.wantKeep, ",") {
-				t.Errorf("keep = %v, want %v", got, tc.wantKeep)
-			}
-		})
-	}
-	// No table: everything kept, nothing denied.
-	h := newMCPRelayHandle(mcpRelayTestCfg(t, true), nil, nil, slog.New(slog.DiscardHandler))
-	res := h.ToolsSeam()(proxy.ToolsAllowlistInput{Decls: decls, Connectors: []proxy.HostedMCPConnector{unknownConn}})
-	if len(res.Keep) != 3 || res.DenyRuleID != "" {
-		t.Errorf("no-table seam = %+v", res)
-	}
 }
 
 // TestMCPRelay_FactsEnumOnlyAndResolve pins the effective-state ACK row
@@ -600,13 +482,15 @@ const projTestOpenCode = `{"$schema": "x", "mcp": {"gh": {"type": "local", "comm
 // TestMCPRelay_ProjectionEndToEnd runs THE installation path (Sol P3+P4
 // finding 2) against a migrated node DB and the real per-format writer in
 // a private home: three clients (shared JSON, codex TOML, opencode) are
-// wrapped with their originals journaled FIRST (rows exist, backups exist,
-// applied digest = the bytes on disk, env KEYS only), the relay remote
-// entry lands where the loopback listener is configured, a re-apply is a
-// no-op, the coverage matrix flips to mediated ONLY after the apply, and
-// disable restores: byte-identically where untouched, by reversal (edit
-// preserved) where the operator edited in between, refused (rows kept)
-// where the backup was tampered with.
+// wrapped with their originals journaled FIRST (env KEYS only, an owned-
+// entry digest and never a whole-file digest or a backup: T-397), every
+// other byte of each credential-bearing config is kept (a TOML comment
+// included) and so is its mode, the relay remote entry lands where the
+// loopback listener is configured, a re-apply is a no-op, a legacy row's
+// backup file is removed at the next projection, the coverage matrix flips
+// to mediated ONLY after the apply, and disable reverses only the
+// relay-owned entries (an operator edit made in between is preserved) and
+// leaves no backup anywhere.
 func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
@@ -660,7 +544,7 @@ func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 	}
 	for _, tool := range []string{"cursor", "codex", "opencode"} {
 		r, ok := got[tool]
-		if !ok || !r.Changed || r.Err != "" || r.BackupPath == "" || r.AppliedSHA256 == "" {
+		if !ok || !r.Changed || r.Err != "" {
 			t.Fatalf("%s receipt %+v", tool, r)
 		}
 		if strings.Join(r.Remote, ",") != "superbased-github" {
@@ -679,8 +563,8 @@ func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 	if !h.projectionApplied.Load() {
 		t.Fatal("projection applied flag not set")
 	}
-	// Journal rows: originals, env KEYS only, backups on disk, applied
-	// digest == the bytes on disk.
+	// Journal rows: originals, env KEYS only, no backup, and an applied
+	// digest that is NOT a digest of the (credential-bearing) file.
 	rows, err := rs.ListLaunchSpecs(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -693,11 +577,12 @@ func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 		if strings.Contains(string(raw), "ghp_SECRET") {
 			t.Fatalf("secret value journaled: %s", raw)
 		}
-		if _, err := os.Stat(r.BackupPath); err != nil || !strings.HasPrefix(r.BackupPath, mcpRelayBackupDir(cfg)) {
-			t.Fatalf("backup missing / misplaced: %s %v", r.BackupPath, err)
+		if r.BackupPath != "" || r.BackupSHA256 != "" {
+			t.Fatalf("a config backup was journaled: %+v", r)
 		}
 		cur, _ := os.ReadFile(r.ConfigPath)
-		if mcprelay.HashBytes(cur) != r.AppliedSHA256 || r.ConfigGeneration != 1 {
+		whole := sha256.Sum256(cur)
+		if r.AppliedSHA256 == "" || r.AppliedSHA256 == hex.EncodeToString(whole[:]) || r.ConfigGeneration != 1 {
 			t.Fatalf("applied digest / generation wrong for %+v", r)
 		}
 		if r.Client == "cursor" && r.EntryKey == "gh" && (r.OrigCommand != "npx" || strings.Join(r.OrigEnvRefs, ",") != "GITHUB_TOKEN") {
@@ -732,6 +617,22 @@ func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 	}
 	if cursorDoc["theme"] != "dark" {
 		t.Fatal("unrelated key lost")
+	}
+	// Surgical: the sibling env block keeps its exact bytes, the codex
+	// comment and keys survive, every mode is kept, and no backup exists.
+	if !strings.Contains(string(curBytes), `"env": {"GITHUB_TOKEN": "ghp_SECRET"}`) || !strings.Contains(string(curBytes), `"theme": "dark",`) {
+		t.Fatalf("cursor config re-rendered:\n%s", curBytes)
+	}
+	if b, _ := os.ReadFile(codexPath); !strings.HasPrefix(string(b), "# keep me\nmodel = \"gpt-5\"\n") || !strings.Contains(string(b), "[mcp_servers.fs]\ncommand = \"/opt/fs\"\nargs = [\"--root\", \"/repo\"]\n") {
+		t.Fatalf("codex config re-rendered:\n%s", b)
+	}
+	for _, p := range []string{cursorPath, codexPath, opencodePath} {
+		if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o644 {
+			t.Fatalf("%s mode not kept: %v %v", p, fi, err)
+		}
+	}
+	if _, err := os.Stat(mcpRelayBackupDir(cfg)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a config backup directory was created: %v", err)
 	}
 
 	// The matrix: mediated for the projected clients, stdio AND remote.
@@ -786,8 +687,43 @@ func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 		t.Fatalf("re-apply added rows: %d", len(rows2))
 	}
 
-	// Operator edits cursor's config after the projection; codex's backup
-	// is tampered with; opencode is untouched.
+	// A row an older build wrote (whole-file digest + a backup file): the
+	// next projection converts it and removes the backup file, never
+	// reading it.
+	legacyBackup := filepath.Join(mcpRelayBackupDir(cfg), "legacy-cursor.bak")
+	if err := os.MkdirAll(filepath.Dir(legacyBackup), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyBackup, []byte("synthetic legacy backup"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Client == "cursor" && r.EntryKey == "gh" {
+			old := r
+			r.BackupPath, r.BackupSHA256, r.AppliedSHA256 = legacyBackup, "00", "11"
+			if err := rs.PutLaunchSpec(ctx, r, old.ConfigGeneration); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, _, err := runMCPRelayProjection(ctx, cfg, "/cfg/observer.toml", rs, h, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacyBackup); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy backup not removed after conversion: %v", err)
+	}
+	conv, _ := rs.ListLaunchSpecs(ctx)
+	for _, r := range conv {
+		if r.BackupPath != "" || r.AppliedSHA256 == "11" {
+			t.Fatalf("legacy row not converted: %+v", r)
+		}
+	}
+	if a := mcpRelayAppliedState(ctx, rs); !a.StdioApplied("cursor") {
+		t.Fatalf("converted row does not verify: %+v", a)
+	}
+
+	// Operator edits cursor's config after the projection; opencode and
+	// codex are untouched. Disable reverses only the relay-owned entries.
 	edited := strings.Replace(string(curBytes), `"theme": "dark"`, `"theme": "light"`, 1)
 	if edited == string(curBytes) {
 		t.Fatal("fixture edit")
@@ -795,31 +731,20 @@ func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 	if err := os.WriteFile(cursorPath, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var codexBackup string
-	for _, r := range rows {
-		if r.Client == "codex" {
-			codexBackup = r.BackupPath
+	recs, rerr := restoreMCPRelayProjection(ctx, cfg, rs, h)
+	if rerr != nil {
+		t.Fatalf("restore: %v %+v", rerr, recs)
+	}
+	for _, r := range recs {
+		if !r.Restored || r.Mode != project.RestoreReversal {
+			t.Fatalf("%s %+v", r.Client.Tool, r)
 		}
 	}
-	if err := os.WriteFile(codexBackup, []byte("tampered = true\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	recs, rerr := restoreMCPRelayProjection(ctx, cfg, rs, h)
-	if rerr == nil {
-		t.Fatal("tampered backup must fail the restore")
-	}
-	byTool := map[string]project.RestoreReceipt{}
-	for _, r := range recs {
-		byTool[r.Client.Tool] = r
-	}
-	if r := byTool["opencode"]; !r.Restored || r.Mode != project.RestoreWholeFile {
-		t.Fatalf("opencode %+v", r)
-	}
-	if b, _ := os.ReadFile(opencodePath); string(b) != projTestOpenCode {
-		t.Fatalf("opencode not byte-identical:\n%s", b)
-	}
-	if r := byTool["cursor"]; !r.Restored || r.Mode != project.RestoreReversal || !strings.Contains(r.Note, "refused") {
-		t.Fatalf("cursor %+v", r)
+	var ocWant, ocGot any
+	_ = json.Unmarshal([]byte(projTestOpenCode), &ocWant)
+	ocBytes, _ := os.ReadFile(opencodePath)
+	if err := json.Unmarshal(ocBytes, &ocGot); err != nil || fmt.Sprint(ocGot) != fmt.Sprint(ocWant) {
+		t.Fatalf("opencode values not restored:\n%s", ocBytes)
 	}
 	curAfter, _ := os.ReadFile(cursorPath)
 	var afterDoc map[string]any
@@ -831,32 +756,21 @@ func TestMCPRelay_ProjectionEndToEnd(t *testing.T) {
 	if aServers["gh"].(map[string]any)["command"] != "npx" || aServers["superbased-github"] != nil || len(aServers) != 2 {
 		t.Fatalf("cursor not reversed: %v", aServers)
 	}
-	if r := byTool["codex"]; r.Restored || !strings.Contains(r.Err, "hash mismatch") {
-		t.Fatalf("codex tampered backup: %+v", r)
+	if !strings.Contains(string(curAfter), `"env": {"GITHUB_TOKEN": "ghp_SECRET"}`) {
+		t.Fatalf("restore re-rendered the sibling env block:\n%s", curAfter)
 	}
-	if b, _ := os.ReadFile(codexPath); !strings.Contains(string(b), "superbased-github") || strings.Contains(string(b), exe) {
-		t.Fatal("a refused restore touched the codex config (or fs was wrapped)")
+	if b, _ := os.ReadFile(codexPath); !strings.HasPrefix(string(b), projTestCodex) || strings.TrimSpace(string(b)) != strings.TrimSpace(projTestCodex) {
+		t.Fatalf("codex not restored (only the relay remote table was added, and only it may go):\n%s", b)
 	}
-	left, _ := rs.ListLaunchSpecs(ctx)
-	if len(left) != 1 {
-		t.Fatalf("rows after restore %d (codex's remote row must stay): %+v", len(left), left)
+	if left, _ := rs.ListLaunchSpecs(ctx); len(left) != 0 {
+		t.Fatalf("rows after restore %d: %+v", len(left), left)
 	}
-	for _, r := range left {
-		if r.Client != "codex" {
-			t.Fatalf("non-codex row survived: %+v", r)
-		}
+	if h.projectionApplied.Load() {
+		t.Fatal("nothing is projected; flag must clear")
 	}
-	if !h.projectionApplied.Load() {
-		t.Fatal("codex is still projected; flag must stay")
-	}
-	// Restored clients' backups are gone; codex's tampered one is kept.
-	for _, r := range rows {
-		_, err := os.Stat(r.BackupPath)
-		if r.Client == "codex" && err != nil {
-			t.Fatalf("codex backup removed after a refused restore")
-		}
-		if r.Client != "codex" && err == nil {
-			t.Fatalf("backup %s left behind after a verified restore", r.BackupPath)
+	if _, err := os.Stat(mcpRelayBackupDir(cfg)); err == nil {
+		if ents, _ := os.ReadDir(mcpRelayBackupDir(cfg)); len(ents) != 0 {
+			t.Fatalf("backup files left behind: %v", ents)
 		}
 	}
 }

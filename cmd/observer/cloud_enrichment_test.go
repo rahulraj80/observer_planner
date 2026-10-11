@@ -1,3 +1,5 @@
+//go:build !sbo_omit_cloud_intelligence
+
 package main
 
 import (
@@ -440,7 +442,7 @@ func TestCloudSessionCostIsPricedPerTokenRow(t *testing.T) {
 			Input: int64(r.in), Output: int64(r.out),
 		}, ts)
 		if !ok {
-			t.Fatalf("no pricing for %q — pick a modelled model for this test", r.model)
+			t.Fatalf("no pricing for %q - pick a modelled model for this test", r.model)
 		}
 		want += b.Total
 	}
@@ -460,10 +462,10 @@ func TestCloudSessionCostIsPricedPerTokenRow(t *testing.T) {
 		t.Fatal("no pricing for the one-shot control")
 	}
 	if diff := oneShot.Total - want; diff < 1e-6 && diff > -1e-6 {
-		t.Fatal("the one-shot control equals the per-row sum — this fixture cannot detect the defect")
+		t.Fatal("the one-shot control equals the per-row sum - this fixture cannot detect the defect")
 	}
 	if res.Envelope.Metrics.CostUSD >= oneShot.Total {
-		t.Errorf("cost %v is not below the one-shot long-context price %v — the surcharge was invented",
+		t.Errorf("cost %v is not below the one-shot long-context price %v - the surcharge was invented",
 			res.Envelope.Metrics.CostUSD, oneShot.Total)
 	}
 }
@@ -526,7 +528,7 @@ func TestCloudEnvelopeOutcomesComeFromTheWholeSession(t *testing.T) {
 		milestones[m.Kind] = true
 	}
 	if !milestones["first_test"] {
-		t.Error("first_test milestone missing — milestones were derived from the sample")
+		t.Error("first_test milestone missing - milestones were derived from the sample")
 	}
 }
 
@@ -597,7 +599,7 @@ func TestDigestMismatchStaysTerminalAndExplainsItself(t *testing.T) {
 		Body:       `{"error":"upload digest does not match the body","code":"digest_mismatch"}`,
 	}
 	if !cloudUploadTerminal(err422) {
-		t.Fatal("precondition changed: 422 digest_mismatch is no longer terminal — revisit the hint copy")
+		t.Fatal("precondition changed: 422 digest_mismatch is no longer terminal - revisit the hint copy")
 	}
 	if got := cloudErrClass(err422); got != "http_422" {
 		t.Errorf("error class = %q, want http_422", got)

@@ -4,10 +4,22 @@ import (
 	"strings"
 	"testing"
 
+	adapterdefaults "github.com/marmutapp/superbased-observer/internal/adapter/defaults"
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/toolresolve"
 )
+
+// adapterInBuild reports whether tool's adapter is registered in this test
+// binary (an sbo_omit_adapter_* tag removes it from adapterdefaults).
+func adapterInBuild(tool string) bool {
+	for _, a := range adapterdefaults.Adapters() {
+		if a.Name() == tool {
+			return true
+		}
+	}
+	return false
+}
 
 func TestAzureProviderConfigured(t *testing.T) {
 	for _, k := range []string{"AZURE_RESOURCE_NAME", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_API_KEY", "OPENAI_API_TYPE"} {
@@ -128,7 +140,7 @@ func TestVocabularySummary(t *testing.T) {
 		{
 			"in taxonomy with caveat",
 			integration.Vocabulary{InTaxonomy: true, Note: "shell calls only"},
-			"in taxonomy (native tool names classified via internal/tooltax) — shell calls only",
+			"in taxonomy (native tool names classified via internal/tooltax) - shell calls only",
 		},
 		{
 			"honest zero renders the note verbatim",
@@ -177,9 +189,24 @@ func TestCheckAdapterVocabularyNote(t *testing.T) {
 	if !ok || zero.Vocabulary.InTaxonomy || zero.Vocabulary.Note == "" {
 		t.Fatalf("fixture assumption broken: chatgpt-web Vocabulary = %+v (want honest zero)", zero.Vocabulary)
 	}
-	w, ok := CheckAdapter("chatgpt-web", config.Config{})
+	if !adapterInBuild(zero.Tool) {
+		// A build without the browser-capture adapters (the minimal distro,
+		// D-535): pin the same rule on any honest-zero adapter this build
+		// does carry, so the Note-verbatim check keeps running.
+		zero = integration.Capability{}
+		for _, c := range integration.Capabilities() {
+			if !c.Vocabulary.InTaxonomy && c.Vocabulary.Note != "" && adapterInBuild(c.Tool) {
+				zero = c
+				break
+			}
+		}
+		if zero.Tool == "" {
+			t.Skip("no honest-zero adapter is compiled into this build")
+		}
+	}
+	w, ok := CheckAdapter(zero.Tool, config.Config{})
 	if !ok {
-		t.Fatal("chatgpt-web should be a known adapter")
+		t.Fatalf("%s should be a known adapter", zero.Tool)
 	}
 	if !joinedHas(w.Details, "vocabulary: "+zero.Vocabulary.Note) {
 		t.Errorf("honest-zero adapter should print its registry Note verbatim (%q): %v",
@@ -196,7 +223,7 @@ func TestTokenTierSummary(t *testing.T) {
 		want string
 	}{
 		{"clean", integration.TokenTier{Best: "proxy"}, "best tier=proxy (no known gap)"},
-		{"gapped", integration.TokenTier{Best: "sqlite", Gap: "model often blank"}, "best tier=sqlite — known gap: model often blank"},
+		{"gapped", integration.TokenTier{Best: "sqlite", Gap: "model often blank"}, "best tier=sqlite - known gap: model often blank"},
 		{"unknown", integration.TokenTier{}, "best tier=unknown (no known gap)"},
 	}
 	for _, tc := range tests {

@@ -347,12 +347,15 @@ func TestVerifyRules(t *testing.T) {
 }
 
 // TestVerifyRuleOrderIsTheSpecification pins the table itself: the nine
-// rules of §3.2 in order. A reordering is a security change (content
+// rules of §3.2 in order, then the three distro rules. A reordering is a security change (content
 // judged before authorship), so it must break a test, not a review.
 func TestVerifyRuleOrderIsTheSpecification(t *testing.T) {
 	want := []string{
 		"1-envelope", "2-manifest-hash", "3-key-agreement", "4-signature",
 		"5-schema", "6-replay", "7-downgrade", "8-freshness", "9-artifact",
+		// Modular packaging plan 5.6 (lane MP-REL2): the distro rules run
+		// after the document is proven authentic and eligible.
+		"10-ceiling", "11-release-index", "12-distro",
 	}
 	if len(verifyRules) != len(want) {
 		t.Fatalf("verifyRules has %d rows, want %d", len(verifyRules), len(want))

@@ -174,6 +174,9 @@ isn't populated:
 Reason texts you may see:
 
 - `"code index unavailable; fall back to get_file"`
+- `"code intelligence is off (it is opt-in); turn it on in the dashboard under Settings > Intelligence > Code intelligence, or set [codeintel].enabled = true in config.toml, then restart the daemon; fall back to get_file"`
+  (code intelligence is off by default since 2026-10-05, D-307; `warnings`
+  then carries `codeintel_disabled` beside `index_unavailable`)
 - `"code index stale relative to file; fall back to get_file"`
 - `"edge kind 'contains' not populated by the code index for this project; fall back to get_symbols or get_file"`
 

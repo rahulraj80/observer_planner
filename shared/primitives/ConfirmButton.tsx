@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import clsx from "clsx";
 import type { LucideIcon } from "lucide-react";
 import { Button, type ButtonSize, type ButtonVariant } from "./Button";
+import { fieldClasses } from "./Input";
 
 // ConfirmButton — the in-place two-step confirm. First click ARMS the
 // button (its label becomes "Confirm?"), a second click within
@@ -11,9 +13,28 @@ import { Button, type ButtonSize, type ButtonVariant } from "./Button";
 // unstyled, un-themed, blocks the whole page, and cannot say anything the
 // surrounding UI does not already show. The pattern is the one the
 // enrolment card proved.
+//
+// `reason` (Agent Access UI lane 0b): a destructive action that records a
+// reason (retire, revoke, reject) asks for it INSIDE the armed step instead of
+// an always-visible reason box on every row. While armed with a reason the
+// control shows the reason field, the confirm button and Cancel, and does NOT
+// auto-disarm (typing takes longer than the timeout); Escape or Cancel
+// disarms, Enter in the field confirms. onConfirm receives the trimmed reason
+// ("" when none was typed).
+
+export type ConfirmReason = {
+  /** Accessible name / placeholder of the field (default "Reason (optional)"). */
+  label?: string;
+  placeholder?: string;
+  /** When true the confirm button stays disabled until a reason is typed. */
+  required?: boolean;
+  /** Max characters (default 200, the server's own audit-detail cap). */
+  maxLength?: number;
+};
 
 export type ConfirmButtonProps = {
-  onConfirm: () => void;
+  /** Fires on the confirming click; carries the typed reason when `reason` is set. */
+  onConfirm: (reason?: string) => void;
   /** Idle label. */
   children: ReactNode;
   /** Armed label. */
@@ -22,7 +43,7 @@ export type ConfirmButtonProps = {
   armedNote?: ReactNode;
   /** false fires on the first click (the confirm step is conditional). */
   requireConfirm?: boolean;
-  /** Auto-disarm delay. */
+  /** Auto-disarm delay (not applied while a reason field is shown). */
   timeoutMs?: number;
   variant?: ButtonVariant;
   armedVariant?: ButtonVariant;
@@ -36,7 +57,7 @@ export type ConfirmButtonProps = {
   /** Render a plain <button> styled only by the caller (`className` idle,
    *  `armedClassName` armed, defaulting to `className`), for a surface with
    *  its own theme (the terminal header). variant / size / iconLeft /
-   *  loading do not apply; put a glyph in `children` / `confirmLabel`. */
+   *  loading / reason do not apply; put a glyph in `children` / `confirmLabel`. */
   unstyled?: boolean;
   /** Unstyled only: the class while armed (default: `className`). */
   armedClassName?: string;
@@ -44,6 +65,8 @@ export type ConfirmButtonProps = {
   armedNoteClassName?: string;
   /** Accessible name for the button, for an icon-only label. */
   ariaLabel?: string;
+  /** Ask for a reason in the armed step (see the file header). */
+  reason?: ConfirmReason;
 };
 
 export function ConfirmButton({
@@ -65,9 +88,12 @@ export function ConfirmButton({
   armedClassName,
   armedNoteClassName,
   ariaLabel,
+  reason,
 }: ConfirmButtonProps) {
   const [armed, setArmed] = useState(false);
+  const [reasonText, setReasonText] = useState("");
   const timer = useRef<number | null>(null);
+  const withReason = reason !== undefined && !unstyled && requireConfirm;
 
   const clear = useCallback(() => {
     if (timer.current !== null) {
@@ -78,14 +104,24 @@ export function ConfirmButton({
 
   useEffect(() => clear, [clear]);
 
+  const disarm = useCallback(() => {
+    clear();
+    setArmed(false);
+    setReasonText("");
+  }, [clear]);
+
   // A control that goes disabled (or stops needing a confirm) must not
   // stay armed behind the operator's back.
   useEffect(() => {
-    if (disabled || loading || !requireConfirm) {
-      clear();
-      setArmed(false);
-    }
-  }, [disabled, loading, requireConfirm, clear]);
+    if (disabled || loading || !requireConfirm) disarm();
+  }, [disabled, loading, requireConfirm, disarm]);
+
+  function fire() {
+    const typed = reasonText.trim();
+    disarm();
+    if (withReason) onConfirm(typed);
+    else onConfirm();
+  }
 
   function onClick() {
     if (!requireConfirm) {
@@ -93,13 +129,13 @@ export function ConfirmButton({
       return;
     }
     if (armed) {
-      clear();
-      setArmed(false);
-      onConfirm();
+      if (withReason && reason?.required && reasonText.trim() === "") return;
+      fire();
       return;
     }
     setArmed(true);
     clear();
+    if (withReason) return; // no auto-disarm while a reason is being typed
     timer.current = window.setTimeout(() => {
       timer.current = null;
       setArmed(false);
@@ -128,12 +164,38 @@ export function ConfirmButton({
       </span>
     );
   }
+  const reasonLabel = reason?.label ?? (reason?.required ? "Reason" : "Reason (optional)");
+  const reasonMissing = withReason && showArmed && reason?.required === true && reasonText.trim() === "";
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
+      {withReason && showArmed && (
+        <input
+          type="text"
+          autoFocus
+          aria-label={reasonLabel}
+          placeholder={reason?.placeholder ?? reasonLabel}
+          maxLength={reason?.maxLength ?? 200}
+          value={reasonText}
+          onChange={(e) => setReasonText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              // Escape disarms only; marked handled so an enclosing
+              // SlideOver / Modal stays open (shared/lib/overlayEscape.ts).
+              e.preventDefault();
+              e.stopPropagation();
+              disarm();
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              if (!reasonMissing) fire();
+            }
+          }}
+          className={clsx(fieldClasses({ ownWidth: true }), "w-56 max-w-full")}
+        />
+      )}
       <Button
         variant={showArmed ? armedVariant : variant}
         size={size}
-        disabled={disabled}
+        disabled={disabled || reasonMissing}
         loading={loading}
         title={title}
         className={className}
@@ -143,6 +205,11 @@ export function ConfirmButton({
       >
         {showArmed ? confirmLabel : children}
       </Button>
+      {withReason && showArmed && (
+        <Button variant="ghost" size={size} onClick={disarm}>
+          Cancel
+        </Button>
+      )}
       {showArmed && armedNote !== undefined && (
         <span className="text-[11px] leading-snug text-fg-3">{armedNote}</span>
       )}

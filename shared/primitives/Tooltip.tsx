@@ -471,8 +471,11 @@ function TooltipLayer({
         {...getFloatingProps()}
         className="pointer-events-none z-[80]"
       >
+        {/* The bubble never outgrows the viewport less shift()'s 8 px
+            padding on each side: a 420 px path tooltip at 375 px pushed
+            the page 8 px wide (T-339). */}
         <div
-          style={{ ...transitionStyles, maxWidth }}
+          style={{ ...transitionStyles, maxWidth: `min(${maxWidth}px, calc(100vw - 16px))` }}
           role="tooltip"
           className={clsx(
             "rounded-md border px-2.5 py-1.5 text-xs leading-relaxed shadow-[var(--shadow-2)]",

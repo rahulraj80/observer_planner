@@ -49,7 +49,7 @@ function BaselineRow({ item }: { item: CacheTimelineItemLike }) {
         <>
           {" · "}
           <span className="tabular-nums">
-            {fmtTimeShort(item.first_at)} – {fmtTimeShort(item.last_at)}
+            {fmtTimeShort(item.first_at)} - {fmtTimeShort(item.last_at)}
           </span>
         </>
       )}

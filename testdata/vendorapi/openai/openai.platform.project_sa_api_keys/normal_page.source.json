@@ -1,0 +1,25 @@
+{
+  "captured_from_real_account": false,
+  "checked_on": "2026-10-07",
+  "field_ledger": {
+    "created_at": "VerifiedOfficial",
+    "id": "VerifiedOfficial",
+    "name": "VerifiedOfficial",
+    "object": "VerifiedOfficial",
+    "value": "VerifiedOfficial"
+  },
+  "fixture_sha256": "03f82699dfb12d49b06f347c3097a6e1a27df2c6e652ded16575f505014279d7",
+  "http": {
+    "method": "POST",
+    "path": "/v1/organization/projects/{project_id}/service_accounts/{service_account_id}/api_keys",
+    "status": 200
+  },
+  "notes": "Verbatim x-oaiMeta response example of operationId CreateanAPIkeyforaserviceaccount.",
+  "scenario": "normal_page",
+  "sdk_or_spec_version_or_commit": "openai-openapi master openapi.yaml (OpenAPI 3.1.0), fetched 2026-10-07",
+  "source_kind": "openapi_spec",
+  "source_sha256": "ca22e4f7ee15164d8e56aa8d28cd858b269d6081123697d0a3299dd55322b3f2",
+  "source_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "status": "synthetic, awaiting live validation",
+  "surface_id": "openai.platform.project_sa_api_keys"
+}

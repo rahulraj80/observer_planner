@@ -1,0 +1,32 @@
+{
+  "Events": [
+    {
+      "AccessKeyId": "SYNTHETICACCESSKEYID",
+      "CloudTrailEvent": "{\"eventVersion\":\"1.08\",\"eventSource\":\"q.amazonaws.com\",\"eventName\":\"SendMessage\",\"requestParameters\":{\"conversationToken\":\"***\",\"utterance\":\"***\"}}",
+      "EventId": "a552c487-7d97-403a-8ec4-d49539c7a03d",
+      "EventName": "SendMessage",
+      "EventSource": "q.amazonaws.com",
+      "EventTime": 1791374400,
+      "ReadOnly": "false",
+      "Resources": [],
+      "Username": "aws-user"
+    },
+    {
+      "AccessKeyId": "SYNTHETICACCESSKEYID",
+      "CloudTrailEvent": "{\"eventVersion\":\"1.08\",\"eventSource\":\"q.amazonaws.com\",\"eventName\":\"PassRequest\",\"requestParameters\":{\"conversationToken\":\"***\",\"utterance\":\"***\"}}",
+      "EventId": "ba0801a1-87ec-4d26-be87-000000075bbb",
+      "EventName": "PassRequest",
+      "EventSource": "q.amazonaws.com",
+      "EventTime": 1791370800,
+      "ReadOnly": "false",
+      "Resources": [
+        {
+          "ResourceName": "arn:aws:codewhisperer:us-east-1:555555555555:profile/SYNTHPROFILE",
+          "ResourceType": "AWS::CodeWhisperer::Profile"
+        }
+      ],
+      "Username": "Mary"
+    }
+  ],
+  "NextToken": "kbOt5LlZe++mErCebpy2TgaMgmDvF1kYGFcH64JSjIbZFjsuvrSqg66b5YGssKutDYIyII4lrP4="
+}

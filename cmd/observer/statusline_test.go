@@ -131,7 +131,7 @@ func TestStatusline_NoLockfile_WordmarkOnly_ZeroDials(t *testing.T) {
 
 	select {
 	case <-dialed:
-		t.Fatal("daemon was dialed despite no live lockfile — zero-dial invariant violated")
+		t.Fatal("daemon was dialed despite no live lockfile - zero-dial invariant violated")
 	case <-time.After(75 * time.Millisecond):
 		// no connection attempt observed — expected.
 	}
@@ -638,7 +638,7 @@ func TestStatusline_NonLoopbackDaemonAddr_SkippedZeroDials(t *testing.T) {
 
 	select {
 	case <-dialed:
-		t.Fatal("F4: statusline dialed a non-loopback daemon address — zero-dial invariant violated")
+		t.Fatal("F4: statusline dialed a non-loopback daemon address - zero-dial invariant violated")
 	case <-time.After(75 * time.Millisecond):
 		// no connection attempt observed — expected.
 	}

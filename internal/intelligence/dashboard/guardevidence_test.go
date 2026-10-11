@@ -205,7 +205,7 @@ func TestAPIGuardEvidence_ExportArtifact(t *testing.T) {
 // (job "failed"), but the divergence detail IS the evidence — the
 // download must still serve it.
 func TestAPIGuardEvidence_VerifyAuditFailureStillDownloads(t *testing.T) {
-	res := &fakeExecResult{out: []byte("audit chain BROKEN — first divergence at id 5\n"), exit: 1}
+	res := &fakeExecResult{out: []byte("audit chain BROKEN - first divergence at id 5\n"), exit: 1}
 	s, _ := newEvidenceServer(t, newFakeExec(res))
 
 	id := kickEvidence(t, s, `{"kind":"verify-audit"}`)

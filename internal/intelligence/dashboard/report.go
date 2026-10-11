@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/dashapi"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
+	"github.com/marmutapp/superbased-observer/internal/modelfilter"
 )
 
 // lossyEvictedBytesTotal sums original_bytes removed by lossy-eviction
@@ -17,8 +19,8 @@ import (
 // (recoverable only via markers), not a compression saving, so callers
 // subtract them before reporting "trimmed" bytes. The project filter
 // mirrors the report's projects.root_path join.
-func (s *Server) lossyEvictedBytesTotal(ctx context.Context, since, until time.Time, project string) (int64, error) {
-	lossy := lossyEvictionMechanismList()
+func (s *Server) lossyEvictedBytesTotal(ctx context.Context, since, until time.Time, project, model string) (int64, error) {
+	lossy := dashapi.LossyEvictionMechanismList()
 	if len(lossy) == 0 || s.db() == nil {
 		return 0, nil
 	}
@@ -32,6 +34,12 @@ func (s *Server) lossyEvictedBytesTotal(ctx context.Context, since, until time.T
 	if project != "" {
 		where = append(where, "at.project_id = (SELECT id FROM projects WHERE root_path = ?)")
 		args = append(args, project)
+	}
+	// Turn grain: an eviction belongs to the model of the proxy turn it
+	// trimmed (modelfilter.RowIs on api_turns.model).
+	if frag, margs := modelfilter.RowIs("at.model", model); frag != "" {
+		where = append(where, frag)
+		args = append(args, margs...)
 	}
 	var evicted int64
 	//nolint:gosec // G202: WHERE fragments + IN placeholder list are code constants; values bound via args.
@@ -86,6 +94,9 @@ func (s *Server) handleReportMonthly(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	project := r.URL.Query().Get("project")
+	// The global Model filter (turn grain: the month's spend narrows to that
+	// model's turns). Echoed so the statement can say which model it covers.
+	model := modelParam(r)
 	start := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	startArg := start.Format(time.RFC3339Nano)
@@ -96,6 +107,9 @@ func (s *Server) handleReportMonthly(w http.ResponseWriter, r *http.Request) {
 		"project":      project,
 		"generated_at": now.Format(time.RFC3339),
 	}
+	if model != "" {
+		resp["model"] = model
+	}
 	if s.db() == nil {
 		writeJSON(w, resp)
 		return
@@ -104,7 +118,7 @@ func (s *Server) handleReportMonthly(w http.ResponseWriter, r *http.Request) {
 	// The month's spend rows: the node's deduped substrate (spendTurns —
 	// the one session dedup rule, sessionmsg.DeriveVerdicts, applied by the
 	// cost engine), project-scoped the way the engine scopes every surface.
-	turns, err := s.spendTurns(r.Context(), start, end, "", project, nil)
+	turns, err := s.spendTurns(r.Context(), start, end, dashapi.SpendScope{Project: project, Model: model}, nil)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -126,7 +140,7 @@ func (s *Server) handleReportMonthly(w http.ResponseWriter, r *http.Request) {
 	}
 	// Compression telemetry is a property of the proxy rows alone (never
 	// deduped away), so it is summed straight off api_turns.
-	compSavedTotal, err := s.reportCompressionSaved(r.Context(), startArg, endArg, project)
+	compSavedTotal, err := s.reportCompressionSaved(r.Context(), startArg, endArg, project, model)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -245,7 +259,7 @@ func (s *Server) handleReportMonthly(w http.ResponseWriter, r *http.Request) {
 	// so "compression trimmed" reports genuine, retrievable compression
 	// only, and surface the evicted volume additively (evicted content is
 	// recoverable via search_past_outputs / stash markers, not a saving).
-	evicted, err := s.lossyEvictedBytesTotal(r.Context(), start, end, project)
+	evicted, err := s.lossyEvictedBytesTotal(r.Context(), start, end, project, model)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -312,7 +326,7 @@ func (s *Server) reportSessionMeta(ctx context.Context, ids []string) (map[strin
 // reportCompressionSaved sums the proxy's compression saving (original -
 // compressed bytes) over the month's non-error api_turns rows, scoped to one
 // project through the row's session when project is set.
-func (s *Server) reportCompressionSaved(ctx context.Context, startArg, endArg, project string) (int64, error) {
+func (s *Server) reportCompressionSaved(ctx context.Context, startArg, endArg, project, model string) (int64, error) {
 	q := `SELECT COALESCE(SUM(COALESCE(at.compression_original_bytes, 0) - COALESCE(at.compression_compressed_bytes, 0)), 0)
 		FROM api_turns at
 		LEFT JOIN sessions s ON s.id = at.session_id
@@ -323,6 +337,10 @@ func (s *Server) reportCompressionSaved(ctx context.Context, startArg, endArg, p
 	if project != "" {
 		q += ` AND COALESCE(p.root_path, '') = ?`
 		args = append(args, project)
+	}
+	if frag, margs := modelfilter.AndRowIs("at.model", model); frag != "" {
+		q += frag
+		args = append(args, margs...)
 	}
 	var saved int64
 	err := s.db().QueryRowContext(ctx, q, args...).Scan(&saved)

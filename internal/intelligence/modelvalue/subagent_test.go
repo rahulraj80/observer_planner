@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
-	"github.com/marmutapp/superbased-observer/internal/routing"
+	"github.com/marmutapp/superbased-observer/internal/routingcore"
 )
 
 // sideAction builds a sidechain action n seconds after t0.
@@ -93,10 +93,10 @@ func TestBuild_SubagentRecommendationsSurface(t *testing.T) {
 		t.Fatalf("subagents = %d, want 1: %+v", len(rep.Subagents), rep.Subagents)
 	}
 	s := rep.Subagents[0]
-	if s.Name != "code-reviewer" || s.Reason != routing.ReasonOverpoweredSubagent {
+	if s.Name != "code-reviewer" || s.Reason != routingcore.ReasonOverpoweredSubagent {
 		t.Errorf("recommendation = %+v", s)
 	}
-	if s.SuggestedModel != "claude-haiku-4-5" || s.SuggestedTier != routing.TierHaikuClass {
+	if s.SuggestedModel != "claude-haiku-4-5" || s.SuggestedTier != routingcore.TierHaikuClass {
 		t.Errorf("suggestion = %s (%s)", s.SuggestedModel, s.SuggestedTier)
 	}
 	if s.Evidence.Actions != 60 || s.Evidence.Reads != 60 {

@@ -44,7 +44,7 @@ func newKimiCmd() *cobra.Command {
 		Aliases: []string{"kimi-code"},
 		Short:   "Launch kimi-code; with --continue-from, write a handover doc and open the TUI (doc-assisted)",
 		Long: "Wraps Moonshot AI's kimi-code CLI (`kimi`). This launcher is\n" +
-			"NON-PROXIED — kimi-code's endpoint config lives in its never-read\n" +
+			"NON-PROXIED - kimi-code's endpoint config lives in its never-read\n" +
 			"config.toml, and no live routed turn has confirmed proxy capture.\n" +
 			"Token capture happens via observer's local kimi-code wire.jsonl\n" +
 			"adapter, not the proxy.\n\n" +
@@ -122,7 +122,7 @@ func newKimiCmd() *cobra.Command {
 					return cerr
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(),
-					"observer kimi: kimi-code has no initial-prompt seed — handover written to %s\n", out.DocPath)
+					"observer kimi: kimi-code has no initial-prompt seed - handover written to %s\n", out.DocPath)
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"observer kimi: paste it as your first message in the TUI, or run `kimi -p \"$(cat %s)\"` for a headless one-shot\n", out.DocPath)
 				if out.Note != "" {
@@ -145,7 +145,7 @@ func newKimiCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to config.toml (defaults to ~/.observer/config.toml); used to resolve the source session for --continue-from")
 	cmd.Flags().StringVar(&binPath, "kimi-path", "", "Path to the kimi binary (default: resolve `kimi` on PATH)")
-	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "Session id to continue from: distill a handover, write it to disk, and open the kimi TUI (doc-assisted — kimi-code has no initial-prompt seed). See docs/session-handoff.md.")
+	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "Session id to continue from: distill a handover, write it to disk, and open the kimi TUI (doc-assisted - kimi-code has no initial-prompt seed). See docs/session-handoff.md.")
 	cmd.Flags().StringVar(&carry, "carry", "", "Carry mode for --continue-from: metadata|distilled|distilled_tail|full|full_cache (default from [handoff] config)")
 	cmd.Flags().IntVar(&fromMessage, "from-message", 0, "With --continue-from: fork after this 1-based transcript message (default: last message)")
 	cmd.Flags().StringVar(&fromTime, "from-time", "", "With --continue-from: fork after the last message at or before this RFC3339 time")

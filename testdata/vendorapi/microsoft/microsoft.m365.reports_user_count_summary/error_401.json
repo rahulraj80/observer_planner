@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "Unauthorized",
+    "message": "Required authentication information is either missing or not valid for the resource."
+  }
+}
