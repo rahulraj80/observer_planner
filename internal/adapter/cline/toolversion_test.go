@@ -49,6 +49,83 @@ func TestLatestClineVersion(t *testing.T) {
 	}
 }
 
+// TestEarliestClineVersion pins the oldest-entry selection the adapter
+// stamps FIRST, so the store's first-wins tool_version is the build the
+// task started on (migration 162, T-784).
+func TestEarliestClineVersion(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		meta taskMetadata
+		want string
+	}{
+		{"none", taskMetadata{}, ""},
+		{
+			name: "oldest_wins",
+			meta: taskMetadata{EnvironmentHistory: []taskEnvironmentRecord{
+				{Ts: 50, ClineVersion: "3.17.4"},
+				{Ts: 5, ClineVersion: "3.16.0"},
+			}},
+			want: "3.16.0",
+		},
+		{
+			name: "tie_keeps_first_listed",
+			meta: taskMetadata{EnvironmentHistory: []taskEnvironmentRecord{
+				{Ts: 5, ClineVersion: "3.16.0"},
+				{Ts: 5, ClineVersion: "3.16.1"},
+			}},
+			want: "3.16.0",
+		},
+		{
+			name: "empty_versions_skipped",
+			meta: taskMetadata{EnvironmentHistory: []taskEnvironmentRecord{
+				{Ts: 1, ClineVersion: ""},
+				{Ts: 9, ClineVersion: "3.10.0"},
+			}},
+			want: "3.10.0",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := earliestClineVersion(tc.meta); got != tc.want {
+				t.Errorf("earliestClineVersion = %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestClineToolVersionStamps pins the stamp ORDER the store's first/last
+// semantics rely on: earliest first, latest second, one stamp when equal.
+func TestClineToolVersionStamps(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		meta taskMetadata
+		want []string
+	}{
+		{"none", taskMetadata{}, nil},
+		{"one build", taskMetadata{EnvironmentHistory: []taskEnvironmentRecord{{Ts: 1, ClineVersion: "3.17.4"}}}, []string{"3.17.4"}},
+		{
+			"upgraded: earliest then latest",
+			taskMetadata{EnvironmentHistory: []taskEnvironmentRecord{{Ts: 50, ClineVersion: "3.18.0"}, {Ts: 5, ClineVersion: "3.17.4"}}},
+			[]string{"3.17.4", "3.18.0"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := clineToolVersionStamps("s", tc.meta)
+			if len(got) != len(tc.want) {
+				t.Fatalf("stamps = %+v, want %v", got, tc.want)
+			}
+			for i, v := range tc.want {
+				if got[i].Version != v || got[i].SessionID != "s" {
+					t.Errorf("stamp %d = %+v, want %s", i, got[i], v)
+				}
+			}
+		})
+	}
+}
+
 // TestParseStampsToolVersion is the end-to-end pin: a task dir carrying
 // the live task_metadata.json (cline_version 3.88.0) yields a
 // SessionToolVersion.

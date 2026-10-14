@@ -102,6 +102,10 @@ export const EXPORT_ROUTES: readonly ExportRow[] = [
   { path: "/cost", tab: "by-model", endpoint: "/api/models", filters: ALL },
   { path: "/cost", tab: "budgets", endpoint: "/api/budget" },
   { path: "/cost", tab: "reconciliation", endpoint: "/api/cowork/reconcile" },
+  {
+    path: "/plans",
+    none: "Nothing to export here: plan readings change every few minutes and stay on this machine.",
+  },
   { path: "/analysis", endpoint: "/api/analysis/headline", filters: ALL },
   { path: "/tools", endpoint: "/api/tools", filters: ["window", "project", "model"] },
   { path: "/compression", tab: "savings", endpoint: "/api/compression/timeseries", filters: ALL },

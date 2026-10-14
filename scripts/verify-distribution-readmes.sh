@@ -25,7 +25,7 @@ fi
 
 fail=0
 for channel in npm pypi; do
-    template="$channel/observer/README.template.md"
+    template="docs/distribution/$channel-README.template.md"
     committed="$channel/observer/README.md"
     rebuilt="$tmpdir/$channel-README.md"
 

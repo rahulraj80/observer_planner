@@ -452,10 +452,9 @@ func TestParseSessionFileMissingSpoolFileErrors(t *testing.T) {
 	}
 }
 
-func TestNameAndDefaultConstruction(t *testing.T) {
-	if got := New().Name(); got != ToolName {
-		t.Errorf("Name() = %q, want %q", got, ToolName)
-	}
+// TestDefaultConstruction checks the platform-default fallback. The wire id
+// is pinned in internal/adapter/defaults TestAdapterIDsOutsideTheCanonicalList.
+func TestDefaultConstruction(t *testing.T) {
 	if got := NewWithRoots(nil); len(got.WatchPaths()) == 0 && len(defaultRoots()) != 0 {
 		t.Error("NewWithRoots(nil) did not fall back to the platform defaults")
 	}

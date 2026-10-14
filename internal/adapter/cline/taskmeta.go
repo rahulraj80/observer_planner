@@ -201,6 +201,45 @@ func latestClineVersion(meta taskMetadata) string {
 	return ver
 }
 
+// earliestClineVersion is latestClineVersion's mirror: the `cline_version`
+// of the OLDEST `environment_history[]` entry that carries one (the first
+// entry wins a timestamp tie). The adapter stamps it before the latest one so
+// the store's first-wins tool_version records the build the task started on
+// and tool_version_last the newest (migration 162, T-784).
+func earliestClineVersion(meta taskMetadata) string {
+	ver := ""
+	var bestTs int64
+	for _, e := range meta.EnvironmentHistory {
+		if e.ClineVersion == "" {
+			continue
+		}
+		if ver == "" || e.Ts < bestTs {
+			bestTs, ver = e.Ts, e.ClineVersion
+		}
+	}
+	return ver
+}
+
+// clineToolVersionStamps returns the task's tool-version stamps in the order
+// the store needs them: the EARLIEST build first and the latest second, so
+// the store's first-wins tool_version is the build the task started on and
+// its tool_version_last the newest (migration 162, T-784). One stamp when the
+// two agree, none when no entry carries a version. Bounded-token validation
+// in the store makes a malformed value harmless.
+func clineToolVersionStamps(sessionID string, meta taskMetadata) []models.SessionToolVersion {
+	versions := []string{earliestClineVersion(meta)}
+	if latest := latestClineVersion(meta); latest != versions[0] {
+		versions = append(versions, latest)
+	}
+	var out []models.SessionToolVersion
+	for _, ver := range versions {
+		if ver != "" {
+			out = append(out, models.SessionToolVersion{SessionID: sessionID, Version: ver})
+		}
+	}
+	return out
+}
+
 // resolveSurfaceHost decides the SurfaceHost token for one task.
 //
 // Two grounded signals, path first then metadata refinement:

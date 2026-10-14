@@ -1588,10 +1588,16 @@ export type SessionDetail = {
   // must never be rendered as "cli" (see the shared SurfaceBadge).
   surface?: string;
   surface_host?: string;
-  // Captured tool/CLI version (migration 125, NODE-LOCAL): the free-form
-  // semver an adapter read from disk. OMITTED when unstamped — absence
-  // means UNKNOWN, never a fabricated version.
+  // Captured tool/CLI version (migration 125): the version-shaped token an
+  // adapter read from disk (or the proxy read off a session-bound request's
+  // User-Agent). Ships to the org as session metadata since server
+  // migration 161. OMITTED when unstamped: absence means UNKNOWN, never a
+  // fabricated version.
   tool_version?: string;
+  // The latest build seen in the session (migration 162). Differs from
+  // tool_version when the session was upgraded mid-session; an older daemon
+  // omits it (read it as equal to tool_version, shared/lib/toolVersion.ts).
+  tool_version_last?: string;
   // Resume-capability block (session-attach design Phase 3): how a CLOSED
   // session on this tool can be reopened, derived server-side by capability
   // shape. Always present.

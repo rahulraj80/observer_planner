@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/archive"
 	"github.com/marmutapp/superbased-observer/internal/archivestore"
 	"github.com/marmutapp/superbased-observer/internal/archivesvc"
@@ -27,7 +29,7 @@ func newRig(t *testing.T) *rig {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
-	hot, err := db.Open(ctx, db.Options{Path: filepath.Join(dir, "observer.db")})
+	hot, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(dir, "observer.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

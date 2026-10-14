@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
 	"github.com/marmutapp/superbased-observer/internal/adapter/codex"
@@ -24,7 +26,7 @@ func setup(t *testing.T) (*Watcher, *store.Store, string) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +260,7 @@ func TestProcessFileWritesCursorOnRetrySuggested(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +320,7 @@ func TestProcessFileNoCursorWriteWhenStaleNoRetry(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +388,7 @@ func TestPollCursorsSkipsOrphanPaths(t *testing.T) {
 func TestNewClampsNegativePollInterval(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	defer database.Close()
 	w := New(store.New(database), adapter.NewRegistry(), Options{
 		PollInterval: -5 * time.Second,
@@ -409,7 +411,7 @@ func TestCodexShortSessionMultiPassIngest(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,7 +522,7 @@ func TestCodexConcurrentProcessFileRace(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +597,7 @@ func TestScanWithNoAdaptersIsNoop(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "empty.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +673,7 @@ func TestProcessFileDedupsAdapterWarnings(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,7 +740,7 @@ func TestProcessFileWarningDedupTTLZeroDisabled(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +788,7 @@ func TestRefreshRootsHotAddsAfterEmptyStart(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -457,12 +457,3 @@ func TestParseSessionFile_Idempotent(t *testing.T) {
 		}
 	}
 }
-
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolKiroCrew {
-		t.Errorf("Name() = %q, want %q", got, models.ToolKiroCrew)
-	}
-	if ToolName != models.ToolKiroCrew {
-		t.Errorf("ToolName = %q, want %q", ToolName, models.ToolKiroCrew)
-	}
-}

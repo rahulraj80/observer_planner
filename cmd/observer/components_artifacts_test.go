@@ -71,6 +71,7 @@ func TestCollectArtifactStatesEmptyMachine(t *testing.T) {
 // TestCollectArtifactStatesInstalledMachine stages each artifact under a
 // throwaway home and checks the report and the doctor rows.
 func TestCollectArtifactStatesInstalledMachine(t *testing.T) {
+	requireCompiled(t, "processobs")
 	requireUnstampedBuild(t)
 	p := testArtifactProbes(t)
 	// Browser: host files installed, a current handshake recorded.

@@ -261,6 +261,7 @@ func observerSubcommandsWith(deps usageDeps) []*cobra.Command {
 		newRoutingCmd(),
 		newModelValueCmd(),
 		newPredictCmd(),
+		newPlansCmd(),
 		newProjectCmd(),
 		newTasksCmd(),
 		newArchiveCmd(),

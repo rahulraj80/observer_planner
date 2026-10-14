@@ -38,6 +38,7 @@ import (
 // own /api/remote/pair route, a real store — because a unit test asserting
 // "the field is non-nil" would not have caught the original miss either.
 func TestBuildRemoteControllerWiresSessionAudit(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	ctx := context.Background()
 	dir := t.TempDir()
 

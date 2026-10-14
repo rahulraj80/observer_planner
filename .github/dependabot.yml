@@ -2,12 +2,19 @@
 # Third-party actions are pinned to full commit SHAs with the release tag in a
 # trailing comment; Dependabot keeps both current by opening a PR per bump, so
 # a pin never goes stale silently and never moves without review.
+#
+# D-602 (CI cost): monthly, and no automatic rebase. With rebasing on, every
+# push to main rebased the open grouped PR, which fired a second full ci,
+# ci-private, org-postgres and kafka-conformance run on the private repo
+# (about half of a release's Actions minutes). Comment `@dependabot rebase`
+# on the PR to refresh it by hand when you are ready to merge it.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
+    rebase-strategy: "disabled"
     groups:
       github-actions:
         patterns:

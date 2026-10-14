@@ -2439,7 +2439,7 @@ const sessionPushSelect = `SELECT s.rowid, s.id,
 		             COALESCE(p.content_fingerprint_hash,''), COALESCE(p.git_upstream_remote,''),
 		             COALESCE(s.workspace_hash,''), COALESCE(s.workspace,''), COALESCE(s.is_worktree,0),
 		             COALESCE(s.surface,''), COALESCE(s.surface_host,''), COALESCE(s.tool_version,''),
-		             COALESCE(s.parent_thread_id,'')
+		             COALESCE(s.parent_thread_id,''), COALESCE(s.tool_version_last,'')
 		        FROM sessions s JOIN projects p ON s.project_id = p.id`
 
 const actionPushSelect = `SELECT a.id, a.session_id,
@@ -2510,7 +2510,7 @@ func scanSessionPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail str
 		&r.ContentFingerprintHash, &r.GitUpstreamRemote,
 		&r.WorkspaceHash, &r.Workspace, &isWorktree,
 		&r.Surface, &r.SurfaceHost, &r.ToolVersion,
-		&r.ParentThreadID); err != nil {
+		&r.ParentThreadID, &r.ToolVersionLast); err != nil {
 		return 0, r, err
 	}
 	r.IsWorktree = isWorktree != 0
@@ -2548,7 +2548,9 @@ func scanSessionPushRow(rows *sql.Rows, share ShareOptions, orgID, userEmail str
 	// whitespace/control chars/prose before it ever lands in the
 	// column), so it carries no developer-authored content risk and
 	// ships in every posture, same as AgentVersion already does for
-	// the Observer binary itself. parent_thread_id (server 162 / pg
+	// the Observer binary itself. tool_version_last (agent 162 / server
+	// 232 / pg 0099) is the same token class, the latest build seen in
+	// the session, so it ships unconditionally too. parent_thread_id (server 162 / pg
 	// 0028) joins the same unconditional bucket for a different
 	// reason: it is not a closed vocabulary or a bounded token, it
 	// is an OPAQUE vendor-minted session id, and the child session

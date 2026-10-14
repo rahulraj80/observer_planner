@@ -310,15 +310,8 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	taskModel := ""
 	if haveMeta {
 		taskModel = latestModelID(meta)
-		// Issue 2: captured Cline agent version. first-wins-unless-empty
-		// + bounded-token validation in the store make a re-stamp or a
-		// malformed value harmless.
-		if ver := latestClineVersion(meta); ver != "" {
-			res.SessionToolVersions = append(res.SessionToolVersions, models.SessionToolVersion{
-				SessionID: sessionID,
-				Version:   ver,
-			})
-		}
+		// Issue 2: captured Cline agent version (earliest, then latest).
+		res.SessionToolVersions = append(res.SessionToolVersions, clineToolVersionStamps(sessionID, meta)...)
 	}
 
 	for i := range msgs {

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/codeintel"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
@@ -161,7 +163,7 @@ func newGetSymbolsFixture(t *testing.T, seeds []symbolSeed, edges []edgeSeed, op
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -537,7 +539,7 @@ func TestGetSymbols_IndexUnavailable(t *testing.T) {
 	// directly with codeintel.Unavailable().
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	t.Cleanup(func() { database.Close() })
 
 	auditW := audit.NewSQLWriter(database, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.SQLWriterOptions{
@@ -594,7 +596,7 @@ func TestGetSymbols_IndexUnavailable(t *testing.T) {
 func TestGetSymbols_RegexFallback_Unavailable(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	t.Cleanup(func() { database.Close() })
 
 	auditW := audit.NewSQLWriter(database, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.SQLWriterOptions{
@@ -656,7 +658,7 @@ export class Editor {}
 func TestGetSymbols_RegexFallback_UnsupportedLanguage(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	t.Cleanup(func() { database.Close() })
 
 	auditW := audit.NewSQLWriter(database, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.SQLWriterOptions{
@@ -937,7 +939,7 @@ func TestGetSymbols_TooManyRequests(t *testing.T) {
 
 func TestGetSymbols_NotRegisteredWhenDisabled(t *testing.T) {
 	tmp := t.TempDir()
-	database, _ := db.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
 	t.Cleanup(func() { database.Close() })
 	s, _ := New(Options{
 		DB: database, ServerName: "test", ServerVersion: "0",
@@ -953,7 +955,7 @@ func TestGetSymbols_NotRegisteredWhenDisabled(t *testing.T) {
 
 func TestGetSymbols_RegisteredWhenEnabledEvenWithoutIndex(t *testing.T) {
 	tmp := t.TempDir()
-	database, _ := db.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
 	t.Cleanup(func() { database.Close() })
 	s, _ := New(Options{
 		DB: database, ServerName: "test", ServerVersion: "0",

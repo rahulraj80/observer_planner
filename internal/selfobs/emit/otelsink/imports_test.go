@@ -1,52 +1,19 @@
 package otelsink
 
 import (
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 // TestPackageImports_Bounded pins that otelsink, the gateway client, never
-// imports internal/obs (the reverse-import boundary). It may import
-// emit/shape/run/keys + internal/exporter/otel + stdlib + OTel.
+// imports internal/obs (the reverse-import boundary).
 func TestPackageImports_Bounded(t *testing.T) {
 	t.Parallel()
-
-	forbidden := []string{
-		"github.com/marmutapp/superbased-observer/internal/obs",
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	matches, err := filepath.Glob(filepath.Join(cwd, "*.go"))
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	if len(matches) == 0 {
-		t.Fatalf("no source files in %s", cwd)
-	}
-
-	fset := token.NewFileSet()
-	for _, path := range matches {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for _, imp := range file.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbidden {
-				if p == bad || strings.HasPrefix(p, bad+"/") {
-					t.Errorf("%s: forbidden import %q (otelsink must not import internal/obs)", filepath.Base(path), p)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		ForbiddenTrees: []string{
+			"github.com/marmutapp/superbased-observer/internal/obs",
+		},
+		Reason: "otelsink must not import internal/obs",
+	})
 }

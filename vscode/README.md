@@ -1,20 +1,27 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/superbasedapp/observer/main/vscode/media/logo-light.png">
-    <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/vscode/media/logo-dark.png" alt="SuperBased logo" height="72">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-idle-dark-512.png">
+    <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-idle-light-512.png" alt="Obs, the SuperBased mascot: a small robot with a terminal prompt for a face and a cape" width="120">
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/brand/superbased-lockup-dark.png">
+    <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/brand/superbased-lockup-light.png" alt="SuperBased" height="32">
   </picture>
 </p>
 
 <h1 align="center">SuperBased for VS Code</h1>
 
 <p align="center">
-  <strong>Local-first observability for AI coding agents, inside your editor.</strong><br>
-  See what Claude Code, Codex, Cursor and every other coding agent you run really cost, from the
-  tokens your provider actually billed. No account, no telemetry.
+  <strong>Track what every AI coding agent costs, inside your editor. See the limit coming.</strong><br>
+  See what Claude Code, Codex, Cursor and 37 more AI coding tools cost, per session and per model,
+  from the tokens your provider actually billed. No account, no telemetry.
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/01-overview.png" alt="SuperBased dashboard Overview: sessions, cost over time by billing bucket, top models and coding tools" width="860">
+  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cost-and-limits.png" alt="Session detail in the SuperBased dashboard: total cost, a low, typical and high cost for the next message, the 5-hour and weekly limit, and the cost of switching to a cheaper model" width="860">
 </p>
 
 ## Why SuperBased
@@ -27,7 +34,13 @@
 - **Know the next bill before it lands.** Prompt-cache expiry warnings and a cost band for your next
   message.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/overview-dashboard.png" alt="Overview page of the SuperBased dashboard: 30-day spend, sessions, actions and proxy-accurate API turns, cache efficiency, cost over time by billing bucket and actions over time by coding tool" width="860">
+</p>
+
 ## Get started
+
+<img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-celebrate-light-small.png" alt="" width="54" align="right">
 
 1. **Install the extension.** Each platform build bundles the `observer` binary, so there is nothing
    else to install.
@@ -55,7 +68,11 @@ If something looks off, run **SuperBased: Doctor**. The **Get Started with Super
 | **Instruction CodeLens** | Refresh or preview suggestions for your agent instruction files from captured patterns. |
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/11-session-detail.png" alt="Session detail: cost, token buckets by billing tier, next-message cost predictor and rate-limit gauge" width="860">
+  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-detail.png" alt="Session detail: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model" width="860">
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/terminals-workspace.png" alt="Terminals page: Claude Code, Codex, Antigravity CLI and Copilot CLI running side by side as live terminals in one dashboard" width="860">
 </p>
 
 ## Settings

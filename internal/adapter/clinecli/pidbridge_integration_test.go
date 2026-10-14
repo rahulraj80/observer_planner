@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	_ "modernc.org/sqlite"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter/clinecli"
@@ -130,7 +132,7 @@ func TestSessionProcessSeed_LiveEndToEnd(t *testing.T) {
 
 	// 6. Real store consumes the seeds; only the live + identity-matched
 	//    one becomes a bridge row.
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(tmp, "observer.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(tmp, "observer.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

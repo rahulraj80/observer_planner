@@ -1,14 +1,11 @@
 package arenamodels
 
 import (
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 // catalog is a slice of the compiled snapshot's shape: every family plus the
@@ -276,35 +273,8 @@ func TestEveryArenaHarnessComposes(t *testing.T) {
 // TestNoForbiddenImports pins the package as pure logic (CLAUDE.md #1): the
 // dashboard handler loads history and the catalogue and passes them in.
 func TestNoForbiddenImports(t *testing.T) {
-	forbidden := []string{
-		"database/sql",
-		"net/http",
-		"os",
-		"os/exec",
-		"github.com/fsnotify/fsnotify",
-		"github.com/marmutapp/superbased-observer/internal/store",
-		"github.com/marmutapp/superbased-observer/internal/intelligence/cost",
-	}
-	fset := token.NewFileSet()
-	matches, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	for _, f := range matches {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f, err)
-		}
-		for _, imp := range af.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbidden {
-				if path == bad {
-					t.Errorf("%s imports forbidden %q: internal/arenamodels must stay pure", f, bad)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "os", "os/exec", "github.com/fsnotify/fsnotify", "github.com/marmutapp/superbased-observer/internal/store", "github.com/marmutapp/superbased-observer/internal/intelligence/cost"},
+		Reason:    "internal/arenamodels must stay pure",
+	})
 }

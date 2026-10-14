@@ -106,6 +106,9 @@ func TestWireEncodingGolden(t *testing.T) {
 				// a bounded, non-prose, vendor-authored token, METADATA like
 				// Surface/SurfaceHost above — ships in the DEFAULT posture.
 				ToolVersion: "1.2.3",
+				// The latest build seen in the session (agent 162 / server
+				// 232 / pg 0099): same METADATA class as ToolVersion.
+				ToolVersionLast: "1.3.0",
 				// Parent-thread-id trickle-up (server migration 162 / pg
 				// 0028): an opaque vendor-minted session-lineage pointer,
 				// METADATA like ToolVersion above — ships in the DEFAULT

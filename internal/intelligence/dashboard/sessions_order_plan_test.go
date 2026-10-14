@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -111,7 +113,7 @@ func TestSessionsDefaultOrderMatchesOldClause(t *testing.T) {
 
 func openOrderTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "order.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "order.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

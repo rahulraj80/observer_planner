@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 
 	keyring "github.com/zalando/go-keyring"
+
+	"github.com/marmutapp/superbased-observer/internal/keystore"
 )
 
 // ServiceName is the keychain/file service identifier for personal-cloud
@@ -55,7 +57,7 @@ var ErrNotFound = errors.New("cloudcred: credential not present")
 // ErrInsecureFallbackUnavailable is returned by every method of the store
 // Open selects when the OS keychain is unavailable AND this platform build's
 // file fallback has not been verified secure (fileFallbackSecure() == false
-// — currently every non-unix build; see cred_other.go). Writing the WorkOS
+// - currently every non-unix build; see internal/keystore platform_other.go). Writing the WorkOS
 // refresh material, API bearer token, or Ed25519 device signing key to a
 // plaintext file without verifying the DACL is current-user-only, and
 // without refusing a reparse point, is worse than refusing outright: a local
@@ -237,15 +239,22 @@ func (failClosedStore) LoadAPIToken() (string, error) {
 // Store.Clear documents that absence is not an error.
 func (failClosedStore) Clear() error { return nil }
 
-// keychainUsable probes the keyring with a throwaway record. A full
-// set/get/delete cycle is the only reliable cross-platform availability test.
-func keychainUsable() bool {
-	if err := keyring.Set(ServiceName, recProbe, "1"); err != nil {
-		return false
-	}
-	got, err := keyring.Get(ServiceName, recProbe)
-	_ = keyring.Delete(ServiceName, recProbe)
-	return err == nil && got == "1"
+// keychainUsable probes the keyring with a throwaway record through the
+// shared keystore probe (a full set/get/delete cycle is the only reliable
+// cross-platform availability test).
+func keychainUsable() bool { return keystore.KeychainUsable(ServiceName, recProbe) }
+
+// fileFallbackSecure reports whether this platform build's file fallback has
+// verified owner and symlink protections (keystore.FileFallbackSecure: unix
+// true, every other build false, so Open fails closed there; FF2).
+func fileFallbackSecure() bool { return keystore.FileFallbackSecure() }
+
+// withCredentialLock runs fn under the cross-process coordination lock at
+// <dir>/<ServiceName>.coordination-lock (keystore.WithLock; a no-op on
+// builds without a verified private directory, where legacy adoption
+// refuses anyway).
+func withCredentialLock(dir string, fn func() error) error {
+	return keystore.WithLock(dir, ServiceName, fn)
 }
 
 // --- keychain-backed store -------------------------------------------------

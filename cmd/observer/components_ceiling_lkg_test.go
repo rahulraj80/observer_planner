@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/managedconfig"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -19,7 +21,7 @@ import (
 // invalid_core_only.
 func TestCeilingLastKnownPersistsAndHolds(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "observer.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "observer.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +77,7 @@ func TestCeilingLastKnownPersistsAndHolds(t *testing.T) {
 func TestCeilingLastKnownToleratesOldDatabase(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "observer.db")
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}

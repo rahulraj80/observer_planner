@@ -33,15 +33,19 @@
 // unavailable — headless Linux with no Secret Service, a CIFS-mounted HOME —
 // the store falls back to a hardened 0600 file backend.
 //
-// The file fallback is deliberately NOT a clone of orgclient's fileStore
-// (which the plan explicitly forbids). It adds, on every read and write:
+// The hardened backend itself lives in internal/keystore (extracted 2026-10-13
+// so other node modules share ONE implementation); this package keeps its
+// record names, per-host scoping and legacy adoption and delegates file I/O,
+// platform checks, the coordination lock and the keychain probe to it. The
+// file fallback is deliberately NOT a clone of orgclient's fileStore (which
+// the plan explicitly forbids). It adds, on every read and write:
 //
 //   - private-directory validation (0700, owner, not a symlink);
 //   - Lstat + O_NOFOLLOW symlink refusal, with a re-check of the open handle to
 //     close the TOCTOU window;
 //   - POSIX ownership verification (unix) on every read and write.
 //
-// fileFallbackSecure (cred_unix.go / cred_other.go) gates whether Open ever
+// fileFallbackSecure (keystore.FileFallbackSecure) gates whether Open ever
 // selects that file store at all: it is true only on unix, where the
 // protections above are real. On every other platform build (Windows today)
 // openNoFollow is 0 and the ownership checks are no-ops — there is no
@@ -66,6 +70,7 @@
 //
 // # Purity
 //
-// stdlib plus github.com/zalando/go-keyring only (pinned by imports_test.go).
-// No other internal package, no database/sql, net/http, or fsnotify.
+// stdlib, github.com/zalando/go-keyring and internal/keystore only (pinned by
+// imports_test.go). No other internal package, no database/sql, net/http, or
+// fsnotify.
 package cloudcred

@@ -43,7 +43,7 @@ func runChooser(t *testing.T, svc chooserService, input string, detected []strin
 // T-731, D-551) that removes the undetected adapters, after a summary and one
 // confirm.
 func TestComponentChooserWritesTheChoice(t *testing.T) {
-	requireUnstampedBuild(t)
+	requireFullCompiledBuild(t)
 	requireAdapter(t, "codex")
 	svc, path := chooserTestService(t, "")
 	// step 1 yes, the step 2 checklist at its defaults (enter), confirm yes.
@@ -67,7 +67,7 @@ func TestComponentChooserWritesTheChoice(t *testing.T) {
 // TestComponentChooserDeclineWritesNothing: no to the confirm keeps today's
 // everything-active behaviour and leaves the file untouched.
 func TestComponentChooserDeclineWritesNothing(t *testing.T) {
-	requireUnstampedBuild(t)
+	requireFullCompiledBuild(t)
 	svc, path := chooserTestService(t, "# mine\n")
 	out := runChooser(t, svc, "n\n\nn\n", []string{"codex"})
 	if !strings.Contains(out, "kept this build's defaults") {

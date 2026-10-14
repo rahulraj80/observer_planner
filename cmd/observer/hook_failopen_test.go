@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/guard"
 	"github.com/marmutapp/superbased-observer/internal/guardposture"
@@ -71,7 +73,7 @@ func TestFailOpenNotRecordedForLifecycle(t *testing.T) {
 func TestDrainPersistsFailOpenAsFlag(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(dir, "o.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(dir, "o.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

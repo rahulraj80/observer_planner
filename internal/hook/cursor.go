@@ -544,9 +544,19 @@ func BuildCursorEvent(eventName string, body []byte, sc *scrub.Scrubber) (policy
 
 // recordCursorAccounts also runs for after-events and stops without usage.
 // The guard reply precedes this optional evidence write on every path.
+//
+// The same deferred, best-effort ingest also carries the payload's Cursor
+// build (cursor_version, T-784) through IngestOptions.SessionToolVersions,
+// the one tool-version seam. It runs AFTER the event's own rows landed, so
+// the session row usually exists; when it does not yet, the stamp is a
+// silent no-op and the next event (or the hooks-log replay) fills it.
 func recordCursorAccounts(eventName string, body []byte, sink CursorSink, stderr io.Writer, deadline time.Duration, at time.Time) {
 	observations := cursor.BuildAccountObservations(eventName, body, at)
-	if len(observations) == 0 || sink == nil {
+	var versions []models.SessionToolVersion
+	if tv, ok := cursor.SessionToolVersionFromHook(body); ok {
+		versions = []models.SessionToolVersion{tv}
+	}
+	if (len(observations) == 0 && len(versions) == 0) || sink == nil {
 		return
 	}
 	if deadline <= 0 {
@@ -554,7 +564,7 @@ func recordCursorAccounts(eventName string, body []byte, sink CursorSink, stderr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
-	if _, err := sink.Ingest(ctx, nil, nil, store.IngestOptions{ToolAccounts: observations}); err != nil {
+	if _, err := sink.Ingest(ctx, nil, nil, store.IngestOptions{ToolAccounts: observations, SessionToolVersions: versions}); err != nil {
 		fmt.Fprintf(stderr, "observer-hook: cursor account capture: %v\n", err)
 	}
 }

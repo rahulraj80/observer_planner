@@ -15,6 +15,7 @@ func TestWireAIClientsSkipsInactiveComponents(t *testing.T) {
 	requireAdapter(t, "claude-code")
 	requireActiveAdapters(t, "claude-code")
 	requireComponents(t, "integration.proxy-route")
+	requireCompiled(t, "integration.mcp-server")
 	cases := []struct {
 		name, block string
 		want, avoid []string
@@ -129,7 +130,7 @@ func TestInitComponentFlagsWriteTheBlock(t *testing.T) {
 	}
 	// No --config is the default config under $HOME (T-730, D-551), which
 	// holds no [components] block here: an unstamped build keeps everything.
-	if unstampedBuild() && !initGateFor("").snap.Active("codeintel") {
+	if unstampedBuild() && !compiledOut("codeintel") && !initGateFor("").snap.Active("codeintel") {
 		t.Fatal("an unconfigured default config must keep everything active on an unstamped build")
 	}
 }

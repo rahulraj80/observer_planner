@@ -332,6 +332,7 @@ var purgeSessionDecisions = []purgeSessionDecision{
 	{table: "process_events", column: "session_id", kind: purgeNullLink, reason: "process observability is its own capture"},
 	{table: "summary_calls", column: "session_id", kind: purgeNullLink, reason: "Observer's own LLM spend stays counted"},
 	{table: "limit_snapshots", column: "session_id", kind: purgeNullLink, reason: "account-level provider rate-limit state"},
+	{table: "plan_snapshots", column: "session_id", kind: purgeNullLink, reason: "Plans & limits status line readings are account-level plan state; the session link only scopes them"},
 	{table: "handoffs", column: "target_session_id", kind: purgeNullLink, reason: "a handoff from a kept session into a purged one keeps its source record"},
 	// Never rewritten.
 	{table: "guard_events", column: "session_id", kind: purgeKeepDangling, reason: "hash-chained guard audit"},

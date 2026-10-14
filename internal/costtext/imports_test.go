@@ -1,38 +1,24 @@
 package costtext
 
 import (
-	"go/parser"
-	"go/token"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestNoForbiddenImports pins the package's purity (CLAUDE.md "Module
-// Boundaries" #1): the standard library's text and JSON packages only, no
-// I/O beyond the io.Writer a caller hands in, and no internal package.
+// TestNoForbiddenImports pins costtext to a closed stdlib text/JSON allow-list
+// (CLAUDE.md #1): no I/O beyond a caller-supplied io.Writer, no internal package.
 func TestNoForbiddenImports(t *testing.T) {
-	allowed := map[string]bool{
-		"bytes": true, "encoding/json": true, "io": true, "regexp": true, "strconv": true, "strings": true,
-	}
-	fset := token.NewFileSet()
-	matches, err := filepath.Glob("*.go")
-	if err != nil || len(matches) == 0 {
-		t.Fatalf("glob: %v (%d files)", err, len(matches))
-	}
-	for _, f := range matches {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f, err)
-		}
-		for _, imp := range af.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			if !allowed[path] {
-				t.Errorf("%s imports %q; costtext stays a pure text package", f, path)
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		AllowOnly: true,
+		Allowed: []string{
+			"bytes",
+			"encoding/json",
+			"io",
+			"regexp",
+			"strconv",
+			"strings",
+		},
+		Reason: "costtext stays a pure text package",
+	})
 }

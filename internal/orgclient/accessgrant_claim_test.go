@@ -59,7 +59,7 @@ func newClaimFixture(t *testing.T, grants ...orgcontract.AccessGrantWire) claimF
 	if out, err := c.FetchAccessGrants(ctx); err != nil || out.State != GrantFetchApplied {
 		t.Fatalf("fetch: %+v %v", out, err)
 	}
-	raw, err := db.Open(ctx, db.Options{Path: path})
+	raw, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestClaimAccessGrantChildProcess(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}

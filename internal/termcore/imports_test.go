@@ -1,45 +1,27 @@
 package termcore
 
 import (
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestNoForbiddenImports pins the module-boundary discipline (CLAUDE.md
-// section 1): internal/termcore is pure vocabulary. It must not import
-// database/sql, net/http, fsnotify or any terminals-component package.
+// TestNoForbiddenImports pins internal/termcore as pure vocabulary (CLAUDE.md
+// rule 1): no infrastructure and no terminals-component package.
 func TestNoForbiddenImports(t *testing.T) {
-	forbidden := []string{
-		"database/sql",
-		"net/http",
-		"github.com/fsnotify/fsnotify",
-	}
-	fset := token.NewFileSet()
-	matches, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	for _, f := range matches {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f, err)
-		}
-		for _, imp := range af.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbidden {
-				if path == bad {
-					t.Errorf("%s imports forbidden %q: internal/termcore must stay pure", f, bad)
-				}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{
+			"database/sql",
+			"net/http",
+			"github.com/fsnotify/fsnotify",
+		},
+		Custom: func(_, p string) string {
+			if strings.Contains(p, "/internal/term") && !strings.HasSuffix(p, "/internal/termcore") {
+				return "termcore must not reach back into the terminals component"
 			}
-			if strings.Contains(path, "/internal/term") && !strings.HasSuffix(path, "/internal/termcore") {
-				t.Errorf("%s imports %q: termcore must not reach back into the terminals component", f, path)
-			}
-		}
-	}
+			return ""
+		},
+		Reason: "internal/termcore must stay pure",
+	})
 }

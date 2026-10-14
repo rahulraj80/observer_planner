@@ -59,15 +59,6 @@ func countAction(res adapter.ParseResult, action string) int {
 	return n
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolKimiCode {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolKimiCode)
-	}
-	if got := New().Name(); got != "kimi-code" {
-		t.Fatalf("Name() = %q, want kimi-code", got)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	a := NewWithOptions(nil, rootDemo)
 	abs, _ := filepath.Abs(mainWire)

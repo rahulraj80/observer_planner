@@ -42,6 +42,7 @@ var logNodeEntryPackages = []string{
 // transitive dependency closure of each node entry package contains neither
 // internal/telemetrylog (or any subpackage) nor a broker client module.
 func TestNodeBinaryNeverImportsTelemetryLog(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	for _, entry := range logNodeEntryPackages {
 		entry := entry
@@ -98,6 +99,7 @@ var scratchpadModulePrefix = modulePath + "scratchpad/"
 // internal/watcher, internal/proxy, internal/hook included — stays in
 // scope.
 func TestTelemetryLogIsServerSideOnly(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	cmd := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}", "./...")
 	cmd.Dir = repoRoot

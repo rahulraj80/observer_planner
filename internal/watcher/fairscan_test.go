@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -71,10 +73,28 @@ func (o *orderAdapter) ParseSessionFile(ctx context.Context, p string, off int64
 	return adapter.ParseResult{NewOffset: info.Size()}, nil
 }
 
+// probeWalkAdapter is an orderAdapter that reports when the directory walk
+// asks about probeName. Placed after the adapter's last session file in
+// walk order, that probe fires only once the walker has handed the file
+// before it to the scan lane.
+type probeWalkAdapter struct {
+	orderAdapter
+	probeName string
+	reached   chan struct{}
+	probeOnce sync.Once
+}
+
+func (p *probeWalkAdapter) IsSessionFile(path string) bool {
+	if filepath.Base(path) == p.probeName {
+		p.probeOnce.Do(func() { close(p.reached) })
+	}
+	return p.orderAdapter.IsSessionFile(path)
+}
+
 func fairScanFixture(t *testing.T, pollInterval time.Duration, adapters ...*orderAdapter) (*Watcher, *store.Store) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,18 +131,62 @@ func writeFiles(t *testing.T, root, ext string, n int) []string {
 // with a large backlog cannot hold another tool's files until its whole
 // tree is parsed. Pre-fix, adapters were walked one after another and the
 // second adapter's only file was parsed 21st.
+//
+// Since P3-40 the rotation serves only lanes that are READY and skips a
+// lane whose walker has not found a file yet, so "within one round" holds
+// from the moment the second lane is ready, not from the moment Scan is
+// called. The test makes that moment deterministic (T-796): the big
+// adapter's first parse is held until the small walker has moved PAST its
+// file (it is visiting the decoy after it), which means f000.small already
+// sits in the lane. Without the hold the assertion raced the walker
+// goroutine's scheduling and failed under a loaded runner. The hold is
+// bounded, so a regression to sequential adapters (where the small walker
+// cannot run until the big tree is done) still fails at position 20
+// instead of hanging.
 func TestScanInterleavesAdaptersRoundRobin(t *testing.T) {
 	t.Parallel()
 	j := &parseJournal{}
-	big := &orderAdapter{name: "aaa-big", root: t.TempDir(), ext: ".big", journal: j}
-	small := &orderAdapter{name: "bbb-small", root: t.TempDir(), ext: ".small", journal: j}
+	smallPast := make(chan struct{})
+	big := &orderAdapter{
+		name: "aaa-big", root: t.TempDir(), ext: ".big", journal: j,
+		blockName: "f000.big", block: make(chan struct{}), started: make(chan struct{}),
+	}
+	small := &probeWalkAdapter{
+		orderAdapter: orderAdapter{name: "bbb-small", root: t.TempDir(), ext: ".small", journal: j},
+		probeName:    "f001.decoy", reached: smallPast,
+	}
 	writeFiles(t, big.root, big.ext, 20)
 	writeFiles(t, small.root, small.ext, 1)
-	w, s := fairScanFixture(t, 0, big, small)
+	if err := os.WriteFile(filepath.Join(small.root, "f001.decoy"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	holdTimedOut := make(chan bool, 1)
+	go func() {
+		// The bound starts when the scan is actually parked in the held
+		// parse, not at test start: fixture setup under -race on a
+		// loaded runner can itself take seconds.
+		<-big.started
+		select {
+		case <-smallPast:
+			holdTimedOut <- false
+		case <-time.After(5 * time.Second):
+			holdTimedOut <- true
+		}
+		close(big.block)
+	}()
+	w, s := fairScanFixture(t, 0, big)
+	w.registry.Register(small)
 
 	res, err := w.Scan(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if <-holdTimedOut {
+		// The small walker could not get past its file while the scan
+		// was busy parsing: either the lanes no longer run concurrently
+		// or the lane hand-off lost its slot, so readiness is back to
+		// depending on goroutine scheduling.
+		t.Errorf("small walker never moved past f000.small while the scan was busy")
 	}
 	if res.FilesProcessed != 21 || res.Errors != 0 {
 		t.Fatalf("scan result = %+v, want 21 files / 0 errors", res)
@@ -150,9 +214,13 @@ func TestScanInterleavesAdaptersRoundRobin(t *testing.T) {
 		}
 	}
 	// Every file reached its cursor.
-	for _, root := range []string{big.root, small.root} {
-		entries, _ := os.ReadDir(root)
+	for _, a := range []*orderAdapter{big, &small.orderAdapter} {
+		entries, _ := os.ReadDir(a.root)
 		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), a.ext) {
+				continue // the decoy is not a session file
+			}
+			root := a.root
 			off, err := s.GetCursor(context.Background(), filepath.Join(root, e.Name()))
 			if err != nil || off != int64(len("line\n")) {
 				t.Errorf("cursor for %s = %d (%v), want %d", e.Name(), off, err, len("line\n"))

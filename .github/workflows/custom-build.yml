@@ -67,7 +67,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
       - uses: actions/download-artifact@v6
         with:
           name: custom-web-dist
@@ -175,7 +175,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
       - uses: actions/download-artifact@v6
         with:
           pattern: custom-staged-*

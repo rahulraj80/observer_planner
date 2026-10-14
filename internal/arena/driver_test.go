@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/integration"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -56,7 +58,7 @@ func arenaTestStore(t *testing.T) *store.Store {
 	// pooled connection its own :memory: database, so migrations would
 	// land on a different connection than the queries.
 	path := filepath.Join(t.TempDir(), "arena.db")
-	d, err := db.Open(context.Background(), db.Options{Path: path})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

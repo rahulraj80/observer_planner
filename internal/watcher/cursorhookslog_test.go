@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/adapter/cursor"
 	"github.com/marmutapp/superbased-observer/internal/db"
@@ -112,7 +114,7 @@ func TestPollerRewindsRotatedCursorHooksLog(t *testing.T) {
 	rec := &offsetRecorder{Adapter: cursor.NewWithOptions(nil, logs)}
 	reg := adapter.NewRegistry()
 	reg.Register(rec)
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

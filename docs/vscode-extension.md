@@ -1,9 +1,9 @@
 # VS Code Extension
 
-> **SuperBased for VS Code** — one local intelligence layer for
+> **SuperBased for VS Code**: one local intelligence layer for
 > every AI coding tool you use, available without leaving your editor.
 >
-> _This document is the **reference** — commands, settings, surfaces._
+> _This document is the **reference**: commands, settings, surfaces._
 > _Looking for the workflow walkthrough? Try the in-editor_
 > _**Get Started** view (Help → Welcome), or read_
 > _[`docs/vscode-extension-user-guide.md`](./vscode-extension-user-guide.md)_
@@ -49,11 +49,11 @@ and install via `code --install-extension <file>.vsix`.
 | Surface | Description |
 |---|---|
 | **Status bar** | Today's spend in the bottom-right (`$(graph) ▞ superbased $313.85`), updated every 60 s. Click → open dashboard. Hover for delta vs yesterday, top model, burn rate, month projection. The `▞ superbased` wordmark prefix is on by default; turn it off with `observer.statusBar.wordmark = false`. |
-| **Activity bar** | An `observer` view container with four `TreeView`s — **Today**, **Sessions**, **Discovery**, **Costs (7 d)**. Right-click any session row for **Open in Dashboard** / **Copy Session ID**. |
-| **Dashboard webview** | `SuperBased: Open Dashboard` opens the full React analytics SPA inside an editor tab. Same surface as the standalone `http://127.0.0.1:8081/` — Remote-SSH / Codespaces work via `portMapping`. |
+| **Activity bar** | An `observer` view container with four `TreeView`s: **Today**, **Sessions**, **Discovery**, **Costs (7 d)**. Right-click any session row for **Open in Dashboard** / **Copy Session ID**. |
+| **Dashboard webview** | `SuperBased: Open Dashboard` opens the full React analytics SPA inside an editor tab. Same surface as the standalone `http://127.0.0.1:8081/`. Remote-SSH / Codespaces work via `portMapping`. |
 | **File-freshness decorations** | A small dot in the explorer next to files your AI tools touched in the last 24 h, with a Markdown hover showing last-read-by, edit count, stale re-read count, and the tools that touched it. |
 | **Budget + watcher-lag notifications** | When spend hits 80 % of `intelligence.monthly_budget_usd`, a banner suggests review. When the watcher falls behind on a session file by > 10 kB, a banner names the lagging file. Both deduped so they don't nag. |
-| **Daemon lifecycle** | The extension can attach to a daemon you started in a terminal (`detect` mode — default), or spawn + supervise its own (`managed` / `auto`). Crash recovery with exponential backoff `[1 s, 2 s, 5 s]`; user-initiated stops are distinguished from crashes. |
+| **Daemon lifecycle** | The extension can attach to a daemon you started in a terminal (`detect` mode, the default), or spawn + supervise its own (`managed` / `auto`). Crash recovery with exponential backoff `[1 s, 2 s, 5 s]`; user-initiated stops are distinguished from crashes. |
 | **Terminal profile** | A contributed terminal profile titled **"AI Coding Tool (SuperBased-proxied)"** that pre-exports `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, and `ENABLE_TOOL_SEARCH=true` so any AI CLI launched from it routes through the observer proxy. |
 | **CodeLens on instruction files** | `CLAUDE.md`, `AGENTS.md`, and `.cursorrules` get two lenses at the top: **Refresh from SuperBased learnings** (runs `observer suggest --apply`) and **Preview suggestions** (dry-run, opens stdout beside the original). |
 | **Human line-count reporting** | On each save the extension counts how many lines you changed and posts the COUNTS to the local daemon, so the dashboard can show human-written lines next to AI-written ones. See [Human line counts](#human-line-counts). Off with `observer.loc.reportSaves = false`. |
@@ -67,10 +67,10 @@ lines *you* type. This is the editor half of that measurement.
 **What is captured.** On every save the extension computes two diffs and
 sends the line counts:
 
-- `human` — the difference between the file as it stood at the last
+- `human`: the difference between the file as it stood at the last
   clean point (your last save, or the moment an agent's write was
   reloaded from disk) and the file as you left it when the save started.
-- `system` — the difference between what you left and what was actually
+- `system`: the difference between what you left and what was actually
   written to disk. That gap is your formatter's work (format-on-save,
   organize-imports, trailing-whitespace trim), reported separately so a
   gofmt reflow never counts as lines you wrote.
@@ -117,17 +117,17 @@ own Go tables into `vscode/src/loc/classifier-tables.json`, and a test on
 each side fails if the two drift. If the editor and the daemon counted
 lines with different rulers, "AI vs human" would not be a comparison.
 
-**Honesty caveat — these are editor-reported saves, not a filesystem
+**Honesty caveat: these are editor-reported saves, not a filesystem
 measurement.** They only exist while VS Code is running with this
 extension active, and only for files you save in VS Code: work done in
 another editor, in a terminal, or by `git checkout` is invisible to this
 path, and the UI labels human counts "editor-reported" for exactly that
 reason. The endpoint is a loopback POST carrying a per-install shared
 secret the daemon generates and the extension reads from the observer
-home — which stops a local process that is not your editor from forging
+home, which stops a local process that is not your editor from forging
 saves, but is no barrier at all to anything else running as you, since it
 can read the same file. Treat these numbers as observability, never as an
-enforcement or performance signal — nothing in the product uses them for
+enforcement or performance signal; nothing in the product uses them for
 either. The daemon-side keys (`[loc].editor_token_file`,
 `[loc].editor_token_required`) are documented in `docs/loc-tracking.md`.
 
@@ -149,7 +149,7 @@ Open the command palette (`Ctrl+Shift+P` / `⌘⇧P`) and search for
 | `SuperBased: Refresh All Trees` | Force a refresh on all four sidebar trees. |
 | `SuperBased: Open Session in Dashboard` | Copy a session ID to clipboard + open the dashboard. (Right-click a session row.) |
 | `SuperBased: Copy Session ID` / `Copy Path` | Self-explanatory; right-click context menu. |
-| `SuperBased: Refresh Instructions from Learnings` | CodeLens on `CLAUDE.md` etc. — runs `observer suggest --apply --target <…>` for the current workspace. |
+| `SuperBased: Refresh Instructions from Learnings` | CodeLens on `CLAUDE.md` etc.: runs `observer suggest --apply --target <…>` for the current workspace. |
 | `SuperBased: Preview Instruction Suggestions` | Same as above but dry-run; opens stdout in a new editor beside the original. |
 
 **Components that are not active.** The extension reads the daemon's
@@ -168,7 +168,7 @@ shows everything as before.
 | Setting | Default | Purpose |
 |---|---|---|
 | `observer.daemon.mode` | `detect` | `detect` attaches only; `managed` spawns + kills with the editor; `auto` attaches if a daemon is running, otherwise spawns. |
-| `observer.binary.path` | empty | Absolute path to override binary auto-detection. **Machine-scoped and restricted in untrusted workspaces** — see "Workspace trust" below. |
+| `observer.binary.path` | empty | Absolute path to override binary auto-detection. **Machine-scoped and restricted in untrusted workspaces**; see "Workspace trust" below. |
 | `observer.binary.preferPathBinary` | `false` | Scan `$PATH` before the bundled binary. **Machine-scoped and restricted in untrusted workspaces**, same reason as `observer.binary.path`. |
 | `observer.dashboard.port` | `8081` | Where the dashboard listens. |
 | `observer.proxy.port` | `8820` | Where the API proxy listens. |
@@ -176,7 +176,7 @@ shows everything as before.
 | `observer.statusBar.wordmark` | `true` | Show the `▞ superbased` wordmark prefix on the status bar's live-state text. |
 | `observer.cacheStatusBar.enabled` | `true` | Cache-expiry status bar item (a countdown when a valuable prompt cache is about to go cold). |
 | `observer.loc.reportSaves` | `true` | Report line COUNTS (never content) to the local daemon on each save, so the dashboard can show human-written lines next to AI-written ones. See [Human line counts](#human-line-counts). |
-| `observer.loc.editorToken` | empty | Sent as `X-Observer-Token` on the saved-line-count report. **Leave it empty** — the daemon generates a per-install token on first start and the extension reads it from the observer home (`OBSERVER_HOME` if set, else `~/.observer/loc-editor-token`). Set it only when the daemon runs somewhere the extension cannot read that file, or when you moved the file with the daemon's `[loc].editor_token_file` key. |
+| `observer.loc.editorToken` | empty | Sent as `X-Observer-Token` on the saved-line-count report. **Leave it empty**: the daemon generates a per-install token on first start and the extension reads it from the observer home (`OBSERVER_HOME` if set, else `~/.observer/loc-editor-token`). Set it only when the daemon runs somewhere the extension cannot read that file, or when you moved the file with the daemon's `[loc].editor_token_file` key. |
 | `observer.apiToken` | empty | **Deprecated, no longer read.** The saved-line-count report was the only request that ever sent this header; it now uses `observer.loc.editorToken`. |
 
 ## Binary management
@@ -253,7 +253,7 @@ ignored from workspace configuration until you grant trust. On top of
 that, `activate()` itself checks `vscode.workspace.isTrusted`: in an
 untrusted workspace the extension does not resolve or spawn the observer
 binary, attach to a running daemon, or wire up any commands/status
-bars/tree views at all — it logs to the Output channel, shows a
+bars/tree views at all; it logs to the Output channel, shows a
 one-time warning notification explaining why, and resumes full
 activation automatically the moment you grant trust (no reload
 needed). Every other setting (ports, status bar toggles, the LOC
@@ -269,7 +269,7 @@ executable or read a secret off disk.
 - **No data leaves your machine.** All `/api/*` traffic is to
   `127.0.0.1:<dashboard.port>` on the workspace host. Under
   Remote-SSH / Codespaces the iframe `portMapping` routes the
-  webview-side `127.0.0.1` to the same loopback on the host — no
+  webview-side `127.0.0.1` to the same loopback on the host, no
   data crosses the wire except through your existing VS Code
   remote-dev session.
 
@@ -281,7 +281,7 @@ executable or read a secret off disk.
 | Cursor | Supported via Open VSX; the extension uses only stable VS Code APIs (no `proposedApi.*`) |
 | VSCodium | Same as Cursor |
 | Windsurf | Same as Cursor |
-| Codespaces | Works — the extension declares `extensionKind: ["workspace"]` so it runs on the workspace host |
+| Codespaces | Works: the extension declares `extensionKind: ["workspace"]` so it runs on the workspace host |
 | Remote-SSH / WSL2 / Dev Containers | Same as Codespaces |
 
 ## Source
@@ -303,4 +303,4 @@ Host with the extension loaded against a dev observer.
 
 ## License
 
-Apache-2.0 — same as the observer binary it wraps.
+Apache-2.0, same as the observer binary it wraps.

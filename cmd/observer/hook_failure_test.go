@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/guard"
@@ -606,7 +608,7 @@ func withStdinT(t *testing.T, body string, fn func()) {
 func TestDrainHookFailuresPersistsGuardError(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(dir, "o.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(dir, "o.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -838,7 +840,7 @@ func TestGuardPostureWriterRepairsTamper(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -875,7 +877,7 @@ func TestGuardPostureWriterRepairsTamper(t *testing.T) {
 func TestDrainHookFailuresKeepsEveryChunk(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(dir, "o.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(dir, "o.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

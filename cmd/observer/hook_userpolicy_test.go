@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/guard"
@@ -197,7 +199,7 @@ func TestDaemonAndHookAgreeOnUserPolicyMode(t *testing.T) {
 			// when it has a store, and the posture it would publish.
 			var gd *guard.Guard
 			if withStore {
-				database, derr := db.Open(context.Background(), db.Options{Path: n.dbPath})
+				database, derr := dbtemplate.Open(context.Background(), db.Options{Path: n.dbPath})
 				if derr != nil {
 					t.Fatal(derr)
 				}

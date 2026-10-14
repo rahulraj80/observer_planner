@@ -4,6 +4,22 @@ All notable changes to SuperBased Observer are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Org dashboard, Settings > Plane B mode tells the truth about what is in flight (T-777, D-617).**
+  With no mode change requested the page now says "No mode change requested" and lists what a change
+  to Gateway Mode would need, instead of seven "pending" checks for a change nobody asked for. The
+  Request selector offers only the other mode. While a change to Gateway Mode is pending, the server
+  checks `mode_capability` and `adapter_route_matrix` itself (marked "Checked by the server", with the
+  evidence and the time), and the other five checks get a Record result button (pass or fail with a
+  required note, showing who recorded it and when). Machines whose member was removed or deactivated,
+  or that left the org, no longer count toward (or block) the capability check. API:
+  `GET /api/org/plane-b/mode` gains `change_pending`, `pending_generation`, `gates_required` and
+  `gate_catalog`, and returns gates only while a change to Gateway Mode is pending (generation 0 and an
+  empty list otherwise); each gate gains `title`, `about`, `kind`, `why_manual`, `source` and
+  `server_check`; capability gains `departed` and `departed_nodes`. `POST /api/org/plane-b/preflight`
+  now refuses a generation other than the pending one (409) and a pass or fail without a note (400).
+
 ## [1.36.0] - 2026-10-10
 
 Stable release on the `stable` channel (npm dist-tags `latest` and `stable`, PyPI, the VS Code

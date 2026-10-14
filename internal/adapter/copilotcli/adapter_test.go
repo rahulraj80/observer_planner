@@ -27,12 +27,6 @@ func jsonStr(t *testing.T, s string) string {
 	return string(b)
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolCopilotCLI {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolCopilotCLI)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := t.TempDir()
 	ssRoot := filepath.Join(root, ".copilot", "session-state")

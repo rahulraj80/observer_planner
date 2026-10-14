@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/compression/indexing"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -26,7 +28,7 @@ func testServer(t *testing.T) (*Server, *sql.DB, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -239,7 +241,7 @@ func (t *deadlineProbeTool) Invoke(ctx context.Context, _ json.RawMessage) (any,
 
 func TestServer_ToolCallTimeoutCancelsInvocation(t *testing.T) {
 	t.Parallel()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "watchdog.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "watchdog.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

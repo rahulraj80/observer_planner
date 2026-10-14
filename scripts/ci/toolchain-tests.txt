@@ -1,0 +1,26 @@
+# Top-level tests in tests/invariant that exec the Go toolchain (go build /
+# go list). The race shards set SBO_SKIP_TOOLCHAIN_TESTS=1 so these skip there,
+# and ci.yml's non-race `go` job runs exactly this list (D-609): a go build
+# inside a -race test binary pays the race slowdown for nothing it checks.
+# tests/invariant/toolchain_job_test.go::toolchainTest fails a test that calls
+# it without being listed here, so the list cannot silently miss one.
+TestAgentAccessImportBoundaryTransitive
+TestCloudClientIsolatedToConsentGateway
+TestCloudDaemonPathsCannotReachCloudClient
+TestComponentsDirectModules
+TestComponentsL1ModuleAbsence
+TestComponentsL1PackageAbsence
+TestComponentsPackageFence
+TestComponentsPackagesInClosure
+TestINV2_OrgSideDoesNotLinkPersonalCloud
+TestINV2_PureSharedPackagesForbidIO
+TestINV2_PureSharedPackagesStayImportableByBothSides
+TestNoMockPackageInProductionDeps
+TestNodeBinaryNeverImportsTelemetryLog
+TestPlanLimitsDaemonPathsCannotReachIO
+TestPlanLimitsIOIsolated
+TestPlanLimitsNetworkOnlyInOnePackage
+TestPricingFeedClientIsolatedToGate
+TestPricingFeedDaemonPathsCannotReachClient
+TestTelemetryLogIsServerSideOnly
+TestTestSupportImportedOnlyByTests

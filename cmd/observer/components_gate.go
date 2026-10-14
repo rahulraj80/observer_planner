@@ -39,6 +39,8 @@ var daemonLoopComponents = map[string][]string{
 	// The lifecycle hook spool drainer ingests rows hooks already wrote; a
 	// spool left behind by hooks that were since removed still ingests.
 	"hook-lifecycle": nil,
+	// Plans & limits reads the local database only until an account is added.
+	"plans": nil,
 
 	"proxy":               {"capture.proxy"},
 	"dashboard":           {"ui.dashboard"},

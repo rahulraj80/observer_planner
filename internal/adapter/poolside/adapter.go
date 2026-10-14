@@ -191,6 +191,15 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 		s.SessionID = sessionID
 		res.SessionSurfaces = append(res.SessionSurfaces, s)
 	}
+	// Same header re-read feeds the tool-version stamp; the store seam
+	// validates it and writes first-wins-unless-empty, so a repeat is a
+	// no-op.
+	if st.clientVersion != "" && sessionID != "" {
+		res.SessionToolVersions = append(res.SessionToolVersions, models.SessionToolVersion{
+			SessionID: sessionID,
+			Version:   st.clientVersion,
+		})
+	}
 
 	// bufio.Reader.ReadString (not Scanner) so the byte cursor advances by
 	// the exact terminator length including CRLF.
@@ -257,6 +266,9 @@ type parseState struct {
 	cwd string
 	// clientHost is session.start's client_metadata.host, when present.
 	clientHost string
+	// clientVersion is session.start's client_metadata.version (the pool
+	// TUI build, "1.0.16"), when present.
+	clientVersion string
 	// rootResolved / root / branch / remote memoize the ONE project-root
 	// resolution a session performs (a session log never changes cwd).
 	rootResolved bool
@@ -313,6 +325,7 @@ func (st *parseState) readHeader(f *os.File) error {
 			if jsonErr := json.Unmarshal([]byte(raw), &rec); jsonErr == nil && rec.SessionStart != nil {
 				if rec.SessionStart.ClientMetadata != nil {
 					st.clientHost = rec.SessionStart.ClientMetadata.Host
+					st.clientVersion = strings.TrimSpace(rec.SessionStart.ClientMetadata.Version)
 				}
 				if len(rec.SessionStart.WorkingDirectories) > 0 {
 					st.cwd = rec.SessionStart.WorkingDirectories[0]

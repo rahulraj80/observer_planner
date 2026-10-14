@@ -212,6 +212,31 @@ type rawHookPayload struct {
 	Text string `json:"text"` // afterAgentThought, afterAgentResponse
 }
 
+// SessionToolVersionFromHook extracts the emitting Cursor build
+// (`cursor_version`, e.g. "3.20.21") keyed to the payload's
+// conversation_id (== the session id) for tool-version capture
+// (migration 125, T-784). ok=false when either field is absent (the 3.4.x
+// payloads carry no cursor_version) or the body does not decode. The
+// value is passed through unvalidated: the store seam
+// (Store.SetSessionToolVersion) owns the bounded-token check and the
+// first-wins-unless-empty write, so this stays a pure decode used by both
+// the live hook and the hooks-log replay.
+func SessionToolVersionFromHook(body []byte) (models.SessionToolVersion, bool) {
+	var p struct {
+		ConversationID string `json:"conversation_id"`
+		CursorVersion  string `json:"cursor_version"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		return models.SessionToolVersion{}, false
+	}
+	id := strings.TrimSpace(p.ConversationID)
+	ver := strings.TrimSpace(p.CursorVersion)
+	if id == "" || ver == "" {
+		return models.SessionToolVersion{}, false
+	}
+	return models.SessionToolVersion{SessionID: id, Version: ver}, true
+}
+
 // BuildEvent maps a Cursor hook payload to a normalized ToolEvent. The
 // caller passes the hook event name (from CLI or payload), the raw JSON
 // body, and a scrubber. Returns (event, true) when the payload represents

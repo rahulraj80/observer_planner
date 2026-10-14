@@ -17,15 +17,6 @@ func newTestAdapter(root string) *Adapter {
 	return NewWithOptions(nil, root)
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolQwenCode {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolQwenCode)
-	}
-	if got := New().Name(); got != "qwen-code" {
-		t.Fatalf("Name() = %q, want qwen-code", got)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := "/home/u/.qwen/projects"
 	a := newTestAdapter(root)

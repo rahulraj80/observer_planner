@@ -1,15 +1,12 @@
 package orgintel
 
 import (
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 func req(required bool, version int64) *orgcontract.IntelRequirementBody {
@@ -124,29 +121,17 @@ func TestCoveredAndPlanAccept(t *testing.T) {
 
 // TestPureImports pins the package free of SQL, HTTP and fsnotify.
 func TestPureImports(t *testing.T) {
-	files, _ := filepath.Glob("*.go")
-	forbidden := []string{"database/sql", "net/http", "fsnotify"}
-	fset := token.NewFileSet()
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		af, err := parser.ParseFile(fset, f, src, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range af.Imports {
-			for _, bad := range forbidden {
-				if strings.Contains(imp.Path.Value, bad) {
-					t.Errorf("%s imports %s", f, imp.Path.Value)
+	importpin.Check(t, importpin.Spec{
+		Custom: func(_, p string) string {
+			for _, bad := range []string{"database/sql", "net/http", "fsnotify"} {
+				if strings.Contains(p, bad) {
+					return "contains " + bad
 				}
 			}
-		}
-	}
+			return ""
+		},
+		Reason: "internal/orgintel must stay pure",
+	})
 }
 
 // TestPlanSubmit pins org-plane submission: one case per refusal row in table

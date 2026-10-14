@@ -218,7 +218,7 @@ func TestReleasedRC11RefusesBodiesThatNeedProjection(t *testing.T) {
 // level-5 node (a tabs-lane build) and to the released v1.34 line, and kept
 // for a level-6 node. Every other id in the body survives.
 func TestLevelSixIDsAreProjectedAwayBelowSix(t *testing.T) {
-	if head.CurrentVocabLevel != 6 {
+	if head.CurrentVocabLevel < 6 {
 		t.Fatalf("CurrentVocabLevel = %d; this test pins level 6", head.CurrentVocabLevel)
 	}
 	if got := head.NavSectionSince("requests"); got != 6 {
@@ -372,4 +372,36 @@ func normalizeForCompare(v any) any {
 		return int64(f)
 	}
 	return v
+}
+
+// TestLevelSevenIDsAreProjectedAwayBelowSeven pins the Plans & limits
+// vocabulary level: the nav id "plans" is removed from a body served to a
+// level-6 node and kept for a level-7 node.
+func TestLevelSevenIDsAreProjectedAwayBelowSeven(t *testing.T) {
+	if head.CurrentVocabLevel < 7 {
+		t.Fatalf("CurrentVocabLevel = %d; this test pins level 7", head.CurrentVocabLevel)
+	}
+	if got := head.NavSectionSince("plans"); got != 7 {
+		t.Errorf("NavSectionSince(plans) = %d, want 7", got)
+	}
+	raw := []byte(`{"schema":1,"sections":{"hidden":["benchmarks","plans"]}}`)
+	if _, _, err := head.CompileBody(raw, maxBody); err != nil {
+		t.Fatalf("today's compiler must accept the body: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		target head.Target
+		kept   bool
+	}{
+		{"level 6", head.Target{Level: 6, MaxSchema: 3, KeyGen: 4}, false},
+		{"level 7", head.Target{Level: 7, MaxSchema: 3, KeyGen: 4}, true},
+	} {
+		body := string(served(t, raw, tc.target))
+		if strings.Contains(body, `"plans"`) != tc.kept {
+			t.Errorf("%s: served %s, want plans kept=%v", tc.name, body, tc.kept)
+		}
+		if !strings.Contains(body, "benchmarks") {
+			t.Errorf("%s: served %s dropped benchmarks, which every level compiles", tc.name, body)
+		}
+	}
 }

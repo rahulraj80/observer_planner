@@ -1,16 +1,12 @@
 package componentstate
 
 import (
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/components"
 	"github.com/marmutapp/superbased-observer/internal/config"
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 // fullCompiled is every node row: a plain `go build`.
@@ -301,26 +297,8 @@ func TestManagedNodeIgnoresLocalNarrowing(t *testing.T) {
 // TestPackageIsPure pins CLAUDE.md module rule 1: no SQL, HTTP, fsnotify or
 // os/exec in this package.
 func TestPackageIsPure(t *testing.T) {
-	forbidden := map[string]bool{"database/sql": true, "net/http": true, "github.com/fsnotify/fsnotify": true, "os/exec": true}
-	files, _ := filepath.Glob("*.go")
-	fset := token.NewFileSet()
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		af, err := parser.ParseFile(fset, f, src, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range af.Imports {
-			p, _ := strconv.Unquote(imp.Path.Value)
-			if forbidden[p] {
-				t.Errorf("%s imports %s", f, p)
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "github.com/fsnotify/fsnotify", "os/exec"},
+		Reason:    "internal/componentstate must stay pure",
+	})
 }

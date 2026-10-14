@@ -105,6 +105,7 @@ func TestAgentAccessImportBoundary(t *testing.T) {
 // (internal/agentid, internal/dpop) must not transitively link database/sql,
 // net/http or the org server.
 func TestAgentAccessImportBoundaryTransitive(t *testing.T) {
+	toolchainTest(t)
 	cases := []struct {
 		pkg       string
 		forbidden []string

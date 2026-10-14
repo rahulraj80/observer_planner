@@ -126,6 +126,7 @@ func allowedCloudTargetsFor(importerRel string) ([]string, bool) {
 // source-only scan would miss (e.g. a daemon package gaining a dep on a new
 // helper that itself imports cloudclient).
 func TestCloudDaemonPathsCannotReachCloudClient(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	for _, entry := range cloudDaemonEntryPackages {
 		entry := entry
@@ -176,6 +177,7 @@ func TestCloudDaemonPathsCannotReachCloudClient(t *testing.T) {
 // Robust to the cloud packages not existing: with none present, nothing imports
 // them and the guard passes, arming automatically when they land.
 func TestCloudClientIsolatedToConsentGateway(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	// -e tolerates packages that fail to load (e.g. a sibling lane mid-build).
 	cmd := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}", "./...")

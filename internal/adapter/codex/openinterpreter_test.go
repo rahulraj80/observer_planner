@@ -24,18 +24,6 @@ func oiFixturePath(t *testing.T) string {
 	return filepath.Join(oiFixtureDir(t), "rollout-2026-07-17T14-59-49-019f6f69-23a0-7e32-bdba-9a9fabc946be.jsonl")
 }
 
-// TestOpenInterpreterName pins the retagged tool identity.
-func TestOpenInterpreterName(t *testing.T) {
-	t.Parallel()
-	a := NewOpenInterpreter()
-	if got := a.Name(); got != models.ToolOpenInterpreter {
-		t.Errorf("Name() = %q, want %q", got, models.ToolOpenInterpreter)
-	}
-	if got := a.Name(); got == models.ToolCodex {
-		t.Errorf("Name() = %q, must NOT collapse to the base codex identity", got)
-	}
-}
-
 // isOIDesktopRoot reports whether p is one of the desktop app's
 // embedded codex-home sessions roots (any of the three OS rungs).
 func isOIDesktopRoot(p string) bool {

@@ -15,11 +15,11 @@ import "strings"
 // organization hid" reads the way the sidebar does.
 
 // NavSectionIDs is the closed set of hideable/lockable node-dashboard nav
-// sections (25 today; "requests" joined with the request-grants design, G6,
+// sections (26 today; "plans" joined with the Plans & limits page, "requests" with the request-grants design, G6,
 // and "agent-config" with adapter config P4/P5).
 var NavSectionIDs = []string{
 	"overview", "live", "sessions", "actions", "projects", "security", "egress", "search",
-	"cost", "analysis", "tools",
+	"cost", "plans", "analysis", "tools",
 	"compression", "cache", "suggestions", "routing", "benchmarks", "discovery", "patterns",
 	"policies", "agent-config", "privacy", "terminals", "remote", "requests", "settings",
 }

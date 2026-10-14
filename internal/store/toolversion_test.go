@@ -9,12 +9,13 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/models"
 )
 
-// TestSetSessionToolVersion pins the captured tool/CLI version column
-// (migration 125) under FIRST-WINS-UNLESS-EMPTY: the first grounded
-// stamp lands, an identical re-stamp reports no change, an empty version
-// preserves what is stored, a DIFFERING later stamp is a no-op (a
-// re-parse never rewrites a captured origin), and a stamp that fills a
-// still-empty column IS a change.
+// TestSetSessionToolVersion pins the two captured version columns
+// (migrations 125 and 162) through their one write path:
+// tool_version is FIRST-WINS-UNLESS-EMPTY (a re-parse never rewrites the
+// build the session started on) and tool_version_last moves forward to the
+// highest version seen, so an upgrade mid-session shows as first != last
+// and a re-parse that re-stamps the older build never rewinds it. The rows
+// run in order against one session.
 func TestSetSessionToolVersion(t *testing.T) {
 	t.Parallel()
 	s, database := newTestStore(t)
@@ -28,14 +29,14 @@ func TestSetSessionToolVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	read := func() string {
-		var v string
+	read := func() (string, string) {
+		var first, last string
 		if err := database.QueryRowContext(ctx,
-			`SELECT COALESCE(tool_version,'') FROM sessions WHERE id='tv-sess'`,
-		).Scan(&v); err != nil {
+			`SELECT COALESCE(tool_version,''), COALESCE(tool_version_last,'') FROM sessions WHERE id='tv-sess'`,
+		).Scan(&first, &last); err != nil {
 			t.Fatal(err)
 		}
-		return v
+		return first, last
 	}
 
 	cases := []struct {
@@ -43,34 +44,56 @@ func TestSetSessionToolVersion(t *testing.T) {
 		in          models.SessionToolVersion
 		wantChanged bool
 		wantErr     bool
-		want        string
+		wantFirst   string
+		wantLast    string
 	}{
 		{
-			name:        "first stamp lands",
+			name:        "first stamp sets both",
 			in:          models.SessionToolVersion{SessionID: "tv-sess", Version: "0.150.0"},
-			wantChanged: true, want: "0.150.0",
+			wantChanged: true, wantFirst: "0.150.0", wantLast: "0.150.0",
 		},
 		{
 			name:        "identical re-stamp is a no-op",
 			in:          models.SessionToolVersion{SessionID: "tv-sess", Version: "0.150.0"},
-			wantChanged: false, want: "0.150.0",
+			wantChanged: false, wantFirst: "0.150.0", wantLast: "0.150.0",
 		},
 		{
 			name:        "empty version preserves",
 			in:          models.SessionToolVersion{SessionID: "tv-sess"},
-			wantChanged: false, want: "0.150.0",
+			wantChanged: false, wantFirst: "0.150.0", wantLast: "0.150.0",
 		},
 		{
-			// First-wins: a later parse re-deriving a different version
-			// must not rewrite the captured origin.
-			name:        "differing later version does NOT overwrite",
+			name:        "malformed version preserves",
+			in:          models.SessionToolVersion{SessionID: "tv-sess", Version: "https://x"},
+			wantChanged: false, wantFirst: "0.150.0", wantLast: "0.150.0",
+		},
+		{
+			// Mid-session upgrade: first stays the origin, last moves.
+			name:        "newer version moves last only",
 			in:          models.SessionToolVersion{SessionID: "tv-sess", Version: "0.151.0"},
-			wantChanged: false, want: "0.150.0",
+			wantChanged: true, wantFirst: "0.150.0", wantLast: "0.151.0",
+		},
+		{
+			// A whole-file re-parse re-stamps the older build first; it must
+			// not rewind the recorded upgrade.
+			name:        "older re-stamp does not rewind last",
+			in:          models.SessionToolVersion{SessionID: "tv-sess", Version: "0.150.0"},
+			wantChanged: false, wantFirst: "0.150.0", wantLast: "0.151.0",
+		},
+		{
+			name:        "numeric ordering, not lexical",
+			in:          models.SessionToolVersion{SessionID: "tv-sess", Version: "0.1000.0"},
+			wantChanged: true, wantFirst: "0.150.0", wantLast: "0.1000.0",
 		},
 		{
 			name:    "missing session id is an error",
 			in:      models.SessionToolVersion{Version: "1.0.0"},
-			wantErr: true, want: "0.150.0",
+			wantErr: true, wantFirst: "0.150.0", wantLast: "0.1000.0",
+		},
+		{
+			name:        "unknown session is a silent no-op",
+			in:          models.SessionToolVersion{SessionID: "no-such-session", Version: "9.9.9"},
+			wantChanged: false, wantFirst: "0.150.0", wantLast: "0.1000.0",
 		},
 	}
 	for _, tc := range cases {
@@ -86,10 +109,83 @@ func TestSetSessionToolVersion(t *testing.T) {
 			if !tc.wantErr && changed != tc.wantChanged {
 				t.Errorf("changed = %v, want %v", changed, tc.wantChanged)
 			}
-			if got := read(); got != tc.want {
-				t.Errorf("stored version = %q, want %q", got, tc.want)
+			first, last := read()
+			if first != tc.wantFirst || last != tc.wantLast {
+				t.Errorf("stored (first, last) = (%q, %q), want (%q, %q)", first, last, tc.wantFirst, tc.wantLast)
 			}
 		})
+	}
+
+	first, last, err := s.LoadSessionToolVersions(ctx, "tv-sess")
+	if err != nil || first != "0.150.0" || last != "0.1000.0" {
+		t.Fatalf("LoadSessionToolVersions = (%q, %q, %v), want (0.150.0, 0.1000.0, nil)", first, last, err)
+	}
+}
+
+// TestSetSessionToolVersionPre162Row pins the upgrade path for a session
+// stamped before migration 162: tool_version is set and tool_version_last
+// is NULL. Reads fall back to tool_version, and the next valid stamp takes
+// tool_version as the base for "last", so an OLDER stamp leaves last at the
+// first value rather than moving it backwards.
+func TestSetSessionToolVersionPre162Row(t *testing.T) {
+	t.Parallel()
+	s, database := newTestStore(t)
+	ctx := context.Background()
+	pid, _ := s.UpsertProject(ctx, "/tmp/toolver-pre162", "")
+	if err := s.UpsertSession(ctx, models.Session{
+		ID: "tv-old", ProjectID: pid, Tool: models.ToolCline,
+		StartedAt: time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE sessions SET tool_version = '3.17.4' WHERE id = 'tv-old'`); err != nil {
+		t.Fatal(err)
+	}
+	if first, last, err := s.LoadSessionToolVersions(ctx, "tv-old"); err != nil || first != "3.17.4" || last != "3.17.4" {
+		t.Fatalf("NULL last must read as first: (%q, %q, %v)", first, last, err)
+	}
+	if _, err := s.SetSessionToolVersion(ctx, models.SessionToolVersion{SessionID: "tv-old", Version: "3.10.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if first, last, _ := s.LoadSessionToolVersions(ctx, "tv-old"); first != "3.17.4" || last != "3.17.4" {
+		t.Fatalf("older stamp on a pre-162 row: (%q, %q), want (3.17.4, 3.17.4)", first, last)
+	}
+	if _, err := s.SetSessionToolVersion(ctx, models.SessionToolVersion{SessionID: "tv-old", Version: "3.18.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if first, last, _ := s.LoadSessionToolVersions(ctx, "tv-old"); first != "3.17.4" || last != "3.18.0" {
+		t.Fatalf("newer stamp on a pre-162 row: (%q, %q), want (3.17.4, 3.18.0)", first, last)
+	}
+}
+
+// TestCompareToolVersions pins the ordering the "last seen" column uses,
+// one case per rule.
+func TestCompareToolVersions(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"1.2.3", "1.2.3", 0},
+		{"1.2.10", "1.2.9", 1},
+		{"0.150.0", "0.1000.0", -1},
+		{"v1.2.3", "1.2.3", 0},
+		{"V2.0", "v1.9.9", 1},
+		{"1.2", "1.2.0", -1},
+		{"1.2.3", "1.2.3-rc.1", 1},
+		{"1.2.3-beta.1", "1.2.3-rc.1", -1},
+		{"1.2.3+build.7", "1.2.3", -1},
+		{"2026.8.2", "2026.10.1", -1},
+		{"2.1.0_beta", "2.1.0", 1},
+		{"01.2", "1.2", 0},
+	}
+	for _, tc := range cases {
+		if got := compareToolVersions(tc.a, tc.b); got != tc.want {
+			t.Errorf("compareToolVersions(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+		if got := compareToolVersions(tc.b, tc.a); got != -tc.want {
+			t.Errorf("compareToolVersions(%q, %q) = %d, want %d (antisymmetry)", tc.b, tc.a, got, -tc.want)
+		}
 	}
 }
 

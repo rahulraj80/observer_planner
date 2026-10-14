@@ -45,15 +45,6 @@ func parse(t *testing.T, a *Adapter, path string, from int64) adapter.ParseResul
 	return res
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != "prime-agent" {
-		t.Errorf("Name() = %q, want prime-agent", got)
-	}
-	if models.ToolPrimeAgent != "prime-agent" {
-		t.Errorf("models.ToolPrimeAgent = %q", models.ToolPrimeAgent)
-	}
-}
-
 func TestWatchPathsEndInPrimeAgentSessions(t *testing.T) {
 	for _, p := range New().WatchPaths() {
 		if !strings.HasSuffix(filepath.ToSlash(p), "/.prime/agent/sessions") {

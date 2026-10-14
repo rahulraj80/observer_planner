@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/components"
 	"github.com/marmutapp/superbased-observer/internal/componentstate"
 	"github.com/marmutapp/superbased-observer/internal/config"
@@ -226,7 +228,7 @@ func TestTeardownTableCoversEveryNodeComponentThatWritesOutsideObserver(t *testi
 func TestPurgeThroughService(t *testing.T) {
 	ctx := context.Background()
 	s, _, _, au := newSvc(t, seedConfig)
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

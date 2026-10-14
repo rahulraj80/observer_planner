@@ -50,6 +50,7 @@ const (
 
 	SectionSearch      Section = "search"
 	SectionCost        Section = "cost"
+	SectionPlans       Section = "plans" // the Plans & limits page
 	SectionAnalysis    Section = "analysis"
 	SectionTools       Section = "tools"
 	SectionCompression Section = "compression"
@@ -74,7 +75,7 @@ const (
 // need to validate a section id.
 var AllSections = []Section{
 	SectionOverview, SectionLive, SectionSessions, SectionActions, SectionProjects, SectionSecurity,
-	SectionEgress, SectionSearch, SectionCost, SectionAnalysis, SectionTools,
+	SectionEgress, SectionSearch, SectionCost, SectionPlans, SectionAnalysis, SectionTools,
 	SectionCompression, SectionCache, SectionSuggestions, SectionRouting,
 	SectionBenchmarks, SectionDiscovery, SectionPatterns, SectionPolicies, SectionAgentConfig,
 	SectionPrivacy, SectionTerminals, SectionRemote, SectionRequests, SectionSettings,

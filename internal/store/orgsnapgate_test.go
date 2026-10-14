@@ -94,6 +94,22 @@ var gatedWireFamilies = map[string]snapFamily{
 	"MCPInventory": snapFamMCPInventory,
 }
 
+// relayWireFamilies are the PushBatch fields only the agentaccess.relay
+// component composes. A `-tags sbo_omit_agentaccess_relay` build links
+// mcprelay_omit.go, which composes no relay rows however much relay data
+// the fixture seeds, so the fixture-coverage checks expect these families
+// EMPTY in that build instead of populated (D-535).
+var relayWireFamilies = map[string]bool{
+	"MCPRelayActivity": true,
+	"MCPRelayEvents":   true,
+}
+
+// wireFamilyCompiledOut reports whether the component that composes the
+// named wire family is compiled out of this test binary.
+func wireFamilyCompiledOut(name string) bool {
+	return !relayInBuild && relayWireFamilies[name]
+}
+
 // ungatedWireFamilies names the wire families that DELIBERATELY keep the
 // pre-Track-R2 every-tick behaviour, with the reason. A family may only be
 // absent from gatedWireFamilies if it is named here.
@@ -427,6 +443,12 @@ func TestSelectUnpushedSince_UnchangedPushRecomputesNoSnapshotFamily(t *testing.
 		t.Fatalf("SelectUnpushedSince (first): %v", err)
 	}
 	for name, n := range snapshotSections(t, first) {
+		if wireFamilyCompiledOut(name) {
+			if n != 0 {
+				t.Fatalf("gated family %s composed %d rows, but its component is not in this build", name, n)
+			}
+			continue
+		}
 		if n == 0 {
 			t.Fatalf("fixture did not populate gated family %s — the skip assertion below would be vacuous", name)
 		}

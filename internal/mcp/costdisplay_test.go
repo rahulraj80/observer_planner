@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -30,7 +32,7 @@ func (moneyTool) Invoke(context.Context, json.RawMessage) (any, error) {
 // without its dollar-keyed fields and with dollar amounts in its text hidden;
 // under dollars it is unchanged.
 func TestToolResultsFollowCostDisplay(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

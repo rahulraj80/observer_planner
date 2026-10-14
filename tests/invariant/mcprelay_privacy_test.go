@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/record"
@@ -58,7 +60,7 @@ func TestForbiddenCacheTablesExpectedRelaySet(t *testing.T) {
 // store, exactly as the relay itself writes it).
 func newRelayInvariantStore(t *testing.T) (*store.Store, *sql.DB) {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

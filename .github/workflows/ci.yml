@@ -4,21 +4,215 @@
 # bug that silently shipped pre-v1.6.0.
 #
 # Tagged-release builds are handled by npm-release.yml; this file is
-# the pre-merge / pre-tag safety net.
+# the pre-merge / pre-tag safety net. scripts/release.sh refuses to tag
+# a commit unless a FULL run of this workflow (the nightly or a
+# workflow_dispatch) and ci-private completed green for that exact sha
+# (D-602, D-609; docs/release-runbook.md "Green before tag").
+#
+# What runs when (D-602, D-609). The `plan` job decides; every other job
+# needs it:
+#   push to main / integration/**, pull_request (a PARTIAL run):
+#       every job, but the go test shards test only the packages the
+#       change can affect (scripts/ci/cipkgs affected: changed packages
+#       plus their reverse test dependencies; a shared input such as
+#       go.mod, ci.yml, scripts/ci, top-level testdata or a migrations
+#       directory tests everything), and only the packages that use
+#       concurrency (scripts/ci/cipkgs race) run with -race. omit-tags
+#       runs the distro sets and no_obs in one job.
+#   schedule (nightly, 03:17 UTC) and workflow_dispatch (a FULL run):
+#       every job, every test package, all with -race, and the full
+#       omit-tag list in batches. The nightly skips itself when main has
+#       not moved since the last successful nightly. A FULL run is what
+#       the release gate accepts.
+#   v* tag push: only the full omit-tag list, against the tagged commit
+#       (path filters never apply to tag pushes).
+#   paths-ignore: a push or PR that touches ONLY the paths below skips
+#       the workflow. Each entry is one no job here reads: Go tests read
+#       docs/*.md, docs/openapi, docs/recipes,
+#       docs/plans/agent-access-research and website/docs-src, so those
+#       are deliberately NOT ignored; website/track-gen is a package of
+#       the root module. A docs-only HEAD therefore has no ci run, and
+#       release.sh tells you to dispatch one before tagging.
 
 name: ci
 
 on:
   pull_request:
+    paths-ignore:
+      - 'docs/handovers/**'
+      - 'docs/audits/**'
+      - 'docs/decisions/**'
+      - 'docs/strategy/**'
+      - 'docs/demos/**'
+      - 'docs/plans/*.md'
+      - 'marketing/**'
+      - 'design/**'
+      - 'website/*.html'
+      - 'website/*.txt'
+      - 'website/*.xml'
+      - 'website/_redirects'
+      - 'website/_worker.js'
+      - 'website/.well-known/**'
+      - 'website/arcade/**'
+      - 'website/arcade-src/**'
+      - 'website/assets/**'
+      - 'website/deck/**'
+      - 'website/docs/**'
+      - 'website/docs-tools/**'
+      - 'website/legal/**'
+      - 'website/pages-src/**'
+      - 'website/tools/**'
+      - 'PROGRESS.md'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'CHANGELOG.md'
+      - 'kickstart-prompt.md'
+      - 'superbased-final-spec-v2.md'
   push:
     # integration/** too (P3-07): long-lived integration branches merge many
     # lanes before main, and the embed drift gates must see them.
     branches: [main, 'integration/**']
+    # v* tags run only the full omit-tag matrix (see the header).
+    tags: ['v*']
+    # Same list as pull_request above; keep the two in step.
+    paths-ignore:
+      - 'docs/handovers/**'
+      - 'docs/audits/**'
+      - 'docs/decisions/**'
+      - 'docs/strategy/**'
+      - 'docs/demos/**'
+      - 'docs/plans/*.md'
+      - 'marketing/**'
+      - 'design/**'
+      - 'website/*.html'
+      - 'website/*.txt'
+      - 'website/*.xml'
+      - 'website/_redirects'
+      - 'website/_worker.js'
+      - 'website/.well-known/**'
+      - 'website/arcade/**'
+      - 'website/arcade-src/**'
+      - 'website/assets/**'
+      - 'website/deck/**'
+      - 'website/docs/**'
+      - 'website/docs-tools/**'
+      - 'website/legal/**'
+      - 'website/pages-src/**'
+      - 'website/tools/**'
+      - 'PROGRESS.md'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'CHANGELOG.md'
+      - 'kickstart-prompt.md'
+      - 'superbased-final-spec-v2.md'
+  schedule:
+    # Nightly FULL run (every job, full -race suite, full omit-tag list),
+    # 03:17 UTC; skipped when main has not moved.
+    - cron: '17 3 * * *'
+  workflow_dispatch: {}
+
+# A newer push to the same ref cancels the run it replaces (main included:
+# its successor contains the superseded commit and is tested in full).
+# event_name is in the group so a main push and the nightly never cancel
+# each other. Tag runs are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
 
 jobs:
+  # ----------------------------------------------------------------
+  # plan (D-609): decides what this run tests, once, for every job.
+  #   run   false only for a nightly on a main commit the last successful
+  #         nightly already covered (every job then skips).
+  #   full  true on schedule / workflow_dispatch / v* tag: every test
+  #         package, all with -race, full omit-tag list.
+  #   shards / shard_count  the go test matrix, sized from the weight
+  #         table for the packages this run tests (1 to 12 shards).
+  #   omit  the omit-tag matrix: one distro job, or the full list in
+  #         batches that share one warm build cache.
+  # The package lists (affected.txt, race.txt) travel to the shards as
+  # an artifact, so every shard tests from the same plan.
+  # ----------------------------------------------------------------
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # the nightly reads its own run history
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      full: ${{ steps.plan.outputs.full }}
+      shards: ${{ steps.plan.outputs.shards }}
+      shard_count: ${{ steps.plan.outputs.shard_count }}
+      omit: ${{ steps.plan.outputs.omit }}
+    steps:
+      - uses: actions/checkout@v5
+      # Restore (never save) the go job's cache: go list needs the module
+      # sources, and a new cache family would cost budget for nothing.
+      - uses: ./.github/actions/go-cache
+        with:
+          family: go
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p plan
+          case "$EVENT:$REF" in
+            schedule:*|workflow_dispatch:*|push:refs/tags/*) full=true ;;
+            *) full=false ;;
+          esac
+          if [ "$EVENT" = schedule ]; then
+            last=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=schedule&status=success&branch=main&per_page=1" \
+              --jq '.workflow_runs[0].head_sha // ""')
+            if [ "$last" = "$GITHUB_SHA" ]; then
+              echo "::notice::main is still at ${GITHUB_SHA}, which the last successful nightly already covered; skipping"
+              { echo "run=false"; echo "full=true"; echo "shards=[]"; echo "shard_count=0"; echo "omit=[]"; } >> "$GITHUB_OUTPUT"
+              echo ALL > plan/affected.txt
+              echo ALL > plan/race.txt
+              exit 0
+            fi
+          fi
+          if [ "$full" = true ]; then
+            echo ALL > plan/affected.txt
+            echo ALL > plan/race.txt
+          else
+            base="${PR_BASE:-$PUSH_BEFORE}"
+            if [ -n "$base" ] && [ -n "${base//0/}" ]; then
+              git fetch --no-tags --depth=1 origin "$base" || echo "::warning::could not fetch base $base; testing everything"
+            fi
+            go run ./scripts/ci/cipkgs affected "$base" "$GITHUB_SHA" > plan/affected.txt
+            go run ./scripts/ci/cipkgs race > plan/race.txt
+          fi
+          export SHARD_FILTER=plan/affected.txt RACE_FILTER=plan/race.txt
+          # About 45 shard-minutes of package-seconds per shard (1.9
+          # package-s per shard-s on a 2-vCPU runner), at most 12 shards.
+          count=$(scripts/ci/go-test-shards.sh plan 12 5100)
+          if [ "$count" -gt 0 ]; then
+            shards=$(seq 0 $((count - 1)) | jq -R 'tonumber' | jq -sc .)
+          else
+            shards='[]'
+          fi
+          if [ "$full" = true ]; then
+            omit=$(seq 0 5 | jq -R '{name: ("batch " + . + "/6"), args: ("--batch " + . + "/6")}' | jq -sc .)
+          else
+            omit='[{"name":"distro sets","args":"--scope distro"}]'
+          fi
+          echo "full=$full packages=$(grep -c . plan/affected.txt) race_packages=$(grep -c . plan/race.txt) shards=$count"
+          { echo "run=true"; echo "full=$full"; echo "shards=$shards"; echo "shard_count=$count"; echo "omit=$omit"; } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: test-plan
+          path: plan/
+          retention-days: 3
+
   # ----------------------------------------------------------------
   # React frontend gates: install, typecheck, build. Also asserts the
   # committed embedded dist matches what a fresh build produces — if
@@ -28,6 +222,10 @@ jobs:
   # ----------------------------------------------------------------
   frontend:
     name: frontend
+    # Every job except omit-tags skips on tag pushes (header: "What runs
+    # when").
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -47,6 +245,15 @@ jobs:
         run: |
           cd web
           npm run typecheck
+
+      - name: ui copy lint
+        # Ratchet on internal names in UI text (snake_case identifiers,
+        # section-sign references, config paths and keys): the per-root
+        # counts in scripts/uicopylint/baseline.json may only go down
+        # (docs/app-design-system.md "Copy rules"). Reads the TypeScript
+        # AST, so comments and class names never count. Same wiring as
+        # scripts/copylint: one cheap pass, no build.
+        run: node scripts/uicopylint/uicopylint.mjs web/src
 
       - name: build
         run: |
@@ -82,14 +289,16 @@ jobs:
   # ----------------------------------------------------------------
   go:
     name: go
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/go-cache
+        id: go
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          family: go
 
       - name: vet
         run: go vet ./...
@@ -119,6 +328,12 @@ jobs:
           # was migrated to the v2 schema at the same time.
           version: v2.12.2
 
+      - name: copy lint
+        # Spelling, no-dash copy, posture comment wording and the one
+        # registry spelling: source-text lints that used to run as
+        # Go tests in tests/invariant (D-612). One cheap pass, no race build.
+        run: go run ./scripts/copylint
+
       # The `-race` test run used to live here as a single `go test -race
       # -timeout 40m ./...` step. It now runs in the sharded `go-test` job
       # below; see that job's comment block for the history.
@@ -141,6 +356,16 @@ jobs:
         # are gated HERE, without -race, on an otherwise idle runner.
         run: go test -count=1 -timeout 10m -run LatencyRegression ./internal/guard/
 
+      - name: toolchain invariant tests (no race)
+        # tests/invariant tests that exec the Go toolchain (go build / go
+        # list) run HERE, without -race, against the warm build cache; the
+        # race shards skip them (SBO_SKIP_TOOLCHAIN_TESTS=1). The list is
+        # scripts/ci/toolchain-tests.txt (D-609).
+        run: |
+          set -euo pipefail
+          names=$(grep -v '^#' scripts/ci/toolchain-tests.txt | grep . | paste -sd'|')
+          go test -count=1 -timeout 30m -run "^(${names})\$" ./tests/invariant/
+
       - name: windows cross-compile
         # `go test ./...` and the build step above never compile any
         # `//go:build windows` file, and the build step's only Windows
@@ -149,6 +374,15 @@ jobs:
         # enum_windows.go, and the ETW backend to come) ships undetected.
         # Compile-only; these packages have no Linux-runnable tests.
         run: GOOS=windows GOARCH=amd64 go build ./...
+
+      - name: save go cache (full runs only, D-612)
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.go.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.go.outputs.gocache }}
+            ${{ steps.go.outputs.gomodcache }}
+          key: ${{ steps.go.outputs.key }}
 
   # ----------------------------------------------------------------
   # Go race suite, sharded.
@@ -177,39 +411,85 @@ jobs:
   # alone can exceed 40m under -race on a loaded runner; the loud failure
   # is now timeout-minutes: 120 on the job, well under the 6 h cap.
   #
-  # Shard count: the `matrix.shard` literal below is the SOURCE OF TRUTH.
-  # SHARDS must agree with it, and the `shard plan` step runs
+  # Shard count: the plan job sizes it (go-test-shards.sh plan) and hands
+  # the matrix and SHARDS over together, and the `shard plan` step runs
   # `go-test-shards.sh check $SHARDS`, which fails the job if the split
-  # does not cover the universe exactly once — so a mismatch or a sharder
-  # bug is red, never a silently unrun package.
+  # does not cover the (filtered) universe exactly once, so a sharder bug
+  # is red, never a silently unrun package.
+  #
+  # Scope (D-609): on a push or PR the universe is narrowed to the
+  # affected packages and only concurrent packages get -race
+  # (scripts/ci/go-test-run.sh); the nightly and workflow_dispatch run
+  # everything with -race, and the release gate requires such a run.
+  #
+  # Cache (D-602, D-604): every shard restores one shared compile cache
+  # (family go-test, saved by shard 0), so an unchanged package is not recompiled
+  # with -race on every push. -count=1 keeps Go from replaying cached
+  # test RESULTS: every test still runs every time.
+  #
+  # checkptr (D-604): -race also turns on -d=checkptr, the unsafe.Pointer
+  # arithmetic checker, for every package. In modernc.org/sqlite and its
+  # libc (machine-transpiled C) that checker was 40% of the CPU of a fresh
+  # server migration (42s to 18s for one orgdb.Open), and the server
+  # suites open thousands of SQLite databases, so the largest server
+  # packages crossed the 90m per-binary timeout. The -gcflags
+  # pattern below turns checkptr off ONLY for modernc.org/...: the race
+  # detector itself still instruments those packages, and every package of
+  # this module (and every other dependency) keeps checkptr.
   # ----------------------------------------------------------------
   go-test:
     name: go test (shard ${{ matrix.shard }})
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/') && needs.plan.outputs.shard_count != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     env:
-      SHARDS: 10
+      SHARDS: ${{ needs.plan.outputs.shard_count }}
+      SHARD_FILTER: plan/affected.txt
+      RACE_FILTER: plan/race.txt
+      SBO_SKIP_TOOLCHAIN_TESTS: '1'
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/go-cache
+        id: go
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          # One family for every shard, saved by shard 0 only (D-604): the
+          # -race build of the shared dependencies is identical across
+          # shards, and 12 per-shard caches would overrun the repository's
+          # 10 GB cache budget.
+          family: go-test
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: test-plan
+          path: plan
 
       - name: shard plan
-        # Honesty gate: union of all shards == universe, no duplicates,
-        # no empty shard. Also prints the per-shard package count and the
-        # estimated seconds, which is how we notice the weight table has
-        # gone stale enough to matter.
+        # Honesty gate: union of all shards == the (filtered) universe, no
+        # duplicates, no empty shard. Also prints the per-shard package
+        # count and the estimated seconds, which is how we notice the
+        # weight table has gone stale enough to matter.
         run: scripts/ci/go-test-shards.sh check "${SHARDS}"
 
       - name: test
-        run: go test -race -timeout 90m $(scripts/ci/go-test-shards.sh list ${{ matrix.shard }} "${SHARDS}")
+        run: scripts/ci/go-test-run.sh ${{ matrix.shard }} "${SHARDS}"
+
+      # Saved from the nightly FULL run only (D-609): a push compiles just its
+      # affected packages, so its cache would be a partial one, and the
+      # newest entry is what every shard restores.
+      - name: save go cache (nightly, shard 0 only)
+        if: ${{ !cancelled() && matrix.shard == 0 && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && steps.go.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.go.outputs.gocache }}
+            ${{ steps.go.outputs.gomodcache }}
+          key: ${{ steps.go.outputs.key }}
 
   # ----------------------------------------------------------------
   # Prebuilt node distros (modular packaging plan 5.2 / 5.9 "Every PR",
@@ -225,6 +505,8 @@ jobs:
   # ----------------------------------------------------------------
   distros:
     name: distro ${{ matrix.distro }}
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -234,21 +516,42 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v6
+      - uses: ./.github/actions/go-cache
+        id: go
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          family: distro-${{ matrix.distro }}
+
+      # The full distro needs obs, and the public tree has none: release.sh
+      # strips cmd/observer/obs_wire.go and retags the stubs so the public
+      # binary reports obs compiled out. A public `full` build is therefore
+      # developer-shaped by design and its proof cannot pass; it is proven
+      # where obs exists (the private tree, and the release that builds from
+      # it).
+      - name: full needs obs (absent on the public tree)
+        if: matrix.distro == 'full' && hashFiles('cmd/observer/obs_wire.go') == ''
+        run: echo "::notice::distro full skipped, this tree has no cmd/observer/obs_wire.go (the public snapshot)"
 
       - name: build + proof + SBOM
+        if: matrix.distro != 'full' || hashFiles('cmd/observer/obs_wire.go') != ''
         run: scripts/build-distro.sh ${{ matrix.distro }} --proof
 
       - name: listener smoke
+        if: matrix.distro != 'full' || hashFiles('cmd/observer/obs_wire.go') != ''
         # The harness runs in its own user, mount and network namespace.
         # Ubuntu 24.04 runners restrict unprivileged user namespaces by
         # AppArmor policy; lift that for this throwaway runner only.
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           scripts/distro-smoke.sh bin/distro/observer-${{ matrix.distro }}-linux-amd64
+
+      - name: save go cache (full runs only, D-612)
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.go.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.go.outputs.gocache }}
+            ${{ steps.go.outputs.gomodcache }}
+          key: ${{ steps.go.outputs.key }}
 
   # ----------------------------------------------------------------
   # Edition installers (T-729): scripts/install.sh is shellchecked and
@@ -259,6 +562,8 @@ jobs:
   # ----------------------------------------------------------------
   installer:
     name: installer ${{ matrix.os }}
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -266,12 +571,19 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      # testdata/grokbot holds 218-character paths (base32 slice names the
+      # adapter reads verbatim); under the private repo's longer checkout
+      # root that passes Windows' 260-character limit and checkout fails.
+      - name: long paths (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
       - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
 
       - name: shellcheck
         if: runner.os == 'Linux'
@@ -297,40 +609,49 @@ jobs:
   # Omit-tag variants (plan 5.9, risk R1 "stub rot"): every sbo_omit_*
   # tag a build line names, the no_obs alias and each distro's tag set
   # get `go vet ./...` and the tests of the packages that hold a tagged
-  # file. The set list comes from the tree (omit-tag-check.sh --list),
-  # one matrix job per set.
+  # file. The set list comes from the tree (omit-tag-check.sh --list) and
+  # is filtered by the script itself, never restated here (D-602, D-609):
+  #   PR / branch push: one job, --scope distro: the distro sets (the
+  #     entries carrying a sbo_distro_* stamp, which are the editions
+  #     npm-release builds and publishes) and no_obs. `full` has no omit
+  #     tag; the distros job builds, proves and smokes it on every push.
+  #   schedule, workflow_dispatch, v* tag push: the whole list, i.e. also
+  #     every single sbo_omit_* tag (custom-build.yml customer builds,
+  #     which the release does not publish), in 6 batches (--batch i/6).
   # ----------------------------------------------------------------
-  omit-tag-sets:
-    name: omit-tag sets
-    runs-on: ubuntu-latest
-    outputs:
-      sets: ${{ steps.list.outputs.sets }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: 'go.mod'
-          cache: true
-      - id: list
-        run: echo "sets=$(scripts/omit-tag-check.sh --list | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-
   omit-tags:
-    name: omit tags ${{ matrix.set }}
-    needs: omit-tag-sets
+    name: omit tags ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        set: ${{ fromJSON(needs.omit-tag-sets.outputs.sets) }}
+        include: ${{ fromJSON(needs.plan.outputs.omit) }}
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      # One cache family for every batch: build tags only change which files
+      # a package selects, so the untagged packages compile identically.
+      - uses: ./.github/actions/go-cache
+        id: go
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          family: omit-tags
       - name: vet + test
-        run: scripts/omit-tag-check.sh --only "${{ matrix.set }}"
+        # One job runs several sets back to back on one warm build cache
+        # (D-609); each set is a log group and a failing set is named in an
+        # ::error line, so a batch still reports per set.
+        run: scripts/omit-tag-check.sh ${{ matrix.args }}
+      # Saved from the nightly FULL run only (D-609): its batches compile
+      # every tag set, the per-push job only the distro sets.
+      - name: save go cache (nightly, batch 0 only)
+        if: ${{ !cancelled() && matrix.name == 'batch 0/6' && github.event_name == 'schedule' && github.ref == 'refs/heads/main' && steps.go.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.go.outputs.gocache }}
+            ${{ steps.go.outputs.gomodcache }}
+          key: ${{ steps.go.outputs.key }}
 
   # ----------------------------------------------------------------
   # Plugin-manifest drift gate. plugins/plugingen derives the in-tool
@@ -355,12 +676,15 @@ jobs:
   # ----------------------------------------------------------------
   plugins-build-drift:
     name: plugin manifest drift
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
@@ -405,12 +729,15 @@ jobs:
   # ----------------------------------------------------------------
   taxonomy-build-drift:
     name: action taxonomy drift
+    needs: plan
+    if: needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
       - uses: actions/setup-node@v5
         with:
           node-version: '22'

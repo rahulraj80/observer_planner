@@ -39,15 +39,6 @@ func copyFixtureBundle(t *testing.T, stem, dstDir, dstID string) {
 	}
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolKiroCLI {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolKiroCLI)
-	}
-	if models.ToolKiroCLI != "kiro-cli" {
-		t.Fatalf("tool constant drift: %q", models.ToolKiroCLI)
-	}
-}
-
 func TestClassifyLayout(t *testing.T) {
 	cases := []struct {
 		path string

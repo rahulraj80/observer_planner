@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -17,7 +19,7 @@ import (
 func cacheWarmServer(t *testing.T, keepwarmMode string) *Server {
 	t.Helper()
 	dir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

@@ -49,12 +49,6 @@ func parseFixture(t *testing.T, from int64) map[string]models.ToolEvent {
 	return byID
 }
 
-func TestName(t *testing.T) {
-	if got := (&Adapter{}).Name(); got != models.ToolDevin {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolDevin)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := "/home/u/.local/share/devin/cli"
 	a := NewWithOptions(nil, []string{root})

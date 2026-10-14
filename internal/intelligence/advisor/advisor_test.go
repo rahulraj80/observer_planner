@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
@@ -313,7 +315,7 @@ func TestRunFiltersAndRanks(t *testing.T) {
 	// sort by savings desc. Use the real Run against a seeded DB.
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +375,7 @@ func TestLoadFacts_ProxyJSONLDedup(t *testing.T) {
 	// row survives.
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "d.db")
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +449,7 @@ func TestLoadFacts_ProxyJSONLDedup(t *testing.T) {
 // same-shape transcript row where Derive claims one twin per proxy row.
 func TestLoadFacts_DedupFollowsDerive(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "d.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +528,7 @@ func TestLoadFacts_DedupFollowsDerive(t *testing.T) {
 func TestLoadFacts_RowsOrderedWithoutSQLSort(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "order.db")
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +635,7 @@ func TestLoadFacts_RowsOrderedWithoutSQLSort(t *testing.T) {
 func TestLoadPhase2_ActionMixWithoutSQLGroupBy(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mix.db")
-	database, err := db.Open(ctx, db.Options{Path: path})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}

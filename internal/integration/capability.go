@@ -1190,7 +1190,7 @@ type InstallHint struct {
 	// OS scopes the hint: "linux" | "darwin" | "windows" | "" (any OS).
 	OS string
 	// Channel names the install method, a CLOSED vocabulary (pinned by
-	// TestInstallHintChannelIsClosedVocabulary): "npm" | "script" | "brew" |
+	// TestInstallHintsUseClosedVocabularies): "npm" | "script" | "brew" |
 	// "winget" | "uv" | "scoop". "choco" is deliberately NOT in the
 	// vocabulary — the one candidate row found (opencode) is a stale
 	// third-party publish (0.11.1 vs. npm's 1.18.26), so it was never

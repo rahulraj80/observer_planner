@@ -65,6 +65,7 @@ var pages = []page{
 	{"live", "live", "Live", "LivePage", "core"},
 	{"search", "search", "Search", "SearchPage", "compression.indexing"},
 	{"cost", "cost", "Cost", "CostPage", "core"},
+	{"plans", "plans", "Plans", "PlansPage", "core"},
 	{"analysis", "analysis", "Analysis", "AnalysisPage", "core"},
 	{"sessions", "sessions", "Sessions", "SessionsPage", "core"},
 	{"actions", "actions", "Actions", "ActionsPage", "core"},

@@ -21,13 +21,6 @@ func fixturePath(t *testing.T, rel string) string {
 	return abs
 }
 
-func TestName(t *testing.T) {
-	t.Parallel()
-	if got := New().Name(); got != models.ToolCowork {
-		t.Fatalf("Name=%q want %q", got, models.ToolCowork)
-	}
-}
-
 // TestIsSessionFile_RequiresAuditBasename pins the shape gate.
 // Only files named exactly audit.jsonl inside a local_<id>/ dir count.
 func TestIsSessionFile_RequiresAuditBasename(t *testing.T) {

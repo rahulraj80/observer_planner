@@ -354,6 +354,10 @@ func oversizePlaceholder(line []byte) string {
 func replayHookBlocks(blocks []hookLogBlock, sc *scrub.Scrubber, fallback time.Time) adapter.ParseResult {
 	var res adapter.ParseResult
 	carrier := newMemoryReasoning()
+	// versioned dedups the per-conversation Cursor build stamp
+	// (cursor_version, T-784) to ONE SessionToolVersion per session per
+	// parse, the first one seen; the store write is first-wins anyway.
+	versioned := map[string]bool{}
 	// skip records a block the replay could not use. The warning is
 	// content-safe (offset, event name, a builder's own error text —
 	// never payload bytes) and reaches the watcher log / backfill
@@ -376,6 +380,10 @@ func replayHookBlocks(blocks []hookLogBlock, sc *scrub.Scrubber, fallback time.T
 		if err := json.Unmarshal(b.body, &head); err != nil {
 			skip(b, b.header, "undecodable JSON payload")
 			continue
+		}
+		if tv, ok := SessionToolVersionFromHook(b.body); ok && !versioned[tv.SessionID] {
+			versioned[tv.SessionID] = true
+			res.SessionToolVersions = append(res.SessionToolVersions, tv)
 		}
 		event := head.Event
 		if event == "" {

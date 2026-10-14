@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
@@ -64,7 +66,7 @@ func TestHotAddedRootWalksPreExistingFiles(t *testing.T) {
 	defer cancel()
 
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func TestHotAddRootsIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}

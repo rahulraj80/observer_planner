@@ -135,6 +135,7 @@ func TestManagedLauncherCommandsRenderRefusalWithoutStartingVendor(t *testing.T)
 // vendor process never starts (it used to start and be killed a reconcile
 // cycle later with nothing said at the terminal).
 func TestManagedLauncherRendersSpendRefusalWithoutStartingVendor(t *testing.T) {
+	requireComponents(t, "capture.proxy")
 	originalRuntimeDir := agentRuntimeDir
 	originalLoginPathDirs := daemonLoginPathDirs
 	agentRuntimeDir = func() string { return "" }

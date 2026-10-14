@@ -335,6 +335,10 @@ func computeStatusline(ctx context.Context, cmd *cobra.Command, deps statuslineD
 	merged := statuslineInputFromEnv(deps.getenv)
 	merged = overlayStatuslineInput(merged, statuslineInputFromFlags(opts))
 
+	// rawStdin is the bounded stdin payload, kept for the Plans & limits
+	// feed (statusline_plans.go), which forwards only its rate_limits
+	// numbers.
+	var rawStdin []byte
 	if !deps.stdinTTY() {
 		// F2a: a stalled pipe (opened, never written to, never closed)
 		// must never block this command forever — the read itself is
@@ -361,6 +365,7 @@ func computeStatusline(ctx context.Context, cmd *cobra.Command, deps statuslineD
 			if parsed, perr := statusline.ParseInput(data); perr == nil {
 				merged = overlayStatuslineInput(merged, parsed)
 			}
+			rawStdin = data
 		}
 	}
 	progress.set(merged)
@@ -416,6 +421,11 @@ func computeStatusline(ctx context.Context, cmd *cobra.Command, deps statuslineD
 			daemonLatency = time.Since(start)
 			if ok {
 				daemonOK = true
+				// Plans & limits: forward the payload's rate_limits numbers
+				// to the daemon, on change only (statusline_plans.go).
+				// Same loopback-and-live-daemon gate as the tile above;
+				// fail-open, bounded.
+				forwardPlanStatusLine(ctx, loopbackBase, dbDir, rawStdin, time.Now())
 			} else {
 				daemonReason = fmt.Sprintf("unreachable (%v, %s)", ferr, daemonLatency.Round(time.Millisecond))
 			}

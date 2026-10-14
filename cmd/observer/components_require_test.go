@@ -93,6 +93,38 @@ func requireUnstampedBuild(t *testing.T) {
 	}
 }
 
+// requireSimulatedDistro skips a test that drives the chooser with a fake
+// snapshot of other distros (componentstate.ResolveGoverned over
+// components.InDistro(d)) when the test binary is stamped with a different
+// one: a stamped build's own distro replaces the snapshot's base by design
+// (componentstate.ResolveGoverned), so the simulated distro is not what
+// the chooser sees. A plain build simulates every distro; a stamped build
+// still runs the rows for its own distro.
+func requireSimulatedDistro(t *testing.T, distros ...components.Distro) {
+	t.Helper()
+	stamp := components.BuildDistro()
+	if stamp == "" {
+		return
+	}
+	for _, d := range distros {
+		if d != stamp {
+			t.Skipf("simulates distro %q; this build is stamped %q, whose own distro is the base the chooser sees", d, stamp)
+		}
+	}
+}
+
+// requireFullCompiledBuild skips a test that pins the plain build's FULL
+// base: an unstamped build with nothing omitted. An omit tag (or the public
+// tree, where obs is compiled out) makes the build's own distro developer or
+// custom, so a "full" expectation does not hold there by design (T-767).
+func requireFullCompiledBuild(t *testing.T) {
+	t.Helper()
+	requireUnstampedBuild(t)
+	if om := components.Omitted(); len(om) > 0 {
+		t.Skipf("pins the plain full build; this build omits %v", om)
+	}
+}
+
 // TestComponentRequirementsNeverSkipAFullBuild pins the promise above: in a
 // plain build every compiled component is active by default, so no
 // requireComponents call can skip there.

@@ -263,7 +263,7 @@ func TestDashboardNPMPlanPreservesValueFlags(t *testing.T) {
 // winget and the scoop row T2 grounded for opencode — shares one rank above the
 // npm fallback. The set is exactly the closed Channel vocabulary's package
 // managers (integration.InstallHint.Channel pinned by
-// TestInstallHintChannelIsClosedVocabulary); "choco" is deliberately NOT in that
+// TestInstallHintsUseClosedVocabularies); "choco" is deliberately NOT in that
 // vocabulary, so it is not asserted here.
 func TestDashboardInstallChannelRankPrefersPackageManagersOverNPM(t *testing.T) {
 	for _, ch := range []string{"brew", "winget", "scoop"} {

@@ -1,16 +1,18 @@
 # @superbased/observer
 
-<img src="https://raw.githubusercontent.com/superbasedapp/observer/main/vscode/media/logo-dark.png" alt="SuperBased logo" height="56">
+<img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-idle-light-512.png" alt="Obs, the SuperBased mascot: a small robot with a terminal prompt for a face and a cape" width="112" align="right">
 
-**Local-first observability for AI coding agents.** See what Claude Code, Codex, Cursor and every
-other coding agent you run really cost, from the tokens your provider actually billed. On your own
-machine, with no account.
+<img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/brand/superbased-lockup-light.png" alt="SuperBased" height="32">
+
+**Track what every AI coding agent costs. See the limit coming.** See what Claude Code, Codex,
+Cursor and 37 more AI coding tools cost, per session and per model, from the tokens your provider
+actually billed. Free, Apache-2.0, and it runs on your machine.
 
 [![npm](https://img.shields.io/npm/v/@superbased/observer.svg)](https://www.npmjs.com/package/@superbased/observer)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/superbasedapp/observer/blob/main/LICENSE)
 [![Website](https://img.shields.io/badge/website-superbased.app-2EC4B6.svg)](https://superbased.app/)
 
-![SuperBased dashboard Overview: sessions, cost over time by billing bucket, top models and coding tools](https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/01-overview.png)
+![Session detail in the SuperBased dashboard: total cost, a low, typical and high cost for the next message, the 5-hour and weekly limit, and the cost of switching to a cheaper model](https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cost-and-limits.png)
 
 ## Try it without installing
 
@@ -52,7 +54,11 @@ and helps you control them.**
 - **Your agents as terminals.** Launch agent CLIs from the dashboard, join a running session from a
   paired device over your Tailscale tailnet, and hand a session from one tool to another.
 
+![Overview page of the SuperBased dashboard: 30-day spend, sessions, actions and proxy-accurate API turns, cache efficiency, cost over time by billing bucket and actions over time by coding tool](https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/overview-dashboard.png)
+
 ## Get started
+
+<img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/mascot/obs-celebrate-light-small.png" alt="" width="54" align="right">
 
 ```bash
 observer start    # proxy + watcher + dashboard; opens http://localhost:8081
@@ -74,6 +80,10 @@ one-off proxied session. `observer init` additionally registers the opt-in MCP s
 - Waste detection: stale re-reads, repeated commands and files several agents fight over.
 - Dashboard terminals with multi-seat join and native resume.
 - A CLI for everything: `observer usage`, `cost`, `predict`, `tail`, `statusline`.
+
+![Session detail: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model](https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-detail.png)
+
+![Terminals page: Claude Code, Codex, Antigravity CLI and Copilot CLI running side by side as live terminals in one dashboard](https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/terminals-workspace.png)
 
 ## Privacy
 

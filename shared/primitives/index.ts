@@ -81,6 +81,24 @@ export {
 export { Select, type SelectProps, type SelectOption } from "./Select";
 export { Textarea, type TextareaProps } from "./Textarea";
 export { SettingRow, type SettingRowProps } from "./SettingRow";
+// Copy and emphasis primitives (design review 2026-10-13, lane DS2;
+// docs/app-design-system.md "Copy rules", "Emphasis", "Row actions").
+export { InfoDisclosure, type InfoDisclosureProps } from "./InfoDisclosure";
+export { HelpTooltip, type HelpTooltipProps } from "./HelpTooltip";
+export { Callout, type CalloutProps } from "./Callout";
+export { RowActions, type RowAction, type RowActionsProps } from "./RowActions";
+export { CoverageBadge, type CoverageBadgeProps } from "./CoverageBadge";
+export {
+  COPY_LIMITS,
+  COVERAGE_TONE,
+  coverageCountLabel,
+  coverageFromCounts,
+  loudCalloutsOverBudget,
+  overCopyLimit,
+  type CalloutTone,
+  type CopyKind,
+  type CoverageStatus,
+} from "./copyModel";
 export { Card, type CardProps } from "./Card";
 export { CardHeader } from "./CardHeader";
 export { MetricIcon } from "./MetricIcon";

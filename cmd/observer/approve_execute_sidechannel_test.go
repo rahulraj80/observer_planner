@@ -24,6 +24,7 @@ import (
 // (path, query, all headers incl. Referer) and the process argv, and confirms
 // the canaries surface ONLY on the command's stdout.
 func TestApproveExecuteDoesNotExposeSecretsInArgvURLOrHistory(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	const (
 		canaryCap     = "CANARY-CAPABILITY-7f3a91"
 		canaryConfirm = "CANARY-CONFIRM-2b8e0d"

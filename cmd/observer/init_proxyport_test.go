@@ -40,6 +40,8 @@ func TestPickInitProxyPortTable(t *testing.T) {
 // overrides it (D-591). Real writes, but only into a throwaway HOME with
 // the crossmount probe disabled.
 func TestInitRouteUsesConfigProxyPort(t *testing.T) {
+	requireActiveAdapters(t, "claude-code")
+	requireComponents(t, "integration.proxy-route")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

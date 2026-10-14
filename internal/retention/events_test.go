@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -19,7 +21,7 @@ func seedEventTables(t *testing.T, compactionAges, compressionAges []time.Durati
 	t.Helper()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "events.db")
-	d, err := db.Open(ctx, db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

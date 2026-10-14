@@ -55,6 +55,7 @@ var pricingFeedClientAllowedImporterPrefixes = []string{
 // the full transitive dependency closure of each always-on daemon package (and
 // the org push loop) must contain NONE of the network lane.
 func TestPricingFeedDaemonPathsCannotReachClient(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	for _, entry := range pricingFeedDaemonEntryPackages {
 		entry := entry
@@ -97,6 +98,7 @@ func TestPricingFeedDaemonPathsCannotReachClient(t *testing.T) {
 // flagged — what must not exist is a PRODUCTION path that reaches the network
 // without the gate.
 func TestPricingFeedClientIsolatedToGate(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	cmd := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}", "./...")
 	cmd.Dir = repoRoot

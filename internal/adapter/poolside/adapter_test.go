@@ -46,12 +46,6 @@ func parseFixture(t *testing.T) (adapter.ParseResult, string) {
 	return res, trajPath
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolPoolside {
-		t.Errorf("Name() = %q, want %q", got, models.ToolPoolside)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "poolside", "trajectories")
 	a := NewWithOptions(nil, root)

@@ -41,7 +41,7 @@ import (
 // add each new id to navSince / settingsSince at the new level, whenever
 // NavSectionIDs or SettingsSectionIDs grows. vocablevel_test.go fails when an
 // id is missing from both the first-level baseline and the since tables.
-const CurrentVocabLevel = 6
+const CurrentVocabLevel = 7
 
 // FirstTabVocabLevel is the level at which page TABS ("<page>/<tab>",
 // vocab.go) joined the nav vocabulary (per-tab visibility, T-132). Every tab
@@ -66,6 +66,8 @@ var (
 		// advertised a level; level-5 (tabs) builds lack it. It is on the T8
 		// floor, so no body names it, but the level stays truthful.
 		"requests": 6,
+		// The Plans & limits page (subscription and balance tracking).
+		"plans": 7,
 	}
 	settingsSince = map[string]int{
 		"cloud": 2, // v1.33.0

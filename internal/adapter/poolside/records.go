@@ -58,11 +58,13 @@ type sessionStartPayload struct {
 // standalone Linux `pool` 1.0.16 TUI (demo node 1, 2026-10-08):
 // {"version":"1.0.16","host":"acp:pool","environment":"production"}. The
 // TUI drives the agent over ACP itself, so its host names the ACP client
-// "pool". Only `host` is read (for the capture surface); the field is
-// absent from the Windows JetBrains ACP capture this adapter was first
-// built against.
+// "pool". `host` feeds the capture surface and `version` the per-session
+// tool version (migration 125, T-784); the whole object is absent from
+// the Windows JetBrains ACP capture this adapter was first built against,
+// so a JetBrains-hosted session honestly stamps neither.
 type clientMetadataInfo struct {
-	Host string `json:"host"`
+	Host    string `json:"host"`
+	Version string `json:"version"`
 }
 
 // sessionInputPayload is `session_input` — one user turn.

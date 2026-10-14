@@ -37,12 +37,6 @@ func newFixtureAdapter(t *testing.T) *Adapter {
 	return NewWithOptions(nil, sessions, logs)
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolGrok {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolGrok)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	// A synthetic-root adapter so the shape+root predicate is exercised
 	// independent of the on-disk fixtures.

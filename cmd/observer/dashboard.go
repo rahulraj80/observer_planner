@@ -89,6 +89,7 @@ func newDashboardCmd() *cobra.Command {
 				CacheWarm:              cfg.CacheWarm,
 				Tasks:                  cfg.Tasks,
 				Projects:               cfg.Projects,
+				Plans:                  newPlansService(cfg, database, slog.Default()),
 				CloudGradeAvailability: CommitAlignmentAvailability,
 				JudgeGrade:             projectsJudgeGrade,
 				JudgeGradeReason:       projectsJudgeGradeReason,

@@ -167,12 +167,6 @@ func TestIsSessionFile(t *testing.T) {
 	}
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolMistralCode {
-		t.Errorf("Name() = %q, want %q", got, models.ToolMistralCode)
-	}
-}
-
 // TestParseSessionFile_SkipsOverlongLine pins ADAPT-LZ-4: a transcript
 // line past the 16 MiB scanner cap used to end the loop silently with
 // sc.Err() unchecked, wedging the cursor at that line forever. It must

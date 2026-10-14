@@ -112,6 +112,7 @@ func TestSetDaemonConfigPathAbsolutizes(t *testing.T) {
 // assembly: even when config loading fails, the dashboard records its explicit
 // path before it could construct any terminal launch or Arena surface.
 func TestStandaloneDashboardRecordsExplicitConfigBeforeStartup(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	prev := daemonConfigPath()
 	t.Cleanup(func() { setDaemonConfigPath(prev) })
 	cfgPath := filepath.Join(t.TempDir(), "invalid.toml")
@@ -234,16 +235,36 @@ func TestPtyLauncherSSHLaunchNeverCarriesDaemonConfig(t *testing.T) {
 // running — the remaining causes are the daemon's own `[proxy]` block, so that
 // is what the advice names.
 func TestProxyDownAdviceIsHonestForADaemonChild(t *testing.T) {
-	child := proxyDownAdvice(true)
-	if strings.Contains(child, "observer start") {
-		t.Fatalf("daemon-child advice still tells the operator to start the daemon: %q", child)
+	for _, daemonChild := range []bool{true, false} {
+		got := proxyDownAdvice(daemonChild)
+		want, deny := proxyDownAdviceExpect(daemonChild)
+		for _, w := range want {
+			if !strings.Contains(got, w) {
+				t.Fatalf("daemonChild=%v: advice %q missing %q", daemonChild, got, w)
+			}
+		}
+		for _, d := range deny {
+			if strings.Contains(got, d) {
+				t.Fatalf("daemonChild=%v: advice %q must not contain %q", daemonChild, got, d)
+			}
+		}
 	}
-	if !strings.Contains(child, "[proxy]") {
-		t.Fatalf("daemon-child advice names no actionable cause: %q", child)
-	}
-	bare := proxyDownAdvice(false)
-	if !strings.Contains(bare, "observer start") {
-		t.Fatalf("bare-launch advice = %q, want the `observer start` next step", bare)
+}
+
+// proxyDownAdviceExpect is the substrings proxyDownAdvice must and must not
+// carry. A daemon child is pointed at the daemon's `[proxy]` block, never at
+// `observer start`; a bare launch is pointed at `observer start`. A build
+// without capture.proxy (D-514) names the build in both cases and neither
+// next step, because no daemon of this build serves the proxy port whatever
+// its `[proxy]` block says.
+func proxyDownAdviceExpect(daemonChild bool) (want, deny []string) {
+	switch {
+	case proxyNotInBuild():
+		return []string{"not in this build"}, []string{"observer start", "[proxy]"}
+	case daemonChild:
+		return []string{"[proxy]"}, []string{"observer start"}
+	default:
+		return []string{"observer start"}, nil
 	}
 }
 
@@ -255,9 +276,15 @@ func TestProxyUnreachableNoticeShape(t *testing.T) {
 	if strings.Count(got, "\n") != 0 {
 		t.Fatalf("notice spans multiple lines: %q", got)
 	}
-	for _, want := range []string{"observer hermes:", "http://127.0.0.1:18898", "NOT captured", "[proxy]"} {
+	adviceWant, adviceDeny := proxyDownAdviceExpect(true)
+	for _, want := range append([]string{"observer hermes:", "http://127.0.0.1:18898", "NOT captured"}, adviceWant...) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("notice %q missing %q", got, want)
+		}
+	}
+	for _, deny := range adviceDeny {
+		if strings.Contains(got, deny) {
+			t.Fatalf("notice %q must not contain %q", got, deny)
 		}
 	}
 }
@@ -275,6 +302,9 @@ func TestCodexRouteSkipNoticeIsOnePerOutcome(t *testing.T) {
 		daemonChild bool
 		wantSubstr  []string
 		denySubstr  []string
+		// downAdvice: the notice carries proxyDownAdvice, so its
+		// proxyDownAdviceExpect substrings apply too.
+		downAdvice bool
 	}{
 		{
 			name:       "operator passed the flag",
@@ -285,15 +315,17 @@ func TestCodexRouteSkipNoticeIsOnePerOutcome(t *testing.T) {
 		{
 			name:       "launcher neutralized a down proxy",
 			reason:     reasonProxyDownClean,
-			wantSubstr: []string{"proxy not reachable at http://127.0.0.1:18898", "NOT captured", "observer start"},
+			wantSubstr: []string{"proxy not reachable at http://127.0.0.1:18898", "NOT captured"},
 			denySubstr: []string{"--no-proxy-route set"},
+			downAdvice: true,
 		},
 		{
 			name:        "down proxy inside a daemon-spawned terminal",
 			reason:      reasonProxyDownClean,
 			daemonChild: true,
-			wantSubstr:  []string{"proxy not reachable", "[proxy]"},
+			wantSubstr:  []string{"proxy not reachable"},
 			denySubstr:  []string{"--no-proxy-route set", "start it with"},
+			downAdvice:  true,
 		},
 		{
 			name:       "unlisted reason falls back to the flag reading",
@@ -307,12 +339,18 @@ func TestCodexRouteSkipNoticeIsOnePerOutcome(t *testing.T) {
 			if strings.Count(got, "\n") != 0 {
 				t.Fatalf("notice spans multiple lines: %q", got)
 			}
-			for _, w := range tt.wantSubstr {
+			want, deny := tt.wantSubstr, tt.denySubstr
+			if tt.downAdvice {
+				adviceWant, adviceDeny := proxyDownAdviceExpect(tt.daemonChild)
+				want = append(append([]string(nil), want...), adviceWant...)
+				deny = append(append([]string(nil), deny...), adviceDeny...)
+			}
+			for _, w := range want {
 				if !strings.Contains(got, w) {
 					t.Fatalf("notice %q missing %q", got, w)
 				}
 			}
-			for _, d := range tt.denySubstr {
+			for _, d := range deny {
 				if strings.Contains(got, d) {
 					t.Fatalf("notice %q must not contain %q", got, d)
 				}

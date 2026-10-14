@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
@@ -21,7 +23,7 @@ func TestBuildDoctorReportPerTool(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.Observer.DBPath = filepath.Join(dir, "o.db")
-	database, err := db.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: cfg.Observer.DBPath})
 	if err != nil {
 		t.Fatal(err)
 	}

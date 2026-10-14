@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	orgdb "github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 )
@@ -20,7 +22,7 @@ import (
 func seedGovernedNode(t *testing.T) (*sql.DB, ed25519.PrivateKey) {
 	t.Helper()
 	ctx := context.Background()
-	d, err := orgdb.Open(ctx, orgdb.Options{Path: filepath.Join(t.TempDir(), "observer.db")})
+	d, err := dbtemplate.Open(ctx, orgdb.Options{Path: filepath.Join(t.TempDir(), "observer.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

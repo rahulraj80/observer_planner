@@ -15,7 +15,7 @@ const repo = fileURLToPath(new URL("../../../", import.meta.url));
 // [root, ceiling]: the count of U+2014 / U+2013 in .ts / .tsx / .css files.
 const CEILINGS: Array<[string, number]> = [
   ["web/src", 1540],
-  ["web2/src", 972],
+  ["web2/src", 961],
   ["shared", 405],
   ["webcloud/src", 79],
 ];

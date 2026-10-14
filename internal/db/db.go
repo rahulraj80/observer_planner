@@ -287,7 +287,7 @@ func Open(ctx context.Context, opts Options) (*sql.DB, error) {
 	if deferMigrations(ctx, database, opts.Path) {
 		return database, nil
 	}
-	if err := runMigrations(ctx, database); err != nil {
+	if err := runMigrationsWait(ctx, database, migrationLockWait(busy)); err != nil {
 		_ = database.Close()
 		return nil, err
 	}
@@ -611,6 +611,29 @@ func integrityCheck(ctx context.Context, db *sql.DB) error {
 // not just K+1, so a botched migration script can't leave the schema
 // in a half-state.
 func runMigrations(ctx context.Context, db *sql.DB) error {
+	return runMigrationsWait(ctx, db, defaultMigrationLockWait)
+}
+
+// defaultMigrationLockWait is how long a migration pass waits for another
+// opener's migration pass to release the write lock.
+const defaultMigrationLockWait = 30 * time.Second
+
+// migrationLockWait is the migration-lock wait for an Open whose
+// connection busy timeout is busy: never below the 30s default, and as
+// long as the caller's own busy timeout when that is longer, so a caller
+// that already tolerates a longer write-lock wait (a test under -race on a
+// loaded 2-vCPU runner, where the winning opener's first full migration
+// pass took over 30s, D-604) is not failed at 30s by the migration lock.
+func migrationLockWait(busy time.Duration) time.Duration {
+	if busy > defaultMigrationLockWait {
+		return busy
+	}
+	return defaultMigrationLockWait
+}
+
+// runMigrationsWait is runMigrations with an explicit wait for the
+// migration lock (the busy_timeout of the BEGIN IMMEDIATE connection).
+func runMigrationsWait(ctx context.Context, db *sql.DB, lockWait time.Duration) error {
 	// Live-DB test isolation gate, handle form (incident "task #17"). Open is
 	// not the only route here: a caller can build a raw database/sql handle
 	// and call this runner directly (migrations_test.go does exactly that), so
@@ -664,10 +687,10 @@ func runMigrations(ctx context.Context, db *sql.DB) error {
 	}
 	defer conn.Close()
 
-	// 30s is generous; well-formed migrations apply in milliseconds
-	// even on multi-GB DBs. The wait is for OTHER daemons holding the
-	// lock during their own migration pass.
-	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = 30000"); err != nil {
+	// 30s (the default) is generous; well-formed migrations apply in
+	// milliseconds even on multi-GB DBs. The wait is for OTHER daemons
+	// holding the lock during their own migration pass.
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", lockWait.Milliseconds())); err != nil {
 		return fmt.Errorf("db.runMigrations: set busy_timeout: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {

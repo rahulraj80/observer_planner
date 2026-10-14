@@ -127,6 +127,9 @@ func TestCopilotCLIRouteDecision(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantRouted {
+				requireComponents(t, "capture.proxy")
+			}
 			unsetEnvForTest(t, copilotGateEnv...)
 			for k, v := range tc.env {
 				t.Setenv(k, v)

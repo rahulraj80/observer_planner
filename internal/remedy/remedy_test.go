@@ -1,11 +1,10 @@
 package remedy
 
 import (
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 // TestEveryActionRendersForBothAudiences: every action in the closed set has
@@ -91,20 +90,14 @@ func TestControlLinks(t *testing.T) {
 
 // TestPackageIsPure keeps remedy free of I/O and of other observer packages.
 func TestPackageIsPure(t *testing.T) {
-	files, _ := filepath.Glob("*.go")
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		pf, err := parser.ParseFile(token.NewFileSet(), f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range pf.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			if p == "database/sql" || p == "net/http" || p == "os" || p == "os/exec" || strings.Contains(p, "superbased-observer/internal/") || strings.Contains(p, "fsnotify") {
-				t.Errorf("%s imports %s", f, p)
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "os", "os/exec"},
+		Custom: func(_, p string) string {
+			if strings.Contains(p, "superbased-observer/internal/") || strings.Contains(p, "fsnotify") {
+				return "observer package or fsnotify"
 			}
-		}
-	}
+			return ""
+		},
+		Reason: "internal/remedy must stay pure",
+	})
 }

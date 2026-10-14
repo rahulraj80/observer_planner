@@ -7,11 +7,19 @@
 #   * docs/distribution/README-body.md  — the shared middle (Per-AI-client
 #                                          setup through Configuration);
 #                                          identical text on both registries.
-#   * npm/observer/README.template.md   — channel-specific header (title,
+#   * docs/distribution/npm-README.template.md
+#                                        — channel-specific header (title,
 #                                          badges, install, quickstart step 1)
 #                                          + INCLUDE marker + channel-specific
 #                                          troubleshooting + footer.
-#   * pypi/observer/README.template.md  — same shape for the PyPI channel.
+#   * docs/distribution/pypi-README.template.md
+#                                        — same shape for the PyPI channel.
+#
+# The templates live here, NOT beside each channel's README.md: npm packs
+# every root file matching README* regardless of package.json "files", and
+# the registry then shows README.template.md (with the raw INCLUDE marker
+# and no body) as the package page. That is what npmjs.com showed for
+# v1.36.0 (found in T-800); keep the templates out of npm/observer/.
 #
 # Each template carries exactly one substitution marker:
 #   <!-- @@INCLUDE:docs/distribution/README-body.md@@ -->
@@ -35,7 +43,7 @@ if [ ! -f "$BODY_PATH" ]; then
 fi
 
 for channel in npm pypi; do
-    template="$channel/observer/README.template.md"
+    template="docs/distribution/$channel-README.template.md"
     output="$channel/observer/README.md"
 
     if [ ! -f "$template" ]; then

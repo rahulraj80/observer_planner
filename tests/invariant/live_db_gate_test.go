@@ -109,7 +109,13 @@ type gateCallSite struct {
 // path-based, so a missing file is a t.Fatalf, not a skip.
 var gateCallSites = []gateCallSite{
 	{filepath.Join("internal", "db", "db.go"), "Open", "GuardLiveDB", true},
-	{filepath.Join("internal", "db", "db.go"), "runMigrations", "GuardLiveDBHandle", false},
+	// The handle-form gate lives in runMigrationsWait, the one runner every
+	// path reaches (D-604): Open calls it directly with its migration-lock
+	// wait, and runMigrations is a thin wrapper that only delegates to it.
+	// The two delegation rows pin that neither entry point can bypass it.
+	{filepath.Join("internal", "db", "db.go"), "runMigrationsWait", "GuardLiveDBHandle", false},
+	{filepath.Join("internal", "db", "db.go"), "runMigrations", "runMigrationsWait", false},
+	{filepath.Join("internal", "db", "db.go"), "Open", "runMigrationsWait", false},
 }
 
 // TestLiveDBGate_StructuralPins is the cheap structural half: it fails if the

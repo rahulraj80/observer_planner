@@ -1,0 +1,1 @@
+{"limit_id":"codex","limit_name":null,"primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1781916000},"secondary":{"used_percent":97.0,"window_minutes":10080,"resets_at":1782345600},"credits":{"has_credits":true,"unlimited":false,"balance":"25"},"individual_limit":null,"plan_type":"pro","rate_limit_reached_type":"primary"}

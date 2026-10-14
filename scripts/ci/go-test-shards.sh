@@ -6,17 +6,19 @@
 # (`go test -race -timeout 40m ./...`). By 2026-09-16 that step took 5+ hours on
 # the 2-core private-repo runner and hit GitHub's hard 6 h job cap on three
 # consecutive pushes - the job was killed with no useful signal, so CI stopped
-# being a gate at all. Splitting the suite across 8 matrix shards puts every
-# shard comfortably under a 120 min job timeout, and a failure now points at a
-# package instead of at a stopwatch.
+# being a gate at all. Splitting the suite across matrix shards puts every
+# shard under a 120 min job timeout, and a failure now points at a package
+# instead of at a stopwatch. The shard count is not fixed: ci.yml's plan job
+# sizes it per run with `plan <max> <target>` (1 to 12 shards, D-609).
 #
 # The assignment is a plain LPT (longest-processing-time-first) greedy:
 #   sort packages by weight DESC, then import path ASC (stable + reproducible),
 #   then hand each package to whichever shard currently has the lowest running
 #   total (ties -> lowest shard index).
 # Because the input order is total and the rule is deterministic, every runner
-# computes the same assignment from the same checkout - no coordination, no
-# artifact passing between jobs.
+# computes the same assignment from the same checkout and the same SHARD_FILTER
+# file (which ci.yml's plan job hands every shard as the test-plan artifact) -
+# no other coordination between jobs.
 #
 # Weights come from scripts/ci/go-test-weights.tsv (module-relative path TAB
 # integer seconds). They are a BALANCING HEURISTIC ONLY. A package missing from
@@ -27,8 +29,10 @@
 #
 # Modes:
 #   list <index> <count>     space-separated import paths for one shard (stdout,
-#                            nothing else - the workflow interpolates this
-#                            straight into `go test ... $(...)`)
+#                            nothing else - scripts/ci/go-test-run.sh reads it
+#                            and splits it into its -race and plain halves)
+#   plan <max> <target>      how many shards (1..max) the filtered universe
+#                            needs to stay near <target> package-seconds each
 #   check <count>            run the whole assignment, assert union == universe,
 #                            no duplicates, no empty shard; print a per-shard
 #                            summary. This is the honesty gate: a sharder bug
@@ -61,6 +65,7 @@ usage:
   go-test-shards.sh list <index> <count>     print shard <index> of <count> (0-based), space-separated
   go-test-shards.sh check <count>            verify the <count>-way split covers the universe exactly
   go-test-shards.sh weights <job-log-file>   regenerate the weight TSV from a GitHub Actions job log
+  go-test-shards.sh plan <max> <target-secs> how many shards the (filtered) universe needs
 EOF
   exit 2
 }
@@ -79,9 +84,26 @@ module_path() {
 # The XTestGoFiles half matters: ~31 packages in this tree carry only a
 # `package foo_test` file, and a TestGoFiles-only filter would silently drop
 # every one of them.
+#
+# SHARD_FILTER (D-609): a file of module-relative package paths, one per line
+# (scripts/ci/cipkgs affected output). When set and the file is not the single
+# word ALL, the universe is narrowed to those packages, so a push tests only
+# what it can affect. Unset, or ALL, keeps the whole universe.
 universe() {
-  (cd "${repo_root}" && go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./...) |
-    grep -v '^$' || true
+  local all
+  all="$( (cd "${repo_root}" && go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./...) |
+    grep -v '^$' || true)"
+  if [[ -n "${SHARD_FILTER:-}" ]] && ! grep -qx 'ALL' "${SHARD_FILTER}"; then
+    local module
+    module="$(module_path)"
+    printf '%s
+' "${all}" | awk -v module="${module}" -v filter="${SHARD_FILTER}" '
+      BEGIN { while ((getline l < filter) > 0) { if (l == ".") keep[module] = 1; else if (l != "") keep[module "/" l] = 1 } }
+      ($0 in keep)'
+  else
+    printf '%s
+' "${all}"
+  fi
 }
 
 # assign emits "<shard>\t<weight>\t<importpath>" for every package in the
@@ -191,6 +213,38 @@ cmd_check() {
   return "${rc}"
 }
 
+# cmd_plan prints how many shards (1..max) the current universe (after
+# SHARD_FILTER) needs so each stays near <target> package-seconds. Packages not
+# in RACE_FILTER (a file of module-relative paths, or ALL) run without -race
+# and count a quarter of their (race-measured) weight.
+cmd_plan() {
+  local max="$1" target="$2"
+  is_uint "${max}" || usage
+  is_uint "${target}" || usage
+  local module
+  module="$(module_path)"
+  universe | awk -v weights="${weights_file}" -v module="${module}" -v defw="${default_weight}"       -v race="${RACE_FILTER:-}" -v max="${max}" -v target="${target}" '
+    BEGIN {
+      FS = "	"; prefix = module "/"; plen = length(prefix); all = (race == "")
+      while ((getline line < weights) > 0) {
+        if (line ~ /^[ 	]*#/ || line ~ /^[ 	]*$/) continue
+        split(line, f, "	"); if (f[1] != "" && f[2] + 0 > 0) w[f[1]] = f[2] + 0
+      }
+      if (!all) { while ((getline l < race) > 0) { if (l == "ALL") all = 1; else if (l != "") r[l] = 1 } }
+    }
+    {
+      rel = (substr($0, 1, plen) == prefix) ? substr($0, plen + 1) : "."
+      x = (rel in w) ? w[rel] : defw
+      if (!all && !(rel in r)) x = x / 4
+      sum += x; n++
+    }
+    END {
+      if (n == 0) { print 0; exit }
+      c = int((sum + target - 1) / target); if (c < 1) c = 1; if (c > max) c = max; if (c > n) c = n
+      print c
+    }'
+}
+
 cmd_weights() {
   local log="$1"
   [[ -f "${log}" ]] || {
@@ -252,6 +306,10 @@ main() {
     weights)
       [[ $# -eq 1 ]] || usage
       cmd_weights "$1"
+      ;;
+    plan)
+      [[ $# -eq 2 ]] || usage
+      cmd_plan "$1" "$2"
       ;;
     *)
       usage

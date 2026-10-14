@@ -1,13 +1,11 @@
 package shutdown
 
 import (
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 func TestTrackerRunningAndStage(t *testing.T) {
@@ -126,30 +124,8 @@ func TestWatchdogDisarmBeforeBoundIsSilent(t *testing.T) {
 
 // TestNoForbiddenImports pins the module boundary (CLAUDE.md section 1).
 func TestNoForbiddenImports(t *testing.T) {
-	forbidden := []string{"database/sql", "net/http", "net", "os", "os/exec", "github.com/fsnotify/fsnotify"}
-	fset := token.NewFileSet()
-	matches, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-	if len(matches) == 0 {
-		t.Fatal("no Go files found; the pin would pass vacuously")
-	}
-	for _, f := range matches {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f, err)
-		}
-		for _, imp := range af.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbidden {
-				if path == bad {
-					t.Errorf("%s imports forbidden %q; internal/shutdown must stay pure", f, bad)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "net", "os", "os/exec", "github.com/fsnotify/fsnotify"},
+		Reason:    "internal/shutdown must stay pure",
+	})
 }

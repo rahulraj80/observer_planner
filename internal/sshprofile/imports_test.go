@@ -1,68 +1,25 @@
 package sshprofile
 
 import (
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestPackageImports_Bounded enforces the module-boundary discipline
-// (CLAUDE.md "Module Boundaries" #1): sshprofile is PURE — validation and argv
-// composition only. It must not reach for infrastructure (database/sql,
-// net/http, os/exec, fsnotify) and must not import any observer-internal
-// package: the profile DATA crosses the seam as plain fields and the argv
-// leaves as a plain []string.
-//
-// os IS permitted (ValidateWithFS stats the key path — never opens it),
-// mirroring internal/sandbox's allowance for its readiness probe. os/exec is
-// NOT: this package composes an argv, it never runs one.
+// TestPackageImports_Bounded pins sshprofile PURE (CLAUDE.md rule 1): it
+// composes an argv and never runs one. os is allowed (ValidateWithFS stats
+// the key path); the only observer import is the neutral internal/sshspec.
 func TestPackageImports_Bounded(t *testing.T) {
 	t.Parallel()
-
-	forbidden := []string{
-		"database/sql",
-		"net/http",
-		"os/exec",
-		"github.com/fsnotify/fsnotify",
-	}
-	const internalPrefix = "github.com/marmutapp/superbased-observer/internal/"
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	matches, err := filepath.Glob(filepath.Join(cwd, "*.go"))
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	if len(matches) == 0 {
-		t.Fatalf("no source files in %s", cwd)
-	}
-
-	fset := token.NewFileSet()
-	for _, path := range matches {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for _, imp := range file.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbidden {
-				if p == bad {
-					t.Errorf("%s: forbidden import %q (sshprofile is pure — it composes an argv, it never runs one)", filepath.Base(path), p)
-				}
-			}
-			// internal/sshspec is the neutral profile model this package
-			// re-exports (modular packaging phase PB); it is pure too.
-			if strings.HasPrefix(p, internalPrefix) && p != internalPrefix+"sshspec" {
-				t.Errorf("%s: forbidden observer-internal import %q (sshprofile imports no internal package but internal/sshspec)", filepath.Base(path), p)
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{
+			"database/sql",
+			"net/http",
+			"os/exec",
+			"github.com/fsnotify/fsnotify",
+		},
+		ForbiddenPrefixes: []string{"github.com/marmutapp/superbased-observer/internal/"},
+		Except:            []string{"github.com/marmutapp/superbased-observer/internal/sshspec"},
+		Reason:            "sshprofile is pure",
+	})
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/adapter/codex"
 	"github.com/marmutapp/superbased-observer/internal/db"
@@ -111,7 +113,7 @@ func TestRescanWindowsStopOnNoProgress(t *testing.T) {
 // Before the fix the rescan read the first window and stopped.
 func TestCodexRescanIngestsPromptPastFirstWindow(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	_ "modernc.org/sqlite"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
@@ -57,7 +59,7 @@ func TestPollCursorsWatermarkStoreLogsOnlyOnProgress(t *testing.T) {
 	}
 	insert(41) // node-3's watermark
 
-	obsDB, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
+	obsDB, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "w.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

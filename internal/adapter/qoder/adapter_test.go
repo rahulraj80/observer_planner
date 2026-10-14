@@ -16,15 +16,6 @@ func newTestAdapter(roots ...string) *Adapter {
 	return NewWithOptions(nil, roots...)
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolQoder {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolQoder)
-	}
-	if got := New().Name(); got != "qoder" {
-		t.Fatalf("Name() = %q, want qoder", got)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	projRoot := "/home/u/.qoder/projects"
 	segRoot := "/home/u/.qoder/logs/sessions"

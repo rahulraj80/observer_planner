@@ -198,6 +198,7 @@ func TestRemoteEnableRoundTripsSecretVerification(t *testing.T) {
 // controller (secret + allow-list + rate limit assembled) — and after
 // `disable`, it returns nil (fail closed) again.
 func TestRemoteEnableSatisfiesSubstratePredicate(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	cfgPath, _ := writeRemoteTestConfig(t)
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: cfgPath})
 	if err != nil {
@@ -243,6 +244,7 @@ func TestRemoteEnableSatisfiesSubstratePredicate(t *testing.T) {
 // runtime-init default-on trap without opening a listener: both the default true
 // and an explicit false must reach the controller before any dashboard toggle.
 func TestBuildRemoteControllerCopiesAllowRemoteTerminalTakeover(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	cfgPath, dataDir := writeRemoteTestConfig(t)
 	cfg, err := config.Load(config.LoadOptions{GlobalPath: cfgPath})
 	if err != nil {

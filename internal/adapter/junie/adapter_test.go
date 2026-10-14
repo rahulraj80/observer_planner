@@ -52,12 +52,6 @@ func parseFixture(t *testing.T) (adapter.ParseResult, string) {
 	return res, logPath
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolJunie {
-		t.Errorf("Name() = %q, want %q", got, models.ToolJunie)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".junie", "sessions")
 	a := NewWithOptions(nil, root)

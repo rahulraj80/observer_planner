@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/loc"
 	"github.com/marmutapp/superbased-observer/internal/orgcontract"
@@ -151,7 +153,7 @@ func locBatch(ctx context.Context, t *testing.T, st *store.Store, share store.Sh
 // not vacuous).
 func TestFileChangesNeverOnTheWire(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -193,7 +195,7 @@ func TestFileChangesNeverOnTheWire(t *testing.T) {
 // KIND of files a developer touched — ships only under shipsRawContent().
 func TestSessionLOCShipsCountsByDefaultAndGatesLanguageMix(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -256,7 +258,7 @@ func TestSessionLOCShipsCountsByDefaultAndGatesLanguageMix(t *testing.T) {
 // developer's own agent turn.
 func TestSidechainLinesAreSplitOnTheWire(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -285,7 +287,7 @@ func TestSidechainLinesAreSplitOnTheWire(t *testing.T) {
 // share may be rendered at all.
 func TestLOCHumanCaptureIsCarriedHonestly(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

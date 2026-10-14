@@ -47,12 +47,6 @@ func parseFixture(t *testing.T, fixture string) (adapter.ParseResult, string) {
 	return res, logPath
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolMuse {
-		t.Errorf("Name() = %q, want %q", got, models.ToolMuse)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "muse", "sessions")
 	a := NewWithOptions(nil, root)

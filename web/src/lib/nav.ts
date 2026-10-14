@@ -6,6 +6,7 @@ import {
   FileCog,
   FolderKanban,
   Gauge,
+  Hourglass,
   Inbox,
   LayoutDashboard,
   Lightbulb,
@@ -82,6 +83,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Analyze",
     items: [
       costNavItem,
+      { id: "plans", label: "Plans & limits", path: "/plans", icon: Hourglass },
       { id: "analysis", label: "Analysis", path: "/analysis", icon: ChartLine },
       { id: "tools", label: "Tools", path: "/tools", icon: Wrench },
     ],

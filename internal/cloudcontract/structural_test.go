@@ -310,18 +310,3 @@ func TestNormalizeMixKey(t *testing.T) {
 		})
 	}
 }
-
-// TestCoverageBandVocabularyIsClosed pins the band vocabulary.
-func TestCoverageBandVocabularyIsClosed(t *testing.T) {
-	t.Parallel()
-	for _, b := range AllCoverageBands() {
-		if !b.Valid() {
-			t.Errorf("%q is in AllCoverageBands but reports invalid", b)
-		}
-	}
-	for _, b := range []CoverageBand{"", "partial", "NONE", "very-high"} {
-		if b.Valid() {
-			t.Errorf("%q must not be a valid coverage band", b)
-		}
-	}
-}

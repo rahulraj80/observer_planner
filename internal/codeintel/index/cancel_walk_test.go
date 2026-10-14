@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/codeintel/index"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -21,7 +23,7 @@ import (
 // per-file step noticed the stop. A cancelled pass now scans nothing and
 // reports the cancellation.
 func TestIndexProjectStopsTheWalkOnCancel(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

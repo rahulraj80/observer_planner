@@ -1,52 +1,31 @@
 package hookevent
 
 import (
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/integration"
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestNoForbiddenImports pins hookevent as pure data: no SQL, no HTTP, no
-// fsnotify, no subprocess, and of this module only the pure
-// internal/integration registry.
+// TestNoForbiddenImports pins hookevent as pure data: of this module only the
+// pure internal/integration registry.
 func TestNoForbiddenImports(t *testing.T) {
-	const modulePrefix = "github.com/marmutapp/superbased-observer/"
-	allowedInternal := map[string]bool{modulePrefix + "internal/integration": true}
-	forbidden := []string{"database/sql", "net/http", "github.com/fsnotify/fsnotify", "os/exec"}
-	matches, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	checked := 0
-	for _, f := range matches {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		checked++
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f, err)
-		}
-		for _, imp := range af.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbidden {
-				if p == bad {
-					t.Errorf("%s imports forbidden %q", f, bad)
-				}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{
+			"database/sql",
+			"net/http",
+			"github.com/fsnotify/fsnotify",
+			"os/exec",
+		},
+		Custom: func(_, p string) string {
+			if strings.HasPrefix(p, "github.com/marmutapp/superbased-observer/") && p != "github.com/marmutapp/superbased-observer/internal/integration" {
+				return "hookevent may import only internal/integration"
 			}
-			if strings.HasPrefix(p, modulePrefix) && !allowedInternal[p] {
-				t.Errorf("%s imports %q: hookevent may import only internal/integration", f, p)
-			}
-		}
-	}
-	if checked == 0 {
-		t.Fatal("no non-test files checked")
-	}
+			return ""
+		},
+		Reason: "hookevent is pure data",
+	})
 }
 
 // TestFromBinding copies the binding's capability facts.

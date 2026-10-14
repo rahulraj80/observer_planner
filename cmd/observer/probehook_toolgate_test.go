@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter/cursor"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/diag"
@@ -117,7 +119,7 @@ func toolGateTestConfig(t *testing.T, mode string) (cfgPath, dbPath string) {
 func toolGateTestLookup(t *testing.T, dbPath string) guardEventLookup {
 	t.Helper()
 	return func(ctx context.Context, sid string) ([]string, error) {
-		database, err := db.Open(ctx, db.Options{Path: dbPath})
+		database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 		if err != nil {
 			return nil, err
 		}

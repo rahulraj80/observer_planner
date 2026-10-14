@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	_ "modernc.org/sqlite"
 
 	"github.com/marmutapp/superbased-observer/internal/adapter"
@@ -182,7 +184,7 @@ func newBudgetCaptureTestWatcher(t testing.TB, opts Options, a adapter.Adapter) 
 func newBudgetCaptureTestWatcherWithAdapters(t testing.TB, opts Options, adapters ...adapter.Adapter) (*Watcher, *store.Store) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "watcher.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "watcher.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

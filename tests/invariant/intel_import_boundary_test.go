@@ -72,6 +72,7 @@ func presentEntryPatterns(repoRoot string, patterns []string) []string {
 // Only internal/cloudcontract and internal/cloudevidence (both pure) are shared,
 // and they are checked by half (b) to be free of node/server I/O.
 func TestINV2_OrgSideDoesNotLinkPersonalCloud(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	patterns := presentEntryPatterns(repoRoot, intelOrgSideEntryPatterns)
 	if len(patterns) == 0 {
@@ -145,6 +146,7 @@ var intelPureAllowedInternal = map[string]bool{
 // in any node/server I/O. This is the standing guard behind "the ONLY change
 // either needs is the authority predicate" (§1.3).
 func TestINV2_PureSharedPackagesStayImportableByBothSides(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	args := append([]string{"list", "-e", "-f", "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}"}, intelPureShared...)
 	cmd := exec.Command("go", args...)
@@ -231,6 +233,7 @@ func firstForbiddenIO(imp string) *forbiddenIOImport {
 // database/sql, os/exec or fsnotify dependency on the pure side fails loudly —
 // the property that keeps cloudcontract/cloudevidence importable by both planes.
 func TestINV2_PureSharedPackagesForbidIO(t *testing.T) {
+	toolchainTest(t)
 	repoRoot := filepath.Join("..", "..")
 	args := append([]string{"list", "-e", "-f", "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}"}, intelPureShared...)
 	cmd := exec.Command("go", args...)

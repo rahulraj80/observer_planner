@@ -276,6 +276,9 @@ func buildProxy(ctx context.Context, configPath, recipeName string, portOverride
 	if cfg.Predict.Enabled {
 		opts.LimitSink = s
 	}
+	// Proxy-side tool-version capture (T-784): the User-Agent build of a
+	// session-bound request, written through the one tool-version seam.
+	opts.ToolVersionSink = proxyToolVersionSink{s: s}
 	if cfg.Observer.Process.Enabled && cfg.Observer.Process.Network.Enabled {
 		opts.NetworkSink = s
 		opts.NetworkCapture = proxy.NetworkCaptureOptions{

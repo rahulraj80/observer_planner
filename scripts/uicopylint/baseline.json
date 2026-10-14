@@ -1,0 +1,14 @@
+{
+  "roots": {
+    "web2/src": {
+      "snake": 130,
+      "section": 1,
+      "config": 52
+    },
+    "web/src": {
+      "snake": 167,
+      "section": 15,
+      "config": 157
+    }
+  }
+}

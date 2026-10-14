@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -16,7 +18,7 @@ import (
 func TestSnapshotExcerptCountAvoidsFTSScan(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(ctx, db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}

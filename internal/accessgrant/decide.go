@@ -36,15 +36,24 @@ type Proposal struct {
 	DeltaTokens     int64
 	DeltaUSD        float64
 	Target          string
-	// StartsAt zero means now. ExpiresAt zero means PERPETUAL (D-080).
+	// StartsAt zero means now. ExpiresAt zero means PERPETUAL (D-080),
+	// unless UntilPeriodEnd is set.
 	StartsAt  time.Time
 	ExpiresAt time.Time
+	// UntilPeriodEnd asks for a budget increase that lasts exactly until the
+	// end of the budget's current period (D-081's maximum). Decide resolves
+	// the expiry from the SERVER's period end at decide time, so the ask
+	// cannot go stale between the request and the grant (T-785: a request
+	// for "until the period ends" carried a fixed number of seconds measured
+	// when it was sent, which already overshot the period end by the time
+	// an approver granted it).
+	UntilPeriodEnd bool
 	// MaxUses 0 is unlimited.
 	MaxUses int64
 }
 
 // Perpetual reports whether the proposal has no expiry.
-func (p Proposal) Perpetual() bool { return p.ExpiresAt.IsZero() }
+func (p Proposal) Perpetual() bool { return p.ExpiresAt.IsZero() && !p.UntilPeriodEnd }
 
 // Approver is who is deciding, as the server resolved them.
 type Approver struct {
@@ -270,6 +279,20 @@ func decideWindow(d *Decision, t RequestType, p Proposal, f Facts, s Settings) {
 	if d.StartsAt.IsZero() || d.StartsAt.Before(f.Now) {
 		d.StartsAt = f.Now
 	}
+	if p.UntilPeriodEnd {
+		if t.Max != MaxBudgetPeriod {
+			d.Problems = append(d.Problems, Problem{
+				Field: "expires_at", Code: CodeBadValue,
+				Message: "only a budget increase can last until the end of its budget period",
+			})
+			return
+		}
+		d.ExpiresAt = budgetPeriodBound(d.StartsAt, f)
+		if !d.ExpiresAt.After(d.StartsAt) {
+			d.Problems = append(d.Problems, Problem{Field: "expires_at", Code: CodeOutOfRange, Message: "the budget period ends before the grant would start"})
+		}
+		return
+	}
 	if p.Perpetual() {
 		return
 	}
@@ -282,17 +305,24 @@ func decideWindow(d *Decision, t RequestType, p Proposal, f Facts, s Settings) {
 			Message: fmt.Sprintf("a %s may last at most %s; longer means perpetual (super-admin)", strings.ToLower(t.Label), HumanDuration(s.MaxFor(t))),
 		})
 	case t.Max == MaxBudgetPeriod:
-		end := f.BudgetPeriodEnd
-		if end.IsZero() {
-			end = d.StartsAt.Add(MaxBudgetFallback)
-		}
+		end := budgetPeriodBound(d.StartsAt, f)
 		if d.ExpiresAt.After(end) {
 			d.Problems = append(d.Problems, Problem{
 				Field: "expires_at", Code: CodeOutOfRange,
-				Message: fmt.Sprintf("a budget increase may last at most until the end of the current budget period (%s)", end.UTC().Format(time.RFC3339)),
+				Message: fmt.Sprintf("a budget increase may last at most until the end of the current budget period (%s); choose a shorter window or until the period ends", end.UTC().Format(time.RFC3339)),
 			})
 		}
 	}
+}
+
+// budgetPeriodBound is the latest a budget increase may end: the current
+// period's end, or MaxBudgetFallback from the start when the period is
+// unknown.
+func budgetPeriodBound(start time.Time, f Facts) time.Time {
+	if f.BudgetPeriodEnd.IsZero() {
+		return start.Add(MaxBudgetFallback)
+	}
+	return f.BudgetPeriodEnd
 }
 
 func decideUses(d *Decision, _ RequestType, p Proposal, _ Facts, _ Settings) {

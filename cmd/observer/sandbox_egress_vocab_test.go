@@ -40,6 +40,7 @@ func TestSandboxEgressConfigVocabularyMatchesPlanner(t *testing.T) {
 // TestSandboxHelperDispatch: only the two helper verbs are intercepted before
 // cobra; everything else falls through untouched.
 func TestSandboxHelperDispatch(t *testing.T) {
+	requireCompiled(t, "terminals")
 	for _, argv := range [][]string{{"observer"}, {"observer", "claude"}, {"observer", "sandbox"}, {"observer", "start"}} {
 		if _, ok := sandboxHelperDispatch(argv); ok {
 			t.Errorf("dispatch intercepted %v", argv)

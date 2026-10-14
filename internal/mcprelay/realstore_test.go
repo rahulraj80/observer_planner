@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay"
 	"github.com/marmutapp/superbased-observer/internal/mcprelay/localpdp"
@@ -31,7 +33,7 @@ func (f *faultyStore) Append(ctx context.Context, rec record.Record) (record.App
 // store's next Append, and a clean chain verification at the end.
 func TestRelayAgainstRealRecordStore(t *testing.T) {
 	ctx := context.Background()
-	d, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "node.db")})
+	d, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "node.db")})
 	mustNoErr(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	real := record.NewSQLStore(d, "fp-node-w4b")

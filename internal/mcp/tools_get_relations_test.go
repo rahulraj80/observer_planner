@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/codeintel"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
@@ -33,7 +35,7 @@ func newGetRelationsFixture(t *testing.T, seeds []symbolSeed, edges []edgeSeed, 
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -358,7 +360,7 @@ func TestGetRelations_PathDenied(t *testing.T) {
 func TestGetRelations_IndexUnavailable(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	t.Cleanup(func() { database.Close() })
 
 	auditW := audit.NewSQLWriter(database, slog.New(slog.NewTextHandler(io.Discard, nil)), audit.SQLWriterOptions{FlushInterval: 10 * time.Millisecond})
@@ -465,7 +467,7 @@ func TestGetRelations_AuditRowPerCall(t *testing.T) {
 
 func TestGetRelations_NotRegisteredWhenDisabled(t *testing.T) {
 	tmp := t.TempDir()
-	database, _ := db.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(tmp, "obs.db")})
 	t.Cleanup(func() { database.Close() })
 	s, _ := New(Options{
 		DB: database, ServerName: "test", ServerVersion: "0",

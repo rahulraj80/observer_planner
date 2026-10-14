@@ -37,11 +37,22 @@ on:
     paths:
       - 'internal/telemetrylog/**'
       - '.github/workflows/kafka-conformance.yml'
+  # branches: [main] (D-602): without it a tag push (path filters are never
+  # evaluated for tags) and every pushed branch ran this suite. Tags are not
+  # a trigger: no release artifact depends on the optional Kafka adapter's
+  # live suite beyond what the main push already ran on the same code.
   push:
+    branches: [main]
     paths:
       - 'internal/telemetrylog/**'
       - '.github/workflows/kafka-conformance.yml'
   workflow_dispatch: {}
+
+# D-602: a newer push to the same ref cancels the run it replaces (main
+# included). No tag trigger here, so no release run can be cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -66,7 +77,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false # the restore collides with the go.mod toolchain download (D-612)
 
       - name: start single-node KRaft Kafka
         # Host networking so the advertised 127.0.0.1:9092 listener resolves the

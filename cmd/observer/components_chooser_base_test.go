@@ -58,6 +58,7 @@ func TestChooserStartsFromTheBinarysOwnDistro(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.distro)+"/"+strings.Join(tc.detected, ","), func(t *testing.T) {
+			requireSimulatedDistro(t, tc.distro)
 			f := &fakeChooserService{snap: distroSnapshot(tc.distro, componentstate.Governed{})}
 			// Every question at its default, then confirm.
 			runChooser(t, f, strings.Repeat("\n", 40), tc.detected)
@@ -89,6 +90,7 @@ func TestChooserStartsFromTheBinarysOwnDistro(t *testing.T) {
 // feasible id of the group: proxy.routing, remote, terminals.sandbox, ...),
 // and a "yes" to a group the base leaves off adds its ids.
 func TestChooserGroupYesAddsOnlyWhatTheBaseLeavesOff(t *testing.T) {
+	requireSimulatedDistro(t, components.DistroDeveloper)
 	f := &fakeChooserService{snap: distroSnapshot(components.DistroDeveloper, componentstate.Governed{})}
 	// step 1 (nothing detected) is answered y too, which only removes
 	// adapters; every group is answered y, then confirm.

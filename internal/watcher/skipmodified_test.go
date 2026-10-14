@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter"
 	"github.com/marmutapp/superbased-observer/internal/adapter/claudecode"
 	"github.com/marmutapp/superbased-observer/internal/db"
@@ -25,7 +27,7 @@ func setupSkipModified(t *testing.T, skipBefore time.Time) (*Watcher, *store.Sto
 	ctx := context.Background()
 
 	dbPath := filepath.Join(t.TempDir(), "w.db")
-	database, err := db.Open(ctx, db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}

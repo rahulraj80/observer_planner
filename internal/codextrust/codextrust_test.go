@@ -3,12 +3,11 @@ package codextrust
 import (
 	"encoding/json"
 	"fmt"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 // liveCmd is the hook command Observer 1.34.0-rc.11 registered on demo
@@ -173,23 +172,8 @@ func TestClassifyRejectsGarbage(t *testing.T) {
 // TestPackageIsPure pins the package free of file, SQL, HTTP and
 // fsnotify imports (CLAUDE.md module boundary rule 1).
 func TestPackageIsPure(t *testing.T) {
-	forbidden := []string{"database/sql", "net/http", "os", "github.com/fsnotify/fsnotify"}
-	files, _ := filepath.Glob("*.go")
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		af, err := parser.ParseFile(token.NewFileSet(), f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range af.Imports {
-			p, _ := strconv.Unquote(imp.Path.Value)
-			for _, bad := range forbidden {
-				if p == bad {
-					t.Errorf("%s imports %s", f, p)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "os", "github.com/fsnotify/fsnotify"},
+		Reason:    "internal/codextrust must stay pure",
+	})
 }

@@ -457,12 +457,6 @@ func TestIsSessionFile(t *testing.T) {
 	}
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolZcode {
-		t.Errorf("Name() = %q, want %q", got, models.ToolZcode)
-	}
-}
-
 // TestMapTool is a table-driven pin of every mapTool branch — the tool
 // name -> ActionType classification that drives the dashboard's action
 // taxonomy.

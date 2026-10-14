@@ -20,15 +20,6 @@ func withFakeHomes(t *testing.T, homes ...crossmount.HomeRoot) {
 	t.Cleanup(func() { allHomesFunc = prev })
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != "windsurf" {
-		t.Errorf("Name() = %q, want %q", got, "windsurf")
-	}
-	if ToolName != "windsurf" {
-		t.Errorf("ToolName = %q, want %q", ToolName, "windsurf")
-	}
-}
-
 // TestDefaultRootsComposition pins the two declared shapes per home: the
 // three `.codeium/<channel>/cascade` directory roots and the single Windsurf
 // `state.vscdb` FILE root — and pins that no OTHER vscodehost product

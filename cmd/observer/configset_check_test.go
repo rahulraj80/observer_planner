@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
@@ -187,7 +189,7 @@ func TestConfigSetStillSavesWhenUngoverned(t *testing.T) {
 	}
 
 	fresh := filepath.Join(t.TempDir(), "observer.db")
-	database, err := db.Open(context.Background(), db.Options{Path: fresh})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: fresh})
 	if err != nil {
 		t.Fatal(err)
 	}

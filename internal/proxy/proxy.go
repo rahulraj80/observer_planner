@@ -65,6 +65,20 @@ type LimitSink interface {
 	InsertLimitSnapshot(ctx context.Context, snap models.LimitSnapshot) error
 }
 
+// ToolVersionSink, when non-nil on [Options], receives the AI tool's own
+// build version the proxy read off a request's User-Agent product token
+// (toolVersionFromHeaders, T-784), ONLY for a request already bound to a
+// session id. Plain strings in, so no store type crosses into the hot
+// path. settled=true means nothing further can change for that session
+// (stamped, already holding a version, owned by a different tool, or a
+// rejected value) and the proxy stops offering it; settled=false (the
+// session row is not ingested yet) lets a later request retry. In
+// production cmd/observer adapts *store.Store, writing through the one
+// tool-version seam Store.SetSessionToolVersion.
+type ToolVersionSink interface {
+	StampSessionToolVersion(ctx context.Context, sessionID, tool, version string) (settled bool, err error)
+}
+
 // SessionResolver maps an incoming TCP connection's remote address
 // ("127.0.0.1:54321") onto a host-tool session_id. The proxy calls it
 // only when the request did not carry an X-Session-Id header — useful
@@ -397,6 +411,10 @@ type Options struct {
 	// limit half; migration 049). Optional — nil disables limit
 	// capture, leaving the cost estimate unaffected.
 	LimitSink LimitSink
+	// ToolVersionSink, when non-nil, receives the User-Agent-derived tool
+	// build version for session-bound requests (toolversion.go).
+	// Optional: nil disables proxy-side tool-version capture.
+	ToolVersionSink ToolVersionSink
 	// NetworkSink, when non-nil and NetworkCapture.Enabled is true, receives a
 	// node-local process network event for each proxied upstream call. This is
 	// the plaintext capture source for process observability network bodies;
@@ -606,6 +624,11 @@ type Proxy struct {
 	// limitSink, when non-nil, receives a models.LimitSnapshot for each
 	// upstream response carrying rate-limit headers (predictor limit half).
 	limitSink LimitSink
+	// toolVersionSink / toolVersionSeen: proxy-side tool-version capture
+	// (toolversion.go). toolVersionSeen holds (session id, version) keys that are settled
+	// or have a stamp in flight, so each build of a session costs one sink call.
+	toolVersionSink ToolVersionSink
+	toolVersionSeen sync.Map
 	// activity / budgetWarning are Options.Activity / Options.BudgetWarning
 	// (activity.go); nil = off.
 	activity      func(kind string)
@@ -870,6 +893,7 @@ func New(opts Options) (*Proxy, error) {
 		cacheEngine:         opts.CacheEngine,
 		cacheSink:           opts.CacheSink,
 		limitSink:           opts.LimitSink,
+		toolVersionSink:     opts.ToolVersionSink,
 		activity:            opts.Activity,
 		budgetWarning:       opts.BudgetWarning,
 		networkSink:         opts.NetworkSink,
@@ -2378,6 +2402,9 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	// so one graft covers all four R2 cases uniformly. Additive: not
 	// threaded through the turn builders.
 	p.captureLimitSnapshot(resp.Header, provider, sessionID)
+	// Tool-version capture (T-784): the REQUEST's User-Agent names the
+	// client build; offered only when the request is session-bound.
+	p.captureToolVersion(r.Header, sessionID)
 	w.WriteHeader(resp.StatusCode)
 
 	contentType := resp.Header.Get("Content-Type")

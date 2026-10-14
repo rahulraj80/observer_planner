@@ -64,6 +64,7 @@ func containsID(ids []string, id string) bool {
 // service off. A block that names a distro or a remove stays a recorded
 // choice.
 func TestChooserRunsOverInstallerWrittenAdds(t *testing.T) {
+	requireSimulatedDistro(t, components.DistroDeveloper, components.DistroManaged)
 	addOnly := config.ComponentsConfig{Add: []string{"integration.service"}}
 
 	f := &fakeChooserService{snap: addsSnapshot(components.DistroDeveloper, addOnly)}
@@ -119,6 +120,7 @@ func TestChooserRunsOverInstallerWrittenAdds(t *testing.T) {
 // 1's "capture only the detected tools" no longer removes those adapters
 // behind the row's back, and a build without it shows the row unavailable.
 func TestChooserAsksAboutBrowserCapture(t *testing.T) {
+	requireSimulatedDistro(t, components.DistroFull, components.DistroManaged, components.DistroMinimal)
 	ids := withBundles("capture.browser")
 	if len(ids) < 2 {
 		t.Fatalf("capture.browser bundles no site adapters in the catalog: %v", ids)

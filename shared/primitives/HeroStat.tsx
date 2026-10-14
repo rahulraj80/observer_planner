@@ -2,7 +2,7 @@ import clsx from "clsx";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Sparkline, hasSparkline } from "./Sparkline";
-import { StatDelta, type StatDeltaValue } from "./StatDelta";
+import { StatDelta, type StatDeltaTone, type StatDeltaValue } from "./StatDelta";
 import { useHelpSlot } from "./helpSlot";
 import { AnimatedValue, Aurora, staleClass } from "./Motion";
 
@@ -73,6 +73,8 @@ export type HeroStatProps = {
   deltaLabel?: string;
   /** Concrete prior-period value (`vs prior $6,073.08`); wins over deltaLabel. */
   deltaPrior?: ReactNode;
+  /** "neutral" for a metric with no direction of good: glyph, no colour. */
+  deltaTone?: StatDeltaTone;
   /** When set, the tile is a <Link> to this route and lifts on hover. */
   linkTo?: string;
   /** Accessible name for the link (defaults to the tile's text). */
@@ -98,6 +100,7 @@ export function HeroStat({
   delta,
   deltaLabel,
   deltaPrior,
+  deltaTone,
   linkTo,
   linkLabel,
   className,
@@ -193,7 +196,7 @@ export function HeroStat({
               reserveCorner && "pr-[100px]",
             )}
           >
-            <StatDelta delta={delta} deltaLabel={deltaLabel} deltaPrior={deltaPrior} />
+            <StatDelta delta={delta} deltaLabel={deltaLabel} deltaPrior={deltaPrior} tone={deltaTone} />
             {sub && <span>{sub}</span>}
           </div>
         ) : (

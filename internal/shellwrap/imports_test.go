@@ -1,54 +1,26 @@
 package shellwrap
 
 import (
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestPackageImports_Bounded pins the module boundary (CLAUDE.md "Module
-// Boundaries" #1): shellwrap is PURE. Non-test files must not import
-// database/sql, net/http, os, os/exec, path/filepath (it follows the BUILD
-// host, not the target OS) or fsnotify, and the only observer package they
-// may import is internal/integration (the WrappedCommandFor seam).
+// TestPackageImports_Bounded pins shellwrap PURE (CLAUDE.md rule 1): no
+// infrastructure, no path/filepath (it follows the BUILD host, not the target
+// OS), and only internal/integration plus internal/shimguard (the core owner
+// of the shim marker since MP-L1E, D-505) among observer packages.
 func TestPackageImports_Bounded(t *testing.T) {
-	forbidden := map[string]bool{
-		"database/sql": true, "net/http": true, "os": true, "os/exec": true,
-		"path/filepath": true, "github.com/fsnotify/fsnotify": true,
-	}
-	// internal/shimguard is the core owner of the shim marker and IsShim since
-	// lane MP-L1E moved them there so the recursion guard survives the
-	// shell-wrap component compiling out (merged under D-505); shellwrap only
-	// re-exports those two pure symbols.
-	allowedInternal := map[string]bool{
-		"github.com/marmutapp/superbased-observer/internal/integration": true,
-		"github.com/marmutapp/superbased-observer/internal/shimguard":   true,
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	matches, _ := filepath.Glob(filepath.Join(cwd, "*.go"))
-	fset := token.NewFileSet()
-	for _, path := range matches {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range f.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			if forbidden[p] {
-				t.Errorf("%s: forbidden import %q", filepath.Base(path), p)
-			}
-			if strings.HasPrefix(p, "github.com/marmutapp/superbased-observer/internal/") && !allowedInternal[p] {
-				t.Errorf("%s: forbidden observer import %q", filepath.Base(path), p)
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{
+			"database/sql", "net/http", "os", "os/exec",
+			"path/filepath", "github.com/fsnotify/fsnotify",
+		},
+		ForbiddenPrefixes: []string{"github.com/marmutapp/superbased-observer/internal/"},
+		Except: []string{
+			"github.com/marmutapp/superbased-observer/internal/integration",
+			"github.com/marmutapp/superbased-observer/internal/shimguard",
+		},
+		Reason: "shellwrap is pure",
+	})
 }

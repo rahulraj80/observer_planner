@@ -41,15 +41,6 @@ func parse(t *testing.T, a *Adapter, path string, from int64) adapter.ParseResul
 	return res
 }
 
-func TestName(t *testing.T) {
-	if got := New().Name(); got != models.ToolDeepSeek {
-		t.Errorf("Name() = %q, want %q", got, models.ToolDeepSeek)
-	}
-	if models.ToolDeepSeek != "deepseek" {
-		t.Errorf("models.ToolDeepSeek = %q, want %q", models.ToolDeepSeek, "deepseek")
-	}
-}
-
 func TestWatchPathsEndInDshSessions(t *testing.T) {
 	for _, p := range New().WatchPaths() {
 		if !strings.HasSuffix(filepath.ToSlash(p), "/.dsh/sessions") {

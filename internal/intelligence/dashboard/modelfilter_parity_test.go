@@ -147,30 +147,34 @@ func TestModelFilterParityEndpoints(t *testing.T) {
 				t.Errorf("projects: %+v, want one row with %d sessions", pr.Rows, tc.projSess)
 			}
 
-			var dr decisionsResp
-			getModelJSON(t, s, withModel("/api/routing/decisions?days=2", tc.model), &dr)
+			// The routing endpoints answer 404 not_compiled when proxy.routing
+			// is omitted (feature_omit_routes_test.go pins that answer).
 			var got []string
-			for _, d := range dr.Decisions {
-				got = append(got, d.SessionID)
-			}
-			if sortedJoin(got) != tc.decisions || dr.Total != len(got) {
-				t.Errorf("routing decisions = %v (total %d), want %q", got, dr.Total, tc.decisions)
-			}
+			if !compiledOutInTest("proxy.routing") {
+				var dr decisionsResp
+				getModelJSON(t, s, withModel("/api/routing/decisions?days=2", tc.model), &dr)
+				for _, d := range dr.Decisions {
+					got = append(got, d.SessionID)
+				}
+				if sortedJoin(got) != tc.decisions || dr.Total != len(got) {
+					t.Errorf("routing decisions = %v (total %d), want %q", got, dr.Total, tc.decisions)
+				}
 
-			var sv store.RouterSavingsReport
-			getModelJSON(t, s, withModel("/api/routing/savings?days=2", tc.model), &sv)
-			if sv.Decisions != tc.savings {
-				t.Errorf("routing savings decisions = %d, want %d", sv.Decisions, tc.savings)
-			}
+				var sv store.RouterSavingsReport
+				getModelJSON(t, s, withModel("/api/routing/savings?days=2", tc.model), &sv)
+				if sv.Decisions != tc.savings {
+					t.Errorf("routing savings decisions = %d, want %d", sv.Decisions, tc.savings)
+				}
 
-			var hr healthResp
-			getModelJSON(t, s, withModel("/api/routing/health?x=1", tc.model), &hr)
-			got = nil
-			for _, m := range hr.Models {
-				got = append(got, m.Model)
-			}
-			if sortedJoin(got) != tc.health {
-				t.Errorf("routing health models = %v, want %q", got, tc.health)
+				var hr healthResp
+				getModelJSON(t, s, withModel("/api/routing/health?x=1", tc.model), &hr)
+				got = nil
+				for _, m := range hr.Models {
+					got = append(got, m.Model)
+				}
+				if sortedJoin(got) != tc.health {
+					t.Errorf("routing health models = %v, want %q", got, tc.health)
+				}
 			}
 
 			var lr liveResp

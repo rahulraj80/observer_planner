@@ -3,15 +3,12 @@ package orgenrol
 import (
 	"errors"
 	"fmt"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/marmutapp/superbased-observer/internal/govern"
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 func TestNormalizeServerURL(t *testing.T) {
@@ -175,31 +172,8 @@ func TestBuildDisclosure(t *testing.T) {
 // TestImportsArePure pins the package's purity: no database/sql, net/http or
 // fsnotify (CLAUDE.md module rule 1).
 func TestImportsArePure(t *testing.T) {
-	forbidden := []string{"database/sql", "net/http", "github.com/fsnotify/fsnotify", "os/exec"}
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		file, err := parser.ParseFile(fset, f, src, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range file.Imports {
-			path, _ := strconv.Unquote(imp.Path.Value)
-			for _, bad := range forbidden {
-				if path == bad {
-					t.Errorf("%s imports %s", f, path)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "github.com/fsnotify/fsnotify", "os/exec"},
+		Reason:    "internal/orgenrol must stay pure",
+	})
 }

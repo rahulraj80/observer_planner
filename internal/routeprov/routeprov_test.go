@@ -4,11 +4,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 const (
@@ -149,29 +149,10 @@ func TestDecideTable(t *testing.T) {
 
 // TestPackageIsPure pins the package free of I/O imports (CLAUDE.md #1).
 func TestPackageIsPure(t *testing.T) {
-	forbidden := []string{"database/sql", "net/http", "os", "os/exec", "github.com/fsnotify/fsnotify"}
-	files, _ := filepath.Glob("*.go")
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		af, err := parser.ParseFile(token.NewFileSet(), f, src, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range af.Imports {
-			p, _ := strconv.Unquote(imp.Path.Value)
-			for _, bad := range forbidden {
-				if p == bad {
-					t.Errorf("%s imports %s", f, p)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "os", "os/exec", "github.com/fsnotify/fsnotify"},
+		Reason:    "internal/routeprov must stay pure",
+	})
 }
 
 // TestNoCaseOnAStringLiteral pins T-495 (CLAUDE.md rule 3): no switch in

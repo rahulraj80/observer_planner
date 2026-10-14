@@ -122,13 +122,6 @@ func TestLegacy_IsSessionFileRejectsForeignAPIHistory(t *testing.T) {
 	}
 }
 
-// TestLegacy_NameReturnsKiloCode pins the public adapter identity.
-func TestLegacy_NameReturnsKiloCode(t *testing.T) {
-	if got := (&LegacyAdapter{}).Name(); got != models.ToolKiloCode {
-		t.Errorf("Name = %q, want %q", got, models.ToolKiloCode)
-	}
-}
-
 // TestLegacy_DefaultRootsIncludesVSCodeServer pins that we glob BOTH
 // the VS Code desktop globalStorage AND the VS Code Server location
 // (the latter is where Remote-WSL captured sessions live). On a host

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	agentdb "github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -21,7 +23,7 @@ import (
 // about a minute into several. The probe must name `target=?` in its seek.
 func TestDashboardReadIndexesArePicked(t *testing.T) {
 	ctx := context.Background()
-	database, err := agentdb.Open(ctx, agentdb.Options{Path: ":memory:"})
+	database, err := dbtemplate.Open(ctx, agentdb.Options{Path: ":memory:"})
 	if err != nil {
 		t.Fatalf("agentdb.Open: %v", err)
 	}

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/adapter/cursor"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -125,7 +127,7 @@ func TestCursorRootlessConversationGetsSyntheticRootButGuardSeesNone(t *testing.
 // rows) onto the "[cursor]" placeholder.
 func TestCursorRootlessEventKeepsFolderSessionProject(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +178,7 @@ func TestCursorRootlessEventKeepsFolderSessionProject(t *testing.T) {
 // touched 0 rows (its id hashed an empty file_path).
 func TestCursorReadOutcomeUpdatesItsRow(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "o.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

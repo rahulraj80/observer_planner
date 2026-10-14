@@ -123,38 +123,76 @@ func TestPinnedChangeChangesHash(t *testing.T) {
 	}
 }
 
-// TestVocabularyIsComplete: the admin console's form is populated from these
-// tables, so every table must be represented.
+// TestVocabularyIsComplete: the admin console's form is populated from
+// Vocabulary(), so every source table must be represented in it: the
+// section and key tables, the nav tabs (in their own list, never mixed into
+// nav_sections) and the managed defaults.
 func TestVocabularyIsComplete(t *testing.T) {
 	v := Vocabulary()
 	if v.Schema != MaxSchema || v.Family != "node.governance" {
 		t.Fatalf("vocab header = %+v", v)
 	}
-	if len(v.NavSections) != len(NavSectionIDs) || len(v.SettingsSections) != len(SettingsSectionIDs) {
-		t.Fatalf("section counts drifted: %d/%d", len(v.NavSections), len(v.SettingsSections))
-	}
-	if len(v.PinnableKeys) != len(PinnableKeys) || len(v.ShareKeys) != len(ShareKeys) || len(v.Features) != len(Features) {
-		t.Fatal("vocabulary dropped rows")
-	}
-	var unhideable int
-	for _, s := range v.NavSections {
-		if s.Unhideable {
-			unhideable++
+	t.Run("tables", func(t *testing.T) {
+		if len(v.NavSections) != len(NavSectionIDs) || len(v.SettingsSections) != len(SettingsSectionIDs) {
+			t.Fatalf("section counts drifted: %d/%d", len(v.NavSections), len(v.SettingsSections))
 		}
-	}
-	if unhideable != len(UnhideableNavSectionIDs) {
-		t.Fatalf("vocab marks %d unhideable nav sections, want %d", unhideable, len(UnhideableNavSectionIDs))
-	}
-	// capture.raise must be PRESENT and RETIRED, never omitted: an admin
-	// looking at an older grant has to be able to see the token exists and
-	// grants nothing.
-	var sawRetired bool
-	for _, a := range v.AuthorityTokens {
-		if a.Token == authorityCaptureRaise {
-			sawRetired = a.Retired && len(a.Directives) == 0
+		if len(v.PinnableKeys) != len(PinnableKeys) || len(v.ShareKeys) != len(ShareKeys) || len(v.Features) != len(Features) {
+			t.Fatal("vocabulary dropped rows")
 		}
-	}
-	if !sawRetired {
-		t.Fatal("capture.raise is missing from the vocabulary or is not marked retired")
-	}
+		var unhideable int
+		for _, s := range v.NavSections {
+			if s.Unhideable {
+				unhideable++
+			}
+		}
+		if unhideable != len(UnhideableNavSectionIDs) {
+			t.Fatalf("vocab marks %d unhideable nav sections, want %d", unhideable, len(UnhideableNavSectionIDs))
+		}
+		// capture.raise must be PRESENT and RETIRED, never omitted: an admin
+		// looking at an older grant has to be able to see the token exists
+		// and grants nothing.
+		var sawRetired bool
+		for _, a := range v.AuthorityTokens {
+			if a.Token == authorityCaptureRaise {
+				sawRetired = a.Retired && len(a.Directives) == 0
+			}
+		}
+		if !sawRetired {
+			t.Fatal("capture.raise is missing from the vocabulary or is not marked retired")
+		}
+	})
+	t.Run("nav_tabs", func(t *testing.T) {
+		if len(v.NavTabs) != len(NavTabIDs()) {
+			t.Fatalf("nav_tabs has %d rows, want %d", len(v.NavTabs), len(NavTabIDs()))
+		}
+		for _, row := range v.NavTabs {
+			if row.ID != NavTabID(row.Page, row.Tab) || row.Label == "" {
+				t.Errorf("bad nav_tabs row %+v", row)
+			}
+		}
+		for _, s := range v.NavSections {
+			if IsNavTab(s.ID) {
+				t.Errorf("nav_sections lists tab %q; tabs belong in nav_tabs", s.ID)
+			}
+		}
+	})
+	t.Run("managed_defaults", func(t *testing.T) {
+		found := false
+		for _, s := range v.NavSections {
+			if s.ID == "security" {
+				found = true
+				if s.ManagedDefault != VisibilityHidden || s.ManagedWhy == "" {
+					t.Fatalf("security vocab row = %+v", s)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("security missing from the vocabulary")
+		}
+		for _, s := range v.SettingsSections {
+			if s.ManagedDefault == "" {
+				t.Fatalf("settings %q has no managed default", s.ID)
+			}
+		}
+	})
 }

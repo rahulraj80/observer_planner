@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -185,6 +187,13 @@ const (
 	// the full ruling text.
 	canaryToolVersion = "CANARY_TOOL_VERSION_perspicacious_vv"
 
+	// canaryToolVersionLast is the mid-session upgrade CANARY (agent
+	// migration 162 / server 232 / pg 0099, T-784): sessions.tool_version_last
+	// is the latest tool build seen in a session, the same vendor-authored
+	// token class as tool_version, so it is a POSITIVE canary too: it ships
+	// in every posture. TOOLVERSION-1 covers both columns.
+	canaryToolVersionLast = "CANARY_TOOL_VERSION_LAST_perspicacious_vl"
+
 	// canaryParentThreadID is the tool-account-parity CANARY (server
 	// migration 162 / pg 0028): sessions.parent_thread_id is now a
 	// POSITIVE canary, not a sentinel — the same polarity flip as
@@ -316,7 +325,7 @@ var allSentinels = []string{
 // an opt-in node config.
 func TestPushPayloadCarriesNoContent(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -383,8 +392,8 @@ func TestPushPayloadCarriesNoContent(t *testing.T) {
 	if _, err := database.ExecContext(ctx,
 		`UPDATE sessions SET git_branch = ?, forked_from_id = ?, parent_thread_id = ?, thread_source = ?,
 		    workspace = ?, workspace_hash = 'sha256:workspace-canary', is_worktree = 1,
-		                     surface = ?, surface_host = ?, tool_version = ?`,
-		secGitBranch, secForkedFrom, canaryParentThreadID, secThreadSource, secWorkspace, canarySurface, canarySurfaceHost, canaryToolVersion); err != nil {
+		                     surface = ?, surface_host = ?, tool_version = ?, tool_version_last = ?`,
+		secGitBranch, secForkedFrom, canaryParentThreadID, secThreadSource, secWorkspace, canarySurface, canarySurfaceHost, canaryToolVersion, canaryToolVersionLast); err != nil {
 		t.Fatalf("stuff sessions git_branch + lineage + identity v2 + surface + tool_version: %v", err)
 	}
 	// Plane B per-turn authority stamps (Sol S5 / Luna L15, migration 095):
@@ -605,6 +614,9 @@ func TestPushPayloadCarriesNoContent(t *testing.T) {
 	if !bytes.Contains(raw, []byte(canaryToolVersion)) {
 		t.Errorf("expected the session's tool_version (%q) in the payload; this change made it unconditional metadata, not gated content", canaryToolVersion)
 	}
+	if !bytes.Contains(raw, []byte(canaryToolVersionLast)) {
+		t.Errorf("expected the session's tool_version_last (%q) in the payload; it is unconditional metadata like tool_version", canaryToolVersionLast)
+	}
 	// Parent-thread-id trickle-up canary (server migration 162 / pg 0028):
 	// this RECLASSIFIES sessions.parent_thread_id from "never ships" to
 	// unconditional METADATA, the same polarity flip as tool_version above —
@@ -741,7 +753,7 @@ func TestPushPayloadCarriesContentWhenOptedIn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}
@@ -900,7 +912,7 @@ func TestEnterpriseGrantedHasNoPerDeveloperOptOut(t *testing.T) {
 // individual-plane guarantee ultimately lands.
 func TestPushPayloadCarriesToolBodiesWhenOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -961,7 +973,7 @@ func seedCacheEvents(ctx context.Context, t *testing.T, database *sql.DB, model 
 // the aggregate itself flips onto the wire under the tier.
 func TestPushPayloadCarriesCacheWhenOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1004,7 +1016,7 @@ func TestPushPayloadCarriesCacheWhenOptedIn(t *testing.T) {
 // may cross there, which is the guard that actually protects the teams tier.
 func TestPushPayloadStripsCacheWhenNotOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1142,7 +1154,7 @@ func TestSessionCacheEventsShipOnlyUnderRawContent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}
@@ -1302,7 +1314,7 @@ func seedCodeintel(ctx context.Context, t *testing.T, database *sql.DB, project,
 // guards that).
 func TestPushPayloadCarriesCodeintelWhenOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1352,7 +1364,7 @@ func TestPushPayloadCarriesCodeintelWhenOptedIn(t *testing.T) {
 // extract.codeintel authority on a managed node.
 func TestPushPayloadStripsCodeintelWhenNotOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1434,7 +1446,7 @@ func seedProcessRun(ctx context.Context, t *testing.T, database *sql.DB, tool, e
 // guards that).
 func TestPushPayloadCarriesProcessWhenOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1475,7 +1487,7 @@ func TestPushPayloadCarriesProcessWhenOptedIn(t *testing.T) {
 // on a managed node.
 func TestPushPayloadStripsProcessWhenNotOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1526,7 +1538,7 @@ func TestPushPayloadStripsProcessWhenNotOptedIn(t *testing.T) {
 // numeric counters / an opaque id, no new content surface.
 func TestSessionProcessWireCarriesMetricsMessageIDAndCapsSamples(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -1680,7 +1692,7 @@ func TestSessionSurfaceAndSidechainTokensShipAsMetadata(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}
@@ -1696,7 +1708,7 @@ func TestSessionSurfaceAndSidechainTokensShipAsMetadata(t *testing.T) {
 			// opaque-vendor-pointer shape production writes via
 			// Store.SetSessionLineage.
 			if _, err := database.ExecContext(ctx,
-				`UPDATE sessions SET surface = 'ide', surface_host = 'vscode', tool_version = '1.2.3', parent_thread_id = 'sess-cur-1' WHERE id = 'sess-cc-1'`); err != nil {
+				`UPDATE sessions SET surface = 'ide', surface_host = 'vscode', tool_version = '1.2.3', tool_version_last = '1.3.0', parent_thread_id = 'sess-cur-1' WHERE id = 'sess-cc-1'`); err != nil {
 				t.Fatalf("stamp surface + tool_version + parent_thread_id: %v", err)
 			}
 			// Likewise exactly ONE usage row is a sub-agent row.
@@ -1777,6 +1789,13 @@ func TestSessionSurfaceAndSidechainTokensShipAsMetadata(t *testing.T) {
 			if unstamped.ToolVersion != "" {
 				t.Errorf("unstamped session carries a phantom tool_version %q; unknown must reach the org EMPTY, never a fabricated guess", unstamped.ToolVersion)
 			}
+			// tool_version_last (agent 162 / server 232): same posture.
+			if stamped.ToolVersionLast != "1.3.0" {
+				t.Errorf("stamped session tool_version_last = %q, want 1.3.0 in every posture", stamped.ToolVersionLast)
+			}
+			if unstamped.ToolVersionLast != "" {
+				t.Errorf("unstamped session carries a phantom tool_version_last %q", unstamped.ToolVersionLast)
+			}
 			// parent_thread_id trickle-up (server migration 162 / pg 0028): the
 			// same unconditional-metadata / honest-absence pair, in the same
 			// three share modes — the tool-account-parity fix (LINEAGE-1).
@@ -1849,7 +1868,7 @@ func TestSessionSurfaceHostClosedVocabulary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}
@@ -1971,7 +1990,7 @@ func TestSessionTasksShipOnlyUnderTaskDetail(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}
@@ -2110,7 +2129,7 @@ func TestSessionToolAccountsShipOnlyUnderToolAccountDetail(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}
@@ -2237,7 +2256,7 @@ func TestSessionToolAccountKeyGatedWhenIdentityDerived(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}
@@ -2358,7 +2377,7 @@ func seedTerminalActivity(ctx context.Context, t *testing.T, st *store.Store, se
 // true because this aggregate is orthogonal to full_content.
 func TestPushPayloadCarriesTerminalWhenOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -2398,7 +2417,7 @@ func TestPushPayloadCarriesTerminalWhenOptedIn(t *testing.T) {
 // content-free aggregate under this explicit tier.
 func TestPushPayloadStripsTerminalWhenNotOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -2469,7 +2488,7 @@ func seedRouterDecision(ctx context.Context, t *testing.T, database *sql.DB, sel
 // aggregate itself flips onto the wire under the tier.
 func TestPushPayloadCarriesRoutingDetailWhenOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -2502,7 +2521,7 @@ func TestPushPayloadCarriesRoutingDetailWhenOptedIn(t *testing.T) {
 // (which ships a DIFFERENT aggregate). routing_detail is a DISTINCT tier.
 func TestPushPayloadStripsRoutingDetailWhenNotOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -2576,7 +2595,7 @@ func seedLimitSnapshot(ctx context.Context, t *testing.T, database *sql.DB, scop
 // separate file).
 func TestPushPayloadCarriesLimitGaugeWhenOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -2612,7 +2631,7 @@ func TestPushPayloadCarriesLimitGaugeWhenOptedIn(t *testing.T) {
 // full_content. It is a DISTINCT tier.
 func TestPushPayloadStripsLimitGaugeWhenNotOptedIn(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -2650,7 +2669,7 @@ func TestPushPayloadStripsLimitGaugeWhenNotOptedIn(t *testing.T) {
 // reach the marshalled batch.
 func TestSessionLimitSnapshotsWireShipsMetadataOnly(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -3307,6 +3326,20 @@ var forbiddenCacheTables = []string{
 	// not a matter of widening this list.
 	"update_state",
 	"update_events",
+	// Plans & limits (agent migration 163, docs/plans-and-limits.md, D-640 /
+	// D-642). All four tables are NODE-LOCAL BY TABLE NAME: orgpush.go must
+	// never reference them. plan_accounts names which vendor accounts the
+	// developer tracks (labels, a GitHub username, an xAI team id) and which
+	// keychain secret NAMES are stored; plan_snapshots holds the developer's
+	// own plan usage and balances; plan_runs the poll history; plan_optins
+	// the per-provider experimental switch. There is no share key and no
+	// paired server migration in this phase: a future opt-in posture share
+	// would be a separate, enum-only row composed by a function call, the
+	// update_state precedent above. Credentials never reach any table.
+	"plan_accounts",
+	"plan_snapshots",
+	"plan_runs",
+	"plan_optins",
 	// Enterprise pricing, node side (agent migration 106,
 	// docs/plans/enterprise-pricing-and-admin-assistant-plan-2026-09-08.md
 	// §3.3). org_pricing_cache is NODE-LOCAL BY TABLE NAME: orgpush.go must
@@ -4579,7 +4612,7 @@ func TestGuardPromptReconsiderPinnedOutOfPush(t *testing.T) {
 	// the wire, even under full_content.
 	const secGPR = "SECRET_GUARDPROMPTRECONSIDER_grandiloquent_zz"
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -4637,7 +4670,7 @@ func TestRemoteAuditTablePinnedOutOfPush(t *testing.T) {
 	// (2) end-to-end: a seeded remote_audit row never rides the wire.
 	const secRemoteAudit = "SECRET_REMOTEAUDIT_grandiloquent_zz"
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -4733,7 +4766,7 @@ func TestTerminalRunTablesPinnedOutOfPush(t *testing.T) {
 	// (2) end-to-end: a seeded terminal-run row never rides the wire.
 	const secTermRun = "SECRET_TERMRUN_pusillanimous_zz"
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -4843,7 +4876,7 @@ func TestSessionClassificationPinnedOutOfPush(t *testing.T) {
 		secTitle = "SECRET_SESSIONTITLE_obstreperous_zz"
 	)
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -4927,7 +4960,7 @@ func TestPolicyResourceTablesPinnedOutOfPush(t *testing.T) {
 	// (2) end-to-end: seeded generation + state rows never ride the wire.
 	const secOrgKey = "secret-orgkey-perspicacious-zz"
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -5019,7 +5052,7 @@ func TestCloudLocalTablesPinnedOutOfPush(t *testing.T) {
 	const sentinel = "SBCLOUDSENT" // unmistakable; appears nowhere legitimate
 
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -5224,7 +5257,7 @@ func TestProjectCommitTablesPinnedOutOfPush(t *testing.T) {
 	s := func(table, col string) string { return sentinel + "_" + table + "_" + col }
 
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -5325,7 +5358,7 @@ func TestSkillHistoryTablesPinnedOutOfPush(t *testing.T) {
 	s := func(table, col string) string { return sentinel + "_" + table + "_" + col }
 
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -5425,7 +5458,7 @@ func TestProjectPromptGradesTableIsPinnedOutOfPush(t *testing.T) {
 	s := func(col string) string { return sentinel + "_" + tableName + "_" + col }
 
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -5496,7 +5529,7 @@ func TestProjectPromptGradesTableIsPinnedOutOfPush(t *testing.T) {
 // the seam, and the trigger does.
 func TestCloudOutboxPayloadOnlyOnStructuralKind(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -5923,7 +5956,7 @@ func TestPolicyStateRowWireShapeIsHashOnly(t *testing.T) {
 // wire-shape tests.
 func newInvariantStore(t *testing.T) (*store.Store, func()) {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -6191,7 +6224,7 @@ func TestObsTiersGatedOffByDefault(t *testing.T) {
 // org's product coming BACK to the node; it must never go out on the push wire.
 func TestPushPayloadNeverCarriesOrgIntelCache(t *testing.T) {
 	ctx := context.Background()
-	database, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
+	database, err := dbtemplate.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "agent.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

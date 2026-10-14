@@ -94,8 +94,9 @@ func backfillCursorHookUsage(ctx context.Context, db *sql.DB, roots []string, fi
 				return nil
 			}
 			ir, ierr := st.Ingest(ctx, pr.ToolEvents, pr.TokenEvents, store.IngestOptions{
-				RecordFailures: true,
-				OutcomeUpdates: pr.OutcomeUpdates,
+				RecordFailures:      true,
+				OutcomeUpdates:      pr.OutcomeUpdates,
+				SessionToolVersions: pr.SessionToolVersions,
 			})
 			if ierr != nil {
 				return fmt.Errorf("%s: %w", path, ierr)

@@ -24,6 +24,7 @@ func isTestSupport(rel string) bool {
 // internal/testsupport package. go list -deps excludes test files, so a
 // _test.go import is allowed and a production import is not.
 func TestNoMockPackageInProductionDeps(t *testing.T) {
+	toolchainTest(t)
 	root := filepath.Join("..", "..")
 	entries, err := os.ReadDir(filepath.Join(root, "cmd"))
 	if err != nil {
@@ -77,6 +78,7 @@ func TestNoMockPackageInProductionDeps(t *testing.T) {
 // import internal/testsupport except testsupport itself (.Imports excludes
 // test-only imports).
 func TestTestSupportImportedOnlyByTests(t *testing.T) {
+	toolchainTest(t)
 	cmd := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}", "./...")
 	cmd.Dir = filepath.Join("..", "..")
 	out, err := cmd.CombinedOutput()

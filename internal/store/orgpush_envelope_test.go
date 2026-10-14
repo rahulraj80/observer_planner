@@ -688,6 +688,12 @@ func TestSelectUnpushedSince_ComposedEnvelopeRespectsBudget(t *testing.T) {
 		if !f.IsValid() {
 			t.Fatalf("PushBatch has no field %q", name)
 		}
+		if wireFamilyCompiledOut(name) {
+			if f.Len() != 0 {
+				t.Errorf("wire family %s composed %d rows, but its component is not in this build (%s)", name, f.Len(), note)
+			}
+			continue
+		}
 		if f.Len() == 0 {
 			t.Errorf("wire family %s is EMPTY at a %d-byte budget — seedEveryWireFamily must populate "+
 				"every family registered in envelopeWireFamilies, otherwise the small-budget assertion "+

@@ -813,6 +813,8 @@ func newStartCmd() *cobra.Command {
 				opts := dashapi.Options{
 					ProcessArchive: processArchive,
 					Projects:       cfg.Projects,
+					// Plans & limits: the same service the "plans" loop below runs.
+					Plans: processPlans(cfg, database, slog.Default()),
 					// CommitAlignmentAvailability (cloud_gradecommit.go) is the
 					// SAME function `observer cloud grade-commit` itself calls,
 					// so the dashboard and the CLI never disagree about why
@@ -1296,6 +1298,14 @@ func newStartCmd() *cobra.Command {
 			// failed root is logged and retried, never cancels the daemon.
 			ng.Go("guidance-scan", func() error {
 				guidanceScanLoop(gctx, configPath)
+				return nil
+			})
+			// Plans & limits (internal/planlimitssvc, docs/plans-and-limits.md):
+			// polls the accounts the user added and reads the passive limits
+			// Observer already captured. With no account added it reads the
+			// local database only. P1 fail-soft.
+			ng.Go("plans", func() error {
+				plansLoop(gctx, configPath)
 				return nil
 			})
 			// Commit-history capture (internal/commitscan): a read-only `git

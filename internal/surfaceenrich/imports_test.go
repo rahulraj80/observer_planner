@@ -1,61 +1,30 @@
 package surfaceenrich
 
 import (
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestPackageImports_Bounded pins the module-boundary discipline
-// (CLAUDE.md "Module Boundaries" #1): surfaceenrich imports no
-// database/sql, net/http, os/exec or fsnotify and no adapter/store
-// package — both store seams and the filesystem are injected funcs.
-// ALLOW-list: the stdlib it needs plus models and the two platform
-// helpers.
+// TestPackageImports_Bounded pins surfaceenrich to a closed allow-list
+// (CLAUDE.md rule 1): store seams and the filesystem are injected funcs, so
+// only this stdlib plus models and the two platform helpers may be imported.
 func TestPackageImports_Bounded(t *testing.T) {
 	t.Parallel()
-
-	allowed := map[string]bool{
-		"context":       true,
-		"log/slog":      true,
-		"os":            true,
-		"path/filepath": true,
-		"strings":       true,
-		"sync":          true,
-		"time":          true,
-		"github.com/marmutapp/superbased-observer/internal/models":                 true,
-		"github.com/marmutapp/superbased-observer/internal/platform/crossmount":    true,
-		"github.com/marmutapp/superbased-observer/internal/platform/jetbrainshost": true,
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	matches, err := filepath.Glob(filepath.Join(cwd, "*.go"))
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-	if len(matches) == 0 {
-		t.Fatalf("no source files in %s", cwd)
-	}
-	fset := token.NewFileSet()
-	for _, path := range matches {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for _, imp := range file.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			if !allowed[p] {
-				t.Errorf("%s: import %q is not in the surfaceenrich allow-list — inject it (CLAUDE.md Module Boundaries #1)", filepath.Base(path), p)
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		AllowOnly: true,
+		Allowed: []string{
+			"context",
+			"log/slog",
+			"os",
+			"path/filepath",
+			"strings",
+			"sync",
+			"time",
+			"github.com/marmutapp/superbased-observer/internal/models",
+			"github.com/marmutapp/superbased-observer/internal/platform/crossmount",
+			"github.com/marmutapp/superbased-observer/internal/platform/jetbrainshost",
+		},
+		Reason: "inject it instead",
+	})
 }

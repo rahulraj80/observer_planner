@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/guardposture"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
@@ -63,7 +65,7 @@ func writeOrgBundle(t *testing.T, path, bundleTOML string) (pub ed25519.PublicKe
 // client does (guard_policy_state, path suffix "#policy-key").
 func seedPin(t *testing.T, dbPath, pin string) {
 	t.Helper()
-	database, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}

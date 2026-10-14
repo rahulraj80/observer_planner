@@ -1,25 +1,20 @@
 package community
 
 import (
-	"go/build"
-	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
-// TestPackageIsPure pins that the community registry stays a pure-logic package:
-// no database/sql, no net/http, no fsnotify. SQL lives in internal/cloudserver/
-// store; HTTP in internal/cloudserver/api. (CLAUDE.md module-boundary rule #1.)
+// TestPackageIsPure pins the community registry pure logic (CLAUDE.md rule 1):
+// SQL lives in internal/cloudserver/store, HTTP in internal/cloudserver/api.
 func TestPackageIsPure(t *testing.T) {
-	pkg, err := build.ImportDir(".", 0)
-	if err != nil {
-		t.Fatalf("ImportDir: %v", err)
-	}
-	forbidden := []string{"database/sql", "net/http", "github.com/fsnotify/fsnotify"}
-	for _, imp := range pkg.Imports {
-		for _, f := range forbidden {
-			if imp == f || strings.HasPrefix(imp, f+"/") {
-				t.Errorf("community imports forbidden package %q — keep it pure", imp)
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		ForbiddenTrees: []string{
+			"database/sql",
+			"net/http",
+			"github.com/fsnotify/fsnotify",
+		},
+		Reason: "community must stay pure",
+	})
 }

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/db/migrations"
 	"github.com/marmutapp/superbased-observer/internal/models"
@@ -394,6 +396,11 @@ func TestPushChangeTriggersAt141ThenUpgrade(t *testing.T) {
 			if _, err := sqlDB.Exec(`ALTER TABLE guard_events ADD COLUMN grant_id INTEGER`); err != nil {
 				t.Fatalf("add post-141 push column: %v", err)
 			}
+			// Same for sessions.tool_version_last (agent migration 162), read
+			// by the sessions push branch.
+			if _, err := sqlDB.Exec(`ALTER TABLE sessions ADD COLUMN tool_version_last TEXT`); err != nil {
+				t.Fatalf("add post-141 push column: %v", err)
+			}
 			err2, rev1 := runUpsertTriggerCase(t, c, s, sqlDB)
 			got, want := c.check(t, sqlDB)
 			switch c.at141 {
@@ -426,12 +433,15 @@ func TestPushChangeTriggersAt141ThenUpgrade(t *testing.T) {
 			if _, err := sqlDB.Exec(`ALTER TABLE guard_events DROP COLUMN grant_id`); err != nil {
 				t.Fatalf("drop post-141 push column: %v", err)
 			}
+			if _, err := sqlDB.Exec(`ALTER TABLE sessions DROP COLUMN tool_version_last`); err != nil {
+				t.Fatalf("drop post-141 push column: %v", err)
+			}
 			if err := sqlDB.Close(); err != nil {
 				t.Fatal(err)
 			}
 
 			// Upgrade THIS database (queue rows present) through the real runner.
-			up, err := db.Open(context.Background(), db.Options{Path: path})
+			up, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 			if err != nil {
 				t.Fatalf("db.Open upgrade: %v", err)
 			}

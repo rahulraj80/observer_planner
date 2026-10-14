@@ -602,10 +602,18 @@ func (w *Watcher) ScanFile(ctx context.Context, path string, forceFromZero bool)
 //
 // Processing stays SERIAL (one processFile at a time, on this goroutine):
 // only the directory walks run ahead, one goroutine per adapter, handing
-// paths over an unbuffered channel. So the writer concurrency and the
+// paths over a one-slot channel. So the writer concurrency and the
 // per-file cursor semantics are exactly the old ones; only the order in
 // which files of DIFFERENT adapters are visited changes. Within one
 // adapter the walk order is unchanged.
+//
+// The one slot is what "ready" means to the round-robin below (T-796): a
+// lane is ready once its walker has FOUND a file, not only while its
+// goroutine happens to be parked on an unbuffered send. Unbuffered, a
+// walker that had matched its file but was not yet scheduled onto the
+// send looked empty to the non-blocking rotation, so a lane with a ready
+// file could be skipped for a whole round; under a loaded scheduler the
+// fairness guarantee depended on goroutine timing.
 func (w *Watcher) scan(ctx context.Context, forceFromZero bool) (ScanResult, error) {
 	var res ScanResult
 	detected := w.registry.Detected(w.allow)
@@ -625,7 +633,7 @@ func (w *Watcher) scan(ctx context.Context, forceFromZero bool) (ScanResult, err
 	}
 	lanes := make([]scanLane, 0, len(detected))
 	for _, a := range detected {
-		files := make(chan string)
+		files := make(chan string, 1)
 		lanes = append(lanes, scanLane{adapter: a, files: files})
 		walkers.Add(1)
 		go func(a adapter.Adapter) {

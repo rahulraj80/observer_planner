@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/mcp/audit"
 	"github.com/marmutapp/superbased-observer/internal/stash"
@@ -23,7 +25,7 @@ import (
 func TestServer_RetrieveStashed_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -64,7 +66,7 @@ func TestServer_RetrieveStashed_RoundTrip(t *testing.T) {
 func TestServer_RetrieveStashed_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: path})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	t.Cleanup(func() { database.Close() })
 
 	st, _ := stash.New(stash.Options{Dir: filepath.Join(dir, "stash")})
@@ -88,7 +90,7 @@ func TestServer_RetrieveStashed_NotFound(t *testing.T) {
 func TestServer_RetrieveStashed_MaxBytes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: path})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	t.Cleanup(func() { database.Close() })
 
 	st, _ := stash.New(stash.Options{Dir: filepath.Join(dir, "stash")})
@@ -132,7 +134,7 @@ func TestServer_RetrieveStashed_NotRegisteredWithoutStash(t *testing.T) {
 func TestServer_RetrieveStashed_LogsK43Signal(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, err := db.Open(context.Background(), db.Options{Path: path})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -203,7 +205,7 @@ type retrieveStashedFixture struct {
 func newRetrieveStashedFixture(t *testing.T) *retrieveStashedFixture {
 	t.Helper()
 	dir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -522,7 +524,7 @@ func TestRetrieveStashed_RangeSliceDeterministic(t *testing.T) {
 // don't fire signals.
 func TestRetrieveStashed_K43SignalPerSha(t *testing.T) {
 	dir := t.TempDir()
-	database, _ := db.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
 	t.Cleanup(func() { database.Close() })
 	st, _ := stash.New(stash.Options{Dir: filepath.Join(dir, "stash")})
 	shaA, _ := st.Write([]byte("a"))
@@ -578,7 +580,7 @@ func sameKeySet(a, b map[string]bool) bool {
 func TestServer_RetrieveStashed_RegisteredWhenStashSet(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "obs.db")
-	database, _ := db.Open(context.Background(), db.Options{Path: path})
+	database, _ := dbtemplate.Open(context.Background(), db.Options{Path: path})
 	t.Cleanup(func() { database.Close() })
 
 	st, _ := stash.New(stash.Options{Dir: filepath.Join(dir, "stash")})

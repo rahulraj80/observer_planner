@@ -68,6 +68,7 @@ var ManagedNavDefaults = []ManagedDefault{
 	{"egress", VisibilityHidden, "Plane-A egress routing of a hosted app's end-user traffic: organization policy, not the developer's own usage."},
 	{"search", VisibilityVisible, "Full-text search over the developer's own sessions."},
 	{"cost", VisibilityVisible, "The developer's own spend (or token usage, per the organization's display policy) and budgets."},
+	{"plans", VisibilityVisible, "The developer's own subscription limits and account balances, read on their machine."},
 	{"analysis", VisibilityVisible, "Insights over the developer's own spending."},
 	{"tools", VisibilityVisible, "The developer's own per-tool activity."},
 	{"compression", VisibilityReadOnly, "The savings are the developer's; the proxy and compression configuration is the organization's."},

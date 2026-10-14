@@ -183,8 +183,11 @@ func startEphemeralDaemon(ctx context.Context) (*ephemeralDaemon, error) {
 		}
 		return nil
 	})
+	// serveErr is written once before done closes, so a read after <-done is
+	// ordered by the close.
+	var serveErr error
 	go func() {
-		_ = g.Wait()
+		serveErr = g.Wait()
 		close(done)
 	}()
 
@@ -200,8 +203,32 @@ func startEphemeralDaemon(ctx context.Context) (*ephemeralDaemon, error) {
 		pCleanup()
 	}
 
-	if err := waitProxyReady(dctx, addr, 15*time.Second); err != nil {
+	// The readiness wait also ends when the serving goroutines exit: a proxy
+	// whose ListenAndServe returned at once (the port taken, or a build
+	// without capture.proxy, whose inert proxy answers errProxyNotInBuild)
+	// will never accept a connection, so dialling it for the full timeout
+	// would only replace the real reason with "timeout".
+	rctx, rcancel := context.WithCancel(dctx)
+	go func() {
+		select {
+		case <-done:
+			rcancel()
+		case <-rctx.Done():
+		}
+	}()
+	err = waitProxyReady(rctx, addr, 15*time.Second)
+	rcancel()
+	if err != nil {
 		teardown()
+		// teardown waited for done (or 5s); a non-nil serveErr is only read
+		// once done has closed.
+		select {
+		case <-done:
+			if serveErr != nil {
+				return nil, fmt.Errorf("ephemeral daemon stopped before its proxy became ready on %s: %w", addr, serveErr)
+			}
+		default:
+		}
 		return nil, fmt.Errorf("proxy never became ready on %s: %w", addr, err)
 	}
 

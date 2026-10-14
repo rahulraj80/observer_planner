@@ -1154,6 +1154,18 @@ type SessionRow struct {
 	// transcript predates the field. Never rendered as a guess.
 	ToolVersion string `json:"tool_version,omitempty"`
 
+	// ToolVersionLast is the LATEST tool/CLI build the node saw for the
+	// session (agent migration 162 / server migration 232 / pg 0099,
+	// internal/store/toolversion.go::SetSessionToolVersion, which moves it
+	// forward on every valid stamp while ToolVersion stays the first build
+	// seen). Same METADATA class and same grammar as ToolVersion, so it ships
+	// BY DEFAULT with no share key and no shipsRawContent() gate, and the
+	// ingest re-validates it the same way. Empty means the node never
+	// stamped it (an older agent, or a session not re-parsed since 162):
+	// readers then treat it as equal to ToolVersion. A session where the two
+	// differ was upgraded mid-session.
+	ToolVersionLast string `json:"tool_version_last,omitempty"`
+
 	// ParentThreadID is the node-local session-lineage pointer (agent
 	// migrations 069/102, internal/store::SetSessionLineage) — for Cursor
 	// the parent session of a sub-agent child, also Codex fork lineage

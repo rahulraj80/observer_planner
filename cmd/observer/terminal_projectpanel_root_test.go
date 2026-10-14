@@ -130,6 +130,7 @@ func TestProjectRootResolverKeepsAuthorizedRootUnchanged(t *testing.T) {
 // in is NOT the terminal's working directory. Browsing it would be a false
 // claim, so the buttons stay honestly disabled (zero TerminalRoot → 409).
 func TestBrowsableRootExcludesSSHRun(t *testing.T) {
+	requireCompiled(t, "terminals.ssh")
 	daemonCwd := t.TempDir()
 	svc := termsvc.New(termsvc.Options{
 		Recorder: assembledRecorder{},

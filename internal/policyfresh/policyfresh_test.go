@@ -1,14 +1,12 @@
 package policyfresh
 
 import (
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 // TestDecideTable walks every row of the freshness table with the operator's
@@ -176,22 +174,11 @@ func TestBackstopDelayAndChanged(t *testing.T) {
 	}
 }
 
+// TestPurity pins the freshness table pure: it imports "time" and nothing else.
 func TestPurity(t *testing.T) {
-	files, _ := filepath.Glob("*.go")
-	fset := token.NewFileSet()
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, _ := os.ReadFile(f)
-		af, err := parser.ParseFile(fset, f, src, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range af.Imports {
-			if p := strings.Trim(imp.Path.Value, `"`); p != "time" {
-				t.Errorf("%s imports %s; the freshness table is pure (time only)", f, p)
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		AllowOnly: true,
+		Allowed:   []string{"time"},
+		Reason:    "the freshness table is pure (time only)",
+	})
 }

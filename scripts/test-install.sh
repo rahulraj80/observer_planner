@@ -256,6 +256,7 @@ else bad "minimal next steps (rc=$rc)"; cat "$T/out"; fi
 #      for by OBSERVER_INSTALL_TEST_SYSTEMD; the stub logs what it is run with.
 old_stub() { # old_stub <prefix>: a previous install there
   mkdir -p "$1"
+  # shellcheck disable=SC2016 # the stub expands these when it runs
   printf '#!/bin/sh\necho "$*" >>"$HOME/observer-calls.log"\n[ "$1" = --version ] && echo "observer version 9.9.8-old (developer stub)"\nexit 0\n' >"$1/observer"
   chmod 0755 "$1/observer"
 }
@@ -263,6 +264,9 @@ unit_for() { # unit_for <home> <exec>: a user unit running <exec>
   mkdir -p "$1/.config/systemd/user"
   printf '[Unit]\nDescription=SuperBased Observer (proxy + watcher + dashboard)\n\n[Service]\nType=simple\nExecStart=%s start --config %s/cfg.toml\n' "$2" "$1" >"$1/.config/systemd/user/observer.service"
 }
+# 15e-15g need systemd, which the installer only drives on Linux
+# (upgrade_service); elsewhere an upgrade leaves the service to the user.
+if [[ "$(uname -s)" == Linux ]]; then
 old_stub "$T/p15e"; mkdir -p "$T/h15e"; unit_for "$T/h15e" "$T/p15e/observer"
 OBSERVER_INSTALL_TEST_SYSTEMD=1 run "$T/h15e" --from-dir "$T/rel" --prefix "$T/p15e" --edition developer
 calls="$(cat "$T/h15e/observer-calls.log" 2>/dev/null)"
@@ -286,6 +290,9 @@ OBSERVER_INSTALL_TEST_SYSTEMD=1 run "$T/h15g" --from-dir "$T/rel" --prefix "$T/p
 if [[ $rc -eq 0 ]] && has "service upgrade" && ! grep -q '^service' "$T/h15g/observer-calls.log"; then
   ok "upgrade with --no-service touches no unit and names observer service upgrade"
 else bad "upgrade --no-service (rc=$rc)"; cat "$T/out"; fi
+else
+  skp "upgrade over a running service, a foreign unit, --no-service (systemd cases, Linux only)"
+fi
 
 # 15h. an upgrade without any service unit: no offer (non-interactive), the
 #      upgrade line, and nothing run against systemd.

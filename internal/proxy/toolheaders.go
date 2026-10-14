@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/marmutapp/superbased-observer/internal/models"
+	"github.com/marmutapp/superbased-observer/internal/orgcontract"
 )
 
 // toolSignature is one row of the header → tool identification table:
@@ -17,6 +18,11 @@ type toolSignature struct {
 	header string // canonical header name, looked up via http.Header.Get
 	prefix string // case-insensitive prefix the header value must carry
 	tool   string // normalized models.Tool* identity
+	// versioned marks a row whose header value is "<prefix><version>
+	// [ rest]": the token right after the prefix is the tool's own build
+	// version (T-784). Only User-Agent product tokens carry one; the
+	// Originator / X-Title rows name the tool without a version.
+	versioned bool
 }
 
 // toolSignatures is the L1 tool-resolution fallback table for the
@@ -50,13 +56,46 @@ type toolSignature struct {
 // copilot-cli, cursor, and hermes talk to their own backends and never
 // reach the proxy's upstreams.
 var toolSignatures = []toolSignature{
-	{header: "User-Agent", prefix: "claude-cli/", tool: models.ToolClaudeCode},
-	{header: "User-Agent", prefix: "codex_cli_rs/", tool: models.ToolCodex},
+	{header: "User-Agent", prefix: "claude-cli/", tool: models.ToolClaudeCode, versioned: true},
+	{header: "User-Agent", prefix: "codex_cli_rs/", tool: models.ToolCodex, versioned: true},
 	{header: "Originator", prefix: "codex", tool: models.ToolCodex},
-	{header: "User-Agent", prefix: "Kilo-Code/", tool: models.ToolKiloCodeCLI},
+	{header: "User-Agent", prefix: "Kilo-Code/", tool: models.ToolKiloCodeCLI, versioned: true},
 	{header: "X-Title", prefix: "Kilo Code", tool: models.ToolKiloCodeCLI},
-	{header: "User-Agent", prefix: "opencode/", tool: models.ToolOpenCode},
+	{header: "User-Agent", prefix: "opencode/", tool: models.ToolOpenCode, versioned: true},
 	{header: "X-Title", prefix: "opencode", tool: models.ToolOpenCode},
+}
+
+// toolVersionFromHeaders resolves the owning tool exactly as
+// toolFromHeaders does (first hit wins), then reads that SAME tool's
+// build version off a versioned row of the table: the product token
+// after the prefix, up to the first space / "(" / ";". A version is only
+// returned for the tool the request was attributed to, so a Kilo request
+// that also carries an inherited opencode UA never yields an opencode
+// version. The token must pass orgcontract.ValidToolVersion (the column's
+// one grammar); anything else is ("", "", false). The store seam
+// re-validates on write, so this check only keeps junk off the sink.
+func toolVersionFromHeaders(h http.Header) (tool, version string, ok bool) {
+	tool, ok = toolFromHeaders(h)
+	if !ok {
+		return "", "", false
+	}
+	for _, sig := range toolSignatures {
+		if !sig.versioned || sig.tool != tool {
+			continue
+		}
+		v := h.Get(sig.header)
+		if len(v) <= len(sig.prefix) || !strings.EqualFold(v[:len(sig.prefix)], sig.prefix) {
+			continue
+		}
+		rest := v[len(sig.prefix):]
+		if i := strings.IndexAny(rest, " (;"); i >= 0 {
+			rest = rest[:i]
+		}
+		if orgcontract.ValidToolVersion(rest) {
+			return tool, rest, true
+		}
+	}
+	return "", "", false
 }
 
 // toolFromHeaders resolves a request's owning AI tool from the

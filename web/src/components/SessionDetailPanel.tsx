@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { SlideOver, SurfaceBadge, TabPanel, TabStrip, ToolBadge, Tooltip, TruncatedPath, type TabDef } from "@/components/primitives";
 import { ChartState } from "@/components/ChartState";
 import { sessionTabIcon } from "@shared/components/sessiondetail";
+import { toolVersionView } from "@shared/lib/toolVersion";
 import { CopyOnClick } from "@/components/CopyOnClick";
 import { SessionActionHeader } from "@/components/SessionActionHeader";
 import { fetchJSON } from "@/lib/api";
@@ -512,6 +513,9 @@ export function SessionDetailPanel({
   );
 
   const d = detail.data;
+  // The session's captured tool build(s): the latest one, and the one it
+  // started on when it was upgraded mid-session (migration 162).
+  const tv = toolVersionView(d?.tool_version, d?.tool_version_last);
   const tabs: TabDef<TabId>[] = useMemo(
     () =>
       (
@@ -545,13 +549,17 @@ export function SessionDetailPanel({
             {/* Capture surface (migration 107). Renders nothing when the
                 session carries no stamp — absence is UNKNOWN, never "cli". */}
             <SurfaceBadge surface={d.surface} host={d.surface_host} />
-            {/* Captured tool/CLI version (migration 125). Rendered only
-                when stamped — absence is UNKNOWN, never a fabricated
-                version. */}
-            {d.tool_version ? (
-              <Tooltip content="Tool version">
-                <span tabIndex={0} className="font-mono text-caption text-fg-3 focus:outline-none">
-                  v{d.tool_version}
+            {/* Captured tool/CLI version (migrations 125 and 162). Rendered
+                only when stamped; absence is UNKNOWN, never a fabricated
+                version. An upgrade inside the session shows both builds. */}
+            {tv.current ? (
+              <Tooltip content={tv.note}>
+                <span
+                  tabIndex={0}
+                  aria-label={tv.upgradedFrom ? tv.note : undefined}
+                  className="font-mono text-caption text-fg-3 focus:outline-none"
+                >
+                  {tv.upgradedFrom ? `v${tv.upgradedFrom} → v${tv.current}` : `v${tv.current}`}
                 </span>
               </Tooltip>
             ) : null}

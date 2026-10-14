@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/models"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -66,7 +68,7 @@ func TestStatusSnapshotMarshalJSONOmitsZeroTimes(t *testing.T) {
 
 func TestSnapshot_EmptyDB(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func TestSnapshot_EmptyDB(t *testing.T) {
 
 func TestSnapshot_PopulatedAndPerToolSummary(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +170,7 @@ func TestSnapshot_PopulatedAndPerToolSummary(t *testing.T) {
 // snapshot so the sidebar badge has a non-zero number to render.
 func TestSnapshot_CountsCacheEvents(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +201,7 @@ func TestSnapshot_CountsCacheEvents(t *testing.T) {
 // "Cache".
 func TestSnapshot_CountsGuardAndRouterRows(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "obs.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +344,7 @@ var _ = bytes.Buffer{}
 func TestSnapshot_QueryErrors(t *testing.T) {
 	t.Run("empty database is complete, not degraded", func(t *testing.T) {
 		dbPath := filepath.Join(t.TempDir(), "obs.db")
-		d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+		d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -363,7 +365,7 @@ func TestSnapshot_QueryErrors(t *testing.T) {
 
 	t.Run("populated database is complete", func(t *testing.T) {
 		dbPath := filepath.Join(t.TempDir(), "obs.db")
-		d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+		d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -392,7 +394,7 @@ func TestSnapshot_QueryErrors(t *testing.T) {
 
 	t.Run("unreadable database is degraded, not empty", func(t *testing.T) {
 		dbPath := filepath.Join(t.TempDir(), "obs.db")
-		d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+		d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -424,7 +426,7 @@ func TestSnapshot_QueryErrors(t *testing.T) {
 
 	t.Run("cancelled context is degraded", func(t *testing.T) {
 		dbPath := filepath.Join(t.TempDir(), "obs.db")
-		d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+		d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -492,7 +494,7 @@ func TestSnapshot_SurfacesIntegrityVerdict(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "agent.db")
-			database, err := db.Open(ctx, db.Options{Path: path})
+			database, err := dbtemplate.Open(ctx, db.Options{Path: path})
 			if err != nil {
 				t.Fatalf("db.Open: %v", err)
 			}

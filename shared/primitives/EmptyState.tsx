@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { Icon as Glyph } from "./Icon";
 import { useHelpSlot } from "./helpSlot";
 import { EmptyIllustration, type IllustrationKind } from "./EmptyIllustration";
+import { InfoDisclosure } from "./InfoDisclosure";
 
 // EmptyState — the shared teaching empty state for every app (promoted from
 // web2 2026-09-28; web2's old path is a re-export shim). Originally G11: it replaced
@@ -41,9 +42,12 @@ export type EmptyStateProps = {
   // a real in-app help-drawer deep link instead.
   docHint?: string;
   // Copyable config snippet (e.g. a `[org_client.share...]` config.toml
-  // block) rendered as a code block with a one-click copy button.
+  // block). It sits CLOSED behind a "Learn more" disclosure (design review
+  // 2026-10-13): the body carries the plain instruction, the config key is
+  // the detail for whoever sets up one machine by hand.
   snippet?: string;
-  // Optional label above the snippet block, e.g. "Add to the node's config.toml".
+  // The disclosure's summary, e.g. "Set it up on one machine". Defaults to
+  // "Learn more".
   snippetLabel?: string;
   // Opens the help drawer scrolled to this guide entry ("Read the guide").
   guideId?: string;
@@ -77,25 +81,21 @@ export function EmptyState({
   className,
 }: EmptyStateProps) {
   const renderHelp = useHelpSlot();
-  // An illustration stacks the art above the copy (centred), in both variants.
-  const stacked = variant === "inline" || !!illustration;
+  // ONE shape (design review 2026-10-13, docs/app-design-system.md "Empty
+  // states"): the art or the icon tile centred above a centred title, a line
+  // of body and the call to action, in both variants. The card variant
+  // without an illustration used to put a small icon LEFT of left-aligned
+  // copy, a second shape beside the centred one. Steps, a snippet and
+  // children stay left-aligned inside a centred block so a list still reads.
   return (
     <div
       className={clsx(
-        "sb-scale-in",
-        variant === "card"
-          ? "rounded-3 border border-line-2 bg-bg-1 p-6"
-          : "py-8 text-center",
-        illustration && variant === "card" && "text-center",
+        "sb-scale-in text-center",
+        variant === "card" ? "rounded-3 border border-line-2 bg-bg-1 p-6" : "py-8",
         className,
       )}
     >
-      <div
-        className={clsx(
-          "flex gap-3",
-          stacked && "flex-col items-center",
-        )}
-      >
+      <div className="flex flex-col items-center gap-3">
         {illustration ? (
           <EmptyIllustration
             kind={illustration}
@@ -104,42 +104,24 @@ export function EmptyState({
           />
         ) : (
           <span
-            className={clsx(
-              "grid h-9 w-9 shrink-0 place-items-center rounded-2 border border-line-2 bg-bg-2 text-fg-3",
-              stacked && "mx-auto",
-            )}
+            className="mx-auto grid h-9 w-9 shrink-0 place-items-center rounded-2 border border-line-2 bg-bg-2 text-fg-3"
             aria-hidden
           >
             <Glyph icon={Icon} size="md" />
           </span>
         )}
-        <div className={clsx("min-w-0", stacked && "text-center")}>
-          <h3
-            className={clsx(
-              "flex items-center gap-1 text-[14px] font-semibold text-fg-0",
-              stacked && "justify-center",
-            )}
-          >
+        <div className="min-w-0 text-center">
+          <h3 className="flex items-center justify-center gap-1 text-[14px] font-semibold text-fg-0">
             {title}
             {helpId && renderHelp(helpId)}
           </h3>
           {body && (
-            <p
-              className={clsx(
-                "mt-1.5 max-w-2xl text-[13px] leading-relaxed text-fg-2",
-                stacked && "mx-auto",
-              )}
-            >
+            <p className="mx-auto mt-1.5 max-w-2xl text-[13px] leading-relaxed text-fg-2">
               {body}
             </p>
           )}
           {steps && steps.length > 0 && (
-            <ol
-              className={clsx(
-                "mt-3 space-y-1.5 text-[12.5px] text-fg-2",
-                stacked && "inline-block text-left",
-              )}
-            >
+            <ol className="mt-3 inline-block space-y-1.5 text-left text-[12.5px] text-fg-2">
               {steps.map((s, i) => (
                 <li key={i} className="flex items-baseline gap-2">
                   <span className="font-mono text-[10.5px] text-fg-4">
@@ -151,18 +133,13 @@ export function EmptyState({
             </ol>
           )}
           {snippet && (
-            <div className={clsx("mt-3 max-w-2xl text-left", stacked && "mx-auto")}>
-              <SnippetBlock label={snippetLabel} snippet={snippet} />
-            </div>
+            <InfoDisclosure summary={snippetLabel ?? "Learn more"} className="mx-auto mt-3 max-w-2xl text-left">
+              <SnippetBlock snippet={snippet} />
+            </InfoDisclosure>
           )}
-          {children && <div className="mt-3">{children}</div>}
+          {children && <div className="mx-auto mt-3 max-w-2xl text-left">{children}</div>}
           {(to || guideId || notifyOperators || docHint) && (
-            <div
-              className={clsx(
-                "mt-4 flex flex-wrap items-center gap-3",
-                stacked && "justify-center",
-              )}
-            >
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
               {to && (
                 <Link
                   to={to}

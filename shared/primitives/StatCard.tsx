@@ -2,7 +2,7 @@ import clsx from "clsx";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Sparkline, hasSparkline } from "./Sparkline";
-import { StatDelta } from "./StatDelta";
+import { StatDelta, type StatDeltaTone } from "./StatDelta";
 
 export { hasSparkline };
 import { useHelpSlot } from "./helpSlot";
@@ -25,6 +25,8 @@ export type StatCardProps = {
   // `vs prior 30d $6,073.08`. Layered on top of `deltaLabel` when both
   // are passed (deltaPrior wins).
   deltaPrior?: ReactNode;
+  // "neutral" for a metric with no direction of good: glyph, no colour.
+  deltaTone?: StatDeltaTone;
   spark?: number[];
   sparkColor?: string;
   warn?: boolean;
@@ -131,6 +133,7 @@ function Body({
   delta,
   deltaLabel,
   deltaPrior,
+  deltaTone,
   helpId,
   icon,
   cornerPill,
@@ -201,7 +204,7 @@ function Body({
         >
           {/* Cost-aware delta (UP = danger, DOWN = success), then the prior
               value or label: the shared StatDelta, also HeroStat's. */}
-          <StatDelta delta={delta} deltaLabel={deltaLabel} deltaPrior={deltaPrior} />
+          <StatDelta delta={delta} deltaLabel={deltaLabel} deltaPrior={deltaPrior} tone={deltaTone} />
           {sub && <span>{sub}</span>}
         </div>
       )}

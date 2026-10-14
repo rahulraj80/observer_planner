@@ -69,9 +69,17 @@ func nodeRows() []Component {
 				// internal/cloudcontract (its SafeText NFC normalisation) is
 				// core since the D-512 ruling (org wire vocabulary).
 				"golang.org/x/text",
+				// internal/keystore (the keychain-first secret store the Plans & limits
+				// module and cloudcred share) is core.
+				"github.com/zalando/go-keyring",
 			},
 			Surface: Surface{
-				FilesWritten: []string{"~/.observer/observer.db", "~/.observer/config.toml"},
+				FilesWritten: []string{"~/.observer/observer.db", "~/.observer/config.toml", "~/.observer/plans-statusline-last.json"},
+				// Plans & limits (docs/plans-and-limits.md) runs a vendor tool or
+				// reads the keychain only for an account the user adds; its
+				// vendor egress is described there (core declares no egress).
+				Processes:   []string{"codex app-server, kiro-cli, amp, auggie (only for a Plans & limits account using that tool)"},
+				Credentials: []string{"OS keychain service sbo-plans-v1 (Plans & limits keys)"},
 			},
 			Tables:     []string{"sessions", "actions", "token_usage", "api_turns", "projects", "parse_cursors", "schema_meta", "session_pid_bridge"},
 			Verbs:      []string{"scan", "watch", "init", "uninstall", "doctor", "adapters", "status", "hook", "config", "db", "start"},

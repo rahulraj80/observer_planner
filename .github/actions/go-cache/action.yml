@@ -1,0 +1,91 @@
+# go-cache: setup-go plus a per-job-family build/module cache (restore only).
+#
+# Why not setup-go's own `cache: true`: its key is OS + Go version +
+# hash(go.sum), so it is written once per go.sum change by whichever job
+# finishes first (usually a 40 second job), and every race shard, distro
+# build and omit-tag job then restores a stale, mostly empty GOCACHE and
+# recompiles the tree. Here each job family gets its own key, refreshed by
+# the full runs on main (the key carries the commit sha) and falling back to
+# the newest entry of the same family.
+#
+# Restore only. The caller saves with actions/cache/save, gated to the
+# nightly (schedule) or a workflow_dispatch on main (D-612: pushes and pull
+# requests restore only), using this action's `key`, `gocache` and
+# `gomodcache` outputs:
+#
+#   - uses: ./.github/actions/go-cache
+#     id: go
+#     with: { family: go-test-3 }
+#   ...
+#   - if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.go.outputs.cache-hit != 'true' }}
+#     uses: actions/cache/save@v4
+#     with:
+#       path: |
+#         ${{ steps.go.outputs.gocache }}
+#         ${{ steps.go.outputs.gomodcache }}
+#       key: ${{ steps.go.outputs.key }}
+#
+# Saving only from main keeps the repository under its cache budget, and a
+# cache written on main is readable from every branch and pull request.
+# Go also caches test RESULTS in GOCACHE, so test steps that must always run
+# keep -count=1.
+name: go-cache
+description: setup-go plus a restore of a per-job-family GOCACHE and GOMODCACHE
+inputs:
+  family:
+    description: Job family name, unique per cache population (e.g. go-test-3, distro-minimal, omit-tags)
+    required: true
+  go-version-file:
+    description: go.mod to read the Go version from
+    required: false
+    default: go.mod
+  go-sum:
+    description: go.sum whose hash is part of the key
+    required: false
+    default: go.sum
+outputs:
+  key:
+    description: The exact key to save under
+    value: ${{ steps.key.outputs.key }}
+  gocache:
+    description: GOCACHE path
+    value: ${{ steps.paths.outputs.gocache }}
+  gomodcache:
+    description: GOMODCACHE path
+    value: ${{ steps.paths.outputs.gomodcache }}
+  cache-hit:
+    description: true when the exact key was restored
+    value: ${{ steps.restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: ${{ inputs.go-version-file }}
+        cache: false
+
+    - id: paths
+      shell: bash
+      run: |
+        echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "goversion=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+    - id: key
+      shell: bash
+      env:
+        PREFIX: go-${{ inputs.family }}-${{ runner.os }}-${{ steps.paths.outputs.goversion }}-${{ hashFiles(inputs.go-sum) }}
+      run: |
+        echo "prefix=${PREFIX}-" >> "$GITHUB_OUTPUT"
+        echo "key=${PREFIX}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+    - id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ steps.paths.outputs.gocache }}
+          ${{ steps.paths.outputs.gomodcache }}
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: |
+          ${{ steps.key.outputs.prefix }}
+          go-${{ inputs.family }}-${{ runner.os }}-${{ steps.paths.outputs.goversion }}-

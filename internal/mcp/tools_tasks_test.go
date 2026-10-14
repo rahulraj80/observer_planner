@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/config"
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/store"
@@ -32,7 +34,7 @@ func tasksTestServer(t *testing.T, tasksEnabled, seed bool) *Server {
 func tasksTestServerWithConfig(t *testing.T, cfg config.TasksConfig, seed bool) *Server {
 	t.Helper()
 	dir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -133,7 +135,7 @@ func TestGetSessionTasksTool_RegisteredAndListed(t *testing.T) {
 func seedConcurrentTasksSession(t *testing.T, sessionID string) *sql.DB {
 	t.Helper()
 	dir := t.TempDir()
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(dir, "obs.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

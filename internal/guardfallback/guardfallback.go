@@ -47,28 +47,33 @@ type Setting struct {
 	Key    string
 	Values []string
 	// Label and Help are the admin-console copy, kept beside the values so
-	// the dashboard and the assistant describe the same choice.
+	// the dashboard and the assistant describe the same choice. Label is a
+	// short sentence-case name; Help is ONE plain sentence saying when the
+	// setting matters. The consequence of each value is the dashboard's
+	// per-value copy (web2 lib/guardFallbacks.ts), and the technical detail
+	// (file path, wire values) is Technical, shown only behind an info icon.
 	Label string
 	Help  string
+	// Technical names the file and the wire values for the technical
+	// reader. Never shown inline: the dashboard puts it in a tooltip.
+	Technical string
 }
 
 // Settings is the whole vocabulary, in display and render order.
 var Settings = []Setting{
 	{
-		Key:    KeyUserPolicyInvalid,
-		Values: []string{UserPolicyLoud, UserPolicyFailClosed},
-		Label:  "Invalid developer guard policy",
-		Help: "What a managed node does while the developer's own ~/.observer/guard-policy.toml does not load. " +
-			"Report only (loud) keeps the built-in rules and this organization's guard bundle in force and reports the problem; " +
-			"Block guarded calls (fail_closed) also blocks every enforced tool call and prompt until the file loads again.",
+		Key:       KeyUserPolicyInvalid,
+		Values:    []string{UserPolicyLoud, UserPolicyFailClosed},
+		Label:     "Developer's own guard file is broken",
+		Help:      "The developer's local guard settings file can't be read.",
+		Technical: "File: ~/.observer/guard-policy.toml. Values: loud, fail_closed.",
 	},
 	{
-		Key:    KeySandboxUnavailable,
-		Values: []string{SandboxRecordedAcceptance, SandboxOrgDisallow},
-		Label:  "Proxied tool without a sandbox",
-		Help: "What a managed node does when the guard is enforcing, a proxied tool can only be contained by the " +
-			"filesystem sandbox, and no sandbox can be built on that machine (macOS, native Windows, or sandboxing turned off). " +
-			"Launch unsandboxed (recorded_acceptance) starts it and records the accepted risk; Refuse the launch (org_disallow) stops it.",
+		Key:       KeySandboxUnavailable,
+		Values:    []string{SandboxRecordedAcceptance, SandboxOrgDisallow},
+		Label:     "No sandbox available",
+		Help:      "A tool needs a filesystem sandbox, but this machine can't build one (macOS, Windows, or sandboxing off).",
+		Technical: "Applies to proxied tools while the guard enforces. Values: recorded_acceptance, org_disallow.",
 	},
 }
 

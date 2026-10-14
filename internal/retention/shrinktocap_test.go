@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 )
 
@@ -89,7 +91,7 @@ func TestShrinkToCap_SourceNeverIssuesBareVacuum(t *testing.T) {
 // SizeCapUnmet rather than looping to chase the unreachable cap.
 func TestShrinkToCap_SinglePassShedsThenFlagsUnreachableCap(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "big.db")
-	d, err := db.Open(context.Background(), db.Options{Path: dbPath})
+	d, err := dbtemplate.Open(context.Background(), db.Options{Path: dbPath})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

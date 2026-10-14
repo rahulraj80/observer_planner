@@ -290,7 +290,7 @@ func enforceBudgetControlledLaunch(ctx context.Context, configPath, tool string,
 	}
 	defer cleanup()
 
-	// T-497: the org's "Proxied tool without a sandbox" choice, the same
+	// T-497: the org's "No sandbox available" choice, the same
 	// decision the dashboard's fresh launch makes (launch_sandbox_gate.go).
 	if err := enforceSandboxFallbackLaunch(ctx, cfg, store.New(database), configPath, tool); err != nil {
 		return err

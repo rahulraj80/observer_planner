@@ -100,6 +100,26 @@ func TestEphemeralDaemonLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if proxyNotInBuild() {
+		// A build without capture.proxy (D-514) has no proxy for the
+		// isolated daemon to serve: startup must fail promptly, naming the
+		// build, instead of dialling a port nothing will bind until the
+		// readiness timeout and reporting "timeout".
+		start := time.Now()
+		eph, err := startEphemeralDaemon(ctx)
+		if err == nil {
+			eph.Close()
+			t.Fatal("startEphemeralDaemon succeeded in a build without capture.proxy")
+		}
+		if !strings.Contains(err.Error(), "not in this build") {
+			t.Fatalf("startEphemeralDaemon error = %v, want the not-in-this-build reason", err)
+		}
+		if took := time.Since(start); took > 10*time.Second {
+			t.Fatalf("startEphemeralDaemon took %s to fail, want a prompt failure, not the readiness timeout", took)
+		}
+		return
+	}
+
 	eph, err := startEphemeralDaemon(ctx)
 	if err != nil {
 		t.Fatalf("startEphemeralDaemon: %v", err)

@@ -2626,7 +2626,9 @@ func (s *Store) ingest(ctx context.Context, events []models.ToolEvent, tokens []
 
 	// Captured tool/CLI version (migration 125): stamp the free-form
 	// version an adapter resolved at its boundary onto the sessions
-	// upserted above. NODE-LOCAL; FIRST-WINS-UNLESS-EMPTY. Same
+	// upserted above. FIRST-WINS-UNLESS-EMPTY. Not node-local: since
+	// 2026-09-22 the column ships to the org as unconditional session
+	// metadata (server migration 161, orgpush.go). Same
 	// best-effort posture as the surface seam above — it runs AFTER the
 	// actions/tokens landed, so a write error is counted, not returned.
 	// A malformed value returns (false, nil) and is skipped silently

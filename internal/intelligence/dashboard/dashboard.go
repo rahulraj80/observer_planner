@@ -444,6 +444,7 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 		secSecurity    = SectionSecurity
 		secSearch      = SectionSearch
 		secCost        = SectionCost
+		secPlans       = SectionPlans
 		secAnalysis    = SectionAnalysis
 		secTools       = SectionTools
 		secCompression = SectionCompression
@@ -494,6 +495,15 @@ func (s *Server) registerRoutes(remote RemoteController) (*http.ServeMux, map[st
 	reg("/api/setup/codex-hooks", V, secSettings.WithSettings("hooks"), s.handleSetupCodexHooks)
 	reg("/api/setup/claude", L, secSettings.WithSettings("hooks"), s.handleSetupClaude)
 	reg("/api/cost", V, secCost, s.handleCost)
+	// Plans & limits (plans.go): whole-route Local, the page manages
+	// keychain credentials. The status line feed is the loopback POST from
+	// `observer statusline`.
+	reg("/api/plans", L, secPlans, s.handlePlans)
+	reg("/api/plans/accounts", L, secPlans, s.handlePlanAccounts)
+	reg("/api/plans/accounts/", L, secPlans, s.handlePlanAccount)
+	reg("/api/plans/optin", L, secPlans, s.handlePlanOptIn)
+	reg("/api/plans/probe", L, secPlans, s.handlePlanProbe)
+	reg("/api/plans/statusline", L, secPlans, s.handlePlanStatusLine)
 	reg("/api/discover", V, secDiscovery, s.handleDiscover)
 	reg("/api/suggestions", V, secSuggestions, s.handleSuggestions)
 	reg("/api/suggestions/state", L, secSuggestions, s.handleSuggestionState)
@@ -3792,6 +3802,10 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		// Omitted when unstamped — the frontend treats absence as
 		// "unknown", never fabricates a version.
 		ToolVersion string `json:"tool_version,omitempty"`
+		// ToolVersionLast is the latest build seen in the session
+		// (migration 162), equal to ToolVersion when no upgrade was seen.
+		// When the two differ the session was upgraded mid-session.
+		ToolVersionLast string `json:"tool_version_last,omitempty"`
 		// Resume declares how a CLOSED session on this tool can be reopened
 		// (session-attach design Phase 3): kind "native" (grounded
 		// ResumeNative → the Resume button POSTs /resume), "handoff" (no native
@@ -4129,8 +4143,8 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	// Captured tool/CLI version (migration 125) — same best-effort read;
 	// a failure leaves it empty (= unknown) and omitted.
-	if tv, terr := store.New(s.db()).LoadSessionToolVersion(r.Context(), id); terr == nil {
-		d.ToolVersion = tv
+	if first, last, terr := store.New(s.db()).LoadSessionToolVersions(r.Context(), id); terr == nil {
+		d.ToolVersion, d.ToolVersionLast = first, last
 	}
 	if lin, lerr := store.New(s.db()).LoadSessionLineage(r.Context(), id); lerr == nil {
 		d.ForkedFromID = lin.ForkedFromID

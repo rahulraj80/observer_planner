@@ -193,20 +193,3 @@ func TestLenientCompileDropsTabsItDoesNotKnow(t *testing.T) {
 		t.Fatalf("ignored = %v", spec.IgnoredIDs)
 	}
 }
-
-func TestVocabularyServesTabs(t *testing.T) {
-	v := Vocabulary()
-	if len(v.NavTabs) != len(NavTabIDs()) {
-		t.Fatalf("nav_tabs has %d rows, want %d", len(v.NavTabs), len(NavTabIDs()))
-	}
-	for _, row := range v.NavTabs {
-		if row.ID != NavTabID(row.Page, row.Tab) || row.Label == "" {
-			t.Errorf("bad nav_tabs row %+v", row)
-		}
-	}
-	for _, s := range v.NavSections {
-		if IsNavTab(s.ID) {
-			t.Errorf("nav_sections lists tab %q; tabs belong in nav_tabs", s.ID)
-		}
-	}
-}

@@ -34,12 +34,6 @@ func parseFixture(t *testing.T) ([]models.ToolEvent, []models.TokenEvent, []stri
 	return res.ToolEvents, res.TokenEvents, res.Warnings
 }
 
-func TestName(t *testing.T) {
-	if got := (&Adapter{}).Name(); got != models.ToolGoose {
-		t.Fatalf("Name()=%q want %q", got, models.ToolGoose)
-	}
-}
-
 func TestWatchPaths_Linux(t *testing.T) {
 	orig := allHomesFunc
 	defer func() { allHomesFunc = orig }()

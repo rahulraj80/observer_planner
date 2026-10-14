@@ -42,6 +42,10 @@ var tokenLineRe = regexp.MustCompile(
 var (
 	mainModelRe  = regexp.MustCompile(`^Main model:\s+(\S+)`)
 	usingModelRe = regexp.MustCompile(`^Using\s+(\S+)\s+model`)
+	// versionBannerRe matches the startup banner `Aider v0.86.2` (the
+	// blockquote prefix already stripped) and captures the build version
+	// for tool-version capture (migration 125, T-784).
+	versionBannerRe = regexp.MustCompile(`^Aider v(\d\S*)$`)
 )
 
 // aiderTimeLayout is the layout of the session-header timestamp. Aider
@@ -55,6 +59,10 @@ type session struct {
 	start time.Time
 	model string
 	seq   int // monotonic per-session event sequence (deterministic)
+	// versioned is set once the session's `Aider vX.Y.Z` banner has been
+	// turned into a SessionToolVersion, so a repeated banner never emits
+	// a second stamp for the same session.
+	versioned bool
 }
 
 // parser accumulates events while scanning a transcript top to bottom.
@@ -70,14 +78,23 @@ type parser struct {
 	userLines []string // pending `#### ` prompt lines
 	asstLines []string // pending assistant prose lines
 
-	tools  []models.ToolEvent
-	tokens []models.TokenEvent
+	tools    []models.ToolEvent
+	tokens   []models.TokenEvent
+	versions []models.SessionToolVersion
 }
 
 // parseTranscript is the entry point: it walks the whole Markdown file and
 // returns the normalized events. ctx is honored for cancellation between
 // lines.
 func (a *Adapter) parseTranscript(ctx context.Context, data []byte, sourceFile, projectRoot, gitRemote string) ([]models.ToolEvent, []models.TokenEvent) {
+	p := a.parseTranscriptState(ctx, data, sourceFile, projectRoot, gitRemote)
+	return p.tools, p.tokens
+}
+
+// parseTranscriptState walks the transcript and returns the finished
+// parser, so ParseSessionFile can also read the per-session tool-version
+// stamps without widening parseTranscript's signature.
+func (a *Adapter) parseTranscriptState(ctx context.Context, data []byte, sourceFile, projectRoot, gitRemote string) *parser {
 	p := &parser{a: a, sourceFile: sourceFile, projectRoot: projectRoot, gitRemote: gitRemote}
 
 	// Normalize CRLF; split into lines without a trailing-empty artifact.
@@ -88,14 +105,14 @@ func (a *Adapter) parseTranscript(ctx context.Context, data []byte, sourceFile, 
 		case <-ctx.Done():
 			p.flushAssistant()
 			p.flushUser()
-			return p.tools, p.tokens
+			return p
 		default:
 		}
 		p.handleLine(line)
 	}
 	p.flushAssistant()
 	p.flushUser()
-	return p.tools, p.tokens
+	return p
 }
 
 // handleLine classifies one transcript line and updates parser state.
@@ -152,7 +169,16 @@ func (p *parser) handleQuoteLine(body string) {
 		p.emitFileOp(models.ActionRunCommand, "aider.run_command", rest)
 		return
 	}
-	// Model / version banner lines: capture the model, emit nothing.
+	// Version banner: one SessionToolVersion per session (the store seam
+	// validates the token and writes first-wins-unless-empty).
+	if m := versionBannerRe.FindStringSubmatch(body); m != nil {
+		if !p.sess.versioned {
+			p.sess.versioned = true
+			p.versions = append(p.versions, models.SessionToolVersion{SessionID: p.sess.key, Version: m[1]})
+		}
+		return
+	}
+	// Model banner lines: capture the model, emit nothing.
 	if m := mainModelRe.FindStringSubmatch(body); m != nil {
 		p.sess.model = m[1]
 		return

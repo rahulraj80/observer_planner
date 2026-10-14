@@ -56,12 +56,6 @@ func firstAction(evs []models.ToolEvent, action string) (models.ToolEvent, bool)
 	return models.ToolEvent{}, false
 }
 
-func TestName(t *testing.T) {
-	if got := newTestAdapter().Name(); got != models.ToolAider {
-		t.Fatalf("Name() = %q, want %q", got, models.ToolAider)
-	}
-}
-
 func TestIsSessionFile(t *testing.T) {
 	root := t.TempDir()
 	a := NewWithOptions(nil, []string{root})

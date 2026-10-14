@@ -110,11 +110,19 @@ func TestNoUnofficialInstallChannels(t *testing.T) {
 // installHintValidOS is the closed vocabulary for InstallHint.OS.
 var installHintValidOS = map[string]bool{"": true, "linux": true, "darwin": true, "windows": true}
 
-// TestInstallHintOSIsClosedVocabulary pins InstallHint.OS to
-// {"", "linux", "darwin", "windows"} — a typo here (e.g. "Windows",
-// "win32") silently produces a dead row: no OS ever matches it (§6.2, the
-// research's "a typo is an invisible dead row today" note).
-func TestInstallHintOSIsClosedVocabulary(t *testing.T) {
+// installHintValidChannel is the closed vocabulary for InstallHint.Channel
+// (capability.go doc comment, §1.6 of the research). "choco" is
+// deliberately excluded; see capability.go's Channel doc.
+var installHintValidChannel = map[string]bool{
+	"npm": true, "script": true, "brew": true, "winget": true, "uv": true, "scoop": true,
+}
+
+// TestInstallHintsUseClosedVocabularies pins every registry InstallHint to
+// the two closed vocabularies. OS: a typo (e.g. "Windows", "win32") silently
+// produces a dead row that no OS ever matches (§6.2, "a typo is an invisible
+// dead row today"). Channel: a typo would make T5's
+// dashboardInstallChannelRank table fall through to its "else" bucket.
+func TestInstallHintsUseClosedVocabularies(t *testing.T) {
 	for _, c := range integration.Capabilities() {
 		if c.Binary == nil {
 			continue
@@ -123,26 +131,6 @@ func TestInstallHintOSIsClosedVocabulary(t *testing.T) {
 			if !installHintValidOS[h.OS] {
 				t.Errorf("adapter %q: Installs[%d].OS = %q is not in the closed vocabulary {\"\",\"linux\",\"darwin\",\"windows\"}", c.Tool, i, h.OS)
 			}
-		}
-	}
-}
-
-// installHintValidChannel is the closed vocabulary for InstallHint.Channel
-// (capability.go doc comment, §1.6 of the research). "choco" is
-// deliberately excluded — see capability.go's Channel doc.
-var installHintValidChannel = map[string]bool{
-	"npm": true, "script": true, "brew": true, "winget": true, "uv": true, "scoop": true,
-}
-
-// TestInstallHintChannelIsClosedVocabulary pins InstallHint.Channel to
-// the documented vocabulary, so T5's dashboardInstallChannelRank table
-// never silently falls through to the "else" bucket for a typo'd channel.
-func TestInstallHintChannelIsClosedVocabulary(t *testing.T) {
-	for _, c := range integration.Capabilities() {
-		if c.Binary == nil {
-			continue
-		}
-		for i, h := range c.Binary.Installs {
 			if !installHintValidChannel[h.Channel] {
 				t.Errorf("adapter %q: Installs[%d].Channel = %q is not in the closed vocabulary {npm,script,brew,winget,uv,scoop}", c.Tool, i, h.Channel)
 			}

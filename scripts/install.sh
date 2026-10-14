@@ -418,6 +418,7 @@ if (ok==1) {
 ok
 EOF
 ) || return 2
+  # shellcheck disable=SC1003 # a backslash in the tr set, not an escaped quote
   [ "$(printf '%s' "$bc_out" | tr -d ' \n\\')" = 1 ]
 }
 
@@ -619,11 +620,14 @@ edition_of() {
 # upgrade, handled after it).
 running_daemons() {
   rd_self=$(real_path "$prefix/observer")
-  rd_root=/proc
+  rd_root=/proc rd_walk=0
+  [ "$os" = linux ] && rd_walk=1
   # Tests point it at a fixture /proc; honoured only with --from-dir, like
-  # every other test hook.
-  if [ -n "${OBSERVER_INSTALL_TEST_PROC:-}" ] && [ -n "$from_dir" ]; then rd_root=$OBSERVER_INSTALL_TEST_PROC; fi
-  if [ "$os" = linux ]; then
+  # every other test hook. A fixture is walked like /proc on every OS, so a
+  # test never reads the host's real processes (macOS has no /proc and
+  # would otherwise fall through to ps).
+  if [ -n "${OBSERVER_INSTALL_TEST_PROC:-}" ] && [ -n "$from_dir" ]; then rd_root=$OBSERVER_INSTALL_TEST_PROC rd_walk=1; fi
+  if [ "$rd_walk" = 1 ]; then
     for rd_p in "$rd_root"/[0-9]*; do
       [ -e "$rd_p" ] || continue
       rd_exe=$(readlink "$rd_p/exe" 2>/dev/null) || continue
@@ -636,6 +640,11 @@ running_daemons() {
   elif have ps; then
     ps -axo pid=,command= 2>/dev/null | awk '{ c = $2; n = split(c, a, "/"); if (a[n] ~ /^observer/ && $3 == "start") print $1, c }' |
       while read -r rd_pid rd_cmd; do
+        # ps shows argv[0] as typed: a foreground `observer start` run from
+        # PATH is a bare name, which resolves through PATH (not the
+        # installer's working directory) so this install's own daemon is
+        # not reported as another install's.
+        case "$rd_cmd" in */*) ;; *) rd_cmd=$(command -v "$rd_cmd" 2>/dev/null || printf '%s' "$rd_cmd") ;; esac
         [ "$(real_path "$rd_cmd")" = "$rd_self" ] && continue
         say "$rd_pid $rd_cmd"
       done

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marmutapp/superbased-observer/internal/db/dbtemplate"
+
 	"github.com/marmutapp/superbased-observer/internal/db"
 	"github.com/marmutapp/superbased-observer/internal/govern"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/dashboard"
@@ -189,7 +191,7 @@ func TestGovernanceCannotHideEnrolmentOrPrivacy(t *testing.T) {
 // discards it, so a guard installed "beside capMap" would be absent from
 // every normal developer node.
 func TestGovernanceAPIRefusesHiddenRoutesOnLoopback(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "gov.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "gov.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
@@ -240,7 +242,7 @@ func TestGovernanceAPIRefusesHiddenRoutesOnLoopback(t *testing.T) {
 // active:false, (iii) every nav section is visible, and (iv) no route is
 // refused.
 func TestSoloNodeUnchangedByGovernance(t *testing.T) {
-	database, err := db.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "solo.db")})
+	database, err := dbtemplate.Open(context.Background(), db.Options{Path: filepath.Join(t.TempDir(), "solo.db")})
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

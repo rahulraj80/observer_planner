@@ -151,6 +151,12 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	res.ToolEvents = append(res.ToolEvents, stepFinishes...)
 	res.ToolEvents = append(res.ToolEvents, todos...)
 	res.TokenEvents = append(res.TokenEvents, tokens...)
+	// T-784: the zcode build that produced a session rides on its
+	// `session.version` row ("0.16.3", the same value schema_migration's
+	// app_version records). Stamp it for the sessions this slice touched;
+	// the store write is first-wins-unless-empty + bounded-token validated.
+	res.SessionToolVersions = append(res.SessionToolVersions,
+		loadSessionToolVersions(ctx, database, touchedSessions(res))...)
 	identitiesByRoot := make(map[string]git.Identity, len(rootCache))
 	for _, entry := range rootCache {
 		if entry.root != "" {
@@ -159,6 +165,52 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	}
 	adapter.ApplyProjectIdentityByRoot(&res, identitiesByRoot)
 	return res, nil
+}
+
+// touchedSessions collects the session ids that carry at least one new
+// tool or token row in res, so a version stamp is only emitted for a
+// session this slice actually ingested.
+func touchedSessions(res adapter.ParseResult) map[string]bool {
+	touched := map[string]bool{}
+	for i := range res.ToolEvents {
+		if id := res.ToolEvents[i].SessionID; id != "" {
+			touched[id] = true
+		}
+	}
+	for i := range res.TokenEvents {
+		if id := res.TokenEvents[i].SessionID; id != "" {
+			touched[id] = true
+		}
+	}
+	return touched
+}
+
+// loadSessionToolVersions reads the per-session `version` column (the
+// zcode build that produced the session) for tool-version capture
+// (migration 125), restricted to the sessions in touched. Ported from
+// kilocode's loader: a query error (an older schema without the column)
+// is TOLERATED and yields no stamps rather than failing the parse.
+func loadSessionToolVersions(ctx context.Context, db *sql.DB, touched map[string]bool) []models.SessionToolVersion {
+	if len(touched) == 0 {
+		return nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(version, '') FROM session`)
+	if err != nil {
+		return nil // schema without a version column: tolerate.
+	}
+	defer rows.Close()
+	var out []models.SessionToolVersion
+	for rows.Next() {
+		var id, ver string
+		if err := rows.Scan(&id, &ver); err != nil {
+			return out
+		}
+		if ver == "" || !touched[id] {
+			continue
+		}
+		out = append(out, models.SessionToolVersion{SessionID: id, Version: ver})
+	}
+	return out
 }
 
 type messageRow struct {

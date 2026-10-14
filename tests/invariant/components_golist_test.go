@@ -52,6 +52,7 @@ var (
 // tree strips the org server).
 func goListDeps(t *testing.T, cmdPath, goos, tags string) *depGraph {
 	t.Helper()
+	toolchainTest(t)
 	root := repoRoot(t)
 	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(cmdPath))); err != nil {
 		t.Skipf("%s is not in this tree", cmdPath)

@@ -73,6 +73,7 @@ func readRecordedEnvValue(t *testing.T, path, key string) (string, bool) {
 // the existing BYOK behavior preserved unchanged through the new
 // DisableFlagParsing + launcherArgsOrDone parser.
 func TestCopilotCLIModelIsReservedNotForwarded(t *testing.T) {
+	requireComponents(t, "capture.proxy")
 	dir := t.TempDir()
 	cfgPath := writeCopilotCLITestConfig(t, dir)
 	argvPath := filepath.Join(dir, "argv.out")

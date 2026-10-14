@@ -200,12 +200,13 @@ func (a *Adapter) ParseSessionFile(ctx context.Context, path string, fromOffset 
 	}
 
 	projectRoot, gitRemote, projectIdentity := a.resolveProjectRoot(path)
-	tools, tokens := a.parseTranscript(ctx, data, path, projectRoot, gitRemote)
+	p := a.parseTranscriptState(ctx, data, path, projectRoot, gitRemote)
 
 	res := adapter.ParseResult{
-		ToolEvents:  tools,
-		TokenEvents: tokens,
-		NewOffset:   int64(len(data)),
+		ToolEvents:          p.tools,
+		TokenEvents:         p.tokens,
+		SessionToolVersions: p.versions,
+		NewOffset:           int64(len(data)),
 	}
 	adapter.ApplyProjectIdentity(&res, projectIdentity)
 	return res, nil

@@ -52,7 +52,7 @@ export function FieldShell({
   return (
     <div className="space-y-1">
       {label !== undefined && (
-        <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-fg-3">
+        <div className="text-xs font-medium text-fg-2">
           {label}
         </div>
       )}

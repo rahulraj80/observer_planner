@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/marmutapp/superbased-observer/internal/db/migrations"
 )
@@ -183,7 +184,12 @@ func TestMigrationsRaceSafeAcrossConcurrentOpens(t *testing.T) {
 	for i := 0; i < N; i++ {
 		go func() {
 			<-start
-			d, err := Open(ctx, Options{Path: path})
+			// The losers wait for the winner's FULL first migration pass,
+			// which took over 30s under -race on a loaded 2-vCPU CI runner
+			// (D-604). A generous busy timeout keeps this a test of
+			// serialization, not of runner speed; Open hands it to the
+			// migration lock (migrationLockWait).
+			d, err := Open(ctx, Options{Path: path, BusyTimeout: 5 * time.Minute})
 			if err != nil {
 				errs <- err
 				dbs <- nil

@@ -432,13 +432,3 @@ func TestDefaultRootsShape(t *testing.T) {
 		}
 	}
 }
-
-func TestName(t *testing.T) {
-	t.Parallel()
-	if got := New().Name(); got != models.ToolGrokbot {
-		t.Errorf("Name() = %q, want %q", got, models.ToolGrokbot)
-	}
-	if models.ToolGrokbot == models.ToolGrok {
-		t.Fatal("grokbot and grok must be distinct tool constants")
-	}
-}

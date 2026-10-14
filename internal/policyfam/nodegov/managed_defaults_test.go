@@ -200,27 +200,3 @@ func TestEnterpriseDefaultBodyStaysSchema2(t *testing.T) {
 		t.Fatalf("enterprise default body schema = %d, want 2", body.Schema)
 	}
 }
-
-func TestVocabularyCarriesManagedDefaults(t *testing.T) {
-	v := Vocabulary()
-	if v.Schema != MaxSchema {
-		t.Fatalf("schema = %d", v.Schema)
-	}
-	found := false
-	for _, s := range v.NavSections {
-		if s.ID == "security" {
-			found = true
-			if s.ManagedDefault != VisibilityHidden || s.ManagedWhy == "" {
-				t.Fatalf("security vocab row = %+v", s)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("security missing from the vocabulary")
-	}
-	for _, s := range v.SettingsSections {
-		if s.ManagedDefault == "" {
-			t.Fatalf("settings %q has no managed default", s.ID)
-		}
-	}
-}

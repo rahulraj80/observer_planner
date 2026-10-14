@@ -109,6 +109,7 @@ func TestOrgGrantWiring_HookAndDaemonReadTheSameGrant(t *testing.T) {
 // can open on this machine, a wildcard bind mapped to loopback, "" when the
 // address cannot be parsed (the line then offers the CLI command only).
 func TestRequestAccessBase(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	t.Setenv("OBSERVER_DASHBOARD_ADDR", "")
 	for _, tc := range []struct{ addr, want string }{
 		{"", "http://127.0.0.1:8081"},
@@ -132,6 +133,7 @@ func TestRequestAccessBase(t *testing.T) {
 // the daemon's guard stamp the same dashboard origin, so the vendor reply,
 // the proxy deny and the dashboard link one request form.
 func TestRequestAccessBaseWiredIntoHookAndDaemon(t *testing.T) {
+	requireCompiled(t, "ui.dashboard")
 	t.Setenv("OBSERVER_DASHBOARD_ADDR", "")
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "observer.db")

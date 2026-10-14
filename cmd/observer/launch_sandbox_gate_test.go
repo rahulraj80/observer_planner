@@ -24,7 +24,7 @@ import (
 )
 
 // TestSandboxFallbackAppliesToEveryLaunchPath pins T-497 (D-333): the org's
-// "Proxied tool without a sandbox" choice is ONE node rule, so the
+// "No sandbox available" choice is ONE node rule, so the
 // dashboard's fresh launch and `observer <tool>` typed in a terminal reach
 // the same answer for the same guard, tool and hook state. Before T-497 only
 // the dashboard refused; the CLI rows below were red.
@@ -112,7 +112,7 @@ func TestSandboxFallbackAppliesToEveryLaunchPath(t *testing.T) {
 						t.Fatalf("%s: err = %v, want the org sandbox refusal", p.path, p.err)
 					}
 					// Honest text: names the org setting by its label and value.
-					for _, want := range []string{tc.tool, `"Proxied tool without a sandbox"`, "org_disallow"} {
+					for _, want := range []string{tc.tool, `"No sandbox available"`, "org_disallow"} {
 						if !strings.Contains(p.err.Error(), want) {
 							t.Errorf("%s: refusal %q does not name %s", p.path, p.err, want)
 						}

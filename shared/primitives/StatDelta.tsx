@@ -46,6 +46,20 @@ const DELTA_GLYPH: Record<StatDeltaKind, string> = {
   new: "",
   none: "",
 };
+/**
+ * StatDeltaTone is how a move is coloured. "cost" (the default) is the
+ * cost-aware convention above (up = danger, down = success). "neutral" is for
+ * a metric with no direction of good (sessions, actions: more is not worse):
+ * the glyph still shows the direction, the colour stays muted (design system
+ * "Emphasis": a delta is coloured only when its metric has a direction of good).
+ */
+export type StatDeltaTone = "cost" | "neutral";
+
+/** deltaToneClass returns the text colour class for a delta kind under a tone. */
+export function deltaToneClass(kind: StatDeltaKind, tone: StatDeltaTone = "cost"): string {
+  return tone === "neutral" ? "text-fg-3" : DELTA_TONE[kind];
+}
+
 // SIGN_KIND classifies a numeric fraction by Math.sign.
 const SIGN_KIND: Record<string, StatDeltaKind> = {
   "1": "up",
@@ -83,18 +97,20 @@ export type StatDeltaProps = {
   deltaLabel?: string;
   /** Concrete prior-period value (`vs prior 30d $6,073.08`); wins over deltaLabel. */
   deltaPrior?: ReactNode;
+  /** How a move is coloured (default "cost"; see StatDeltaTone). */
+  tone?: StatDeltaTone;
 };
 
 /**
  * StatDelta renders the delta badge and its prior / label as inline siblings,
  * for the caller's flex row (StatCard's sub row, HeroStat's delta row).
  */
-export function StatDelta({ delta, deltaLabel, deltaPrior }: StatDeltaProps) {
+export function StatDelta({ delta, deltaLabel, deltaPrior, tone = "cost" }: StatDeltaProps) {
   const d = resolveStatDelta(delta);
   return (
     <>
       {d && (
-        <span className={clsx("inline-flex items-center gap-0.5 font-semibold", DELTA_TONE[d.kind])}>
+        <span className={clsx("inline-flex items-center gap-0.5 font-semibold", deltaToneClass(d.kind, tone))}>
           {DELTA_GLYPH[d.kind]}
           {d.text}
         </span>

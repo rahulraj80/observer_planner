@@ -29,12 +29,6 @@ func writeFixture(t *testing.T, lines []string) string {
 	return path
 }
 
-func TestAdapter_Name(t *testing.T) {
-	if New().Name() != models.ToolCopilot {
-		t.Fatalf("name: %s", New().Name())
-	}
-}
-
 // TestAdapter_pathShapeFilters covers the string-based shape filters
 // (isLegacySessionPath / isModernSessionPath) which intentionally
 // normalize Windows backslashes so they recognize foreign-OS paths

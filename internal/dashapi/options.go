@@ -14,6 +14,7 @@ import (
 	"github.com/marmutapp/superbased-observer/internal/intelligence/alignment"
 	"github.com/marmutapp/superbased-observer/internal/intelligence/cost"
 	"github.com/marmutapp/superbased-observer/internal/orgclient"
+	"github.com/marmutapp/superbased-observer/internal/planlimitssvc"
 	"github.com/marmutapp/superbased-observer/internal/store"
 )
 
@@ -519,6 +520,10 @@ type Options struct {
 	// the cmd-side status / accept / withdraw functions `observer intel`
 	// also runs. Nil makes /api/intel/* answer 501.
 	OrgIntel OrgIntelManager
+	// Plans is the Plans & limits service (internal/planlimitssvc): the
+	// page model, account lifecycle, refresh and the status line feed. Nil
+	// makes every /api/plans route answer 503.
+	Plans *planlimitssvc.Service
 	// Projects carries the [projects] tunables (Projects-page spend/ROI/
 	// commit-alignment arc, docs/plans/projects-page-roi-and-commit-
 	// alignment-plan-2026-09-21.md). Consumed for CommitLinkWindowDays

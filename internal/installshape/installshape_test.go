@@ -1,12 +1,10 @@
 package installshape
 
 import (
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 // fs is a fake Resolve: path -> resolved path. A key that is absent does not
@@ -147,27 +145,8 @@ func TestRulesOrder(t *testing.T) {
 
 // TestNoForbiddenImports pins purity (CLAUDE.md module boundaries).
 func TestNoForbiddenImports(t *testing.T) {
-	forbidden := []string{"database/sql", "net/http", "os", "os/exec", "path/filepath", "github.com/fsnotify/fsnotify"}
-	matches, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	for _, f := range matches {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range af.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			for _, bad := range forbidden {
-				if p == bad {
-					t.Errorf("%s imports %q: internal/installshape must stay pure", f, bad)
-				}
-			}
-		}
-	}
+	importpin.Check(t, importpin.Spec{
+		Forbidden: []string{"database/sql", "net/http", "os", "os/exec", "path/filepath", "github.com/fsnotify/fsnotify"},
+		Reason:    "internal/installshape must stay pure",
+	})
 }

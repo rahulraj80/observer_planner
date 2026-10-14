@@ -1,8 +1,6 @@
 package guardposture
 
 import (
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/marmutapp/superbased-observer/internal/testsupport/importpin"
 )
 
 func TestPostureRoundTrip(t *testing.T) {
@@ -408,27 +408,15 @@ func TestDrainKeepsTailAcrossTheCap(t *testing.T) {
 // is read on the hook path.
 func TestNoForbiddenImports(t *testing.T) {
 	const modulePrefix = "github.com/marmutapp/superbased-observer/"
-	matches, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	for _, f := range matches {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		af, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, imp := range af.Imports {
-			p := strings.Trim(imp.Path.Value, `"`)
-			if strings.HasPrefix(p, modulePrefix) && p != modulePrefix+"internal/fsatomic" {
-				t.Errorf("%s imports %q: guardposture is stdlib + fsatomic only", f, p)
-			}
+	importpin.Check(t, importpin.Spec{
+		ForbiddenPrefixes: []string{modulePrefix},
+		Except:            []string{modulePrefix + "internal/fsatomic"},
+		Custom: func(_, p string) string {
 			if !strings.HasPrefix(p, modulePrefix) && strings.Contains(p, ".") {
-				t.Errorf("%s imports third-party %q", f, p)
+				return "third-party import"
 			}
-		}
-	}
+			return ""
+		},
+		Reason: "guardposture is stdlib + fsatomic only",
+	})
 }

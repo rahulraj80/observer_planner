@@ -141,6 +141,9 @@ var capabilityEra = map[int]struct{ MaxSchema, KeyGen int }{
 	4: {3, 4},
 	5: {3, 4},
 	6: {3, 4},
+	// Level 7 (the Plans & limits page) builds always advertise the schema
+	// and keys tokens; this row is only the fallback for a hand-written one.
+	7: {3, 4},
 }
 
 // TargetForCapabilities resolves the Target a node advertises, and false when

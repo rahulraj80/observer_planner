@@ -46,6 +46,12 @@ export const PAGE_ROUTES: readonly PageRoute[] = [
     Page: lazy(() => import("@/pages/Cost").then((m) => ({ default: m.CostPage }))),
   },
   {
+    navId: "plans",
+    path: "plans",
+    component: "core",
+    Page: lazy(() => import("@/pages/Plans").then((m) => ({ default: m.PlansPage }))),
+  },
+  {
     navId: "analysis",
     path: "analysis",
     component: "core",
@@ -185,6 +191,7 @@ export const NAV_COMPONENTS: Readonly<Record<string, string>> = {
   live: "core",
   search: "compression.indexing",
   cost: "core",
+  plans: "core",
   analysis: "core",
   sessions: "core",
   actions: "core",

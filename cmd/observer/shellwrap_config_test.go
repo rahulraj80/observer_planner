@@ -87,6 +87,7 @@ func TestDefaultOrgGovernedWithoutConfig(t *testing.T) {
 // verb it runs (P3-09), so every wrapped verb, on every host shape, and the
 // bridge's `shell-wrap launch-env`, must register a --config flag.
 func TestEveryShimVerbAcceptsConfig(t *testing.T) {
+	requireCompiled(t, "terminals")
 	root := newRootCmd()
 	if lc, _, err := root.Find([]string{"shell-wrap", "launch-env"}); err != nil || lc.Flags().Lookup("config") == nil && lc.InheritedFlags().Lookup("config") == nil {
 		t.Fatalf("shell-wrap launch-env takes no --config (%v)", err)
