@@ -2184,7 +2184,11 @@ export type CacheHealthSummary = {
   max_rate_threshold: number;
   gate_passed: boolean;
   bucket_mispredicts: number;
+  /** Denominator for bucket_mispredicts (events carrying a prediction). */
+  predicted_events?: number;
   inconsistent_rewrite_count: number;
+  /** Denominator for inconsistent_rewrite_count (rewrite events). */
+  rewrite_events?: number;
   dominant_cause?: CacheHealthDominantCause;
   // Count of non-Anthropic api_turns rows over the last 7 days —
   // the proxy captured them (cost / tokens / model attribution all

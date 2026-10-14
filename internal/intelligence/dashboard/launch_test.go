@@ -79,6 +79,8 @@ type fakeLaunchManager struct {
 	// snapshot is the live-session list Snapshot() returns. Nil ⇒ empty
 	// (unchanged default), so existing tests see no live runs.
 	snapshot []LaunchInfo
+	// closed records every handle Close was called with, in order.
+	closed []string
 }
 
 func (m *fakeLaunchManager) Create(spec LaunchSpec) (string, error) {
@@ -156,7 +158,7 @@ func (m *fakeLaunchManager) AcquireWriterRemote(RemoteWriterRequest) (LaunchWrit
 	return nil, ErrLaunchExecuteUnavailable
 }
 
-func (m *fakeLaunchManager) Close(string)                                   {}
+func (m *fakeLaunchManager) Close(h string)                                 { m.closed = append(m.closed, h) }
 func (m *fakeLaunchManager) SessionForRun(string) (string, bool)            { return "", false }
 func (m *fakeLaunchManager) Snapshot() []LaunchInfo                         { return m.snapshot }
 func (m *fakeLaunchManager) RevokeAllRemoteWriters(string) int              { return 0 }
@@ -722,11 +724,52 @@ func TestLaunchAdminListAndDelete(t *testing.T) {
 		t.Errorf("list body missing sessions key: %s", rec.Body.String())
 	}
 
+	// An unknown ref is an honest 404, never a 204 that closed nothing.
 	req = httptest.NewRequest(http.MethodDelete, "/api/launch/some-handle", nil)
 	rec = httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want 204", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete unknown status = %d, want 404", rec.Code)
+	}
+}
+
+// TestLaunchAdminDeleteResolvesRef pins T-803: the demo roll reaped four
+// daemon-launched terminals with DELETE /api/launch/<session_id>; each got
+// 204 and all four kept running, because the route closed whatever string it
+// was given and the manager treats an unknown handle as a no-op. A ref now
+// resolves to a real handle (token, run_id or session_id) or fails honestly.
+func TestLaunchAdminDeleteResolvesRef(t *testing.T) {
+	cases := []struct {
+		name       string
+		ref        string
+		wantCode   int
+		wantClosed []string
+	}{
+		{"token", "TOK-1", http.StatusNoContent, []string{"TOK-1"}},
+		{"session id of one terminal", "sess-a", http.StatusNoContent, []string{"TOK-1"}},
+		{"run id", "run-2", http.StatusNoContent, []string{"TOK-2"}},
+		{"session id shared by two terminals", "sess-shared", http.StatusConflict, nil},
+		{"unknown", "nope", http.StatusNotFound, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lm := &fakeLaunchManager{snapshot: []LaunchInfo{
+				{ID: "TOK-1", SessionID: "sess-a", RunID: "run-1"},
+				{ID: "TOK-2", SessionID: "sess-b", RunID: "run-2"},
+				{ID: "TOK-3", SessionID: "sess-shared", RunID: "run-3"},
+				{ID: "TOK-4", SessionID: "sess-shared", RunID: "run-4"},
+			}}
+			s := newLaunchTestServer(t, lm)
+			req := httptest.NewRequest(http.MethodDelete, "/api/launch/"+tc.ref, nil)
+			rec := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rec, req)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("DELETE %s = %d, want %d (%s)", tc.ref, rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if strings.Join(lm.closed, ",") != strings.Join(tc.wantClosed, ",") {
+				t.Fatalf("closed %v, want %v", lm.closed, tc.wantClosed)
+			}
+		})
 	}
 }
 

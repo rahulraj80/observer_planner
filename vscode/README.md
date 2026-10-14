@@ -67,13 +67,31 @@ If something looks off, run **SuperBased: Doctor**. The **Get Started with Super
 | **Terminal profile** | Pre-sets the proxy environment so agent CLIs started from it route through SuperBased. |
 | **Instruction CodeLens** | Refresh or preview suggestions for your agent instruction files from captured patterns. |
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-detail.png" alt="Session detail: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model" width="860">
-</p>
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/sessions.png" alt="Sessions page: one row per coding-agent session with tool, model, start time, elapsed time, actions and cost, plus tag totals" width="420"><br><sub><b>Sessions:</b> every session from every agent, with cost and tags.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/cache.png" alt="Cache page: live prompt caches with time left before they expire, cache ratio, reads and writes, and provider coverage" width="420"><br><sub><b>Cache:</b> which prompt caches are warm and when they go cold.</sub></td>
+  </tr>
+</table>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/terminals-workspace.png" alt="Terminals page: Claude Code, Codex, Antigravity CLI and Copilot CLI running side by side as live terminals in one dashboard" width="860">
 </p>
+
+## Inside a session
+
+Click any session to open its detail view. Four of its tabs:
+
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-detail.png" alt="Session detail, Overview tab: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model" width="420"><br><sub><b>Overview:</b> cost, tokens by billing tier and the models used.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-messages.png" alt="Session detail, Messages tab: every message in the session with time, role, model, tool calls and cost" width="420"><br><sub><b>Messages:</b> each message with its model, tool calls and cost.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cost-and-limits-tab.png" alt="Session detail, Cost and limits tab: low, typical and high cost for the next message and the 5-hour and weekly limit" width="420"><br><sub><b>Cost &amp; limits:</b> what the next message will cost and how much of your limit is left.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cache-tab.png" alt="Session detail, Cache tab: the session's live cache and when it expires, cache hits, writes, rewrites and the read to write ratio" width="420"><br><sub><b>Cache:</b> the session's live cache, hits, writes and rewrites.</sub></td>
+  </tr>
+</table>
 
 ## Settings
 

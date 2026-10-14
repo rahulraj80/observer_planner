@@ -1448,7 +1448,7 @@ const MAX_ROW_TAGS = 2;
 // three text columns that can hold an unbounded string (project, tool,
 // models) also set meta.truncate so they clip instead of growing.
 //
-// Sum without the optional scoring columns: 1378px. That fits inside the
+// Sum without the optional scoring columns: 1386px. That fits inside the
 // ~1620px of table area a 1920px viewport leaves after the sidebar and the
 // page/card padding, with room to spare; at 1440px the wrapper scrolls the
 // last ~140px, with a visible scrollbar and an edge fade to say so.
@@ -1459,10 +1459,11 @@ const COL_W = {
   // "Antigravity CLI") still read; longer ones ellipsize with the badge's
   // own tooltip carrying the full name.
   tool: 120,
-  // Client: one small pill, "desktop · claude-desktop" being the widest
-  // common value. Deliberately narrow; the pill's own tooltip carries the
+  // Client: one small pill. The cell renders the compact badge (glyph +
+  // host, T-803: "cli · cla..." was all that fit), so 104 holds the common
+  // hosts ("claude-code", "vscode"); the pill's own tooltip carries the
   // full gloss + host, and the cell truncates rather than growing.
-  client: 96,
+  client: 104,
   project: 132,
   tags: 116,
   models: 108,
@@ -1815,6 +1816,7 @@ function buildColumns(
       cell: ({ row }) => (
         <span className="flex min-w-0">
           <SurfaceBadge
+            compact
             surface={row.original.surface}
             host={row.original.surface_host}
             className="min-w-0 max-w-full [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"
@@ -2214,7 +2216,7 @@ function buildColumns(
           // without cache_events keep the legacy single value.
           if (r.redundancy_ratio_wasteful != null) {
             return (
-              <Tooltip content="total / wasteful subset (spec §14.1)">
+              <Tooltip content="total / wasteful subset">
                 <span tabIndex={0} className="focus:outline-none">
                   {fmtPct(r.redundancy_ratio)}
                   <span className="ml-1 text-fg-3">

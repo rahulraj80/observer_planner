@@ -10,7 +10,7 @@ test("capturePillView: one row per setup status, never 'Paused' for a missing to
     ["api_key_ready", "Active", "active"],
     // Node 1, 2026-10-06: Claude Code is not installed there; the pill read
     // "Paused" while every other tool was being captured.
-    ["claude_not_installed", "No Claude Code", "absent"],
+    ["claude_not_installed", "No Claude Code here", "absent"],
     ["something_new", "Not routed", "paused"],
     [undefined, "Checking", "absent"],
     [null, "Checking", "absent"],
@@ -25,4 +25,13 @@ test("capturePillView: one row per setup status, never 'Paused' for a missing to
     assert.ok(CAPTURE_DOT[v.state], `CAPTURE_DOT has a "${v.state}" state`);
   }
   assert.match(capturePillView("something_new").tooltip, /something_new/);
+});
+
+test("capturePillView: no pill at all when Claude Code is not on this machine", () => {
+  // T-803: the pill read "No Claude Code" beside a dashboard full of Claude
+  // Code sessions captured from another OS. Nothing to report here: hidden.
+  assert.equal(capturePillView("claude_not_installed").hidden, true);
+  for (const s of ["oauth_ready", "api_key_ready", "something_new", undefined]) {
+    assert.ok(!capturePillView(s).hidden, String(s));
+  }
 });

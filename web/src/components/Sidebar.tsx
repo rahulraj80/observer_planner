@@ -8,12 +8,12 @@ import { filterNavGroups, useGovernance, useGovernanceVisibility } from "@/lib/g
 import { hiddenNavIds } from "@/lib/visibility";
 import { filterNavByComponents } from "@/lib/componentState";
 import { useInactiveNavIds } from "@/lib/useComponents";
-import { fmtBytes, fmtCompact } from "@/lib/format";
+import { fmtBytes, fmtCompact, fmtInt } from "@/lib/format";
 import { BrandMark, Icon, LiveDot, Tooltip } from "@/components/primitives";
 import { CAPTURE_DOT, liveDotProps, withDotClass } from "@/lib/liveSignals";
 import { slideFromX } from "@shared/lib/motion";
 import type { StatusSnapshot, SetupClaude, WatcherHealth } from "@/lib/types";
-import { WATCHER_LINE_LABEL, watcherLineState } from "@/lib/watcherLine";
+import { WATCHER_LINE_LABEL, WATCHER_LINE_TOOLTIP, watcherLineState } from "@/lib/watcherLine";
 
 export function Sidebar({
   open = false,
@@ -132,7 +132,18 @@ export function Sidebar({
         )}
       >
         <Brand onClose={onClose} collapsed={collapsed} reveal={reveal} />
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
+        {/* The nav scrolls when the window is shorter than the full list
+            (at 1440x900 the Configure group sits below the fold). The bottom
+            fade says "more below" instead of a row that looks cut off, and
+            pb-8 keeps the last row clear of the fade once scrolled to the
+            end (T-803). */}
+        <nav
+          className="flex-1 overflow-y-auto px-3 pb-8 pt-4"
+          style={{
+            maskImage: "linear-gradient(to bottom, black calc(100% - 28px), transparent)",
+            WebkitMaskImage: "linear-gradient(to bottom, black calc(100% - 28px), transparent)",
+          }}
+        >
           {navGroups.map((g) => (
             <div key={g.id} className="mb-5">
               <div
@@ -198,7 +209,13 @@ export function Sidebar({
                           {it.label}
                         </span>
                         {counts[it.id] != null && (
+                          // The gutter numbers are ALL-TIME totals, while the
+                          // pages window their tables (T-803: "Sessions 5.2K"
+                          // here beside "1,871" on the 30-day Sessions table).
+                          // The label says so for screen readers and on hover.
                           <span
+                            title={`${fmtInt(counts[it.id] as number)} in total, all time`}
+                            aria-label={`${fmtInt(counts[it.id] as number)} in total, all time`}
                             className={clsx(
                               "shrink-0 font-mono text-[10px] tabular-nums text-fg-4",
                               collapsed && "lg:hidden",
@@ -397,20 +414,26 @@ function Foot({
   const misrouted = (watcher?.suspected_misrouted_count ?? 0) > 0;
   return (
     <div className="border-t border-line-1 px-4 py-3 text-[11px] text-fg-3">
-      <div className="mb-0.5 flex items-center gap-1.5 text-fg-2">
-        <LiveDot
-          {...withDotClass(liveDotProps(CAPTURE_DOT, watcherState === "active" ? "active" : "paused"), "h-1.5 w-1.5 shrink-0")}
-        />
-        watcher {WATCHER_LINE_LABEL[watcherState]}
-        {setup?.proxy_port ? (
-          <>
-            {" · "}
-            <span className="font-mono text-fg-3">
-              proxy {setup.proxy_port}
-            </span>
-          </>
-        ) : null}
-      </div>
+      <Tooltip maxWidth={300} content={WATCHER_LINE_TOOLTIP[watcherState]}>
+        <div tabIndex={0} className="mb-0.5 flex items-center gap-1.5 text-fg-2 focus:outline-none">
+          <LiveDot
+            {...withDotClass(
+              liveDotProps(
+                CAPTURE_DOT,
+                watcherState === "active" ? "active" : watcherState === "off" ? "paused" : "absent",
+              ),
+              "h-1.5 w-1.5 shrink-0",
+            )}
+          />
+          {WATCHER_LINE_LABEL[watcherState]}
+          {setup?.proxy_port ? (
+            <>
+              {" · "}
+              <span className="font-mono text-fg-3">proxy :{setup.proxy_port}</span>
+            </>
+          ) : null}
+        </div>
+      </Tooltip>
       {(lagging || misrouted) && (
         <Tooltip
           maxWidth={320}
@@ -435,15 +458,17 @@ function Foot({
         </Tooltip>
       )}
       {status && (
-        <div className="font-mono text-[10px] text-fg-4">
-          schema v{status.schema_version}
-          {status.db_size_bytes != null && (
-            <> · {fmtBytes(status.db_size_bytes)}</>
-          )}
-          {status.uptime_seconds != null && status.uptime_seconds > 0 && (
-            <> · up {fmtUptime(status.uptime_seconds)}</>
-          )}
-        </div>
+        // The schema version is a support detail: it rides the tooltip, not
+        // the line (T-803). The database size stays visible: it is the
+        // disk Observer uses on this machine.
+        <Tooltip content={`Database schema version ${status.schema_version}`}>
+          <div tabIndex={0} className="font-mono text-[10px] text-fg-4 focus:outline-none">
+            {status.db_size_bytes != null ? <>database {fmtBytes(status.db_size_bytes)}</> : <>database</>}
+            {status.uptime_seconds != null && status.uptime_seconds > 0 && (
+              <> · up {fmtUptime(status.uptime_seconds)}</>
+            )}
+          </div>
+        </Tooltip>
       )}
       {status?.last_action_at && (
         <div className="font-mono text-[10px] text-fg-4">

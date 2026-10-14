@@ -552,8 +552,13 @@ func printPlanView(out io.Writer, v planlimitssvc.View, now time.Time) {
 		if p := planFirst(c.PlanLabel, c.PlanCode); p != "" {
 			title += " " + p
 		}
+		// The terminal is the owner's own, so the observed login still shows
+		// here when there is no typed label, exactly as before Identity was
+		// split out of Label (T-803 moved it out of the dashboard card title).
 		if c.Label != "" {
 			title += " (" + c.Label + ")"
+		} else if c.Identity != "" {
+			title += " (" + c.Identity + ")"
 		}
 		line := title
 		if c.AccountID != "" {

@@ -7,7 +7,10 @@ import {
   SOURCE_HOWTO,
   SOURCE_LABELS,
   canSave,
+  cardPill,
   cardTitle,
+  identityText,
+  maskIdentity,
   errorText,
   fmtAmount,
   methodOptions,
@@ -114,4 +117,37 @@ test("every source has a label and a one-line instruction", () => {
 test("server errors read as sentences", () => {
   assert.equal(errorText('{"error":"turn on the experimental switch for this provider first"}'), "Turn on the experimental switch for this provider first");
   assert.equal(errorText(""), "The request failed");
+});
+
+test("a login never lands in the card title and is masked below it", () => {
+  const c: PlanCard = {
+    id: "passive:chatgpt:k1",
+    provider: "chatgpt",
+    sources: [],
+    status: "ok",
+    health: "fresh",
+    plan_label: "Pro",
+    identity: "santosh@example.com",
+    windows: [],
+    balances: [],
+    spend: [],
+  };
+  assert.equal(cardTitle(c), "ChatGPT and Codex Pro");
+  assert.equal(identityText(c), "Signed in as s***h@example.com");
+  // An email that reached the label (an older server) stays out of the title too.
+  const old = { ...c, identity: undefined, label: "santosh@example.com" };
+  assert.equal(cardTitle(old), "ChatGPT and Codex Pro");
+  assert.equal(identityText(old), "Signed in as s***h@example.com");
+  assert.equal(identityText({ ...c, identity: "" }), "");
+  assert.equal(maskIdentity("ab@x.io"), "a***@x.io");
+  assert.equal(maskIdentity("octocat"), "o***t");
+});
+
+test("a card pill never claims a refresh is running", () => {
+  assert.equal(cardPill({ status: "ok", health: "fresh" }), null);
+  assert.equal(cardPill({ status: "ok", health: "stale" })?.label, "Out of date");
+  assert.equal(cardPill({ status: "throttled", health: "stale" })?.label, "Limit reached");
+  for (const health of ["fresh", "stale", "waiting"]) {
+    assert.notEqual(cardPill({ status: "ok", health })?.label, "Updating");
+  }
 });

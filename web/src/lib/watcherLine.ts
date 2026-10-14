@@ -15,9 +15,18 @@ export function watcherLineState(w: WatcherHealth | null | undefined): WatcherLi
   return w.watcher_running ? "active" : "off";
 }
 
-// The label text after "watcher " for each state.
+// The footer line for each state. T-803: "watcher off" was jargon; the
+// line now says what it means for the user (is new activity being
+// recorded?) and the tooltip says why.
 export const WATCHER_LINE_LABEL: Record<WatcherLineState, string> = {
-  active: "active",
-  off: "off",
-  unknown: "-",
+  active: "Capturing",
+  off: "Not capturing",
+  unknown: "Checking capture",
+};
+
+// The tooltip on that line.
+export const WATCHER_LINE_TOOLTIP: Record<WatcherLineState, string> = {
+  active: "Observer is watching your AI tools' session files and recording new activity as it happens.",
+  off: "This dashboard runs without the file watcher, so it shows what is already recorded but records nothing new. Start Observer with observer start to capture again.",
+  unknown: "Reading the watcher status.",
 };

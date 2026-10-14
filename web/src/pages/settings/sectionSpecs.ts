@@ -260,7 +260,7 @@ export const SECTION_SPECS: Record<string, SectionSpec> = {
     id: "browser",
     path: ["Browser"],
     description:
-      "Browser-chat capture (opt-in MV3 extension → chatgpt-web / claude-web / perplexity-web / gemini-web / copilot-web). The granularity ceiling is the daemon's §5.1 clamp: the maximum a captured turn is stored at, regardless of what the extension sent. usage_only = counts + model + latency only (no prompt/response text); redacted = client-redacted content; full = raw content (still passes the server scrub seam). Lower the ceiling to keep on-screen text out of the DB while still tracking tokens and cost.",
+      "Browser-chat capture (opt-in MV3 extension → chatgpt-web / claude-web / perplexity-web / gemini-web / copilot-web). The granularity ceiling is the most detail the daemon keeps: the maximum a captured turn is stored at, regardless of what the extension sent. usage_only = counts + model + latency only (no prompt/response text); redacted = client-redacted content; full = raw content (still passes the server scrub seam). Lower the ceiling to keep on-screen text out of the DB while still tracking tokens and cost.",
     fields: [
       {
         id: "GranularityCeiling",

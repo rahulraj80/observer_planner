@@ -384,6 +384,7 @@ const CAPTURE_PILL_TONE: Record<CapturePillState, string> = {
 
 function CaptureStatePill({ setup }: { setup: SetupClaude | null }) {
   const view = capturePillView(setup?.status);
+  if (view.hidden) return null;
   return (
     <Tooltip content={view.tooltip}>
       <span

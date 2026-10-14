@@ -1575,8 +1575,12 @@ func (s *Server) handleStatusScoped(w http.ResponseWriter, r *http.Request) {
 	}
 	out := counts{Days: days}
 
-	// sessions: started_at in window, session-table direct. Marker-only
-	// probe sessions are excluded so this stat agrees with the Sessions list.
+	// sessions: ACTIVE in the window (started in it, or any action / api
+	// turn / token row in it), the same sessionActiveInWindow predicate the
+	// Sessions list uses, so the two numbers agree for the same window
+	// (T-803: Overview said 1,861 and the Sessions table 1,871 over 30 days,
+	// because this count used started_at alone). Marker-only probe sessions
+	// are excluded so this stat agrees with the Sessions list.
 	// Model filter: sessions and actions are session grain (sessions that
 	// used the model); api_turns and token_usage carry their own model
 	// column (turn grain), like every spend surface.
@@ -1584,10 +1588,10 @@ func (s *Server) handleStatusScoped(w http.ResponseWriter, r *http.Request) {
 	sExtra, sArgs := scoped(true) // sessions has tool + project_id directly
 	mExtra, mArgs := modelfilter.AndSessionsUsing("id", model)
 	sExtra, sArgs = sExtra+mExtra, append(sArgs, mArgs...)
-	sUpper, sArgs := upper("started_at", sArgs)
-	sQ := `SELECT COUNT(*) FROM sessions WHERE started_at >= ? AND ` +
-		nonEmptySessionPredicateSessions + sExtra + sUpper
-	_ = s.db().QueryRowContext(r.Context(), sQ, append([]any{since}, sArgs...)...).Scan(&out.Sessions)
+	winPred, winArgs := sessionActiveInWindow("sessions", sinceT, untilT)
+	sQ := `SELECT COUNT(*) FROM sessions WHERE ` + winPred + ` AND ` +
+		nonEmptySessionPredicateSessions + sExtra
+	_ = s.db().QueryRowContext(r.Context(), sQ, append(winArgs, sArgs...)...).Scan(&out.Sessions)
 
 	// api_turns
 	atExtra, atArgs := scoped(false) // api_turns: project_id direct, tool via session
@@ -1971,6 +1975,37 @@ const nonEmptySessionPredicateSessions = `(EXISTS (SELECT 1 FROM actions a WHERE
 	` OR EXISTS (SELECT 1 FROM token_usage tu WHERE tu.session_id = sessions.id)` +
 	` OR EXISTS (SELECT 1 FROM api_turns t WHERE t.session_id = sessions.id))`
 
+// sessionActiveInWindow is the ONE "this session belongs to the window"
+// predicate: it started in [since, until) OR it has any action, api turn or
+// token row in it. The Sessions list (its rows, total and scored_count) and
+// the Overview Sessions tile (/api/status/scoped) both use it, so the two
+// numbers agree for the same window. q is the sessions table's name or
+// alias in the caller's FROM. A zero since means no lower bound (only the
+// started_at upper bound applies, with no activity branches); a zero until
+// means no upper bound. Both zero returns a tautology.
+func sessionActiveInWindow(q string, since, until time.Time) (string, []any) {
+	if since.IsZero() {
+		if until.IsZero() {
+			return "1=1", nil
+		}
+		return q + ".started_at < ?", []any{until.Format(time.RFC3339Nano)}
+	}
+	sinceStr := since.Format(time.RFC3339Nano)
+	if !until.IsZero() {
+		untilStr := until.Format(time.RFC3339Nano)
+		return `((` + q + `.started_at >= ? AND ` + q + `.started_at < ?)
+				OR EXISTS (SELECT 1 FROM actions a2 WHERE a2.session_id = ` + q + `.id AND a2.timestamp >= ? AND a2.timestamp < ?)
+				OR EXISTS (SELECT 1 FROM api_turns at2 WHERE at2.session_id = ` + q + `.id AND at2.timestamp >= ? AND at2.timestamp < ?)
+				OR EXISTS (SELECT 1 FROM token_usage tu2 WHERE tu2.session_id = ` + q + `.id AND tu2.timestamp >= ? AND tu2.timestamp < ?))`,
+			[]any{sinceStr, untilStr, sinceStr, untilStr, sinceStr, untilStr, sinceStr, untilStr}
+	}
+	return `(` + q + `.started_at >= ?
+				OR EXISTS (SELECT 1 FROM actions a2 WHERE a2.session_id = ` + q + `.id AND a2.timestamp >= ?)
+				OR EXISTS (SELECT 1 FROM api_turns at2 WHERE at2.session_id = ` + q + `.id AND at2.timestamp >= ?)
+				OR EXISTS (SELECT 1 FROM token_usage tu2 WHERE tu2.session_id = ` + q + `.id AND tu2.timestamp >= ?))`,
+		[]any{sinceStr, sinceStr, sinceStr, sinceStr}
+}
+
 // parseSessionsSortParams reads sort_by / sort_dir from the request, clamping
 // sort_by to a fixed allow-list (defaulting to started_at) so the value is
 // never interpolated unchecked into SQL. Direction defaults to descending; only
@@ -2217,7 +2252,6 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		args = append(args, host)
 	}
 	if !since.IsZero() {
-		sinceStr := since.Format(time.RFC3339Nano)
 		// Reconcile the Sessions window with the cost engine. /api/cost and
 		// /api/models window by turn/token TIMESTAMP (cost/summary.go), so a
 		// long-running session that STARTED before the window but has RECENT
@@ -2235,20 +2269,9 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		// same exclusive upper bound, so a bounded window (e.g. a Calendar
 		// day-click) can't leak a session whose only in-window activity is
 		// actually AFTER `until`.
-		if !until.IsZero() {
-			untilStr := until.Format(time.RFC3339Nano)
-			where = append(where, `((s.started_at >= ? AND s.started_at < ?)
-				OR EXISTS (SELECT 1 FROM actions a2 WHERE a2.session_id = s.id AND a2.timestamp >= ? AND a2.timestamp < ?)
-				OR EXISTS (SELECT 1 FROM api_turns at2 WHERE at2.session_id = s.id AND at2.timestamp >= ? AND at2.timestamp < ?)
-				OR EXISTS (SELECT 1 FROM token_usage tu2 WHERE tu2.session_id = s.id AND tu2.timestamp >= ? AND tu2.timestamp < ?))`)
-			args = append(args, sinceStr, untilStr, sinceStr, untilStr, sinceStr, untilStr, sinceStr, untilStr)
-		} else {
-			where = append(where, `(s.started_at >= ?
-				OR EXISTS (SELECT 1 FROM actions a2 WHERE a2.session_id = s.id AND a2.timestamp >= ?)
-				OR EXISTS (SELECT 1 FROM api_turns at2 WHERE at2.session_id = s.id AND at2.timestamp >= ?)
-				OR EXISTS (SELECT 1 FROM token_usage tu2 WHERE tu2.session_id = s.id AND tu2.timestamp >= ?))`)
-			args = append(args, sinceStr, sinceStr, sinceStr, sinceStr)
-		}
+		pred, pArgs := sessionActiveInWindow("s", since, until)
+		where = append(where, pred)
+		args = append(args, pArgs...)
 	} else if !until.IsZero() {
 		// No lower bound: window has only an upper bound. There are no
 		// activity-EXISTS branches to reconcile (those exist solely to

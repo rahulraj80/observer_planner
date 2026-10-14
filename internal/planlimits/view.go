@@ -57,22 +57,27 @@ type CardBalance struct {
 
 // Card is one plan or balance on the page.
 type Card struct {
-	ID           string        `json:"id"`
-	Provider     string        `json:"provider"`
-	AccountID    string        `json:"account_id,omitempty"`
-	Label        string        `json:"label,omitempty"`
-	ScopeReason  string        `json:"scope_reason,omitempty"`
-	Sources      []string      `json:"sources"`
-	Experimental bool          `json:"experimental,omitempty"`
-	Status       string        `json:"status"`
-	Health       string        `json:"health"`
-	PlanCode     string        `json:"plan_code,omitempty"`
-	PlanLabel    string        `json:"plan_label,omitempty"`
-	ObservedAt   *time.Time    `json:"observed_at,omitempty"`
-	Windows      []CardWindow  `json:"windows"`
-	Balances     []CardBalance `json:"balances"`
-	Spend        []Spend       `json:"spend"`
-	State        *RunState     `json:"state,omitempty"`
+	ID           string   `json:"id"`
+	Provider     string   `json:"provider"`
+	AccountID    string   `json:"account_id,omitempty"`
+	Label        string   `json:"label,omitempty"`
+	ScopeReason  string   `json:"scope_reason,omitempty"`
+	Sources      []string `json:"sources"`
+	Experimental bool     `json:"experimental,omitempty"`
+	Status       string   `json:"status"`
+	Health       string   `json:"health"`
+	PlanCode     string   `json:"plan_code,omitempty"`
+	PlanLabel    string   `json:"plan_label,omitempty"`
+	// Identity is the observed login a passive scope is bound to (an email
+	// or user name). It is kept apart from Label, the name the user typed,
+	// so the page shows it as a quiet, masked secondary line and never in
+	// the card title.
+	Identity   string        `json:"identity,omitempty"`
+	ObservedAt *time.Time    `json:"observed_at,omitempty"`
+	Windows    []CardWindow  `json:"windows"`
+	Balances   []CardBalance `json:"balances"`
+	Spend      []Spend       `json:"spend"`
+	State      *RunState     `json:"state,omitempty"`
 }
 
 // Health codes of a card.
@@ -92,6 +97,7 @@ type unit struct {
 	account  *AccountInfo
 	scope    string
 	label    string
+	identity string
 	reason   string
 	snaps    []Snapshot
 }
@@ -201,7 +207,7 @@ func BuildView(in ViewInput) []Card {
 		id := k.prov + "|" + k.scope
 		u, ok := scopeUnits[id]
 		if !ok {
-			u = &unit{provider: k.prov, scope: k.scope, label: p.ScopeLabel, reason: p.Reason}
+			u = &unit{provider: k.prov, scope: k.scope, identity: p.ScopeLabel, reason: p.Reason}
 			scopeUnits[id] = u
 			byProv[k.prov] = append(byProv[k.prov], u)
 		}
@@ -217,6 +223,9 @@ func BuildView(in ViewInput) []Card {
 					t.snaps = append(t.snaps, u.snaps...)
 					if t.label == "" {
 						t.label = u.label
+					}
+					if t.identity == "" {
+						t.identity = u.identity
 					}
 					attached[u] = true
 					break
@@ -254,7 +263,7 @@ func providerOrder(m map[string][]*unit) []string {
 }
 
 func buildCard(u *unit, in ViewInput) Card {
-	c := Card{Provider: u.provider, Label: u.label, ScopeReason: u.reason, Windows: []CardWindow{}, Balances: []CardBalance{}, Spend: []Spend{}}
+	c := Card{Provider: u.provider, Label: u.label, Identity: u.identity, ScopeReason: u.reason, Windows: []CardWindow{}, Balances: []CardBalance{}, Spend: []Spend{}}
 	if u.account != nil {
 		c.ID = u.account.ID
 		c.AccountID = u.account.ID

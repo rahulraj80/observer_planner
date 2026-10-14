@@ -406,7 +406,11 @@ export default function App() {
             <ConfigSavePreviewHost />
             <KonamiEgg />
             <FilterBar onOpenPalette={() => setPaletteOpen(true)} />
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* pb-24: a reserved gutter under every page so the floating
+                terminal dock (LaunchDock: the New terminal button and its
+                drag grip, fixed bottom-right) never sits on top of the last
+                rows of a table or card once you scroll to the end (T-803). */}
+            <div className="min-h-0 flex-1 overflow-y-auto pb-24">
               {routeReadOnly && <ManagedReadOnlyBar gov={gov.data} />}
               {routeUnresolved ? (
                 <PostureUnresolved posture={visibility.posture} onRetry={visibility.reload} />

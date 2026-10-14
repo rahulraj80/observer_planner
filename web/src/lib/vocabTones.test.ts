@@ -16,6 +16,7 @@ import {
   CACHE_EVENT_KIND,
   CACHE_EXPIRY,
   CACHE_TIER,
+  cacheCauseLabel,
 } from "../../../shared/lib/cacheVocab.ts";
 import { JOB_STATUS, MESSAGE_ROLE, STOP_REASON, TASK_STATUS } from "../../../shared/lib/sessionVocab.ts";
 import { SOURCE_TIER } from "../../../shared/lib/sourceVocab.ts";
@@ -138,6 +139,18 @@ test("CACHE_CAUSE covers the internal/cachetrack Cause closed set", () => {
     "prompt_cache_key_overflow",
   ];
   assert.deepEqual(causes.filter((c) => !(c in CACHE_CAUSE)), []);
+});
+
+test("every cache cause has a plain label, never its snake_case wire id", () => {
+  // T-803: the Overview tile's pill printed "tools_or_system_changed".
+  for (const [cause, entry] of Object.entries(CACHE_CAUSE)) {
+    assert.ok(entry.label, `${cause} has no label`);
+    assert.doesNotMatch(entry.label!, /_/, `${cause} label is a raw key`);
+    assert.ok(entry.label!.length <= 24, `${cause} label is too long for a tile pill`);
+    assert.equal(cacheCauseLabel(cause), entry.label);
+  }
+  assert.equal(cacheCauseLabel("brand_new_cause"), "brand new cause");
+  assert.equal(cacheCauseLabel(""), "");
 });
 
 test("CACHE_EVENT_KIND covers the internal/cachetrack Kind closed set", () => {

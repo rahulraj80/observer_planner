@@ -83,9 +83,29 @@ one-off proxied session. `observer init` additionally registers the opt-in MCP s
 - Dashboard terminals with multi-seat join and native resume.
 - A CLI for everything: `observer usage`, `cost`, `predict`, `tail`, `statusline`.
 
-![Session detail: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model](https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-detail.png)
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/sessions.png" alt="Sessions page: one row per coding-agent session with tool, model, start time, elapsed time, actions and cost, plus tag totals" width="430"><br><sub><b>Sessions:</b> every session from every agent, with cost and tags.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/cache.png" alt="Cache page: live prompt caches with time left before they expire, cache ratio, reads and writes, and provider coverage" width="430"><br><sub><b>Cache:</b> which prompt caches are warm and when they go cold.</sub></td>
+  </tr>
+</table>
 
 ![Terminals page: Claude Code, Codex, Antigravity CLI and Copilot CLI running side by side as live terminals in one dashboard](https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/terminals-workspace.png)
+
+## Inside a session
+
+Click any session to open its detail view. Four of its tabs:
+
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-detail.png" alt="Session detail, Overview tab: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model" width="430"><br><sub><b>Overview:</b> cost, tokens by billing tier and the models used.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-messages.png" alt="Session detail, Messages tab: every message in the session with time, role, model, tool calls and cost" width="430"><br><sub><b>Messages:</b> each message with its model, tool calls and cost.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cost-and-limits-tab.png" alt="Session detail, Cost and limits tab: low, typical and high cost for the next message and the 5-hour and weekly limit" width="430"><br><sub><b>Cost &amp; limits:</b> what the next message will cost and how much of your limit is left.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/superbasedapp/observer/main/docs/assets/screenshots/session-cache-tab.png" alt="Session detail, Cache tab: the session's live cache and when it expires, cache hits, writes, rewrites and the read to write ratio" width="430"><br><sub><b>Cache:</b> the session's live cache, hits, writes and rewrites.</sub></td>
+  </tr>
+</table>
 
 ## Privacy
 

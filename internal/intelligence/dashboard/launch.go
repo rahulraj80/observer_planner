@@ -1570,8 +1570,15 @@ func resolveAllowedProjectRoots(roots []string) []string {
 
 // handleLaunchAdmin serves the running-session admin routes under
 // /api/launch/: GET /api/launch/sessions lists live terminal sessions
-// (metadata only — no content), and DELETE /api/launch/<handle> reaps one.
+// (metadata only — no content), and DELETE /api/launch/<ref> reaps one.
 // Gated by the LaunchManager seam; DELETE is Origin-checked by browserGuard.
+//
+// <ref> is the session's token (the handle), or its run_id / session_id
+// from the same GET /api/launch/sessions row (resolveLaunchRef). T-803: the
+// route used to call Close on whatever it was given and answer 204, so a
+// caller passing a session_id got 204 while the terminal kept running. An
+// unknown ref is now 404 and an ambiguous one 409; 204 means a session was
+// actually closed.
 func (s *Server) handleLaunchAdmin(w http.ResponseWriter, r *http.Request) {
 	if s.opts.LaunchManager == nil {
 		http.Error(w, "launch unavailable", http.StatusServiceUnavailable)
@@ -1601,12 +1608,59 @@ func (s *Server) handleLaunchAdmin(w http.ResponseWriter, r *http.Request) {
 	// the handle exists (same confidentiality posture as the snapshot redaction
 	// + SubscribeRemote refusal). The owner-local loopback listener is never
 	// remote-exposed, so the local owner's Cancel still reaps it.
-	if remoteExposedFromContext(r.Context()) && s.opts.LaunchManager.IsSetupSession(rest) {
+	handle, status := s.resolveLaunchRef(r.Context(), rest)
+	if status != http.StatusOK {
+		msg := "no running terminal session matches " + rest
+		if status == http.StatusConflict {
+			msg = rest + " matches more than one running terminal session; close it by its token"
+		}
+		writeJSONStatus(w, status, map[string]string{"error": msg})
+		return
+	}
+	if remoteExposedFromContext(r.Context()) && s.opts.LaunchManager.IsSetupSession(handle) {
 		http.NotFound(w, r)
 		return
 	}
-	s.opts.LaunchManager.Close(rest)
+	s.opts.LaunchManager.Close(handle)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// resolveLaunchRef maps a DELETE /api/launch/<ref> reference onto one live
+// handle. Rules, walked top-down:
+//
+//  1. ref is a live token: that handle (any caller, the pre-T-803 contract).
+//  2. ref equals the run_id or session_id of exactly one session the caller
+//     can see: that session's handle.
+//  3. it matches several: 409, the caller must pick a token.
+//  4. otherwise: 404.
+//
+// Rule 2 reads the caller's visibleSnapshot, so a remote caller can never
+// resolve a session hidden from it (a setup PTY, or an attach/resume run
+// with allow_terminal_view off) through an alias.
+func (s *Server) resolveLaunchRef(ctx context.Context, ref string) (string, int) {
+	for _, info := range s.opts.LaunchManager.Snapshot() {
+		if info.ID == ref {
+			return ref, http.StatusOK
+		}
+	}
+	var hit string
+	n := 0
+	for _, info := range s.visibleSnapshot(ctx) {
+		if (info.RunID != "" && info.RunID == ref) || (info.SessionID != "" && info.SessionID == ref) {
+			if info.ID != hit {
+				hit = info.ID
+				n++
+			}
+		}
+	}
+	switch n {
+	case 0:
+		return "", http.StatusNotFound
+	case 1:
+		return hit, http.StatusOK
+	default:
+		return "", http.StatusConflict
+	}
 }
 
 // wsControl is the text-frame control protocol between the browser and the

@@ -473,6 +473,17 @@ Flags:
   cause-concentration WARN (one non-suffix_growth cause should never
   dominate a healthy soak; over-firing rule indicator).
 
+Dashboard (Cache page, T-803): the only engine-health alarm in the page's
+hero area is the grading gate, read off `/api/cache/health`'s
+`gate_passed` (enough graded events and the rate above `--max-rate`).
+The read:write inconsistency count, the bucket-mispredict count and the
+cause concentration describe how the engine labels its own events; they
+grow with history on every long-running install (a healthy node read
+350,108 inconsistent rewrites and 248,808 bucket mismatches with a 0%
+mispredict rate), so the page shows them collapsed under "Engine
+diagnostics" at the bottom of the Overview tab, as shares of their
+denominators (`rewrite_events`, `predicted_events`), never as warnings.
+
 The rate gate is the PASS/FAIL signal; the two secondary checks
 **never** change the verdict but surface the class of error the rate
 is blind to — when the engine's predicted kind and the attributed

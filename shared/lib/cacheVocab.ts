@@ -39,26 +39,29 @@ export const CACHE_EVENT_KIND: VocabTable = {
 // handoff rehydration, a prefix under the cacheable minimum) and the honest
 // "unknown" are neutral; every real invalidation cause is warn. A flagged
 // cause renders CACHE_FLAG's tone (warn) - read it through cacheCauseTone.
+// Every row carries a plain label (T-803: the Overview tile printed the raw
+// wire id "tools_or_system_changed", truncated), so no pill shows a
+// snake_case key.
 export const CACHE_CAUSE: VocabTable = {
-  suffix_growth: { tone: "info" },
-  implicit_hit: { tone: "info" },
-  reanchor: { tone: "neutral" },
-  handoff_rehydration: { tone: "neutral" },
-  below_min_cacheable: { tone: "neutral" },
-  unknown: { tone: "neutral" },
-  model_changed: { tone: "warn" },
-  fast_toggle: { tone: "warn" },
-  tools_changed: { tone: "warn" },
-  system_changed: { tone: "warn" },
-  tools_or_system_changed: { tone: "warn" },
-  context_compacted: { tone: "warn" },
-  ttl_expired: { tone: "warn" },
-  lookback_window_missed: { tone: "warn" },
-  block_diverged: { tone: "warn" },
-  parallel_cold_start: { tone: "warn" },
-  prefix_churn: { tone: "warn" },
-  prefix_shrink: { tone: "warn" },
-  prompt_cache_key_overflow: { tone: "warn" },
+  suffix_growth: { tone: "info", label: "Conversation grew" },
+  implicit_hit: { tone: "info", label: "Prefix reused" },
+  reanchor: { tone: "neutral", label: "Re-anchored" },
+  handoff_rehydration: { tone: "neutral", label: "Handoff reload" },
+  below_min_cacheable: { tone: "neutral", label: "Too short to cache" },
+  unknown: { tone: "neutral", label: "Unknown" },
+  model_changed: { tone: "warn", label: "Model changed" },
+  fast_toggle: { tone: "warn", label: "Fast mode toggled" },
+  tools_changed: { tone: "warn", label: "Tools changed" },
+  system_changed: { tone: "warn", label: "System prompt changed" },
+  tools_or_system_changed: { tone: "warn", label: "Tools or prompt changed" },
+  context_compacted: { tone: "warn", label: "Context compacted" },
+  ttl_expired: { tone: "warn", label: "Cache expired" },
+  lookback_window_missed: { tone: "warn", label: "Lookback missed" },
+  block_diverged: { tone: "warn", label: "Prompt block changed" },
+  parallel_cold_start: { tone: "warn", label: "Parallel cold start" },
+  prefix_churn: { tone: "warn", label: "Prefix changed" },
+  prefix_shrink: { tone: "warn", label: "Prefix shrank" },
+  prompt_cache_key_overflow: { tone: "warn", label: "Cache key overflow" },
 };
 
 // CACHE_FLAG - the ONE presentation of the engine's `flagged` mark (a cause
@@ -91,6 +94,16 @@ export function cacheEventTone(kind: string | null | undefined, flagged?: boolea
  */
 export function cacheCauseTone(cause: string | null | undefined, flagged?: boolean): Tone {
   return flagged === true ? CACHE_FLAGGED_TONE : vocabTone(CACHE_CAUSE, cause);
+}
+
+/**
+ * cacheCauseLabel - the plain label of one cache_events.cause. An unknown
+ * cause reads as its words ("new_cause" -> "new cause"), never a raw
+ * snake_case key.
+ */
+export function cacheCauseLabel(cause: string | null | undefined): string {
+  if (!cause) return "";
+  return CACHE_CAUSE[cause]?.label ?? cause.replace(/_+/g, " ");
 }
 
 /** The session cache-summary fields cacheSummaryTone reads. */

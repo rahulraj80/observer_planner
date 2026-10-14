@@ -595,7 +595,7 @@ export function RoutingPage() {
           value={st ? fmtInt(st.calibration_rows) : "-"}
           sub={
             <>
-              built from your own turns; feeds the §R7.2 evidence gate
+              built from your own turns; the evidence check uses these
               <CommandJobButton
                 job="calibration"
                 className="mt-1.5"
@@ -691,7 +691,7 @@ export function RoutingPage() {
       {st && Object.keys(st.demoted_rules ?? {}).length > 0 && (
         <ChartShell
           title={<TitleWithHelp text="Calibration demotions" helpId="chart.routing_demotions" />}
-          sub="Rules the calibration job graded as regressing - their decisions log but never apply until the evidence clears (§R18.3)."
+          sub="Rules the calibration job graded as regressing - their decisions log but never apply until the evidence clears."
         >
           <div className="space-y-1.5">
             {Object.entries(st.demoted_rules).map(([rule, why]) => (
@@ -745,7 +745,7 @@ export function RoutingPage() {
 
       <ChartShell
         title={<TitleWithHelp text="Tier map" helpId="chart.routing_tiers" />}
-        sub="Pills with counts carry observed calibration evidence (hover for per-kind error rates). Evidence is correlational - deltas act only past the §R7.2 thresholds."
+        sub="Pills with counts carry observed calibration evidence (hover for per-kind error rates). Evidence is correlational - deltas act only past the evidence thresholds."
       >
         {tiers.loading || (!tiers.data && !tiers.error) ? (
           <InlineLoading block />
@@ -992,7 +992,7 @@ export function RoutingPage() {
 
       <ChartShell
         title={<TitleWithHelp text="Health board (observed)" helpId="chart.routing_health" />}
-        sub="429/5xx rates from the node's own api_turns stream - the observations the §R12.3 circuit breakers act on."
+        sub="429/5xx rates from the node's own api_turns stream - the observations the circuit breakers act on."
       >
         {health.loading || (!health.data && !health.error) ? (
           <InlineLoading block />
@@ -1120,7 +1120,7 @@ function PromoteControl({ sh }: { sh: ShadowReport }) {
         <div className="rounded-2 border border-line-2 bg-bg-3 p-3 text-[11.5px]">
           {!sh.ready_to_promote && (
             <p className="mb-2 font-semibold text-danger">
-              The §R22 gate is NOT met - the rungs above show what's missing. Promoting now goes against the
+              The promotion check is NOT met - the rungs above show what's missing. Promoting now goes against the
               evidence; the decision is yours.
             </p>
           )}
@@ -1381,7 +1381,7 @@ function RoutingApplyCard({ days }: { days: number }) {
     >
       {!preview && !busy && !error && (
         <p className="text-[12px] text-fg-3">
-          Pick a tool and run the preview - a dry run over the §R10.3 evidence (which sub-agent personas ran
+          Pick a tool and run the preview - a dry run over the sub-agent evidence (which sub-agent personas ran
           read-shaped work on bigger models than their observed profile needs). Nothing is written without a per-file
           confirmation.
         </p>
@@ -1408,7 +1408,7 @@ function RoutingApplyCard({ days }: { days: number }) {
           {changes.length === 0 ? (
             <p className="text-[12px] text-fg-3">
               No actionable per-subagent changes - every evidence-backed persona is already at its target (or no
-              sidechain evidence has cleared the §R7.2 floor yet).
+              sidechain evidence has cleared the evidence threshold yet).
             </p>
           ) : (
             <div className="space-y-2">

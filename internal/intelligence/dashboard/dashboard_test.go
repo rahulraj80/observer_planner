@@ -5074,3 +5074,75 @@ func TestAPICompressionTimeseries_BucketHour(t *testing.T) {
 		t.Errorf("non-empty buckets = %d, want 1", nonZero)
 	}
 }
+
+// TestAPIStatusScoped_SessionsMatchSessionsList pins T-803: the Overview
+// Sessions tile (/api/status/scoped) counted sessions by started_at alone
+// while the Sessions table (/api/sessions) counts a session active in the
+// window, so the same 30-day window read 1,861 on one and 1,871 on the
+// other. A session that started before the window but has activity in it
+// now counts on both.
+func TestAPIStatusScoped_SessionsMatchSessionsList(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.db")
+	database, err := openTestDB(context.Background(), db.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	st := store.New(database)
+	root := t.TempDir()
+	now := time.Now().UTC()
+	ev := func(id, sid string, ts time.Time) models.ToolEvent {
+		return models.ToolEvent{
+			SourceFile: "f-" + id, SourceEventID: id, SessionID: sid,
+			ProjectRoot: root, Timestamp: ts, Tool: models.ToolClaudeCode,
+			ActionType: models.ActionReadFile, Target: "a.go", Success: true,
+		}
+	}
+	// sOld started 20 days ago and was used again 2 days ago; sNew started
+	// 2 days ago; sGone was only active 40 days ago.
+	events := []models.ToolEvent{
+		ev("o1", "sOld", now.Add(-20*24*time.Hour)),
+		ev("o2", "sOld", now.Add(-2*24*time.Hour)),
+		ev("n1", "sNew", now.Add(-2*24*time.Hour)),
+		ev("g1", "sGone", now.Add(-40*24*time.Hour)),
+	}
+	if _, err := st.Ingest(context.Background(), events, nil, store.IngestOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{DB: database, DBPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(url string, v any) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, url, nil))
+		if rr.Code != 200 {
+			t.Fatalf("%s: status %d body=%s", url, rr.Code, rr.Body.String())
+		}
+		if err := json.NewDecoder(rr.Body).Decode(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since := now.Add(-10 * 24 * time.Hour).Format(time.RFC3339)
+	var scoped struct {
+		Sessions int64 `json:"sessions"`
+	}
+	get("/api/status/scoped?since="+since, &scoped)
+	var list struct {
+		Total int `json:"total"`
+	}
+	get("/api/sessions?since="+since, &list)
+	if scoped.Sessions != 2 || list.Total != 2 {
+		t.Fatalf("sessions in a 10-day window: tile %d, list %d; want 2 and 2 (sOld + sNew)", scoped.Sessions, list.Total)
+	}
+	// A bounded window that holds only the first day of sOld.
+	until := now.Add(-15 * 24 * time.Hour).Format(time.RFC3339)
+	from := now.Add(-25 * 24 * time.Hour).Format(time.RFC3339)
+	get("/api/status/scoped?since="+from+"&until="+until, &scoped)
+	get("/api/sessions?since="+from+"&until="+until, &list)
+	if scoped.Sessions != int64(list.Total) || list.Total != 1 {
+		t.Fatalf("bounded window: tile %d, list %d; want 1 and 1", scoped.Sessions, list.Total)
+	}
+}

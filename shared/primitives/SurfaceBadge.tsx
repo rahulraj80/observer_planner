@@ -67,9 +67,16 @@ export type SurfaceBadgeProps = {
   /** sessions.surface_host — the free-form host token, or absent. */
   host?: string | null;
   className?: string;
+  /**
+   * compact drops the kind WORD when a host is present: the glyph already
+   * names the kind and the tooltip spells both out, so a narrow table cell
+   * spends its width on the host ("claude-desktop") instead of truncating
+   * "cli · cla..." (T-803). Without a host the kind word still shows.
+   */
+  compact?: boolean;
 };
 
-export function SurfaceBadge({ surface, host, className }: SurfaceBadgeProps) {
+export function SurfaceBadge({ surface, host, className, compact }: SurfaceBadgeProps) {
   const kind = isSurfaceKind(surface) ? surface : null;
   const hostToken = (host ?? "").trim();
   // Nothing grounded => render nothing. Never a fabricated "cli".
@@ -86,10 +93,10 @@ export function SurfaceBadge({ surface, host, className }: SurfaceBadgeProps) {
 
   return (
     <Pill className={className} title={title} icon={kind ? vocabIcon("captureSurface", kind) : undefined}>
-      {meta ? meta.label : null}
+      {meta && !(compact && hostToken) ? meta.label : null}
       {hostToken ? (
         <span className="text-fg-3">
-          {meta ? "· " : ""}
+          {meta && !compact ? "· " : ""}
           {hostToken}
         </span>
       ) : null}

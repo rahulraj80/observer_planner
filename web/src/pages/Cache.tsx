@@ -8,6 +8,7 @@ import {
   EmptyState,
   ErrorState,
   Icon,
+  InfoDisclosure,
   type IllustrationKind,
   InlineLoading,
   ModelId,
@@ -43,6 +44,7 @@ import {
 import { GranControl } from "@/components/GranControl";
 import { asGranularity, perBucketTitle } from "@shared/lib/granularity";
 import { useApi } from "@/lib/useApi";
+import { gradingGateFailed } from "@/lib/cacheHealth";
 import {
   fmtCompact,
   fmtDateTime,
@@ -191,7 +193,7 @@ export function CachePage() {
   // Recent events — paginated drill-down below the charts. Page
   // size 50 / no page state in URL (yet); refresh 30s.
   const [eventsOffset, setEventsOffset] = useState(0);
-  // Page tabs (platform tabs plan §2.2): Overview (rollups, charts, entry
+  // Page tabs (platform tabs plan, section 2.2): Overview (rollups, charts, entry
   // states) / Events (recent events, top causes, worst sessions). The
   // recent-events read runs once the Events tab has been opened.
   const pageTabs = usePageTabs("cache", CACHE_TABS);
@@ -222,7 +224,7 @@ export function CachePage() {
     [model],
     { refreshMs: 60000 },
   );
-  // Empty-state copy is filter-aware AND provider-aware. As of §15.3
+  // Empty-state copy is filter-aware AND provider-aware. Since implicit-cache support
   // OpenAI / codex / OpenAI-routed adapters ALSO emit implicit-cache
   // events, so an OpenAI-dominated install is no longer silently
   // empty — but events land on the separate (lower-fidelity)
@@ -466,11 +468,11 @@ function CacheContent({
           rhythm but on the engine-coverage axis. */}
       <UntrackedProviderBanner health={health} />
 
-      {/* Engine-health WARN banner — fires when the cachetrack engine
-          surfaces a grading-gate failure, a dominant non-baseline
-          cause, an inconsistent rewrite shape, or bucket-mismatch
-          drift. Mirrors the unknown-model pill pattern on Cost. */}
-      <CacheHealthBanner health={health} />
+      {/* The one alarm this page raises about the attribution engine:
+          the cache-health grading gate failed on enough events. The
+          engine's own labelling diagnostics never alarm here; they live
+          collapsed at the bottom of the Overview tab (EngineDiagnostics). */}
+      <CacheAttributionAlarm health={health} />
 
       {/* Headline KPI row — mirrors Cost's accent-hero rhythm. The
           ratio tile is the accent hero; the three siblings render with
@@ -544,7 +546,7 @@ function CacheContent({
         <MispredictRateTile health={health} />
       </Stagger>
 
-      {/* §15.3 implicit-cache row — renders only when implicit-cache
+      {/* Implicit-cache row — renders only when implicit-cache
           events exist in the window (OpenAI / codex / OpenAI-routed
           adapters). Surfaces prefix-survival rate + engine-consistency
           on a separate row from the Anthropic gate so the operator
@@ -556,13 +558,12 @@ function CacheContent({
             <span className="font-semibold uppercase tracking-[0.06em] text-info">
               Implicit cache scope
             </span>{" "}
-            §15.3 reduced attribution path. Anthropic-only events are graded
-            by the marker-aware §10 gate above; OpenAI / codex / cline-cli-
-            via-deepseek / opencode+kilo-on-OpenAI events grade against a
-            per-session 128-token-granule prefix estimate. The two
-            surfaces are kept disjoint by design (
+            OpenAI, Codex and other OpenAI-style providers do not mark
+            their cache, so these events are graded against an estimate of
+            each session's stable prompt prefix. That is less exact than
+            Anthropic, which marks its cache, and the two are graded
+            separately so one never skews the other.{" "}
             <HelpInd id="glossary.cachetrack_codex_limitation" />
-            ).
           </div>
         </div>
       )}
@@ -729,6 +730,8 @@ function CacheContent({
           <EntryStatesBar rows={entryStates.rows} total={entryStates.total} />
         )}
       </ChartShell>
+
+      <EngineDiagnostics health={health} />
       </TabPanel>
 
       <TabPanel id="events" active={tab} idPrefix="cache" className="space-y-6">
@@ -855,7 +858,7 @@ function MispredictRateTile({
   );
 }
 
-// ImplicitCacheTile renders §15.3 implicit-cache efficiency: the
+// ImplicitCacheTile renders implicit-cache efficiency: the
 // prefix-survival rate (hits / (hits + misses)) over OpenAI / codex /
 // OpenAI-routed adapter cache_events. Hidden when no implicit events
 // exist in the window. The "lower fidelity" framing is honest — the
@@ -895,17 +898,17 @@ function ImplicitCacheTile({
 
 // ----------------------------------------------------- Untracked-provider banner
 
-// UntrackedProviderBanner surfaces the §15.3 implicit-cache coverage
-// reality. Before §15.3 this banner said "we saw codex but didn't
-// grade it"; with §15.3 OpenAI / codex / OpenAI-routed adapters DO
+// UntrackedProviderBanner surfaces the implicit-cache coverage
+// reality. Before implicit-cache support this banner said "we saw codex
+// but didn't grade it"; now OpenAI / codex / OpenAI-routed adapters DO
 // emit cache_events — they land on a separate (lower-fidelity)
-// implicit-cache surface, NOT the Anthropic §10 gate. The banner
+// implicit-cache surface, NOT the Anthropic grading gate. The banner
 // flips between three states:
 //
 //   1. Implicit-cache events present → "tracked via implicit cache
 //      (lower fidelity)" — informative, not a warning.
 //   2. Untracked turns but no implicit events → "proxy / binary may
-//      pre-date §15.3" — actionable hint.
+//      pre-date implicit-cache support" — actionable hint.
 //   3. Neither → hidden.
 //
 // Info-toned (not warn) in every case; not engine drift.
@@ -922,7 +925,7 @@ function UntrackedProviderBanner({
 
   if (untrackedTurns === 0 && implicitEvents === 0) return null;
 
-  // §15.3 path: implicit events present → "tracked via implicit cache"
+  // Implicit events present → "tracked via implicit cache"
   if (implicitEvents > 0) {
     const churn = health.implicit_cache_prefix_churn_rate ?? 0;
     const consistency = health.implicit_cache_consistency_rate ?? 0;
@@ -936,18 +939,18 @@ function UntrackedProviderBanner({
             {fmtInt(implicitEvents)} implicit-cache event
             {implicitEvents === 1 ? "" : "s"}
           </strong>{" "}
-          tracked via §15.3 reduced attribution (lower fidelity than the
-          Anthropic marker-aware path - graded on per-session prefix
-          estimates, not provider markers). Prefix-survival {fmtPct(churn)}
-          {consistency > 0 ? ` · engine consistency ${fmtPct(consistency)}` : ""}
-          . Anthropic §10 gate is unmoved.
+          tracked from an estimate of each session&apos;s prompt prefix, which
+          is less exact than Anthropic&apos;s marked cache. Prefix kept{" "}
+          {fmtPct(churn)}
+          {consistency > 0 ? `, engine agreement ${fmtPct(consistency)}` : ""}. The
+          Anthropic mispredict rate does not include these events.
         </span>
         <HelpInd id="glossary.cachetrack_codex_limitation" />
       </div>
     );
   }
 
-  // Pre-§15.3 binary or no implicit traffic captured yet.
+  // Binary older than implicit-cache support, or no implicit traffic captured yet.
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-3 border border-info/30 bg-info-soft/30 px-3 py-2 text-[11px] text-fg-2">
       <span className="font-semibold uppercase tracking-[0.06em] text-info">
@@ -960,77 +963,95 @@ function UntrackedProviderBanner({
           {untrackedSessions === 1 ? "" : "s"}
         </strong>{" "}
         ({fmtInt(untrackedTurns)} turn{untrackedTurns === 1 ? "" : "s"}) in the
-        last 7 days but captured zero implicit-cache events - the daemon
-        binary may pre-date §15.3 (rebuild + restart). Tokens, cost, and
-        actions are captured normally for these sessions either way.
+        last 7 days but recorded no cache events for them. The running
+        Observer may be older than its implicit-cache support: update and
+        restart it. Tokens, cost and actions are captured normally for
+        these sessions either way.
       </span>
       <HelpInd id="glossary.cachetrack_codex_limitation" />
     </div>
   );
 }
 
-// ----------------------------------------------------- Health banner
+// ----------------------------------------------------- Engine health
 
-// CacheHealthBanner surfaces the cachetrack engine's two
-// informational secondary checks (read:write consistency + cause
-// concentration) + the bucket-mispredict drift surface as small
-// pills inside one banner row. Hidden entirely
-// when every signal is clean. Mirrors Cost's unknown-model pill
-// pattern but rolls multiple signals into one banner since they're
-// all engine-health flavored.
-function CacheHealthBanner({ health }: { health: CacheHealthSummary | null }) {
-  if (!health) return null;
-  const pills: React.ReactNode[] = [];
-  if (health.dominant_cause) {
-    const c = health.dominant_cause;
-    pills.push(
-      <Tooltip key="dominant" content="A non-baseline cause exceeds the 80% share threshold over graded events - likely an over-firing rule. Open the engine-health entry in the help drawer for the full check list.">
-        <span
-          tabIndex={0}
-          className="inline-flex items-center gap-1.5 rounded-2 border border-warn/40 bg-warn-soft px-2.5 py-1 text-[10.5px] font-medium text-warn focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
-        >
-          <Icon icon={TriangleAlert} size={11} className="shrink-0" />
-          {c.cause} dominates ({fmtPct(c.share)} of {fmtInt(c.count)} events)
-        </span>
-      </Tooltip>,
-    );
-  }
-  if (health.inconsistent_rewrite_count > 0) {
-    pills.push(
-      <Tooltip key="inconsistent" content="Rewrite events with tokens_read > 3× tokens_written are mechanically inconsistent with a real invalidation - the cause may be mislabeled.">
-        <span
-          tabIndex={0}
-          className="inline-flex items-center gap-1.5 rounded-2 border border-warn/40 bg-warn-soft px-2.5 py-1 text-[10.5px] font-medium text-warn focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
-        >
-          <Icon icon={TriangleAlert} size={11} className="shrink-0" />
-          {fmtInt(health.inconsistent_rewrite_count)} inconsistent rewrite
-          {health.inconsistent_rewrite_count === 1 ? "" : "s"}
-        </span>
-      </Tooltip>,
-    );
-  }
-  if (health.bucket_mispredicts > 0) {
-    pills.push(
-      <Tooltip key="bucket" content="bucket(predicted) ≠ bucket(observed) - engine drift the grading-rate gate is blind to (growth-turn mispredicts can land in the same hit-vs-write bucket and slip past the rate check).">
-        <span
-          tabIndex={0}
-          className="inline-flex items-center gap-1.5 rounded-2 border border-warn/40 bg-warn-soft px-2.5 py-1 text-[10.5px] font-medium text-warn focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
-        >
-          <Icon icon={TriangleAlert} size={11} className="shrink-0" />
-          {fmtInt(health.bucket_mispredicts)} bucket-mismatch event
-          {health.bucket_mispredicts === 1 ? "" : "s"}
-        </span>
-      </Tooltip>,
-    );
-  }
-  if (pills.length === 0) return null;
+// CacheAttributionAlarm is the only engine-health banner in the page's
+// hero area. It shows when the grading gate fails and nowhere else.
+function CacheAttributionAlarm({ health }: { health: CacheHealthSummary | null }) {
+  if (!health || !gradingGateFailed(health)) return null;
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-3 border border-warn/30 bg-warn-soft/30 px-3 py-2 text-[11px] text-fg-2">
-      <span className="font-semibold uppercase tracking-[0.06em] text-warn">
-        Engine warnings
+      <Icon icon={TriangleAlert} size={12} className="shrink-0 text-warn" />
+      <span>
+        <strong className="text-fg-1">Cache attribution may be unreliable.</strong>{" "}
+        {fmtPct(health.mispredict_rate)} of {fmtInt(health.graded_events)} graded
+        events were mispredicted, above the {fmtPct(health.max_rate_threshold)} limit. Cache
+        numbers here may name the wrong cause. Engine diagnostics at the bottom of
+        the Overview tab have the detail.
       </span>
-      {pills}
     </div>
+  );
+}
+
+function share(n: number, of: number | undefined): string {
+  return of && of > 0 ? ` (${fmtPct(n / of)} of ${fmtInt(of)})` : "";
+}
+
+// EngineDiagnostics: how well the attribution engine labels its own
+// events. These counters grow with history on any install and say nothing
+// about whether the user's cache works, so they sit collapsed at the
+// bottom of the Overview tab in neutral tone. A real problem still alarms
+// above, through CacheAttributionAlarm.
+function EngineDiagnostics({ health }: { health: CacheHealthSummary | null }) {
+  if (!health) return null;
+  const dominant = health.dominant_cause;
+  const any = health.inconsistent_rewrite_count > 0 || health.bucket_mispredicts > 0 || !!dominant;
+  if (!any) return null;
+  return (
+    <InfoDisclosure summary="Engine diagnostics" persistKey="cache.engineDiagnostics">
+      <p>
+        These numbers describe how the attribution engine labels its own
+        events. They are normal on a long-running install and do not mean your
+        cache is failing. The mispredict rate tile above is the check that
+        matters, and it {gradingGateFailed(health) ? "is currently failing" : "is passing"}.
+      </p>
+      <ul className="mt-1.5 list-disc space-y-1 pl-4">
+        {health.inconsistent_rewrite_count > 0 && (
+          <li>
+            <strong className="text-fg-1">
+              {fmtInt(health.inconsistent_rewrite_count)} rewrites read mostly from cache
+            </strong>
+            {share(health.inconsistent_rewrite_count, health.rewrite_events)}. A real
+            rewrite rebuilds the cache, so it reads little. These were labelled as
+            rewrites but read more than three times what they wrote, so their cause
+            label may be wrong. Totals and cost are not affected.
+          </li>
+        )}
+        {health.bucket_mispredicts > 0 && (
+          <li>
+            <strong className="text-fg-1">
+              {fmtInt(health.bucket_mispredicts)} events landed differently than predicted
+            </strong>
+            {share(health.bucket_mispredicts, health.predicted_events)}. The engine
+            expected a cache read and saw a write, or the other way round. This
+            mostly happens while a conversation is still growing and is how the
+            engine&apos;s predictions are tuned.
+          </li>
+        )}
+        {dominant && (
+          <li>
+            <strong className="text-fg-1">
+              One cause explains {fmtPct(dominant.share)} of {fmtInt(dominant.count)} events
+            </strong>
+            . A healthy mix spreads across causes; one cause above 80% can mean a
+            rule is firing too often.
+          </li>
+        )}
+      </ul>
+      <p className="mt-1.5">
+        The full report, with the sessions involved, is the cache-health command.
+      </p>
+    </InfoDisclosure>
   );
 }
 

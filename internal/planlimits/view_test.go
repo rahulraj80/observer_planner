@@ -192,3 +192,25 @@ func hostOnly(h string) string {
 	}
 	return h
 }
+
+// The observed login of a passive scope is never the card label: the label
+// is what the user typed and lands in the card title, so an email there
+// would be shouted in the page header. It rides in Identity instead.
+func TestBuildViewIdentityIsNotTheLabel(t *testing.T) {
+	now := t0
+	p := passive(ProviderChatGPT, SourceCodexLogs, "acct:k1", now, 0.2)
+	p.ScopeLabel = "me@example.test"
+
+	cards := BuildView(ViewInput{Now: now, Passive: []ScopedSnapshot{p}})
+	if len(cards) != 1 || cards[0].Label != "" || cards[0].Identity != "me@example.test" {
+		t.Fatalf("passive card: want empty label and the login as identity: %+v", cards)
+	}
+
+	acct := AccountInfo{ID: "a1", Provider: ProviderChatGPT, Source: SourceCodexAppServer, Label: "Work", Enabled: true, State: RunState{Status: StatusOK}}
+	snap := newSnap(ProviderChatGPT, SourceCodexAppServer, KindVendorRPC, ConfPercentOnly, now)
+	snap.Windows = []Window{{Key: "weekly", Unit: UnitPercent, UsedFrac: F(0.4)}}
+	cards = BuildView(ViewInput{Now: now, Accounts: []AccountInfo{acct}, Latest: map[string]Snapshot{"a1": snap}, Passive: []ScopedSnapshot{p}})
+	if len(cards) != 1 || cards[0].Label != "Work" || cards[0].Identity != "me@example.test" {
+		t.Fatalf("merged card: want the typed label and the login as identity: %+v", cards)
+	}
+}

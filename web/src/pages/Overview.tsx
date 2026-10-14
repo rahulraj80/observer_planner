@@ -87,7 +87,7 @@ import {
 import { navIcon } from "@/lib/nav";
 import { GranControl } from "@/components/GranControl";
 import { asGranularity, perBucketTitle } from "@shared/lib/granularity";
-import { cacheCauseTone } from "@shared/lib/cacheVocab";
+import { cacheCauseLabel, cacheCauseTone } from "@shared/lib/cacheVocab";
 import { MetricIcon } from "@/components/MetricIcon";
 
 // One glyph per overview section card title (the ChartShell `icon` slot): the
@@ -707,8 +707,11 @@ function CacheEfficiencyTile({
 
   const cornerPill =
     dominantCause && dominantCause.count > 0 ? (
-      <Pill variant={cacheCauseTone(dominantCause.cause, dominantCause.flagged)} className="normal-case">
-        {dominantCause.cause}
+      <Pill
+        variant={cacheCauseTone(dominantCause.cause, dominantCause.flagged)}
+        title={`Most common cache-miss cause: ${cacheCauseLabel(dominantCause.cause)}`}
+      >
+        {cacheCauseLabel(dominantCause.cause)}
       </Pill>
     ) : undefined;
 

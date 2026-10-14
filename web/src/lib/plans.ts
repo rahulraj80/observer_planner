@@ -56,6 +56,8 @@ export type PlanCard = {
   provider: string;
   account_id?: string;
   label?: string;
+  /** The observed login of a passive scope. Never part of the title. */
+  identity?: string;
   scope_reason?: string;
   sources: string[];
   experimental?: boolean;
@@ -375,11 +377,54 @@ export function planName(c: Pick<PlanCard, "plan_label" | "plan_code">): string 
   return PLAN_CODE_LABELS[c.plan_code] ?? titleWord(c.plan_code);
 }
 
-/** cardTitle: "Claude Max (work)", "OpenRouter", "Cursor Pro". */
+function looksLikeEmail(s: string): boolean {
+  return /\S@\S/.test(s);
+}
+
+/**
+ * cardTitle: "Claude Max (work)", "OpenRouter", "Cursor Pro". The title is
+ * the provider and plan plus a name the user typed. A login (an email) never
+ * goes in the title: the card header shouts it in capitals. It is shown,
+ * masked, by identityText instead.
+ */
 export function cardTitle(c: PlanCard): string {
   const plan = planName(c);
   const head = plan ? `${providerLabel(c.provider)} ${plan}` : providerLabel(c.provider);
-  return c.label ? `${head} (${c.label})` : head;
+  return c.label && !looksLikeEmail(c.label) ? `${head} (${c.label})` : head;
+}
+
+/**
+ * maskIdentity keeps an email recognisable to its owner without printing it
+ * in full: "santosh@example.com" becomes "s***h@example.com". A plain user
+ * name keeps its first and last character the same way.
+ */
+export function maskIdentity(s: string): string {
+  const v = s.trim();
+  if (!v) return "";
+  const at = v.lastIndexOf("@");
+  const local = at > 0 ? v.slice(0, at) : v;
+  const domain = at > 0 ? v.slice(at) : "";
+  const masked = local.length <= 2 ? `${local[0]}***` : `${local[0]}***${local[local.length - 1]}`;
+  return `${masked}${domain}`;
+}
+
+/** identityText: the quiet secondary line naming which login a card is for. */
+export function identityText(c: PlanCard): string {
+  const id = c.identity || (c.label && looksLikeEmail(c.label) ? c.label : "");
+  return id ? `Signed in as ${maskIdentity(id)}` : "";
+}
+
+/**
+ * cardPill: the one status pill a card header shows, or null. A status the
+ * server reports wins; otherwise a reading past its freshness bound says
+ * "Out of date". Nothing here ever claims a refresh is in progress: the page
+ * has no such state to report.
+ */
+export function cardPill(c: Pick<PlanCard, "status" | "health">): StatusVocab | null {
+  const s = statusVocab(c.status);
+  if (s.label) return s;
+  if (c.health === "stale") return STATUS_VOCAB.stale;
+  return null;
 }
 
 // ---------- numbers ----------

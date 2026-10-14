@@ -737,6 +737,14 @@ func TestLoadCacheHealthSummary_HeadlineSignals(t *testing.T) {
 	if summary.InconsistentRewriteCount != 1 {
 		t.Errorf("InconsistentRewriteCount = %d, want 1", summary.InconsistentRewriteCount)
 	}
+	// The denominators the page needs to show these as shares: 17
+	// rewrite events, and all 19 events carry a prediction.
+	if summary.RewriteEvents != 17 {
+		t.Errorf("RewriteEvents = %d, want 17", summary.RewriteEvents)
+	}
+	if summary.PredictedEvents != 19 {
+		t.Errorf("PredictedEvents = %d, want 19", summary.PredictedEvents)
+	}
 	// system_changed share = 16/19 = 0.842 > 0.80 → dominant
 	if summary.DominantCause == nil {
 		t.Fatalf("DominantCause not surfaced; expected system_changed at >80%% share. summary=%+v", summary)

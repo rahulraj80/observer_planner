@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { WatcherHealth } from "./types.ts";
-import { WATCHER_LINE_LABEL, watcherLineState } from "./watcherLine.ts";
+import { WATCHER_LINE_LABEL, WATCHER_LINE_TOOLTIP, watcherLineState } from "./watcherLine.ts";
 
 const base: WatcherHealth = {
   files: [],
@@ -27,8 +27,12 @@ test("watcherLineState is unknown before the payload loads or on an older daemon
   assert.equal(watcherLineState(base), "unknown");
 });
 
-test("each state has a label", () => {
-  assert.equal(WATCHER_LINE_LABEL.active, "active");
-  assert.equal(WATCHER_LINE_LABEL.off, "off");
-  assert.equal(WATCHER_LINE_LABEL.unknown, "-");
+test("each state has a plain label and an explanation (T-803)", () => {
+  assert.equal(WATCHER_LINE_LABEL.active, "Capturing");
+  assert.equal(WATCHER_LINE_LABEL.off, "Not capturing");
+  assert.equal(WATCHER_LINE_LABEL.unknown, "Checking capture");
+  for (const s of ["active", "off", "unknown"] as const) {
+    assert.ok(WATCHER_LINE_TOOLTIP[s].length > 0, s);
+    assert.doesNotMatch(WATCHER_LINE_LABEL[s] + WATCHER_LINE_TOOLTIP[s], /[\u2013\u2014]/);
+  }
 });

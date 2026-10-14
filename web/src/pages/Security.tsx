@@ -843,7 +843,7 @@ function DecisionCell({ ev }: { ev: GuardEvent }) {
         <Pill
           variant="neutral"
           className="ml-1"
-          title={`The verdict wanted ${ev.degraded_from} but this channel cannot express it (§6.2 degradation - recorded, never silent).`}
+          title={`The verdict wanted ${ev.degraded_from} but this channel cannot express it. The stronger verdict is still recorded.`}
         >
           from {ev.degraded_from}
         </Pill>
@@ -1032,7 +1032,7 @@ function EvidenceCard() {
       icon={SECURITY_SECTION_ICONS.complianceEvidence}
       sub={
         <>
-          The auditor-shaped outputs: the §14.4 evidence pack (policy state, change log, verdict
+          The auditor-shaped outputs: the evidence pack (policy state, change log, verdict
           stats, chain verification, exception register), a SIEM export of the audit rows, and the
           full tamper-evidence chain walk. File-based and pull-based - nothing leaves this machine.
         </>

@@ -146,9 +146,12 @@ observer scan     # backfill history from the session logs already on disk
 - **Your editor and shell**: a VS Code extension (status bar, sidebar, dashboard tab), a one-line
   `observer statusline`, and a CLI for everything (`observer usage`, `cost`, `predict`, `tail`).
 
-<p align="center">
-  <img src="docs/assets/screenshots/session-detail.png" alt="Session detail: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model" width="900">
-</p>
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshots/sessions.png" alt="Sessions page: one row per coding-agent session with tool, model, start time, elapsed time, actions and cost, plus tag totals" width="430"><br><sub><b>Sessions:</b> every session from every agent, with cost and tags.</sub></td>
+    <td width="50%"><img src="docs/assets/screenshots/cache.png" alt="Cache page: live prompt caches with time left before they expire, cache ratio, reads and writes, and provider coverage" width="430"><br><sub><b>Cache:</b> which prompt caches are warm and when they go cold.</sub></td>
+  </tr>
+</table>
 
 Supported agents include Claude Code, Codex, Cursor, Copilot and Copilot CLI, Gemini CLI, Cline and
 Cline CLI, Antigravity, OpenCode, OpenClaw, Pi, Hermes, Kilo Code, Qwen Code, Kiro CLI, Kiro Crew,
@@ -156,6 +159,21 @@ Crush, Kimi Code, Grok, Devin, Aider, Qoder, goose, droid, Open Interpreter, Com
 Poolside, Zed, Mistral Code, Muse, Prime Agent, DeepSeek, zcode, Freebuff, Cowork and Grok Bot, plus
 ChatGPT, Claude, Gemini, Copilot and Perplexity on the web through an optional browser extension.
 Per-tool setup: [superbased.app/docs/track](https://superbased.app/docs/track/overview).
+
+## Inside a session
+
+Click any session to open its detail view. Four of its tabs:
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshots/session-detail.png" alt="Session detail, Overview tab: total cost, actions, elapsed time and tokens, the action breakdown, token buckets by billing tier and the cost per model" width="430"><br><sub><b>Overview:</b> cost, tokens by billing tier and the models used.</sub></td>
+    <td width="50%"><img src="docs/assets/screenshots/session-messages.png" alt="Session detail, Messages tab: every message in the session with time, role, model, tool calls and cost" width="430"><br><sub><b>Messages:</b> each message with its model, tool calls and cost.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshots/session-cost-and-limits-tab.png" alt="Session detail, Cost and limits tab: low, typical and high cost for the next message and the 5-hour and weekly limit" width="430"><br><sub><b>Cost &amp; limits:</b> what the next message will cost and how much of your limit is left.</sub></td>
+    <td width="50%"><img src="docs/assets/screenshots/session-cache-tab.png" alt="Session detail, Cache tab: the session's live cache and when it expires, cache hits, writes, rewrites and the read to write ratio" width="430"><br><sub><b>Cache:</b> the session's live cache, hits, writes and rewrites.</sub></td>
+  </tr>
+</table>
 
 ## Privacy
 

@@ -994,9 +994,18 @@ type CacheHealthSummary struct {
 	// land in the same hit-vs-write bucket as the right answer and
 	// slip past the rate gate; this surfaces them directly.
 	BucketMispredicts int `json:"bucket_mispredicts"`
+	// PredictedEvents is the denominator for BucketMispredicts: events
+	// that carry a persisted prediction to compare against.
+	PredictedEvents int `json:"predicted_events"`
 
-	// Informational WARNs surfaced as banner pills.
+	// Informational engine diagnostics. They describe how well the
+	// attribution engine labels its own events, not the health of the
+	// user's cache, so the page shows them in a collapsed diagnostics
+	// section and alarms only on the grading gate (GatePassed).
 	InconsistentRewriteCount int `json:"inconsistent_rewrite_count"`
+	// RewriteEvents is the denominator for InconsistentRewriteCount:
+	// every rewrite or compaction-reset event.
+	RewriteEvents int `json:"rewrite_events"`
 	// DominantCause is non-nil when one non-suffix_growth cause
 	// exceeds the share threshold over GradedEvents. Banner copy
 	// uses the cause + share to call it out by name.
@@ -1124,14 +1133,20 @@ func loadCacheHealthSummary(ctx context.Context, db *sql.DB, model string) (Cach
 		if cause != "" {
 			causeCounts[cause]++
 		}
-		if predicted != "" && cachetrack.BucketMismatch(cachetrack.Kind(predicted), k) {
-			s.BucketMispredicts++
+		if predicted != "" {
+			s.PredictedEvents++
+			if cachetrack.BucketMismatch(cachetrack.Kind(predicted), k) {
+				s.BucketMispredicts++
+			}
 		}
 		// read:write consistency: non-baseline rewrite kinds with
 		// read >> write are mechanically inconsistent with a real
 		// cache invalidation (a real one rebuilds a cold prefix → read ≈ 0).
-		if isRewriteKindLocal(k) && read > int64(defaultMaxRewriteRR*float64(written)) && read > 0 {
-			s.InconsistentRewriteCount++
+		if isRewriteKindLocal(k) {
+			s.RewriteEvents++
+			if read > int64(defaultMaxRewriteRR*float64(written)) && read > 0 {
+				s.InconsistentRewriteCount++
+			}
 		}
 		// §15.3 implicit-cache accounting. The §10 gate above is
 		// blind to these by design (cachetrack.isRateSkipped routes

@@ -31,11 +31,13 @@ import {
   SOURCE_LABELS,
   balanceLabel,
   canSave,
+  cardPill,
   cardSourceText,
   cardTitle,
   errorText,
   fmtAmount,
   healthText,
+  identityText,
   methodOptions,
   paceText,
   providerLabel,
@@ -106,7 +108,7 @@ export function PlansPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 p-4 sm:p-6">
       <PageHeader
         title="Plans & limits"
         icon={navIcon("plans")}
@@ -220,7 +222,8 @@ function PlanCardView({
   onHistory: (a: PlanAccount) => void;
   onRemove: (id: string) => void;
 }) {
-  const status = statusVocab(card.status);
+  const pill = cardPill(card);
+  const identity = identityText(card);
   const scopeNote = card.scope_reason ? SCOPE_NOTES[card.scope_reason] ?? "" : "";
   const sub = [cardSourceText(card), healthText(card)].filter(Boolean).join(". ");
   const stopped = card.state?.stopped;
@@ -229,11 +232,10 @@ function PlanCardView({
     <Card
       title={cardTitle(card)}
       sub={sub}
-      stale={card.health === "stale"}
       actions={
         <div className="flex items-center gap-1.5">
           {card.experimental && <Pill variant="info">Experimental</Pill>}
-          {status.label && <Pill variant={status.tone}>{status.label}</Pill>}
+          {pill && <Pill variant={pill.tone}>{pill.label}</Pill>}
           {account && (
             <RowActions
               menuLabel={`Actions for ${cardTitle(card)}`}
@@ -256,6 +258,7 @@ function PlanCardView({
       }
     >
       <div className="space-y-2.5">
+        {identity && <p className="text-[11px] text-fg-3">{identity}</p>}
         {card.windows.map((w) => {
           const frac = windowFrac(w);
           const reset = resetText(w);
