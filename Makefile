@@ -227,3 +227,21 @@ verify-website-build:
 # docs-build if the Compare/Track/Changelog page roster changed.
 docs-og:
 	cd website/tools && node og-gen.mjs
+
+# Drift gate for the telemetry contract mirror under internal/telemetry/contract/.
+# Regenerates the golden artifacts with golden_gen.py into a temp dir and diffs
+# against the committed copies. Mirrors the reporterd verify-telemetry-contract
+# discipline so the same artifact shape is pinned in this repo too.
+verify-telemetry-contract:
+	@tmp=$$(mktemp -d); \
+	python3 internal/telemetry/contract/golden_gen.py $$tmp >/dev/null; \
+	fail=0; \
+	for f in contract.json sample_batch.json.gz sample_batch_invalid.json.gz; do \
+		if ! cmp -s internal/telemetry/contract/golden/$$f $$tmp/$$f; then \
+			echo "CONTRACT DRIFT: $$f differs from committed golden"; \
+			fail=1; \
+		fi; \
+	done; \
+	rm -rf $$tmp; \
+	if [ $$fail -ne 0 ]; then exit 1; fi; \
+	grep -m1 '"contract_version"' internal/telemetry/contract/golden/contract.json | cut -d'"' -f4 | xargs -I{} echo "telemetry contract {}: golden artifacts match"
