@@ -135,6 +135,7 @@ tmp/
 !/docs/recipes/codex-variant.toml
 !/docs/vscode-extension.md
 !/docs/vscode-extension-user-guide.md
+!/docs/plans/
 /scripts/release.sh
 
 # Marketing website + design source-of-truth — published from the
