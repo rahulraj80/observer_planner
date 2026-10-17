@@ -28,8 +28,11 @@ func TestNoAbsolutePrivacyClaims(t *testing.T) {
 		"web/src", "webcloud/src", "scripts/install.sh", "scripts/install.ps1",
 		"cmd/observer/privacy.go", "website", "plugins", "browser-extension/manifest.json",
 	}
-	skipDir := regexp.MustCompile(`(^|/)(node_modules|dist|plans|handovers|audits|strategy|testdata)(/|$)`)
-	skipFile := regexp.MustCompile(`(?i)(CHANGELOG\.md|_test\.go|\.test\.tsx?|\.spec\.ts|\.map)$`)
+	skipDir := regexp.MustCompile(`(^|/)(node_modules|dist|plans|handovers|audits|strategy|testdata|decisions|adr)(/|$)`)
+	// Dated records: CHANGELOG history (and the website changelog/feed built
+	// from it) and date-stamped docs (docs/*-YYYY-MM-DD.md) describe what was
+	// true when written.
+	skipFile := regexp.MustCompile(`(?i)(CHANGELOG\.md|changelog\.(md|html)|feed\.xml|search-index\.json|-20[0-9]{2}-[0-9]{2}-[0-9]{2}\.md|_test\.go|\.test\.tsx?|\.spec\.ts|\.map)$`)
 	var bad []string
 	for _, s := range surfaces {
 		base := filepath.Join(root, s)
@@ -81,6 +84,13 @@ var privacyClaimAllow = []struct{ path, line, why string }{
 	{"webcloud/src/", "until you preview it and approve it", "cloud portal: nothing is uploaded before the developer approves the preview"},
 	{"webcloud/src/components/AuthShell.tsx", "TRUST_ROW", "the code comment describing that same scoped portal promise"},
 	{"browser-extension/manifest.json", "", "the browser extension itself sends nothing; it only talks to the local observer"},
+	{"docs/website-design-guide.md", "Never write", "the copy rule itself quotes the banned phrasings"},
+	{"docs/security.md", "install", "security ledger rows describing the installer, which contacts only the release host"},
+	{"docs/observer-statusline.md", "telemetry vendor", "defines the statusline's own zero-network property"},
+	{"docs/", "--no-telemetry", "names Claude Code's own --no-telemetry flag"},
+	{"docs/vscode-extension-tracker.md", "", "dated tracker log of extension releases"},
+	{"superbased-observer-vs-claude-code-usage-monitor", "", "quotes and assesses Claude Code Usage Monitor's own \"100% local\" claim"},
+	{"superbased-observer-vs-tokentracker", "TokenTracker", "describes TokenTracker's own positioning"},
 }
 
 func privacyClaimAllowed(rel, line string) bool {
