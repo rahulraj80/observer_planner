@@ -96,6 +96,17 @@ prints this list, with each row's on/off state, for your configuration.
 | **Org enrolment** | If you ran `observer enroll <org-url>` | Aggregate per-day metrics (token totals, action counts, project hashes), and only the fields the org-server explicitly requests | `observer enroll` (explicit, prompts for org URL + token) |
 | **Model price table** | Every 24 hours by default (`[pricing.feed]`) | A plain GET of the public, signed price table at `superbased.app/api/pricing/...`; no identifier, session or usage data, only an `If-None-Match` cache tag | On by default; opt out with `[pricing.feed] enabled = false` |
 | **TLS warm-up** | At proxy start, when `[proxy].prewarm_targets` is non-empty (the default) | A bare HEAD request to the listed provider hosts so your first real request does not pay the TLS handshake; no session data | On by default; empty `[proxy].prewarm_targets` to turn it off |
+| **Cloud intelligence** | After `observer cloud login`, for a session you preview (`observer cloud preview`) and consent to (`observer cloud consent`); uploads on `observer cloud sync` | Exactly the bytes the preview showed you, to the hosted cloud service | Sign-in plus per-session consent |
+| **Aggregate share** | If `[aggregate_share] enabled = true` and a consent receipt exists | A coarsened monthly usage aggregate to `aggregate.superbased.app` | Config plus consent (`observer aggregate`) |
+| **Org update manifest** | When enrolled and `[update] enabled = true` | GETs the signed update manifest (and, when an update applies, the artifact) from your enrolled org server | `observer enroll` |
+| **Dashboard update check** | When you click "Check for updates" in Settings | A GET to `registry.npmjs.org` for the latest version number | Your click |
+| **`observer summarize`** | When you run it | A session, to the Anthropic Messages API with your own key | Your command |
+| **Rolling summarization** | If `[compression.conversation.rolling] enabled = true` and a tool routes through the proxy | Older conversation turns, to the summarizer provider you configure | TOML config |
+| **OTel exporter** | If `[exporter.otel] enabled = true` | Turn-level spans to your OTLP collector | TOML config |
+| **Email / digest alerts** | If `[email] enabled = true` | Alert or digest mail to your SMTP server | TOML config |
+| **Remote notify** | If `[remote.notify] enabled = true` | A webhook / ntfy call on terminal session events | TOML config |
+| **Guard cloud** | If `[guard.cloud] enabled = true` and a webhook, judge or reputation lookup is configured | Redacted guard event summaries to your webhooks; an ask-class event's context to your judge endpoint; package metadata GETs from `registry.npmjs.org` | TOML config |
+| **Generalized observability (Plane A)** | If `[observability] enabled = true` | Judge calls and alert webhooks for a hosted app you are observing | TOML config |
 | **Antigravity gRPC fallback** | When parsing Antigravity sessions on macOS where keychain decrypt fails | Local IPC to a Google-installed gRPC socket, never the internet | Automatic; only fires on Antigravity sessions |
 
 Apart from the two default calls above, observer makes no outbound network

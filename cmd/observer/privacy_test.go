@@ -278,6 +278,7 @@ func TestBuildPrivacyEgressDefault(t *testing.T) {
 		"remote-access notify":                 false,
 		"TLS pre-warm":                         true,
 		"pricing feed":                         true,
+		"cloud intelligence":                   false,
 		"guard cloud webhooks":                 false,
 		"guard cloud LLM judge":                false,
 		"guard cloud reputation lookup":        false,
@@ -645,8 +646,8 @@ func TestBuildPrivacyReportSchemaAndDocsURL(t *testing.T) {
 	if len(report.Sockets) == 0 {
 		t.Errorf("Sockets is empty")
 	}
-	if len(report.Egress) != 16 {
-		t.Errorf("Egress len = %d, want 16", len(report.Egress))
+	if len(report.Egress) != 17 {
+		t.Errorf("Egress len = %d, want 17", len(report.Egress))
 	}
 }
 

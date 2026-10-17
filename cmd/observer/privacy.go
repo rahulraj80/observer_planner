@@ -386,6 +386,14 @@ func buildPrivacyEgress(cfg config.Config) []privacyEgress {
 			Detail: fmt.Sprintf("HEAD requests fired at proxy startup against: %s - to warm the TLS connection so the first real request through the proxy doesn't pay the handshake. No session data, no request body, no headers beyond the bare HEAD; not driven by anything you typed or ran.", prewarmTargetsList(cfg.Proxy.PrewarmTargets)),
 		},
 		{
+			// Signed-in personal cloud intelligence (cmd/observer/cloud.go):
+			// uploads only sessions the developer previewed and consented to.
+			Name:   "cloud intelligence",
+			Gate:   "`observer cloud login` AND a per-session consent receipt (`observer cloud consent`); uploads on `observer cloud sync` (Active reflects only [cloud].base_url being set - run `observer cloud status`)",
+			Active: cfg.Cloud.BaseURL != "",
+			Detail: "Uploads exactly the bytes `observer cloud preview` showed for a consented session to the hosted cloud service and pulls the enrichment results back. Nothing uploads without the preview-then-consent step.",
+		},
+		{
 			// The public model price table (internal/pricingfeed/client): a
 			// plain GET with Accept + If-None-Match only, on by default
 			// (config Default(): [pricing.feed] enabled + auto, 24 h).
