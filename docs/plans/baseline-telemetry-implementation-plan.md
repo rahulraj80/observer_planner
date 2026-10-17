@@ -2,8 +2,9 @@
 
 **Status:** Approved for implementation (2026-10-10).
 **Scope:** Both repos — enterprise (`superbased-observer-private`) and individual (`observer_planner`).
-**Central server:** `observer_reporter` on `sup` (`testubuntu20`), ingest `*:48089`, plain today.
-**Default endpoint (both builds):** `https://superbaseddev.bot.nu:48089` (TLS-terminate on `sup`; reporterd has no TLS today).
+**Central server (revised 2026-10-17):** the live cloud service, `observer-cloud` at `https://cloud.superbased.app` (private repo, `internal/cloudserver`), through a new anonymous telemetry lane (`/v1/telemetry/*`). `observer_reporter` stays as the self-hosted enterprise reporter (Step 5.4) and the contract's reference/test server; on `sup` it serves `https://superbaseddev.bot.nu:48089` for testing.
+**Default endpoint (both builds):** `https://cloud.superbased.app` (was `https://superbaseddev.bot.nu:48089`).
+**Revision 2026-10-17 (Rahul):** align with upstream. The install identity is the cloud's existing Ed25519 device key (`cloudcred`), not a copyable `sbk_` key; auth is an anonymous nonce exchange plus the existing `cloudpop` per-request proof. Telemetry tiers and the cloud-intelligence level are one additive ladder (Off / Baseline / Enrichment titles / Enrichment excerpts; Deep add-on). See §5.2.
 
 ---
 
@@ -24,9 +25,9 @@
 
 ## 2. Decisions (locked 2026-10-10)
 
-1. **Individual registration: no registration service.** Generate an installation key at install time; same key uploads data + authenticates the user; copyable from settings/profile; key alone is the credential for the web view; **individual self-view is API-only (1b)**.
+1. **Individual registration: no registration service.** ~~Generate an installation key at install time; same key uploads data + authenticates the user; copyable from settings/profile; key alone is the credential for the web view~~ (revised 2026-10-17: the machine's Ed25519 device key is the identity, never shown or exported; see §5.2); **individual self-view is API-only (1b)**.
 2. **Enterprise: both web dashboard and API.**
-3. **Baseline goes to our central server in both builds**, default endpoint `https://superbaseddev.bot.nu:48089`.
+3. **Baseline goes to our central server in both builds**, default endpoint `https://cloud.superbased.app` (revised 2026-10-17; was `https://superbaseddev.bot.nu:48089`).
 4. **Enterprise two solutions:** (1) self-hosted — prompt telemetry to their reporterd; (2) cloud — to our server, into their tenant, web dashboard + API.
 5. **Local-only rule (suggested, approved in principle):** individual build ships only the baseline to the central server by default; prompt/output text, session history, enrichment, partner sharing, tenant features are off-by-default or absent. Enterprise build adds self-hosted/cloud-tenant + optional consented enrichment + optional consented giveaways.
 6. **System nudge tagging (g):** classify locally from DB text via pareto/frequency bootstrap + continuously improving classifier; emit only the tag; never export prompt text.
@@ -126,46 +127,36 @@ Add to golden/contract.json:
 - Baseline event addition = minor contract bump (additions are minor per the contract's own rule).
 - If we instead extended `token_use` meaning, that's a meaning change and needs a new event name + major bump. Recommend the new-event path to avoid mutating existing `token_use` consumers.
 
-### 5.2 Reporterd server: install-key model + individual API-only self view + delete/export by install key
+### 5.2 Cloud telemetry lane: device-key install identity, anonymous exchange, self view, delete
 
-#### Install-key model (replaces user-row-dependent register for individuals)
-- **Individual install key:** generated at install time by the client (observer repo), not by reporterd register. High-entropy secret (256-bit random, presented in a copyable form). The client derives from it:
-  - a public `install_id` (`inst-<12 hex>` shape, same as today — random, not hardware-derived, resettable),
-  - an auth credential used for `Authorization: Bearer <key-derived-token>` on ingest and on the personal API view.
-- Reporterd accepts the install key (or a key-derived bearer token) and resolves it to an install **without requiring a `users` row**. So individuals have an install + key but no user row. The `users` table stays for enterprise tenants and any individual the operator wants to account for, but it is not required for an individual install to exist or use baseline telemetry.
-- Enterprise tenants: unchanged — users/orgs/roles/dashboard still work; an enterprise install can also be bound to a user/org, and the tenant dashboard authenticates via the enterprise identity model.
+**Revised 2026-10-17 (Rahul): align with upstream.** Upstream has no install-key concept. Its cloud identity is an Ed25519 device key created on first use and kept in `cloudcred` (keychain first; `internal/cloudclient/device.go`), a nonce-signed `/v1/auth/exchange` for a short-lived token, and a `cloudpop` proof on every request. The telemetry lane reuses all of it, minus WorkOS, inside `observer-cloud`. The superseded `sbk_` bearer-key design is kept in CONTINUATION.md for history.
 
-This keeps "no registration needed" for individuals while preserving enterprise user/org semantics. The install key is the individual's credential for everything: upload + personal API view + delete/export.
+#### Identity
+- **One key per machine:** the same `cloudcred` Ed25519 device key cloud intelligence uses, created on first use. The private key never leaves the machine and is never shown.
+- **Install id:** `inst-` + first 12 hex of sha256("install-id" || device thumbprint), where thumbprint = base64url(sha256(public key)) (`store.Thumbprint`). Derived, so a new key means a new install id.
+- **Rotate / reset:** like upstream's device revoke, a full reset: the client revokes the current install server-side, deletes the device key, and the next run creates a new key and install id. Old history is orphaned and ages out under retention.
+- **Lost key:** the data is orphaned (cannot be viewed, exported or deleted) and ages out. Stated plainly in the privacy text.
+- **Later sign-in:** when the user signs in to cloud intelligence with the same device key, the install can be linked to the account (a nullable `account_id`) so the portal shows their telemetry. Not in the first cut.
 
-#### Ingest auth that accepts install key without user row
-- Extend token resolution so a bearer token can resolve to either (a) an enterprise user/org identity, or (b) an individual install-only identity (install_id, no user_id, no org_id, role = individual/self).
-- Ingest admission still checks consent tier (baseline on by default → admitted; off → consent_missing).
-- The install-only identity can read/write its own rows via RLS (install-scoped), but has no org, no manager rollup, no cross-install visibility.
-- Enterprise tenant tokens still resolve to user/org/role and get the org dashboard + manager rollup.
+#### Wire (all under `https://cloud.superbased.app`)
+- `GET /v1/auth/nonce` (existing, per-IP capped).
+- `POST /v1/telemetry/exchange` `{device_public_key, nonce, signature}`: signature is Ed25519 over the existing exchange signing input (`sbo-device-exchange.v1\n<nonce>\n<b64url pubkey>`) under a telemetry domain (`sbo-telemetry-exchange.v1`) so a telemetry signature can never be replayed as an account exchange. No WorkOS. Consumes the nonce, auto-creates the install on first sight, mints a 1-hour telemetry-only token (hash stored). Per-IP capped plus a global new-installs-per-hour cap.
+- `POST /v1/telemetry/ingest`: one contract v1.1.0 envelope (gzip allowed, 1 MiB cap). Auth: Bearer telemetry token + `cloudpop` proof (method, URL, token hash, body digest, jti) + per-install jti replay cache + per-install rate limit. The envelope's `install_id` must equal the token's install. Validated with the vendored contract (no free-text fields by construction); dedupe on `batch_uuid`; bad envelopes recorded in a content-free quarantine row (reason, size, no body). Tier admission per the one ladder.
+- `GET /v1/telemetry/me`: the install's own aggregates and recent events (self view, API only).
+- `DELETE /v1/telemetry/me`: deletes the install's events, batches, quarantine rows, tokens and the install row, returning honest counts. Export = `GET /v1/telemetry/me?full=1`.
+- `GET /v1/telemetry/config`: server floors and kill switch (max tier the server accepts), so an operator can pause the rail.
 
-#### Individual API-only self view (1b)
-Individual uses their install key to call:
-- `GET /v1/me/summary` — their own aggregates (install-scoped).
-- `GET /v1/me/raw` — their own raw events, unsealed for them.
-- `GET /v1/consent/config` — their own consent posture + server floors.
-- `GET /v1/consent/deep` etc. as applicable.
+#### Storage (migration `0042_telemetry_lane.sql`)
+- System tables with no account linkage (classified "excluded" in the deletion matrix): `telemetry_installs`, `telemetry_tokens`, `telemetry_pop_replay`, `telemetry_batches`, `telemetry_events` (jsonb fields, contract-validated), `telemetry_quarantine`. Grants to `sbci_api` only for what the handlers need; sweeps run as the store's role.
+- Retention: events 24 months, deep-only events 90 days, tokens and replay rows on expiry, quarantine 30 days.
 
-No web login for individuals. The install key is pasted into whatever client they use to view their data, or used by the observer app itself to display the user's own analytics. This is (1b).
+#### What reporterd keeps
+Manager/peer/org rollups, org join, sealed raw with operator unseal (self-hosted enterprise, Step 5.4), the contract reference and golden gate, the seed corpus and load tools. Its known token defects (derivable install token, ingest not bound to the token's install, unauthenticated `/` dashboard, no rate limits) are left as is until 5.4 (Rahul, 2026-10-17).
 
-#### Install-key copyable from settings/profile
-In the observer app (both repos), the install key is:
-- generated at first install/first-run,
-- stored locally (scrubbed from logs, file permissions appropriate),
-- shown in settings/profile as a copyable key,
-- used by the app to authenticate baseline upload + to let the user paste it into a viewer if they want their own API view.
-
-Provide a "reset/install-new-key" path that rotates the key and orphans prior history (documented trade-off, same as today's reset-id trade-off). Resetting the key invalidates the old key server-side (revoke that install's token / mark stale), which is also the individual's "stop sending from this install" control.
-
-#### Delete/export by install key (geo regimes)
-- Reporterd already has a deletion matrix for user-based deletion. Add **install-key-scoped deletion**: `DELETE /v1/me` already works for the caller's own identity; for individuals that's install-scoped deletion of raw_events, batches, receipts, agg, install row. Ensure it works for install-only identity (not just user-bound identity).
-- Add an **export** endpoint for the individual's own data (their raw events + aggregates for that install) so a user in a geo regime can export before deleting. Export is authenticated with the install key, scoped to that install.
-
-Implementation: extend `handleSelfDelete` (or add a parallel handler) so the install-only identity can delete its own install + export its own data. The existing deletion matrix in `internal/store/deletion.go` (`DeleteInstall`) already does the per-install matrix; wire an API path that calls it for the install-only identity and returns honest counts. Add `GET /v1/me/export` (or similar) that returns the install's own data (raw + agg) for download, authenticated by install key.
+#### Client changes (with 5.7 / 5.8)
+- `DefaultTelemetryEndpoint` becomes `https://cloud.superbased.app`.
+- The rail gets a telemetry client in the cloud network seam (`internal/cloudclient` + `internal/cloudgateway`, the only packages allowed to egress to the cloud) that reuses `loadOrCreateDevice` and `cloudpop`; the `register` and `install_token_file` flow goes away.
+- `observer telemetry consent` and the dashboard Cloud Intelligence card become one ladder control; the disclosure text is rewritten for the ladder.
 
 ### 5.3 Reporterd: TLS on sup
 
@@ -252,7 +243,7 @@ Implementation: extend `handleSelfDelete` (or add a parallel handler) so the ins
 ## 6. Verification (what "done" means per step)
 
 - After 5.1: contract test passes in all three repos and asserts no baseline text fields.
-- After 5.2: an individual install key (no user row) can ingest baseline + read its own data via API + delete/export its own data, authenticated by the key alone.
+- After 5.2: a machine with only its device key (no account, no sign-in) can exchange for a telemetry token, ingest baseline to `observer-cloud`, read its own data via API, and delete/export it; a replayed proof, a mismatched install id, or a text field is refused.
 - After 5.3: `https://superbaseddev.bot.nu:48089` serves a trusted cert.
 - After 5.4: a customer can run reporterd with their own Postgres/KEK/seed and a documented clean first-run path.
 - After 5.5: a tenant admin can log in to the web dashboard and see tenant-scoped aggregates + installs + consent posture + export/delete within their rights.
